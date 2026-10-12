@@ -31,6 +31,9 @@ try:
             continue
         chunk = os.read(sys.stdin.fileno(), 65536)
         if not chunk:
+            if arguments[2] == 'observe' and os.environ.get('TEST_TERMINAL_OBSERVER_IGNORES_STDIN'):
+                time.sleep(.01)
+                continue
             break
         pending += chunk
         while b'\n' in pending:

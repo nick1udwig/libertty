@@ -45,6 +45,17 @@ impl Fixture {
             .filter(|event| event["event"] == kind)
             .collect()
     }
+    fn reaped(&self) -> usize {
+        self.events("open")
+            .iter()
+            .filter(|event| {
+                let pid = event["pid"].as_i64().unwrap() as libc::pid_t;
+                // Signal zero checks existence without changing the process.
+                (unsafe { libc::kill(pid, 0) }) == -1
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+            })
+            .count()
+    }
     fn frame(&self, full: bool) {
         std::fs::write(self.root.path().join("frame"), json!({"type":"terminal.frame","encoding":"ansi","width":40,"height":30,"full":full,"bytes":"YWJjZA=="}).to_string()).unwrap();
     }
@@ -75,6 +86,47 @@ async fn frame(receive: &mut mpsc::Receiver<Value>, width: u16, full: bool) -> V
 }
 
 #[tokio::test]
+async fn observers_ignoring_stdin_do_not_delay_mobile_control_or_disposal() {
+    let mut fixture = Fixture::new(false);
+    fixture
+        .target
+        .env
+        .insert("TEST_TERMINAL_OBSERVER_IGNORES_STDIN".into(), "1".into());
+    let hub = Hub::default();
+    let (send, mut receive) = mpsc::channel(128);
+    let view = hub
+        .subscribe(fixture.target.clone(), "term_0".into(), send)
+        .unwrap();
+    frame(&mut receive, 80, true).await;
+
+    view.resize(Some(Size { cols: 40, rows: 30 })).unwrap();
+    tokio::time::timeout(Duration::from_millis(750), frame(&mut receive, 40, true))
+        .await
+        .expect("Mobile control must not wait for an observer's shutdown grace period");
+    assert_eq!(
+        fixture.reaped(),
+        1,
+        "The observer must be reaped before control opens"
+    );
+
+    view.resize(None).unwrap();
+    frame(&mut receive, 80, true).await;
+    assert!(
+        fixture
+            .events("command")
+            .iter()
+            .any(|event| { event["message"]["type"] == "terminal.release" }),
+        "Controllers must still release geometry gracefully"
+    );
+    assert_eq!(fixture.reaped(), 2);
+
+    drop(view);
+    tokio::time::timeout(Duration::from_millis(750), until(|| fixture.reaped() == 3))
+        .await
+        .expect("The last observer must be reaped without a shutdown grace period");
+}
+
+#[tokio::test]
 async fn mobile_viewers_share_geometry_release_to_observers_and_clamp_scroll_cells() {
     let fixture = Fixture::new(false);
     let hub = Hub::default();
@@ -92,7 +144,7 @@ async fn mobile_viewers_share_geometry_release_to_observers_and_clamp_scroll_cel
     first.resize(Some(Size { cols: 42, rows: 31 })).unwrap();
     frame(&mut first_frames, 42, true).await;
     assert_eq!(fixture.events("open").len(), 2);
-    assert_eq!(fixture.events("close").len(), 1);
+    assert_eq!(fixture.reaped(), 1);
     frame(&mut desktop_frames, 42, true).await;
     let (send, mut second_frames) = mpsc::channel(128);
     let second = hub
@@ -146,7 +198,7 @@ async fn mobile_viewers_share_geometry_release_to_observers_and_clamp_scroll_cel
         4
     );
     drop((first, second, desktop));
-    until(|| fixture.events("close").len() == 3).await;
+    until(|| fixture.reaped() == 3).await;
 }
 
 #[tokio::test]

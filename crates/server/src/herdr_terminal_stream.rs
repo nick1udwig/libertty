@@ -232,6 +232,15 @@ impl Running {
         .map_err(|e| e.to_string())
     }
     async fn close(mut self) {
+        if self.size.is_none() {
+            // Observers may ignore stdin EOF and have no geometry to release.
+            // Reap local observers immediately; dropping the SSH stream closes
+            // its channel without waiting for an observer to finish output.
+            if let Some(mut child) = self.child.take() {
+                let _ = child.kill().await;
+            }
+            return;
+        }
         if self.size.is_some() {
             let _ = self.write(&json!({"type":"terminal.release"})).await;
         }
