@@ -66,28 +66,35 @@ try {
     }
     // Deliberately omit pointer events. These previously got stopped without
     // ever starting a gesture, leaving both scrolling and selection inert.
-    const touch = (type, point, selector = '#terminal canvas') => frame.evaluate(({ type, point, selector }) => {
-      const target = document.querySelector(selector), contact = { identifier: 42, target, clientX: point.x, clientY: point.y };
-      const touches = type === 'touchend' || type === 'touchcancel' ? [] : [contact];
-      // Linux WebKit exposes Touch but does not allow constructing one. Replay
-      // the event's lists explicitly; native taps are checked separately below.
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [contact] } });
-      target.dispatchEvent(event);
-    }, { type, point, selector });
-    const pointer = (type, point = { x: 150, y: 180 }) => frame.evaluate(({ type, point }) => document.querySelector('#terminal canvas').dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 42, pointerType: 'touch', isPrimary: true, clientX: point.x, clientY: point.y })), { type, point });
+    const contacts = events => frame.evaluate(events => {
+      for (const { type, point, selector = '#terminal canvas' } of events) {
+        const target = document.querySelector(selector);
+        if (type.startsWith('touch')) {
+          const contact = { identifier: 42, target, clientX: point.x, clientY: point.y };
+          const touches = type === 'touchend' || type === 'touchcancel' ? [] : [contact];
+          // Linux WebKit exposes Touch but does not allow constructing one.
+          // Native taps are checked separately below.
+          const event = new Event(type, { bubbles: true, cancelable: true });
+          Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [contact] } });
+          target.dispatchEvent(event);
+        } else target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 42, pointerType: 'touch', isPrimary: true, clientX: point.x, clientY: point.y }));
+      }
+    }, events);
+    const touch = (type, point, selector = '#terminal canvas') => contacts([{ type, point, selector }]);
+    const pointer = (type, point = { x: 150, y: 180 }) => contacts([{ type, point }]);
     const start = { x: 150, y: 180 }, end = { x: 150, y: 280 };
-    await touch('touchstart', start); await touch('touchmove', end);
+    // Keep synthetic drag sequences in one browser turn so slow test-driver
+    // round trips cannot turn them into a 350ms long press.
+    const drag = types => contacts(types.map(type => ({ type, point: type === 'touchmove' || type === 'touchend' ? end : start })));
+    await drag(['touchstart', 'touchmove']);
     assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Touch-only dragging must scroll ' + (herdr ? 'Herdr' : 'the normal terminal'));
-    await touch('touchend', end); await touch('touchstart', start); await touch('touchcancel', start);
+    await drag(['touchend', 'touchstart', 'touchcancel']);
     // Pointer cancellation must not cancel the continuing touch stream.
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
-    await pointer('pointerdown'); await touch('touchstart', start); await pointer('pointercancel'); await pointer('lostpointercapture');
-    await touch('touchmove', end); await touch('touchend', end); await touch('touchstart', start); await touch('touchcancel', start);
+    await drag(['pointerdown', 'touchstart', 'pointercancel', 'lostpointercapture', 'touchmove', 'touchend', 'touchstart', 'touchcancel']);
     assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Touch scrolling survives pointer cancellation');
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
-    await touch('touchstart', start); await pointer('pointerdown'); await pointer('pointercancel');
-    await touch('touchmove', end); await touch('touchend', end); await touch('touchstart', start); await touch('touchcancel', start);
+    await drag(['touchstart', 'pointerdown', 'pointercancel', 'touchmove', 'touchend', 'touchstart', 'touchcancel']);
     assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Touch-first event ordering must also keep touch ownership');
     const word = await frame.evaluate(() => {
       const t = window.__testTerminal, b = t.buffer.active, rect = document.querySelector('#terminal canvas').getBoundingClientRect(), top = b.length - t.rows - Math.floor(t.getViewportY());
