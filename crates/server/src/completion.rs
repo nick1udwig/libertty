@@ -40,9 +40,15 @@ struct CompletionWorker {
 impl CompletionWorker {
     fn start(bash: String, cwd: &str, env: &BTreeMap<String, String>) -> Result<Self, String> {
         static SCRIPT: OnceLock<String> = OnceLock::new();
-        let script = SCRIPT.get_or_init(|| format!(
-            "while IFS= read -r -d '' termai_count; do\n[[ $termai_count =~ ^[0-9]+$ ]] && ((termai_count >= 3 && termai_count <= 65)) || exit 1\ntermai_words=()\nfor ((termai_i=0; termai_i<termai_count; termai_i++)); do IFS= read -r -d '' termai_word || exit 1; termai_words+=(\"$termai_word\"); done\n( set -- \"${{termai_words[@]}}\"\n{COMPLETION_SCRIPT}\n) < /dev/null\nbuiltin printf '\\0'\ndone"
-        ));
+        let script = SCRIPT.get_or_init(|| {
+            // Only the worker protocol needs to omit empty records.
+            let body = COMPLETION_SCRIPT.replace(
+                r#"if ((${#COMPREPLY[@]})); then builtin printf '%s\0' "${COMPREPLY[@]:0:1000}" >&3; fi"#,
+                r#"for termai_completion_value in "${COMPREPLY[@]:0:1000}"; do
+  [[ -n "$termai_completion_value" ]] && builtin printf '%s\0' "$termai_completion_value" >&3
+done"#);
+            format!("while IFS= read -r -d '' termai_count; do\n[[ $termai_count =~ ^[0-9]+$ ]] && ((termai_count >= 3 && termai_count <= 65)) || exit 1\ntermai_words=()\nfor ((termai_i=0; termai_i<termai_count; termai_i++)); do IFS= read -r -d '' termai_word || exit 1; termai_words+=(\"$termai_word\"); done\n( set -- \"${{termai_words[@]}}\"\n{body}\n) < /dev/null\nbuiltin printf '\\0'\ndone")
+        });
         let mut child = Command::new(&bash)
             .args(["--noprofile", "--norc", "-c", script, "termai-completion"])
             .current_dir(cwd)
@@ -137,9 +143,10 @@ impl CompletionProvider {
                         .await
                         .map_err(|_| "Completion timed out.".to_owned())??;
                 let mut idle = self.idle.lock().await;
-                if idle.len() < 2 {
-                    idle.push(worker);
+                if idle.len() >= 2 {
+                    idle.remove(0);
                 }
+                idle.push(worker);
                 Ok(values)
             })
             .await;

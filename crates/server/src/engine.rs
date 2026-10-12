@@ -32,6 +32,10 @@ struct EngineRequest {
     runtime: Rc<RefCell<Runtime>>,
     id: u32,
 }
+enum Executor {
+    Shared(tokio::runtime::Handle),
+    Owned(tokio::runtime::Runtime),
+}
 impl Drop for EngineRequest {
     fn drop(&mut self) {
         self.runtime.borrow_mut().cancel(self.id);
@@ -40,17 +44,22 @@ impl Drop for EngineRequest {
 impl NativeEngine {
     pub fn new() -> Result<Self, String> {
         let (sender, mut receiver) = mpsc::channel::<Message>(128);
-        let executor = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
+        let executor = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => Executor::Shared(handle),
+            Err(_) => Executor::Owned(
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|e| e.to_string())?,
+            ),
+        };
         std::thread::Builder::new()
             .name("termai-engine".into())
             .spawn(move || {
                 termai_engine::initialize();
                 let runtime = Rc::new(RefCell::new(Runtime::default()));
                 let local = tokio::task::LocalSet::new();
-                executor.block_on(local.run_until(async move {
+                let work = local.run_until(async move {
                     let mut next = 0u32;
                     let clock = Instant::now();
                     let mut generation = CancellationToken::new();
@@ -154,7 +163,11 @@ impl NativeEngine {
                         }
                     }
                     generation.cancel();
-                }));
+                });
+                match executor {
+                    Executor::Shared(handle) => handle.block_on(work),
+                    Executor::Owned(runtime) => runtime.block_on(work),
+                }
             })
             .map_err(|e| e.to_string())?;
         Ok(Self { sender })

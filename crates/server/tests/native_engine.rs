@@ -506,3 +506,51 @@ async fn native_executor_keeps_short_requests_responsive_and_reset_cancels_pendi
     );
     help.dispose();
 }
+
+#[tokio::test]
+async fn shared_probes_survive_the_engine_that_started_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    executable(
+        &dir.path().join("orchard"),
+        "#!/bin/sh\ntouch started\nsleep .3\nprintf '  --shared  Shared\\n'\n",
+    );
+    let catalog = catalog(cwd, &["orchard"]);
+    let env = BTreeMap::from([("PATH".into(), format!("{cwd}:/usr/bin:/bin"))]);
+    let services = HostServices::new();
+    let help = HelpProvider::new(services.pool.clone());
+    let host = NativeHost::new(services, catalog.clone(), env.clone(), help.clone());
+    let first = NativeEngine::new().unwrap();
+    let second = NativeEngine::new().unwrap();
+    let stop = CancellationToken::new();
+    let first_stop = stop.clone();
+    let first_host = host.clone();
+    let first_request = request("discover", json!(["orchard", catalog, env]));
+    let running =
+        tokio::spawn(async move { first.invoke(first_request, &first_host, &first_stop).await });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while !dir.path().join("started").exists() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let cancel = CancellationToken::new();
+    let surviving = second.invoke(
+        request("discover", json!(["orchard", catalog, env])),
+        &host,
+        &cancel,
+    );
+    let close_first = async {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        stop.cancel();
+        assert!(running.await.unwrap().is_err());
+    };
+    let (result, _) = tokio::join!(surviving, close_first);
+    assert_eq!(
+        result.unwrap()["metadata"]["flags"]["orchard"][0]["name"],
+        "--shared"
+    );
+    assert_eq!(help.help_probes(), 1);
+    help.dispose();
+}

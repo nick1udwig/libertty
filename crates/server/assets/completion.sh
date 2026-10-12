@@ -44,6 +44,4 @@ exec 3>&1
     break
   done
 } >/dev/null 2>&1
-for termai_completion_value in "${COMPREPLY[@]:0:1000}"; do
-  [[ -n "$termai_completion_value" ]] && builtin printf '%s\0' "$termai_completion_value" >&3
-done
+if ((${#COMPREPLY[@]})); then builtin printf '%s\0' "${COMPREPLY[@]:0:1000}" >&3; fi

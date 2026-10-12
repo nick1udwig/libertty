@@ -120,3 +120,25 @@ async fn cancelled_and_oversized_completions_discard_workers_and_recover() {
     );
     assert_eq!(provider.worker_starts(), 3);
 }
+
+#[tokio::test]
+async fn worker_cache_eviction_keeps_new_contexts_warm() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    let provider = CompletionProvider::default();
+    let pool = ProbePool::default();
+    let cancel = CancellationToken::new();
+    let words = vec!["tool".into(), "".into()];
+    for value in 0..4 {
+        let env = BTreeMap::from([("VALUE".into(), value.to_string())]);
+        provider
+            .complete(&pool, &words, cwd, &env, &cancel)
+            .await
+            .unwrap();
+        provider
+            .complete(&pool, &words, cwd, &env, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(provider.worker_starts(), value + 1);
+    }
+}
