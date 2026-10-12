@@ -438,7 +438,14 @@ try {
   assert.equal(await page.evaluate(() => window.__paint.some(text => /[^\x20-\x7e]/.test(text))), false, 'Reset must not paint corrupted glyphs');
   assert.deepEqual(errors, []);
   // Live shell completion definitions supply both Git refs and generic names.
-  await command(page, `cd ${fixture}; source /usr/share/bash-completion/completions/git; git init -q; git symbolic-ref HEAD refs/heads/feat/elixir-worker; git -c user.name=Test -c user.email=test@example.test commit --allow-empty -qm initial; git remote add origin https://example.invalid/repo.git`);
+  const gitCompletion = [
+    process.env.TERMAI_GIT_COMPLETIONS_FILE,
+    '/usr/share/bash-completion/completions/git',
+    '/opt/homebrew/opt/git/share/git-core/contrib/completion/git-completion.bash',
+    '/usr/local/opt/git/share/git-core/contrib/completion/git-completion.bash',
+  ].find(file => file && existsSync(file));
+  assert.ok(gitCompletion, 'Install Git Bash completion for the live completion checks.');
+  await command(page, `cd ${fixture}; source '${gitCompletion.replace(/'/g, "'\\''")}'; git init -q; git symbolic-ref HEAD refs/heads/feat/elixir-worker; git -c user.name=Test -c user.email=test@example.test commit --allow-empty -qm initial; git remote add origin https://example.invalid/repo.git`);
   for (const [input, expected] of [
     ['git push dash u origin feet/elixir dash worker', 'git push -u origin feat/elixir-worker'],
     ['git checkout F E A T', 'git checkout feat/elixir-worker'],
