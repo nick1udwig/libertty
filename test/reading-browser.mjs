@@ -1,6 +1,6 @@
 import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -164,9 +164,11 @@ try {
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
   await frame.waitForFunction(() => window.__shellState.ready);
+  const missingExitCode = spawnSync('ls', ['/definitely/not/present'], { stdio: 'ignore' }).status;
+  assert.ok(missingExitCode > 0, 'The missing-file fixture must fail on this platform.');
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at ls /definitely/not/present'); await page.keyboard.press('Enter');
-  await page.locator('.reading-view.reading-empty:not([hidden])').waitFor();
-  assert.match(await page.locator('.reading-view.reading-empty:not([hidden])').textContent(), /Exited with status 2.*Check the terminal for errors/s);
+  await page.waitForFunction(code => new RegExp(`Exited with status ${code}.*Check the terminal for errors`, 's').test(document.querySelector('.reading-view.reading-empty:not([hidden])')?.textContent || ''), missingExitCode);
+  assert.match(await page.locator('.reading-view.reading-empty:not([hidden])').textContent(), new RegExp(`Exited with status ${missingExitCode}.*Check the terminal for errors`, 's'));
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   let finishRead, startedRead;
   const readingStarted = new Promise(resolve => startedRead = resolve);
