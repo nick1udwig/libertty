@@ -106,7 +106,9 @@ try {
       await touch('touchstart', point); await touch('touchend', point);
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected, 'Touch-only taps activate terminal links');
       const count = await frame.evaluate(() => window.__opened.length);
+      await frame.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       await page.touchscreen.tap(point.x, point.y);
+      await frame.waitForFunction(count => window.__opened.length >= count + 1, count);
       assert.equal(await frame.evaluate(() => window.__opened.length), count + 1, 'Native pointer/touch delivery opens a link exactly once');
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected);
     }
