@@ -3,11 +3,16 @@ use crate::{
     util::*,
 };
 use std::{
+    cell::RefCell,
     collections::{BTreeSet, HashMap, HashSet},
     sync::{Arc, Mutex, OnceLock},
 };
 
-pub fn tokens(input: &str) -> Vec<Token> {
+thread_local! { static TOKENS: RefCell<TextMemo<SharedList<Token>>> = RefCell::new(TextMemo::default()); }
+pub fn tokens(input: &str) -> SharedList<Token> {
+    memo(&TOKENS, input, 0, || parsed_tokens(input))
+}
+fn parsed_tokens(input: &str) -> SharedList<Token> {
     quoted_words(input)
         .into_iter()
         .map(|text| {
@@ -81,7 +86,7 @@ fn filtered_commands(input: &str, catalog: &Catalog) -> SharedList<String> {
         catalog.commands.clone()
     }
 }
-fn command_tokens(input: &str, catalog: &Catalog) -> Vec<Token> {
+fn command_tokens(input: &str, catalog: &Catalog) -> SharedList<Token> {
     let mut words = tokens(input);
     let Some(first) = words.first() else {
         return words;

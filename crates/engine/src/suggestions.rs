@@ -98,7 +98,7 @@ async fn referenced_paths(
 ) -> Result<Catalog, String> {
     let expanded = expand_symbols(input, true);
     let mut prefixes = Vec::new();
-    for word in tokens(&expanded) {
+    for word in &tokens(&expanded) {
         if let Some(matched) = regex(r"^((?:~/|/|\.\.?/)[^\s]*/)").captures(&word.value) {
             let prefix = matched[1].to_owned();
             if !prefixes.contains(&prefix) {

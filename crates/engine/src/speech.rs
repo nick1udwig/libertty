@@ -1,6 +1,11 @@
 use crate::{
     command_policy::vocabulary,
-    util::{collapse, locale_cmp, utf16_len},
+    util::{TextMemo, collapse, locale_cmp, memo, utf16_len},
+};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::{Arc, OnceLock},
 };
 
 const DIRECT: &str = "tilde slash buc mic fas bas pam pat soq doq tic tis wut zap hax hep ket lac rac lit rit lob rob led ban lus stet slus shed dart dusk lark lush";
@@ -32,38 +37,90 @@ struct SymbolMatch {
     alias: bool,
 }
 
-fn distance(a: &str, b: &str) -> usize {
-    let a: Vec<_> = a.chars().collect();
-    let b: Vec<_> = b.chars().collect();
-    if a.len().abs_diff(b.len()) > 2 {
-        return 3;
-    }
-    let mut rows = vec![vec![0; b.len() + 1]; a.len() + 1];
-    for (i, row) in rows.iter_mut().enumerate() {
-        row[0] = i;
-    }
-    for (j, cell) in rows[0].iter_mut().enumerate() {
-        *cell = j;
-    }
-    for i in 1..=a.len() {
-        for j in 1..=b.len() {
-            rows[i][j] = (rows[i - 1][j] + 1)
-                .min(rows[i][j - 1] + 1)
-                .min(rows[i - 1][j - 1] + usize::from(a[i - 1] != b[j - 1]));
-            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                rows[i][j] = rows[i][j].min(rows[i - 2][j - 2] + 1);
+struct SymbolName {
+    name: String,
+    key: String,
+    sound: String,
+    words: usize,
+}
+struct SymbolIndex {
+    names: Vec<SymbolName>,
+    buckets: HashMap<(usize, usize), Vec<usize>>,
+    max_words: usize,
+}
+fn symbol_index() -> &'static SymbolIndex {
+    static INDEX: OnceLock<SymbolIndex> = OnceLock::new();
+    INDEX.get_or_init(|| {
+        let names: Vec<_> = vocabulary()
+            .symbol_names
+            .keys()
+            .map(|name| {
+                let key = name.replace(' ', "");
+                SymbolName {
+                    name: name.clone(),
+                    sound: phonetic(&key),
+                    key,
+                    words: name.split(' ').count(),
+                }
+            })
+            .collect();
+        let mut buckets: HashMap<(usize, usize), Vec<usize>> = HashMap::new();
+        for (at, name) in names.iter().enumerate() {
+            buckets
+                .entry((name.words, name.key.len()))
+                .or_default()
+                .push(at);
+        }
+        SymbolIndex {
+            max_words: names.iter().map(|name| name.words).max().unwrap_or(1),
+            names,
+            buckets,
+        }
+    })
+}
+#[derive(Default)]
+struct Distance {
+    rows: [Vec<usize>; 3],
+}
+impl Distance {
+    fn measure(&mut self, a: &str, b: &str) -> usize {
+        let a: Vec<_> = a.chars().collect();
+        let b: Vec<_> = b.chars().collect();
+        if a.len().abs_diff(b.len()) > 2 {
+            return 3;
+        }
+        for row in &mut self.rows {
+            row.resize(b.len() + 1, 3);
+            row.fill(3);
+        }
+        for j in 0..=b.len().min(2) {
+            self.rows[0][j] = j;
+        }
+        for i in 1..=a.len() {
+            let current = i % 3;
+            let previous = (i - 1) % 3;
+            self.rows[current].fill(3);
+            if i <= 2 {
+                self.rows[current][0] = i;
+            }
+            for j in i.saturating_sub(2).max(1)..=b.len().min(i + 2) {
+                let mut edits = (self.rows[previous][j] + 1)
+                    .min(self.rows[current][j - 1] + 1)
+                    .min(self.rows[previous][j - 1] + usize::from(a[i - 1] != b[j - 1]));
+                if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                    edits = edits.min(self.rows[(i - 2) % 3][j - 2] + 1);
+                }
+                self.rows[current][j] = edits.min(3);
             }
         }
+        self.rows[a.len() % 3][b.len()]
     }
-    rows[a.len()][b.len()]
 }
 fn symbol_matches(words: &[String], at: usize, nearby: bool, general: bool) -> Vec<SymbolMatch> {
     let names = &vocabulary().symbol_names;
-    let max_words = names
-        .keys()
-        .map(|name| name.split(' ').count())
-        .max()
-        .unwrap_or(1);
+    let index = symbol_index();
+    let max_words = index.max_words;
+    let mut distance = Distance::default();
     let mut found = Vec::new();
     for count in (1..=max_words.min(words.len() - at)).rev() {
         let span = &words[at..at + count];
@@ -125,22 +182,35 @@ fn symbol_matches(words: &[String], at: usize, nearby: bool, general: bool) -> V
         if key.len() < 4 {
             continue;
         }
-        for name in names.keys() {
-            let name_key = name.replace(' ', "");
-            if name.split(' ').count() != count
+        let sound = phonetic(&key);
+        let mut nearby: Vec<_> = (key.len().saturating_sub(2)..=key.len() + 2)
+            .flat_map(|len| {
+                index
+                    .buckets
+                    .get(&(count, len))
+                    .into_iter()
+                    .flatten()
+                    .copied()
+            })
+            .collect();
+        nearby.sort_unstable();
+        for at in nearby {
+            let prepared = &index.names[at];
+            let name = &prepared.name;
+            let name_key = &prepared.key;
+            if prepared.words != count
                 || name_key.len() < 4
                 || name_key.len().abs_diff(key.len()) > 2
             {
                 continue;
             }
-            let edits = distance(&key, &name_key);
+            let edits = distance.measure(&key, name_key);
             let budget = if key.len().min(name_key.len()) >= 7 {
                 2
             } else {
                 1
             };
-            let sound = phonetic(&key);
-            let same_sound = sound.len() >= 3 && sound == phonetic(&name_key);
+            let same_sound = sound.len() >= 3 && sound == prepared.sound;
             if edits > 0 && (edits <= budget || same_sound) {
                 found.push(SymbolMatch {
                     name: name.clone(),
@@ -206,13 +276,23 @@ fn render(units: &[Unit]) -> String {
     }
     output
 }
-fn raw_words(input: &str) -> Vec<String> {
-    crate::util::quoted_words(input)
-        .into_iter()
-        .map(str::to_owned)
-        .collect()
+thread_local! { static WORDS: RefCell<TextMemo<Arc<Vec<String>>>> = RefCell::new(TextMemo::default()); static EXPANDED: RefCell<TextMemo<String>> = RefCell::new(TextMemo::default()); }
+fn raw_words(input: &str) -> Arc<Vec<String>> {
+    memo(&WORDS, input, 0, || {
+        Arc::new(
+            crate::util::quoted_words(input)
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        )
+    })
 }
 pub fn expand_symbols(input: &str, general: bool) -> String {
+    memo(&EXPANDED, input, u8::from(general), || {
+        expand(input, general)
+    })
+}
+fn expand(input: &str, general: bool) -> String {
     let words = raw_words(input);
     let mut units = Vec::new();
     let mut at = 0;
@@ -304,4 +384,50 @@ pub fn symbol_alternatives(input: &str) -> Vec<String> {
     }
     result.truncate(3);
     result
+}
+
+#[cfg(test)]
+mod distance_tests {
+    use super::*;
+    #[test]
+    fn bounded_distance_preserves_transpositions_insertions_and_exact_matches() {
+        fn full(a: &str, b: &str) -> usize {
+            let a = a.as_bytes();
+            let b = b.as_bytes();
+            let mut rows = vec![vec![0; b.len() + 1]; a.len() + 1];
+            for (i, row) in rows.iter_mut().enumerate() {
+                row[0] = i;
+            }
+            for (j, cell) in rows[0].iter_mut().enumerate() {
+                *cell = j;
+            }
+            for i in 1..=a.len() {
+                for j in 1..=b.len() {
+                    rows[i][j] = (rows[i - 1][j] + 1)
+                        .min(rows[i][j - 1] + 1)
+                        .min(rows[i - 1][j - 1] + usize::from(a[i - 1] != b[j - 1]));
+                    if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                        rows[i][j] = rows[i][j].min(rows[i - 2][j - 2] + 1);
+                    }
+                }
+            }
+            rows[a.len()][b.len()].min(3)
+        }
+        let mut words = vec![String::new()];
+        for len in 1..=6 {
+            for bits in 0..(1 << len) {
+                words.push(
+                    (0..len)
+                        .map(|i| if bits & (1 << i) == 0 { 'a' } else { 'b' })
+                        .collect(),
+                );
+            }
+        }
+        let mut scratch = Distance::default();
+        for a in &words {
+            for b in &words {
+                assert_eq!(scratch.measure(a, b), full(a, b), "{a:?} {b:?}");
+            }
+        }
+    }
 }

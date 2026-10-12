@@ -1,11 +1,51 @@
 use crate::types::SharedList;
 use regex::Regex;
 use std::{
+    cell::RefCell,
     cmp::Ordering,
     collections::{HashMap, VecDeque},
     hash::{Hash, Hasher},
     sync::{Arc, Mutex, OnceLock},
 };
+
+/// Small deterministic input caches; never store host facts or full suggestions.
+pub(crate) struct TextMemo<T>(VecDeque<((String, u8), T)>);
+impl<T> Default for TextMemo<T> {
+    fn default() -> Self {
+        Self(VecDeque::new())
+    }
+}
+impl<T: Clone> TextMemo<T> {
+    pub fn get(&self, input: &str, mode: u8) -> Option<T> {
+        self.0
+            .iter()
+            .rev()
+            .find(|((text, kind), _)| text == input && *kind == mode)
+            .map(|(_, value)| value.clone())
+    }
+    pub fn insert(&mut self, input: &str, mode: u8, value: T) {
+        if input.len() > 8192 {
+            return;
+        }
+        self.0.push_back(((input.into(), mode), value));
+        if self.0.len() > 32 {
+            self.0.pop_front();
+        }
+    }
+}
+pub(crate) fn memo<T: Clone>(
+    cache: &'static std::thread::LocalKey<RefCell<TextMemo<T>>>,
+    input: &str,
+    mode: u8,
+    compute: impl FnOnce() -> T,
+) -> T {
+    if let Some(value) = cache.with(|memo| memo.borrow().get(input, mode)) {
+        return value;
+    }
+    let value = compute();
+    cache.with(|memo| memo.borrow_mut().insert(input, mode, value.clone()));
+    value
+}
 
 /// Bounded memoization of deterministic parsing only, keyed by every input value.
 pub struct ArrayCache<T> {
