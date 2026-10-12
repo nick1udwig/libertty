@@ -86,12 +86,18 @@ impl Browser {
         }
     }
     async fn ready(&mut self, after: u64) {
+        let output_at = self.output.len();
         self.until(|value| {
             value["type"] == "state"
                 && value["state"]["ready"] == true
                 && value["state"]["prompt"].as_u64().is_some_and(|p| p > after)
         })
         .await;
+        // The prompt marker precedes Readline restoring raw terminal input.
+        // Wait for its bracketed-paste enable before sending control keys.
+        while !self.output[output_at..].contains("\x1b[?2004h") {
+            self.next().await;
+        }
     }
     async fn command(&mut self, id: &str, command: &str) {
         let prompt = self.session.state().prompt;
