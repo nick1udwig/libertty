@@ -52,28 +52,75 @@ impl NativeHost {
         cancel: &CancellationToken,
     ) -> Result<termai_engine::host::FactValue, String> {
         use termai_engine::host::FactValue;
-        if self.remote.is_none() && matches!(operation["kind"].as_str(), Some("lookup" | "entries"))
-        {
+        if self.remote.is_none() {
             if cancel.is_cancelled() {
                 return Err(ABORTED.into());
             }
-            let path = operation["path"]
-                .as_str()
-                .ok_or("Invalid host field path.")?;
-            let value = if operation["kind"] == "lookup" {
-                FactValue::Lookup(Arc::new(
-                    self.services.directories.lookup(path, cancel).await?,
-                ))
-            } else {
-                let limit = operation["limit"]
-                    .as_u64()
-                    .ok_or("Invalid directory limit.")? as usize;
-                FactValue::Entries(
+            let text = |field| {
+                operation
+                    .get(field)
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| format!("Invalid host field {field}."))
+            };
+            let value = match text("kind")? {
+                "lookup" => FactValue::Lookup(Arc::new(
                     self.services
                         .directories
-                        .entries(path, limit, cancel)
+                        .lookup(text("path")?, cancel)
                         .await?,
-                )
+                )),
+                "entries" => FactValue::Entries(
+                    self.services
+                        .directories
+                        .entries(
+                            text("path")?,
+                            operation["limit"]
+                                .as_u64()
+                                .ok_or("Invalid directory limit.")?
+                                as usize,
+                            cancel,
+                        )
+                        .await?,
+                ),
+                "stat" => FactValue::Stat(
+                    self.services
+                        .directories
+                        .stat(
+                            text("path")?,
+                            operation["executable"].as_bool().unwrap_or(true),
+                            cancel,
+                        )
+                        .await?,
+                ),
+                "syntax" => FactValue::Syntax(
+                    self.services
+                        .syntax
+                        .valid(text("command")?, &self.catalog.cwd, cancel)
+                        .await?,
+                ),
+                "completion" => {
+                    FactValue::Completion(Arc::new(self.complete(operation, cancel).await?))
+                }
+                "help" => {
+                    let route: Vec<String> = serde_json::from_value(
+                        operation
+                            .get("route")
+                            .cloned()
+                            .ok_or("Invalid help route.")?,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    FactValue::Help(Arc::new(
+                        self.read_help(text("command")?, &route, true, cancel)
+                            .await?,
+                    ))
+                }
+                "describe" => FactValue::Describe(Arc::new(
+                    self.services
+                        .catalog
+                        .describe(text("command")?, &self.catalog.cwd, cancel)
+                        .await?,
+                )),
+                _ => return Err("Unknown host operation.".into()),
             };
             if cancel.is_cancelled() {
                 return Err(ABORTED.into());
@@ -81,6 +128,38 @@ impl NativeHost {
             return Ok(value);
         }
         self.fact(operation, cancel).await.map(Into::into)
+    }
+    async fn complete(
+        &self,
+        operation: &Value,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<String>, String> {
+        let words: Vec<String> = serde_json::from_value(
+            operation
+                .get("words")
+                .cloned()
+                .ok_or("Invalid completion words.")?,
+        )
+        .map_err(|e| e.to_string())?;
+        let timeout = operation
+            .get("timeoutMs")
+            .and_then(Value::as_f64)
+            .unwrap_or(1500.0);
+        if !timeout.is_finite() || timeout < 0.0 {
+            return Err("Invalid completion timeout.".into());
+        }
+        tokio::time::timeout(
+            Duration::from_secs_f64(timeout.min(1500.0) / 1000.0),
+            self.services.completion.complete(
+                &self.services.pool,
+                &words,
+                &self.catalog.cwd,
+                &self.environment,
+                cancel,
+            ),
+        )
+        .await
+        .map_err(|_| "Completion timed out.".to_owned())?
     }
     pub fn new(
         services: HostServices,
@@ -154,36 +233,7 @@ impl NativeHost {
                     .valid(text("command")?, &self.catalog.cwd, cancel)
                     .await?
             ),
-            "completion" => {
-                let words: Vec<String> = serde_json::from_value(
-                    operation
-                        .get("words")
-                        .cloned()
-                        .ok_or("Invalid completion words.")?,
-                )
-                .map_err(|e| e.to_string())?;
-                let timeout = operation
-                    .get("timeoutMs")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(1500.0);
-                if !timeout.is_finite() || timeout < 0.0 {
-                    return Err("Invalid completion timeout.".into());
-                }
-                json!(
-                    tokio::time::timeout(
-                        Duration::from_secs_f64(timeout.min(1500.0) / 1000.0),
-                        self.services.completion.complete(
-                            &self.services.pool,
-                            &words,
-                            &self.catalog.cwd,
-                            &self.environment,
-                            cancel
-                        )
-                    )
-                    .await
-                    .map_err(|_| "Completion timed out.".to_owned())??
-                )
-            }
+            "completion" => json!(self.complete(operation, cancel).await?),
             "help" => {
                 let route: Vec<String> = serde_json::from_value(
                     operation

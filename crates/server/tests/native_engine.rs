@@ -450,3 +450,59 @@ async fn cancelled_native_discovery_does_not_poison_later_work() {
     );
     help.dispose();
 }
+
+#[tokio::test]
+async fn native_executor_keeps_short_requests_responsive_and_reset_cancels_pending_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    executable(
+        &dir.path().join("orchard"),
+        "#!/bin/sh\ntouch started\nsleep 5\nprintf '  --slow  Slow\\n'\n",
+    );
+    let catalog = catalog(cwd, &["orchard", "cd"]);
+    let env = BTreeMap::from([("PATH".into(), format!("{cwd}:/usr/bin:/bin"))]);
+    let services = HostServices::new();
+    let help = HelpProvider::new(services.pool.clone());
+    let host = NativeHost::new(services, catalog.clone(), env.clone(), help.clone());
+    let engine = NativeEngine::new().unwrap();
+    let cancel = CancellationToken::new();
+    let slow = engine.invoke(
+        request("discover", json!(["orchard", catalog, env])),
+        &host,
+        &cancel,
+    );
+    let reset = async {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !dir.path().join("started").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            engine.invoke(
+                request("cachedMetadata", json!([catalog, env])),
+                &host,
+                &cancel,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        engine.reset().unwrap();
+    };
+    let (slow, _) = tokio::join!(slow, reset);
+    assert_eq!(slow.unwrap_err(), termai_server::probes::ABORTED);
+    assert!(
+        engine
+            .invoke(
+                request("cachedMetadata", json!([catalog, env])),
+                &host,
+                &cancel
+            )
+            .await
+            .is_ok()
+    );
+    help.dispose();
+}

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque, hash_map::Entry},
     rc::Rc,
     sync::Arc,
     task::{Context, Poll},
@@ -23,12 +23,50 @@ pub enum Call {
 }
 
 type Slot = Rc<RefCell<Option<Result<FactValue, String>>>>;
+#[derive(Deserialize, Hash, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
+enum OperationKey {
+    Stat {
+        path: String,
+        executable: bool,
+    },
+    Lookup {
+        path: String,
+    },
+    Entries {
+        path: String,
+        limit: usize,
+    },
+    Syntax {
+        command: String,
+    },
+    Completion {
+        words: Vec<String>,
+        #[serde(rename = "timeoutMs", deserialize_with = "timeout_bits")]
+        timeout: u64,
+    },
+    Help {
+        command: String,
+        route: Vec<String>,
+    },
+    Describe {
+        command: String,
+    },
+}
+fn timeout_bits<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
+    f64::deserialize(deserializer).map(f64::to_bits)
+}
+#[derive(Hash, PartialEq, Eq)]
+enum FactKey {
+    Typed(OperationKey),
+    Json(String),
+}
 #[derive(Default)]
 struct RequestHost {
     now: Cell<f64>,
     completion: Cell<bool>,
     queue: RefCell<VecDeque<(Value, Slot)>>,
-    cache: RefCell<BTreeMap<String, Slot>>,
+    cache: RefCell<HashMap<FactKey, Slot>>,
 }
 impl Host for RequestHost {
     fn supports_completion(&self) -> bool {
@@ -38,18 +76,18 @@ impl Host for RequestHost {
         self.now.get()
     }
     fn request(&self, operation: Value) -> LocalBoxFuture<'_, Result<FactValue, String>> {
-        let key = operation.to_string();
-        let slot = if let Some(slot) = self.cache.borrow().get(&key) {
-            slot.clone()
-        } else {
-            let slot = Rc::new(RefCell::new(None));
-            // Release the read borrow before inserting below.
-            slot
+        let key = OperationKey::deserialize(&operation)
+            .map(FactKey::Typed)
+            .unwrap_or_else(|_| FactKey::Json(operation.to_string()));
+        let slot = match self.cache.borrow_mut().entry(key) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(entry) => {
+                let slot = Rc::new(RefCell::new(None));
+                entry.insert(slot.clone());
+                self.queue.borrow_mut().push_back((operation, slot.clone()));
+                slot
+            }
         };
-        if !self.cache.borrow().contains_key(&key) {
-            self.cache.borrow_mut().insert(key, slot.clone());
-            self.queue.borrow_mut().push_back((operation, slot.clone()));
-        }
         Box::pin(futures::future::poll_fn(move |_| {
             match slot.borrow().as_ref() {
                 Some(result) => Poll::Ready(result.clone()),

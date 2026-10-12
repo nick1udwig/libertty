@@ -1,155 +1,163 @@
 use crate::{host::NativeHost, probes::ABORTED};
 use serde_json::Value;
-use std::{
-    collections::BTreeMap,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc::{RecvTimeoutError, SyncSender, sync_channel},
-    },
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
 use termai_engine::{
     Request,
     runtime::{Call, Reply, Runtime, Step},
 };
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
+struct Job {
+    call: Call,
+    host: NativeHost,
+    cancel: CancellationToken,
+    result: oneshot::Sender<Result<Value, String>>,
+}
 enum Message {
-    Start {
-        job: u64,
-        call: Call,
-        result: oneshot::Sender<Step>,
-        cancelled: Arc<AtomicBool>,
-    },
-    Resume {
-        job: u64,
-        replies: Vec<Reply>,
-        result: oneshot::Sender<Step>,
-    },
-    Cancel(u64),
+    Start(Box<Job>),
     Reset,
 }
 #[derive(Clone)]
 pub struct NativeEngine {
-    sender: SyncSender<Message>,
-    jobs: Arc<AtomicU64>,
+    sender: mpsc::Sender<Message>,
 }
-struct Pending {
-    sender: SyncSender<Message>,
-    job: u64,
-    cancelled: Arc<AtomicBool>,
-}
+struct Pending(CancellationToken);
 impl Drop for Pending {
     fn drop(&mut self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-        let _ = self.sender.try_send(Message::Cancel(self.job));
+        self.0.cancel();
+    }
+}
+struct EngineRequest {
+    runtime: Rc<RefCell<Runtime>>,
+    id: u32,
+}
+impl Drop for EngineRequest {
+    fn drop(&mut self) {
+        self.runtime.borrow_mut().cancel(self.id);
     }
 }
 impl NativeEngine {
     pub fn new() -> Result<Self, String> {
-        let (sender, receiver) = sync_channel(128);
+        let (sender, mut receiver) = mpsc::channel::<Message>(128);
+        let executor = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
         std::thread::Builder::new()
             .name("termai-engine".into())
             .spawn(move || {
                 termai_engine::initialize();
-                let mut runtime = Runtime::default();
-                let mut jobs: BTreeMap<u64, (u32, Arc<AtomicBool>)> = BTreeMap::new();
-                let mut next = 0u32;
-                let clock = Instant::now();
-                loop {
-                    jobs.retain(|_, (id, cancelled)| {
-                        if cancelled.load(Ordering::SeqCst) {
-                            runtime.cancel(*id);
-                            false
-                        } else {
-                            true
-                        }
-                    });
-                    let message = if jobs.is_empty() {
-                        match receiver.recv() {
-                            Ok(message) => message,
-                            Err(_) => break,
-                        }
-                    } else {
-                        match receiver.recv_timeout(Duration::from_millis(100)) {
-                            Ok(message) => message,
-                            Err(RecvTimeoutError::Timeout) => continue,
-                            Err(RecvTimeoutError::Disconnected) => break,
-                        }
-                    };
-                    let now = clock.elapsed().as_secs_f64() * 1000.0;
-                    match message {
-                        Message::Start {
-                            job,
-                            call,
-                            result,
-                            cancelled,
-                        } => {
-                            if cancelled.load(Ordering::SeqCst) {
-                                let _ = result.send(Step::Error {
-                                    request: 0,
-                                    error: ABORTED.into(),
-                                });
-                                continue;
+                let runtime = Rc::new(RefCell::new(Runtime::default()));
+                let local = tokio::task::LocalSet::new();
+                executor.block_on(local.run_until(async move {
+                    let mut next = 0u32;
+                    let clock = Instant::now();
+                    let mut generation = CancellationToken::new();
+                    while let Some(message) = receiver.recv().await {
+                        match message {
+                            Message::Reset => {
+                                generation.cancel();
+                                generation = CancellationToken::new();
+                                runtime.borrow_mut().reset();
                             }
-                            let Some(id) = next.checked_add(1) else {
-                                let _ = result.send(Step::Error {
-                                    request: 0,
-                                    error: "Engine request IDs exhausted.".into(),
-                                });
-                                continue;
-                            };
-                            next = id;
-                            jobs.insert(job, (id, cancelled));
-                            let step = runtime.start_call(id, call, now);
-                            if !matches!(step, Step::Pending { .. }) {
-                                jobs.remove(&job);
-                            }
-                            if result.send(step).is_err() {
-                                runtime.cancel(id);
-                                jobs.remove(&job);
-                            }
-                        }
-                        Message::Resume {
-                            job,
-                            replies,
-                            result,
-                        } => {
-                            if let Some(id) = jobs.get(&job).map(|(id, _)| *id) {
-                                let step = runtime.resume(id, replies, now);
-                                if !matches!(step, Step::Pending { .. }) {
-                                    jobs.remove(&job);
+                            Message::Start(job) => {
+                                let Job {
+                                    call,
+                                    host,
+                                    cancel,
+                                    result,
+                                } = *job;
+                                let Some(id) = next.checked_add(1) else {
+                                    let _ =
+                                        result.send(Err("Engine request IDs exhausted.".into()));
+                                    continue;
+                                };
+                                next = id;
+                                if cancel.is_cancelled() {
+                                    let _ = result.send(Err(ABORTED.into()));
+                                    continue;
                                 }
-                                if result.send(step).is_err() {
-                                    runtime.cancel(id);
-                                    jobs.remove(&job);
-                                }
-                            } else {
-                                let _ = result.send(Step::Error {
-                                    request: 0,
-                                    error: "Unknown or cancelled engine request.".into(),
+                                // Assign and start IDs in receiver order, before tasks can yield.
+                                let step = match runtime.borrow_mut().start_call(
+                                    id,
+                                    call,
+                                    clock.elapsed().as_secs_f64() * 1000.0,
+                                ) {
+                                    Step::Complete { value, .. } => {
+                                        let _ = result.send(Ok(value));
+                                        continue;
+                                    }
+                                    Step::Error { error, .. } => {
+                                        let _ = result.send(Err(error));
+                                        continue;
+                                    }
+                                    pending => pending,
+                                };
+                                let reset = generation.clone();
+                                let runtime = runtime.clone();
+                                tokio::task::spawn_local(async move {
+                                    let _request = EngineRequest {
+                                        runtime: runtime.clone(),
+                                        id,
+                                    };
+                                    let work = async {
+                                        let host = &host;
+                                        let cancel = &cancel;
+                                        let mut step = step;
+                                        loop {
+                                            match step {
+                                                Step::Complete { value, .. } => return Ok(value),
+                                                Step::Error { error, .. } => return Err(error),
+                                                Step::Pending { callbacks, .. } => {
+                                                    let replies = futures::future::join_all(
+                                                        callbacks.into_iter().map(
+                                                            |callback| async move {
+                                                                let results =
+                                                                    futures::future::join_all(
+                                                                        callback
+                                                                            .operations
+                                                                            .iter()
+                                                                            .map(|operation| {
+                                                                                host.engine_fact(
+                                                                                    operation,
+                                                                                    cancel,
+                                                                                )
+                                                                            }),
+                                                                    )
+                                                                    .await;
+                                                                Reply::Native {
+                                                                    request: callback.request,
+                                                                    results,
+                                                                }
+                                                            },
+                                                        ),
+                                                    )
+                                                    .await;
+                                                    step = runtime.borrow_mut().resume(
+                                                        id,
+                                                        replies,
+                                                        clock.elapsed().as_secs_f64() * 1000.0,
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    };
+                                    let value = tokio::select! { biased;
+                                        _ = cancel.cancelled() => Err(ABORTED.into()),
+                                        _ = reset.cancelled() => Err(ABORTED.into()),
+                                        value = work => value,
+                                    };
+                                    let _ = result.send(value);
                                 });
                             }
-                        }
-                        Message::Cancel(job) => {
-                            if let Some((id, _)) = jobs.remove(&job) {
-                                runtime.cancel(id);
-                            }
-                        }
-                        Message::Reset => {
-                            runtime.reset();
-                            jobs.clear();
                         }
                     }
-                }
+                    generation.cancel();
+                }));
             })
             .map_err(|e| e.to_string())?;
-        Ok(Self {
-            sender,
-            jobs: Arc::new(AtomicU64::new(0)),
-        })
+        Ok(Self { sender })
     }
     pub fn reset(&self) -> Result<(), String> {
         self.sender
@@ -190,54 +198,19 @@ impl NativeEngine {
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }
-        let job = self.jobs.fetch_add(1, Ordering::SeqCst);
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let _pending = Pending {
-            sender: self.sender.clone(),
-            job,
-            cancelled: cancelled.clone(),
-        };
+        let pending = Pending(CancellationToken::new());
         let (result, receiver) = oneshot::channel();
         self.sender
-            .try_send(Message::Start {
-                job,
+            .try_send(Message::Start(Box::new(Job {
                 call,
+                host: host.clone(),
+                cancel: pending.0.clone(),
                 result,
-                cancelled,
-            })
+            })))
             .map_err(|_| "Engine queue is full.".to_owned())?;
-        let mut step = tokio::select! { biased; _ = cancel.cancelled() => return Err(ABORTED.into()), result = receiver => result.map_err(|_| "Engine closed.".to_owned())? };
-        loop {
-            match step {
-                Step::Complete { value, .. } => return Ok(value),
-                Step::Error { error, .. } => return Err(error),
-                Step::Pending { callbacks, .. } => {
-                    let replies = futures::future::join_all(callbacks.into_iter().map(
-                        |callback| async move {
-                            let results = futures::future::join_all(
-                                callback.operations.iter().map(|operation| async move {
-                                    host.engine_fact(operation, cancel).await
-                                }),
-                            )
-                            .await;
-                            Reply::Native {
-                                request: callback.request,
-                                results,
-                            }
-                        },
-                    ));
-                    let replies = tokio::select! { biased; _ = cancel.cancelled() => return Err(ABORTED.into()), replies = replies => replies };
-                    let (result, receiver) = oneshot::channel();
-                    self.sender
-                        .try_send(Message::Resume {
-                            job,
-                            replies,
-                            result,
-                        })
-                        .map_err(|_| "Engine queue is full.".to_owned())?;
-                    step = tokio::select! { biased; _ = cancel.cancelled() => return Err(ABORTED.into()), result = receiver => result.map_err(|_| "Engine closed.".to_owned())? };
-                }
-            }
+        tokio::select! { biased;
+            _ = cancel.cancelled() => Err(ABORTED.into()),
+            result = receiver => result.map_err(|_| "Engine closed.".to_owned())?,
         }
     }
 }

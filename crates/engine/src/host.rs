@@ -1,6 +1,5 @@
 use crate::types::{DirectoryEntry, DirectoryLookup, FileInfo, Flag, Help, SharedList};
 use futures::future::LocalBoxFuture;
-use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -9,6 +8,11 @@ pub enum FactValue {
     Json(Arc<Value>),
     Lookup(Arc<DirectoryLookup>),
     Entries(SharedList<DirectoryEntry>),
+    Stat(Option<FileInfo>),
+    Syntax(bool),
+    Completion(Arc<Vec<String>>),
+    Help(Arc<Help>),
+    Describe(Arc<Option<Vec<Flag>>>),
 }
 impl From<Value> for FactValue {
     fn from(value: Value) -> Self {
@@ -25,22 +29,21 @@ pub trait Host {
     }
 }
 
-async fn fact<T: DeserializeOwned>(host: &dyn Host, operation: Value) -> Result<T, String> {
-    let FactValue::Json(value) = host.request(operation).await? else {
-        return Err("Invalid host fact type.".into());
-    };
-    crate::deserialize(value.as_ref()).map_err(|error| format!("Invalid host fact: {error}"))
-}
 pub async fn stat(
     host: &dyn Host,
     path: &str,
     executable: bool,
 ) -> Result<Option<FileInfo>, String> {
-    fact(
-        host,
-        json!({"kind":"stat","path":path,"executable":executable}),
-    )
-    .await
+    match host
+        .request(json!({"kind":"stat","path":path,"executable":executable}))
+        .await?
+    {
+        FactValue::Stat(value) => Ok(value),
+        FactValue::Json(value) => {
+            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
+        }
+        _ => Err("Invalid host fact type.".into()),
+    }
 }
 pub async fn lookup(host: &dyn Host, path: &str) -> Result<DirectoryLookup, String> {
     match host.request(json!({"kind":"lookup","path":path})).await? {
@@ -68,22 +71,54 @@ pub async fn entries(
     }
 }
 pub async fn syntax(host: &dyn Host, command: &str) -> Result<bool, String> {
-    fact(host, json!({"kind":"syntax","command":command})).await
+    match host
+        .request(json!({"kind":"syntax","command":command}))
+        .await?
+    {
+        FactValue::Syntax(value) => Ok(value),
+        FactValue::Json(value) => {
+            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
+        }
+        _ => Err("Invalid host fact type.".into()),
+    }
 }
 pub async fn complete(
     host: &dyn Host,
     words: &[String],
     timeout_ms: f64,
 ) -> Result<Vec<String>, String> {
-    fact(
-        host,
-        json!({"kind":"completion","words":words,"timeoutMs":timeout_ms}),
-    )
-    .await
+    match host
+        .request(json!({"kind":"completion","words":words,"timeoutMs":timeout_ms}))
+        .await?
+    {
+        FactValue::Completion(value) => Ok(value.as_ref().clone()),
+        FactValue::Json(value) => {
+            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
+        }
+        _ => Err("Invalid host fact type.".into()),
+    }
 }
 pub async fn help(host: &dyn Host, command: &str, route: &[String]) -> Result<Help, String> {
-    fact(host, json!({"kind":"help","command":command,"route":route})).await
+    match host
+        .request(json!({"kind":"help","command":command,"route":route}))
+        .await?
+    {
+        FactValue::Help(value) => Ok(value.as_ref().clone()),
+        FactValue::Json(value) => {
+            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
+        }
+        _ => Err("Invalid host fact type.".into()),
+    }
 }
 pub async fn describe(host: &dyn Host, command: &str) -> Result<Option<Vec<Flag>>, String> {
-    fact(host, json!({"kind":"describe","command":command})).await
+    match host
+        .request(json!({"kind":"describe","command":command}))
+        .await?
+    {
+        FactValue::Describe(value) => Ok(value.as_ref().clone()),
+        FactValue::Json(value) => {
+            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
+        }
+        _ => Err("Invalid host fact type.".into()),
+    }
 }
