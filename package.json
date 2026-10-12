@@ -49,7 +49,8 @@
     "test:plugins": "node test/plugins-browser.mjs",
     "release:package": "node scripts/package-release.mjs",
     "test:install": "node --test test/install.test.mjs test/setup-integrations.test.mjs",
-    "test:herdr-flash": "node test/herdr-space-flash-native.mjs"
+    "test:herdr-flash": "node test/herdr-space-flash-native.mjs",
+    "test:herdr-loading": "node test/herdr-loading-browser.mjs"
   },
   "dependencies": {
     "ghostty-web": "0.4.0-next.20.g1858a59",

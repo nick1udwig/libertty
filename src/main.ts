@@ -59,6 +59,7 @@ for (const plugin of builtinPlugins({
   connect: (host, id) => configureConnection(host, id), closeSession: closeTabSession, store, notice, terminalURL, openReading,
   frame(tab, frame) { if (frame) frames.set(tab.id, frame); else frames.delete(tab.id); },
   herdr(tab, view) { if (view) herdrViews.set(tab.id, view); else { herdrViews.delete(tab.id); herdrAttention.delete(tab.id); } },
+  ready(tab) { if (tab.id === active) updateViewVisibility(); },
   attention(tab, count) { herdrAttention.set(tab.id, count); const badge = $('tabs').querySelector<HTMLElement>('[aria-controls="herdr-' + tab.id + '"] .herdr-attention'); if (badge) { badge.textContent = String(count); badge.hidden = !count; badge.setAttribute('aria-label', count + ' agents need attention'); } },
   notification: (connection, event) => herdrSounds.play(connection, event), notificationDevice: id => herdrNotifications.device(id),
   watch: tab => herdrNotifications.watch(tab.backendId, tab.id, herdrSession(tab.herdrSession), tab.herdrSource), unwatch: tab => herdrNotifications.unwatch(tab.backendId, tab.id),
@@ -87,6 +88,7 @@ const authenticating = new Map<string, Promise<void>>();
 const lockedTerminals = new Set<string>();
 const handledEnds = new Map<string, string>();
 let terminalLoading: { id: string; waitForPrompt: boolean } | undefined;
+let presentedTab = '', herdrLoading = false;
 let notification: ReturnType<typeof setTimeout>;
 function notice(message: string) { $('notice').textContent = message; $('notice').hidden = false; clearTimeout(notification); notification = setTimeout(() => $('notice').hidden = true, 6000); }
 function store() { try { for (const [key, value] of Object.entries({ backends: backends.filter(b => b.id !== 'primary'), hosts, tabs, activeTab: active })) localStorage.setItem('termai.' + key, JSON.stringify(value)); localStorage.removeItem('termai.readingTabs'); } catch { notice('Browser storage is unavailable. Connections will last for this page only.'); } }
@@ -155,7 +157,7 @@ function show(view: typeof page) {
   closeTabMenu();
   const previous = page; page = view; const terminal = view === 'terminal';
   $('terminal-header').hidden = !terminal; $('terminal-stack').hidden = !terminal; $('library').hidden = terminal;
-  for (const [id, view] of pluginViews) view.setVisible(terminal && id === active && !document.hidden);
+  updateViewVisibility();
   if (terminal) { renderTabs(); return; }
   $('settings-pane').hidden = view !== 'settings'; $('library-content').hidden = view === 'settings';
   for (const [id, selected] of [['nav-vault', view !== 'settings'], ['nav-settings', view === 'settings']] as const) { if (selected) $(id).setAttribute('aria-current', 'page'); else $(id).removeAttribute('aria-current'); }
@@ -296,7 +298,31 @@ async function renderCards() {
   }
   if (!$('cards').children.length) { $('list-empty').textContent = query ? 'No matches.' : page === 'keychain' ? 'Add an SSH key to connect securely. New keys are stored encrypted in this browser.' : page === 'known' ? 'Verified SSH hosts will appear here after you connect.' : 'Add a host to open your next terminal.'; $('list-empty').hidden = false; }
 }
-function updateTerminalLoading() { $('terminal-loading').hidden = page !== 'terminal' || terminalLoading?.id !== active; }
+function updateTerminalLoading() {
+  $('terminal-loading').hidden = page !== 'terminal' || !herdrLoading && terminalLoading?.id !== active;
+  $('terminal-loading-label').textContent = herdrLoading ? 'Loading Herdr…' : 'Opening SSH terminal…';
+  $('terminal-loading').classList.toggle('has-previous', herdrLoading && !!presentedTab);
+}
+function updateViewVisibility() {
+  const visible = page === 'terminal' && !document.hidden, target = pluginViews.get(active);
+  target?.setHeld?.(false);
+  target?.setVisible(visible);
+  if (!pluginViews.has(presentedTab)) presentedTab = '';
+  const tab = tabs.find(tab => tab.id === active);
+  const waiting = visible && tab && tabPluginId(tab) === 'herdr' && (!target || herdrViews.has(active)) && !herdrViews.get(active)?.ready;
+  const preparing = !!waiting && presentedTab !== active;
+  herdrLoading = preparing;
+  if (!visible) presentedTab = '';
+  else if (!preparing) presentedTab = target ? active : '';
+  for (const [id, view] of pluginViews) {
+    if (id !== active) view.setVisible(visible && id === presentedTab);
+    view.setHeld?.(visible && id === presentedTab && id !== active);
+    view.element.style.visibility = id === active && preparing ? 'hidden' : '';
+    view.element.inert = visible && (id !== active || preparing);
+  }
+  $('terminal-stack').setAttribute('aria-busy', String(preparing));
+  updateTerminalLoading();
+}
 function showTerminalLoading(id: string, waitForPrompt = false) { terminalLoading = { id, waitForPrompt }; updateTerminalLoading(); }
 function hideTerminalLoading(id: string) { if (terminalLoading?.id === id) { terminalLoading = undefined; updateTerminalLoading(); } }
 function renderTabs() {
@@ -321,7 +347,7 @@ function renderTabs() {
       if (['ArrowLeft', 'ArrowRight'].includes(event.key)) { event.preventDefault(); const index = all.indexOf(tab), next = all[(index + (event.key === 'ArrowRight' ? 1 : all.length - 1)) % all.length]; activate(next.id); ($('tabs').querySelector('[aria-selected=true]') as HTMLElement)?.focus(); }
     }; $('tabs').append(el);
   }
-  for (const [id, view] of pluginViews) view.setVisible(id === active && page === 'terminal' && !document.hidden);
+  updateViewVisibility();
   $('empty-terminal').hidden = !!all.length;
   updateTerminalLoading();
   requestAnimationFrame(() => $('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
@@ -873,7 +899,7 @@ input('search').oninput = () => void renderCards(); select('backend-filter').onc
 $('sort-hosts').onclick = () => { alphabetical = !alphabetical; $('sort-hosts').setAttribute('aria-pressed', String(alphabetical)); void renderCards(); };
 function viewport() { document.documentElement.style.setProperty('--height', `${window.visualViewport?.height || innerHeight}px`); }
 window.visualViewport?.addEventListener('resize', viewport); window.addEventListener('resize', viewport); viewport();
-document.addEventListener('visibilitychange', () => { for (const [id, view] of pluginViews) view.setVisible(id === active && page === 'terminal' && !document.hidden); });
+document.addEventListener('visibilitychange', updateViewVisibility);
 show('terminal');
 async function boot() {
   try {

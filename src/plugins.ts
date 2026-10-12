@@ -15,6 +15,7 @@ export function migrateReadingTab(tab: LegacyReadingTab): TerminalTab {
 export interface PluginView {
   element: HTMLElement;
   setVisible(visible: boolean): void;
+  setHeld?(held: boolean): void;
   dispose(): void;
   focus?(): void;
   applySettings?(): void;

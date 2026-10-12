@@ -142,7 +142,8 @@ The revision is obtained through the read-only `pane.copy_motion` operation rath
 
 Mobile space switches retain up to four authenticated terminal iframes in least-recently-used order.
 Parked views keep their native mobile geometry while consuming and discarding stream frames on the backend, and they pause browser output and shared history polling.
-A warm switch at unchanged dimensions shows its last certified mobile image immediately while reacquiring controller priority and fresh state.
+The initial warm-switch optimization showed its last certified mobile image immediately while reacquiring controller priority and fresh state.
+The loading handoff described below now retains the currently displayed view until the selected pane has a fresh certified paint.
 Uncertified incoming frames cannot overwrite that retained image.
 Cold views and changed dimensions stay hidden until the new layout barrier completes.
 Eviction, removal, disposal, leaving the top-level Herdr tab and changing to a desktop layout release the relevant mobile controllers.
@@ -170,3 +171,20 @@ Run `npm run test:herdr-flash` for the default case, and use `TEST_REDRAW_DELAY=
 Use `TEST_SPACES=6 TEST_SWITCHES=6 TEST_RETURNS=1 TEST_REDRAW_DELAY=200` to verify cache eviction and controller release.
 Run `npm run test:herdr-resize`, `npm run test:herdr-scroll` and `npm run test:herdr` for keyboard geometry, multiple viewers, live scrolling, selection, links and the wider Herdr lifecycle.
 Set `TEST_BACKEND=node` on the lifecycle test to verify legacy-backend compatibility.
+
+## Herdr loading handoff
+
+Selecting a pane or top-level Herdr tab prepares the incoming view at its full on-screen dimensions behind the current view.
+The current view remains visible with a small loading indicator and cannot receive input during the transition.
+Initial opens and returns without an available previous view show a full loading panel.
+The swap occurs only after the incoming terminal has a complete matching mobile grid, passes its redraw barrier and paints across two animation-frame boundaries.
+Each selection has a fresh presentation identifier, and the terminal reports its current columns and rows separately from its rendered acknowledgement.
+The parent rejects acknowledgements for superseded selections or earlier dimensions, including a viewport change during loading.
+Rapid selections can cancel a pending switch without exposing its unfinished pane.
+If returning to the displayed pane requires different dimensions, a separate iframe prepares the new grid while the old iframe remains frozen until the handoff completes.
+Old iframes are retired after the swap, and leaving or disposing the view also cleans up a temporarily retained iframe.
+Legacy backends keep the previous iframe frozen during the handoff without requiring backend parking support.
+
+Run `npm run test:herdr-loading` and repeat with `TEST_BACKEND=node` to exercise cold loading panels, pane and top-level handoffs, stale acknowledgements, viewport changes, cancellation and live composited canvas updates after reveal.
+The native flash test samples visibility from the parent window, so it includes the old displayed pane and the incoming pane across iframe visibility transitions.
+The real-Herdr test also captures composited browser pixels independently of the terminal-buffer assertions.

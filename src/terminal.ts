@@ -25,6 +25,7 @@ const herdrTerminal = params.get('herdrTerminal');
 let herdrReady = false;
 let herdrLayoutPending = false, herdrLayoutMatched = false, herdrLayoutFrame = 0;
 let herdrBarrier = false, herdrBarrierReady = true, herdrParkable = false, herdrParked = false, herdrPreserve = false;
+let herdrPresentation = '';
 let offeredWire: string[] | undefined;
 let accessToken: string | undefined = backendAccess(baseURL.href);
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
@@ -150,7 +151,14 @@ function sizeTerminal() {
     // resize. Use its public measurements for both modes, with one resize owner.
     const dimensions = fit.proposeDimensions();
     const nextCols = wide ? projection?.nativeColumns || 80 : dimensions?.cols;
-    if (dimensions && nextCols && (term.cols !== nextCols || term.rows !== dimensions.rows)) preserveScrollback(term, () => term.resize(nextCols, dimensions.rows));
+    if (dimensions && nextCols && (term.cols !== nextCols || term.rows !== dimensions.rows)) {
+      if (mobileTerminal()) {
+        cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutPending = true; herdrLayoutMatched = false;
+        herdrBarrierReady = !herdrBarrier; herdrPreserve = false; terminalViewport.classList.add('awaiting-herdr-layout');
+      }
+      preserveScrollback(term, () => term.resize(nextCols, dimensions.rows));
+      notifyHerdrSizing();
+    }
     projection?.resize(mobileTerminal());
     // Herdr resolves the selected pane asynchronously after the WS upgrade.
     // Send geometry only after its state acknowledges that the handler is ready.
@@ -272,11 +280,10 @@ async function socketURL(signal: AbortSignal) {
     cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutMatched = false;
     herdrPreserve = false;
     herdrLayoutPending = geometry.mobile;
-    terminalViewport.classList.toggle('awaiting-herdr-layout', herdrLayoutPending);
+    terminalViewport.classList.toggle('awaiting-herdr-layout', herdrLayoutPending && !herdrParked);
     const response = await fetch(herdrEndpoint('api/herdr/ticket'), { method: 'POST', credentials: 'same-origin', headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(geometry), signal });
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error(result.error), { status: response.status });
-    if (!result.initialGeometry) { herdrLayoutPending = false; terminalViewport.classList.remove('awaiting-herdr-layout'); }
     herdrBarrier = result.redrawBarrier === true; herdrBarrierReady = !herdrBarrier; herdrParkable = result.parkViews === true;
     socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire;
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
@@ -302,21 +309,31 @@ function socketOpened() {
 function revealHerdrLayout() {
   if (herdrLayoutFrame || !herdrLayoutPending || !herdrLayoutMatched || !herdrBarrierReady) return;
   const socket = transport.socket;
+  const presentation = herdrPresentation;
+  const cols = term.cols, rows = term.rows;
   projection?.paintBaseline();
   const reveal = () => {
     herdrLayoutFrame = 0;
-    if (transport.socket !== socket || !herdrLayoutPending || !herdrLayoutMatched || !herdrBarrierReady || herdrParked) return;
+    if (transport.socket !== socket || presentation !== herdrPresentation || term.cols !== cols || term.rows !== rows || !herdrLayoutPending || !herdrLayoutMatched || !herdrBarrierReady || herdrParked) return;
     herdrLayoutPending = false; herdrPreserve = false; terminalViewport.classList.remove('awaiting-herdr-layout');
-    send({ type:'herdr-frame-request' }); notify('terminal-rendered');
+    send({ type:'herdr-frame-request' }); notifyHerdrRendered(presentation);
   };
-  herdrLayoutFrame = requestAnimationFrame(() => {
-    if (herdrBarrier) reveal();
-    else herdrLayoutFrame = requestAnimationFrame(reveal);
-  });
+  herdrLayoutFrame = requestAnimationFrame(() => { herdrLayoutFrame = requestAnimationFrame(reveal); });
+}
+function notifyHerdrRendered(presentation = herdrPresentation) {
+  if (!herdrLayoutPending && !herdrParked && presentation === herdrPresentation) notify('terminal-rendered', { presentation, cols:term.cols, rows:term.rows });
+}
+function notifyHerdrSizing() {
+  if (herdrTerminal) notify('terminal-sizing', { presentation:herdrPresentation, cols:term.cols, rows:term.rows });
+}
+function scheduleHerdrRendered() {
+  const presentation = herdrPresentation, socket = transport.socket;
+  requestAnimationFrame(() => { if (transport.socket === socket) notifyHerdrRendered(presentation); });
 }
 function socketMessage(event: MessageEvent) {
   const message: ServerMessage = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
   if (message.type === 'herdr-layout') {
+    if (herdrParked) return;
     if (message.cols !== term.cols || message.rows !== term.rows || !mobileTerminal()) return;
     cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0;
     herdrLayoutPending = true; herdrBarrierReady = message.ready; herdrLayoutMatched = false;
@@ -332,11 +349,11 @@ function socketMessage(event: MessageEvent) {
       if (!herdrLayoutMatched && !message.full) return;
       herdrLayoutMatched = true;
     }
-    if (projection?.frame(message) && !herdrLayoutPending) requestAnimationFrame(() => notify('terminal-rendered'));
+    if (projection?.frame(message) && !herdrLayoutPending) scheduleHerdrRendered();
     revealHerdrLayout();
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
   }
-  if (message.type === 'screen') { if (herdrLayoutPending || herdrParked) return; projection?.update(message.text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); requestAnimationFrame(() => notify('terminal-rendered')); return; }
+  if (message.type === 'screen') { if (herdrLayoutPending || herdrParked) return; projection?.update(message.text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return; }
   if (message.type === 'input-line') {
     const intact = message.prompt === state.prompt && message.revision === state.inputRevision && state.ready;
     inputLines.get(message.id)?.(intact && typeof message.text === 'string' && typeof message.cursor === 'number' ? { text: message.text, cursor: message.cursor } : undefined);
@@ -490,13 +507,18 @@ if (!embedded && import.meta.env.PROD && 'serviceWorker' in navigator) navigator
 if (embedded) {
   window.addEventListener('message', event => {
     if (event.source !== parent || event.origin !== location.origin) return;
+    if (event.data?.type === 'herdr-present' && herdrTerminal && typeof event.data.presentation === 'string') {
+      herdrPresentation = event.data.presentation; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0;
+      notifyHerdrSizing();
+      return;
+    }
     if (event.data?.type === 'authorize') { accessToken = event.data.accessToken; void transport.connect(undefined, true); }
     if (event.data?.type === 'recovery-failed') connection('Session ended');
-    if (event.data?.type === 'herdr-park' && herdrTerminal && herdrParkable) {
+    if (event.data?.type === 'herdr-park' && herdrTerminal) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;
       herdrParked = parked; dictation.visibility(!parked && tabVisible);
-      send({ type:'herdr-active', active:!parked });
+      if (herdrParkable) send({ type:'herdr-active', active:!parked });
       if (!parked) {
         const cols = term.cols, rows = term.rows; sizeTerminal();
         herdrPreserve = event.data.preserve === true && cols === term.cols && rows === term.rows;

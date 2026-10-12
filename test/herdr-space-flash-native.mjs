@@ -15,6 +15,7 @@ const env = { ...process.env, HOME:dir, XDG_CONFIG_HOME:dir+'/config', XDG_DATA_
 const delay = ms => new Promise(resolve => setTimeout(resolve,ms));
 const wait = async (check,label) => { for(let end=Date.now()+15000;Date.now()<end;) { if(await check()) return; await delay(20); } throw new Error('Timed out: '+label); };
 let herdr, desktop, backend, browser;
+const errors=[];
 try {
   const listener = net.createServer(); listener.listen(0,'127.0.0.1'); await once(listener,'listening'); const port=listener.address().port; await new Promise(resolve=>listener.close(resolve));
   const base='http://127.0.0.1:'+port;
@@ -46,17 +47,26 @@ try {
   await context.route('**/assets/terminal-*.js',async route=>{const response=await route.fetch(),source=await response.text();const body=source.replace(/new ([\w$]+)\(\{ghostty:/,'window.__terminal=new $1({ghostty:');assert.notEqual(body,source);await route.fulfill({response,body});});
   await context.addInitScript(()=>{
     if(window===parent&&!localStorage.getItem('termai.tabs')) {const id=crypto.randomUUID();localStorage.setItem('termai.hosts',JSON.stringify([{id:'herdr-native',name:'Herdr',kind:'herdr',backendId:'primary'}]));localStorage.setItem('termai.tabs',JSON.stringify([{id,session:'default',name:'Herdr',mode:'herdr',backendId:'primary',hostId:'herdr-native'}]));localStorage.setItem('termai.activeTab',JSON.stringify(id));}
-    if(window===parent) {window.__flashPaints=[];window.addEventListener('message',event=>{if(event.origin===location.origin&&event.data?.type==='test-layout-paint')window.__flashPaints.push(event.data);});return;}
+    if(window===parent) {
+      window.__flashPaints=[];const previous=new WeakMap();
+      const inspect=()=>{
+        for(const frame of document.querySelectorAll('.herdr-screen iframe')) {
+          if(!frame.checkVisibility({checkVisibilityCSS:true})) continue;
+          const child=frame.contentWindow,t=child.__terminal,viewport=child.document.querySelector('#terminal-viewport');
+          if(!t||!viewport||child.getComputedStyle(viewport).visibility==='hidden') continue;
+          const b=t.buffer.active,top=b.viewportY,title=b.getLine(top)?.translateToString(true),border=b.getLine(top+1)?.translateToString(true);
+          if(!title?.startsWith('FLASH_')) continue;
+          const key=title+'\0'+border+'\0'+t.cols+'\0'+t.rows;
+          if(previous.get(frame)!==key||child.__captureAllPaints) {
+            previous.set(frame,key);window.__flashPaints.push({type:'test-layout-paint',title,border,cols:t.cols,rows:t.rows,time:performance.timeOrigin+performance.now(),terminal:frame.dataset.terminal});
+          }
+        }
+        requestAnimationFrame(inspect);
+      };requestAnimationFrame(inspect);return;
+    }
     window.__frames=[];const Original=WebSocket;window.WebSocket=class extends Original {constructor(...args){super(...args);this.addEventListener('message',async event=>{const m=await window.__wireMessage(event.data,this);if(m.type==='herdr-layout') (window.__layoutSignals ||= []).push(m); if(m.type==='herdr-frame')window.__frames.push({width:m.width,height:m.height,full:m.full});});}};
-    let previous='';const inspect=()=>{
-      const t=window.__terminal,viewport=document.querySelector('#terminal-viewport');
-      if(t&&viewport&&getComputedStyle(viewport).visibility!=='hidden'&&frameElement?.classList.contains('herdr-terminal')&&getComputedStyle(frameElement).visibility!=='hidden'&&frameElement.checkVisibility({checkVisibilityCSS:true})) {
-        const b=t.buffer.active,top=b.viewportY,title=b.getLine(top)?.translateToString(true),border=b.getLine(top+1)?.translateToString(true);
-        if(title?.startsWith('FLASH_')) {const key=title+'\0'+border+'\0'+t.cols+'\0'+t.rows;if(key!==previous || window.__captureAllPaints){previous=key;parent.postMessage({type:'test-layout-paint',title,border,cols:t.cols,rows:t.rows,time:performance.timeOrigin+performance.now(),terminal:new URLSearchParams(location.search).get('herdrTerminal')},location.origin);}}
-      }requestAnimationFrame(inspect);
-    };requestAnimationFrame(inspect);
   });
-  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+  const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
   const cpu=Number(process.env.TEST_CPU||1); if(cpu>1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate',{rate:cpu});
   const pixelDirectory = root+'.test-artifacts/herdr-pixel-flash-'+Date.now(); await mkdir(pixelDirectory,{recursive:true});
   const compositor = await context.newCDPSession(page), images=[], writes=[];
@@ -124,6 +134,7 @@ try {
   const sorted=timings.map(t=>t.ms).sort((a,b)=>a-b);console.log('PASS: '+timings.length+' real Herdr mobile space switches have no visible desktop layout; first visible mobile paint median '+sorted[Math.floor(sorted.length/2)].toFixed(1)+' ms, p95 '+sorted[Math.floor((sorted.length-1)*.95)].toFixed(1)+' ms.');
   console.log('PASS: '+returns.length+' returns to the top-level Herdr tab release and reacquire mobile geometry without desktop pixels ('+pixels.length+' composited frames).');
 }catch(error) {
+  console.error('Browser errors:',errors);
   for(const page of browser?.contexts()[0]?.pages()||[]) { console.error('Paints:',await page.evaluate(()=>({paints:window.__flashPaints,selected:document.querySelector('.herdr-agent-tab[aria-selected=true]')?.dataset.terminal,frames:[...document.querySelectorAll('.herdr-screen iframe')].map(frame=>({terminal:frame.dataset.terminal,class:frame.className,visibility:frame.style.visibility}))}))); for(const frame of page.frames()) console.error('Frame:',frame.url(),await frame.evaluate(()=>{const t=window.__terminal,b=t?.buffer.active;return{pending:document.querySelector('#terminal-viewport')?.className,parentClass:frameElement?.className,parentVisibility:frameElement&&getComputedStyle(frameElement).visibility,visible:frameElement?.checkVisibility({checkVisibilityCSS:true}),cols:t?.cols,rows:t?.rows,top:b?.viewportY,lines:b&&Array.from({length:8},(_,i)=>b.getLine(b.viewportY+i)?.translateToString(true)),frames:window.__frames,signals:window.__layoutSignals,body:document.querySelector('#toast')?.textContent};}).catch(()=>({}))); }
   throw error;
 }finally {

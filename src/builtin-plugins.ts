@@ -18,6 +18,7 @@ export interface BuiltinServices extends ReadingServices {
   terminalURL(backend: BackendProfile, session: string): string;
   frame(tab: TerminalTab, frame?: HTMLIFrameElement): void;
   herdr(tab: TerminalTab, view?: HerdrView): void;
+  ready(tab: TerminalTab): void;
   attention(tab: TerminalTab, count: number): void;
   notification(connection: string, event: Parameters<ConstructorParameters<typeof HerdrView>[0]['notification']>[0]): void;
   notificationDevice(backendId: string): string | undefined;
@@ -63,10 +64,10 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         const view = new HerdrView({ url: backend.url, session, source: tab.herdrSource, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), key: 'termai.herdr.' + connection,
           notificationDevice: () => s.notificationDevice(tab.backendId),
           api: <T>(name: string, data?: unknown) => s.api<T>(backend, name + '?' + new URLSearchParams({ herdrSession: session, ...(tab.herdrSource ? { herdrSource: tab.herdrSource } : {}) }), data),
-          changed: count => s.attention(tab, count), notification: event => s.notification(connection, event), notice: s.notice });
+          changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice });
         view.element.id = 'herdr-' + tab.id; s.herdr(tab, view);
         void s.watch(tab).then(() => view.updatePresence()).catch(error => s.notice(error.message));
-        return { element: view.element, setVisible: visible => view.setVisible(visible), applySettings: () => view.applySettings(), copySelection: () => view.copySelection(),
+        return { element: view.element, setVisible: visible => view.setVisible(visible), setHeld: held => view.setHeld(held), applySettings: () => view.applySettings(), copySelection: () => view.copySelection(),
           dispose() { view.dispose(); s.herdr(tab); } };
       },
       async close(tab) { await s.unwatch(tab); if (tab.ownsSession) await s.closeSession(tab); return true; },

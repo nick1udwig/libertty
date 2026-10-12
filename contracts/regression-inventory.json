@@ -1606,6 +1606,25 @@
       ]
     },
     {
+      "source": "test/herdr-loading-browser.mjs",
+      "imports": [
+        "node:assert/strict",
+        "node:fs/promises",
+        "node:child_process",
+        "node:events",
+        "node:net",
+        "playwright-core",
+        "./herdr-fixture.ts",
+        "./wire-observer.mjs"
+      ],
+      "assertions": [],
+      "classification": "integration-harness",
+      "equivalent": "test/herdr-loading-browser.mjs",
+      "status": "retained",
+      "justification": "Retain the external browser, installation and benchmark assertions against the Rust runtime; TEST_BACKEND=node remains available for the reference oracle.",
+      "coverage": []
+    },
+    {
       "source": "test/herdr-notifications.test.ts",
       "imports": [
         "node:test",
