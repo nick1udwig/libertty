@@ -2,7 +2,8 @@ name: Rust contracts and regression checks
 
 on:
   push:
-    branches: [master, "feat/rust-backend*", feat/cleanup-post-rust]
+    # Master pushes already run this workflow through the Release verification gate.
+    branches: ["feat/rust-backend*", feat/cleanup-post-rust]
   pull_request:
   workflow_dispatch:
   workflow_call:
