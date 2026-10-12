@@ -82,3 +82,51 @@ fn complete_fact_batches_reject_invalid_paths_limits_routes_and_expensive_operat
         assert!(validate(&invalid).is_err(), "{invalid}");
     }
 }
+
+#[test]
+fn prepared_contexts_keep_wire_keys_and_invalidate_functions_history_and_environment() {
+    use std::sync::Arc;
+    let mut facts = Facts::default();
+    let env = BTreeMap::from([("HOME".into(), "/fixture".into())]);
+    let catalog = Catalog {
+        cwd: "/fixture".into(),
+        functions: Some(vec!["helper".into()].into()),
+        history_cwds: Some(Arc::new(BTreeMap::from([("ls".into(), "/old".into())]))),
+        ..Catalog::default()
+    };
+    let first = facts.context(1, catalog.clone(), &env, None, true);
+    assert_eq!(
+        first["catalogKey"],
+        termai_server::facts::digest(&json!(catalog))
+    );
+    for prompt in 1..4 {
+        let next = facts.context(
+            prompt,
+            catalog.clone(),
+            &env,
+            first["catalogKey"].as_str(),
+            true,
+        );
+        assert_eq!(next["key"], context_key(prompt, &catalog, &env));
+        assert!(next.get("catalog").is_none());
+    }
+    let mut changed = catalog.clone();
+    changed.functions.as_mut().unwrap().push("second".into());
+    Arc::make_mut(changed.history_cwds.as_mut().unwrap()).insert("ls".into(), "/new".into());
+    let next = facts.context(4, changed, &env, first["catalogKey"].as_str(), true);
+    assert_eq!(
+        next["patch"],
+        json!({"functions":["helper","second"],"historyCwds":{"ls":"/new"}})
+    );
+    assert_eq!(catalog.functions.as_ref().unwrap().as_slice(), ["helper"]);
+    assert_eq!(catalog.history_cwds.as_ref().unwrap()["ls"], "/old");
+    let mut changed_env = env.clone();
+    changed_env.insert("PWD".into(), "/different".into());
+    let next = facts.context(1, catalog.clone(), &changed_env, None, true);
+    assert_ne!(next["key"], first["key"]);
+    assert_eq!(next["discoveryKey"], first["discoveryKey"]);
+    changed_env.insert("HOME".into(), "/new-home".into());
+    let next = facts.context(1, catalog, &changed_env, None, true);
+    assert_ne!(next["discoveryKey"], first["discoveryKey"]);
+    assert_eq!(next["home"], "/new-home");
+}

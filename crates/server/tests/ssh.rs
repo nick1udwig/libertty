@@ -232,7 +232,7 @@ async fn remote_authentication_pins_facts_and_bounded_channels() {
     let catalog = termai_engine::types::Catalog {
         cwd: fixture.home(),
         commands: vec!["python3".into(), "git".into(), "ls".into()].into(),
-        functions: Some(vec![]),
+        functions: Some(vec![].into()),
         ..Default::default()
     };
     let mut native = NativeHost::new(

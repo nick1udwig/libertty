@@ -1,13 +1,20 @@
 use crate::{completion::valid_completion_words, host::NativeHost};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use termai_engine::types::Catalog;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
 pub struct Facts {
-    catalogs: VecDeque<(String, Value)>,
+    catalogs: VecDeque<PreparedCatalog>,
+    environment: Option<(BTreeMap<String, String>, String)>,
+    context: Option<(u64, String, String)>,
+}
+struct PreparedCatalog {
+    catalog: Catalog,
+    key: String,
+    wire: Value,
 }
 pub fn digest(value: &Value) -> String {
     Sha256::digest(serde_json::to_vec(value).unwrap())
@@ -31,36 +38,74 @@ impl Facts {
         known: Option<&str>,
         include_paths: bool,
     ) -> Value {
-        let key = context_key(prompt, &catalog, environment);
-        catalog.functions.get_or_insert_with(Vec::new);
+        if self
+            .environment
+            .as_ref()
+            .is_none_or(|(old, _)| old != environment)
+        {
+            let discovery = digest(&json!(
+                environment
+                    .iter()
+                    .filter(
+                        |(k, _)| !["_", "PWD", "OLDPWD", "SHLVL", "LINES", "COLUMNS"]
+                            .contains(&k.as_str())
+                            && !k.starts_with("TERMAI_")
+                    )
+                    .collect::<Vec<_>>()
+            ));
+            self.environment = Some((environment.clone(), discovery));
+            self.context = None;
+        }
+        if self
+            .context
+            .as_ref()
+            .is_none_or(|(old_prompt, cwd, _)| *old_prompt != prompt || *cwd != catalog.cwd)
+        {
+            self.context = Some((
+                prompt,
+                catalog.cwd.clone(),
+                context_key(prompt, &catalog, environment),
+            ));
+        }
+        let key = &self.context.as_ref().unwrap().2;
+        catalog.functions.get_or_insert_with(Default::default);
         catalog.history_cwds.get_or_insert_with(Default::default);
-        let catalog = json!(catalog);
-        let catalog_key = digest(&catalog);
-        let mut reply = json!({"key":key,"catalogKey":catalog_key,"prompt":prompt,"pathsIncluded":include_paths,"home":environment.get("HOME").cloned().unwrap_or_default(),"discoveryKey":digest(&json!(environment.iter().filter(|(k,_)| !["_","PWD","OLDPWD","SHLVL","LINES","COLUMNS"].contains(&k.as_str()) && !k.starts_with("TERMAI_")).collect::<Vec<_>>()))});
-        if known != Some(catalog_key.as_str()) {
-            if let Some((_, old)) = self
+        if !self.catalogs.iter().any(|old| old.catalog == catalog) {
+            let wire = json!(catalog);
+            self.catalogs.push_back(PreparedCatalog {
+                key: digest(&wire),
+                wire,
+                catalog: catalog.clone(),
+            });
+            if self.catalogs.len() > 8 {
+                self.catalogs.pop_front();
+            }
+        }
+        let prepared = self
+            .catalogs
+            .iter()
+            .find(|old| old.catalog == catalog)
+            .unwrap();
+        let mut reply = json!({"key":key,"catalogKey":prepared.key,"prompt":prompt,"pathsIncluded":include_paths,"home":environment.get("HOME").cloned().unwrap_or_default(),"discoveryKey":self.environment.as_ref().unwrap().1});
+        if known != Some(prepared.key.as_str()) {
+            if let Some(old) = self
                 .catalogs
                 .iter()
-                .find(|(key, _)| Some(key.as_str()) == known)
+                .find(|old| Some(old.key.as_str()) == known)
             {
                 reply["base"] = json!(known);
                 reply["patch"] = json!(
-                    catalog
+                    prepared
+                        .wire
                         .as_object()
                         .unwrap()
                         .iter()
-                        .filter(|(k, v)| old.get(*k) != Some(*v))
+                        .filter(|(k, v)| old.wire.get(*k) != Some(*v))
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect::<serde_json::Map<_, _>>()
                 );
             } else {
-                reply["catalog"] = catalog.clone();
-            }
-        }
-        if !self.catalogs.iter().any(|(key, _)| key == &catalog_key) {
-            self.catalogs.push_back((catalog_key, catalog));
-            if self.catalogs.len() > 8 {
-                self.catalogs.pop_front();
+                reply["catalog"] = prepared.wire.clone();
             }
         }
         reply

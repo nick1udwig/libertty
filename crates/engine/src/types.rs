@@ -92,7 +92,7 @@ pub struct Flag {
     pub optional_value: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Catalog {
     pub cwd: String,
@@ -104,13 +104,13 @@ pub struct Catalog {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    pub functions: Option<Vec<String>>,
+    pub functions: Option<SharedList<String>>,
     #[serde(
         default,
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    pub history_cwds: Option<BTreeMap<String, String>>,
+    pub history_cwds: Option<Arc<BTreeMap<String, String>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

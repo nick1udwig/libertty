@@ -7,16 +7,26 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use termai_engine::{path, repair::tokens, types::Flag};
+use termai_engine::{
+    path,
+    repair::tokens,
+    types::{Flag, SharedList},
+};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 pub const AST_SCRIPT: &str = include_str!("../assets/describe.py");
 type FlagEntry = (String, String, SharedTask<Option<Vec<Flag>>>);
+struct Paths {
+    cwd: String,
+    versions: Vec<String>,
+    values: SharedList<String>,
+}
 #[derive(Clone, Default)]
 pub struct CatalogHost {
     directories: Directories,
     pool: ProbePool,
     flags: Arc<Mutex<VecDeque<FlagEntry>>>,
+    paths: Arc<Mutex<VecDeque<Paths>>>,
 }
 impl CatalogHost {
     pub fn new(directories: Directories, pool: ProbePool) -> Self {
@@ -24,6 +34,7 @@ impl CatalogHost {
             directories,
             pool,
             flags: Arc::new(Mutex::new(VecDeque::new())),
+            paths: Arc::default(),
         }
     }
     pub async fn executable_names(
@@ -68,14 +79,14 @@ impl CatalogHost {
         &self,
         cwd: &str,
         cancel: &CancellationToken,
-    ) -> Result<Vec<String>, String> {
-        let entries = self.directories.entries(cwd, 10000, cancel).await?;
-        let mut paths: Vec<_> = entries
-            .iter()
-            .map(|e| format!("{}{}", e.name, if e.directory { "/" } else { "" }))
-            .collect();
-        for dir in &entries {
-            if paths.len() >= 4000 {
+    ) -> Result<SharedList<String>, String> {
+        let root = self.directories.snapshot(cwd, 10000, cancel).await?;
+        let entries = &root.entries;
+        let mut versions = vec![root.version];
+        let mut children = vec![];
+        let mut count = entries.len();
+        for dir in entries {
+            if count >= 4000 {
                 break;
             }
             if !dir.directory
@@ -85,20 +96,55 @@ impl CatalogHost {
             {
                 continue;
             }
-            let children = self
+            let snapshot = self
                 .directories
-                .entries(&path::join(&[cwd, &dir.name]), 4000 - paths.len(), cancel)
+                .snapshot(&path::join(&[cwd, &dir.name]), 4000 - count, cancel)
                 .await?;
+            count += snapshot.entries.len();
+            versions.push(snapshot.version);
+            children.push((&dir.name, snapshot.entries));
+        }
+        let cacheable = versions.iter().all(|version| !version.is_empty());
+        if cacheable
+            && let Some(old) = self
+                .paths
+                .lock()
+                .await
+                .iter()
+                .find(|old| old.cwd == cwd && old.versions == versions)
+        {
+            return Ok(old.values.clone());
+        }
+        let mut paths: Vec<_> = entries
+            .iter()
+            .map(|e| format!("{}{}", e.name, if e.directory { "/" } else { "" }))
+            .collect();
+        for (dir, children) in children {
             for child in &children {
                 if paths.len() >= 4000 {
                     break;
                 }
                 paths.push(format!(
                     "{}/{}{}",
-                    dir.name,
+                    dir,
                     child.name,
                     if child.directory { "/" } else { "" }
                 ));
+            }
+        }
+        let paths: SharedList<String> = paths.into();
+        if cacheable {
+            let mut cache = self.paths.lock().await;
+            cache.retain(|old| old.cwd != cwd);
+            cache.push_back(Paths {
+                cwd: cwd.into(),
+                versions,
+                values: paths.clone(),
+            });
+            while cache.len() > 8
+                || cache.iter().map(|entry| entry.values.len()).sum::<usize>() > 40000
+            {
+                cache.pop_front();
             }
         }
         Ok(paths)

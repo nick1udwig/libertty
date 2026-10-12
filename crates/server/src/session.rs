@@ -105,7 +105,7 @@ struct Inner {
     markers: Markers,
     paste: PasteMode,
     history: termai_engine::types::SharedList<String>,
-    history_cwds: BTreeMap<String, String>,
+    history_cwds: Arc<BTreeMap<String, String>>,
     history_cwd_order: VecDeque<String>,
     history_read_at: Option<Instant>,
     last_history: String,
@@ -245,7 +245,7 @@ impl Inner {
                         if !self.history_cwds.contains_key(&line) {
                             self.history_cwd_order.push_back(line.clone());
                         }
-                        self.history_cwds.insert(line, command_cwd);
+                        Arc::make_mut(&mut self.history_cwds).insert(line, command_cwd);
                         if self.history_cwds.len() > 1000 {
                             let numeric = self
                                 .history_cwds
@@ -260,7 +260,7 @@ impl Inner {
                             let key = numeric
                                 .map(|(_, key)| key)
                                 .unwrap_or_else(|| self.history_cwd_order.front().unwrap().clone());
-                            self.history_cwds.remove(&key);
+                            Arc::make_mut(&mut self.history_cwds).remove(&key);
                             self.history_cwd_order.retain(|old| *old != key);
                         }
                     }
@@ -449,7 +449,7 @@ impl Session {
                 markers: Markers::new(&nonce),
                 paste: PasteMode::default(),
                 history: history.into(),
-                history_cwds: BTreeMap::new(),
+                history_cwds: Arc::default(),
                 history_cwd_order: VecDeque::new(),
                 history_read_at: None,
                 last_history: String::new(),
@@ -1226,7 +1226,7 @@ impl Session {
     pub async fn snapshot(
         &self,
         include_paths: bool,
-    ) -> Result<(Catalog, BTreeMap<String, String>, u64), String> {
+    ) -> Result<(Catalog, Arc<BTreeMap<String, String>>, u64), String> {
         let state = self.state();
         let shell = if let Some(remote) = &self.remote {
             remote.context(state.prompt, &self.lifetime).await?
@@ -1253,14 +1253,14 @@ impl Session {
             None
         };
         let paths = if include_paths && let Some(remote) = &self.remote {
-            remote.paths(&state.cwd, &self.lifetime).await?
+            remote.paths(&state.cwd, &self.lifetime).await?.into()
         } else if include_paths {
             self.services
                 .catalog
                 .paths_in(&state.cwd, &self.lifetime)
                 .await?
         } else {
-            vec![]
+            Default::default()
         };
         let mut inner = self.inner.lock().unwrap();
         if inner.state.prompt != state.prompt || inner.state.cwd != state.cwd {
@@ -1286,12 +1286,12 @@ impl Session {
                 } else {
                     shell.commands.clone().into()
                 },
-                functions: Some(shell.functions.as_ref().clone()),
-                paths: paths.into(),
+                functions: Some(shell.functions.clone().into()),
+                paths,
                 history: inner.history.clone(),
                 history_cwds: Some(inner.history_cwds.clone()),
             },
-            shell.environment.as_ref().clone(),
+            shell.environment.clone(),
             state.prompt,
         ))
     }

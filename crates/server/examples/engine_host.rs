@@ -34,7 +34,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 benchmark_host = Some(NativeHost::new(
                     services.clone(),
                     serde_json::from_value(request.args[0].clone()).map_err(|e| e.to_string())?,
-                    serde_json::from_value(request.args[1].clone()).map_err(|e| e.to_string())?,
+                    serde_json::from_value::<std::collections::BTreeMap<String, String>>(
+                        request.args[1].clone(),
+                    )
+                    .map_err(|e| e.to_string())?,
                     help.clone(),
                 ));
                 return Ok(Value::Null);
@@ -61,7 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .clone(),
                 )
                 .map_err(|e| e.to_string())?;
-                let env = serde_json::from_value(
+                let env: std::collections::BTreeMap<String, String> = serde_json::from_value(
                     request.args[if [
                         "seedMetadata",
                         "hostFacts",

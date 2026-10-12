@@ -174,7 +174,7 @@ impl NativeEngine {
             Call::Suggest {
                 input: input.into(),
                 catalog: Arc::new(host.catalog.clone()),
-                environment: Arc::new(host.environment.clone()),
+                environment: host.environment.clone(),
             },
             host,
             cancel,

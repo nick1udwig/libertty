@@ -42,7 +42,7 @@ pub struct NativeHost {
     pub services: HostServices,
     pub help: HelpProvider,
     pub catalog: Catalog,
-    pub environment: BTreeMap<String, String>,
+    pub environment: Arc<BTreeMap<String, String>>,
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
 }
 impl NativeHost {
@@ -85,13 +85,13 @@ impl NativeHost {
     pub fn new(
         services: HostServices,
         catalog: Catalog,
-        environment: BTreeMap<String, String>,
+        environment: impl Into<Arc<BTreeMap<String, String>>>,
         help: HelpProvider,
     ) -> Self {
         Self {
             services,
             catalog,
-            environment,
+            environment: environment.into(),
             help,
             remote: None,
         }
