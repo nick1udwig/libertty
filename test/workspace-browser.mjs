@@ -63,7 +63,7 @@ try {
   await installWireObserver(context);
   await context.addInitScript(() => {
     const Original = window.WebSocket; window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'state') window.__shellState = m.state; if (m.type === 'hello') window.__engine = m.engine; if (m.type === 'output') window.__output = (window.__output || '') + m.data; }); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'state') window.__shellState = m.state; if (m.type === 'hello') window.__engine = m.engine; if (m.type === 'output') window.__output = (window.__output || '') + m.data; if (m.type === 'ssh-command') window.__sshCapture = m.id; if (m.type === 'ssh-released' && window.__sshCapture === m.id) window.__sshCapture = undefined; }); }
     };
   });
   await page.goto(origin);
@@ -448,6 +448,8 @@ try {
   // Cancelling a captured connection leaves the original shell usable.
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type(sshCommand); await page.keyboard.press('Enter'); await page.locator('#captured-ssh-dialog').waitFor({ state: 'visible' });
   await page.locator('#captured-ssh-cancel').click(); await page.locator('#captured-ssh-dialog').waitFor({ state: 'hidden' });
+  // The HTTP response can close the modal before the socket releases input.
+  await frame.waitForFunction(() => window.__sshCapture === undefined);
   await command(frame, 'printf usable > capture-cancelled.txt'); assert.equal(await readFile(fixture + '/capture-cancelled.txt', 'utf8'), 'usable');
   await command(frame, 'ssh() { printf native > capture-function.txt; }');
   await command(frame, 'ssh capture-host'); assert.equal(await readFile(fixture + '/capture-function.txt', 'utf8'), 'native');
