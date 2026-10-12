@@ -1,11 +1,11 @@
 use crate::probes::ABORTED;
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     ffi::CString,
     os::unix::fs::MetadataExt,
     path::Path,
     sync::{
-        Arc,
+        Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -22,6 +22,14 @@ struct Listing {
     key: (String, usize),
     stamp: String,
     snapshot: DirectorySnapshot,
+    names: Option<Arc<NameIndex>>,
+}
+struct NameIndex {
+    exact: HashMap<String, usize>,
+    folded: OnceLock<HashMap<String, usize>>,
+}
+fn fold(name: &str) -> String {
+    name.nfc().collect::<String>().to_lowercase()
 }
 #[derive(Clone, Default)]
 pub struct Directories {
@@ -88,37 +96,43 @@ impl Directories {
         if stamp.is_empty() {
             return Ok(empty());
         }
-        let Ok(mut handle) = tokio::fs::read_dir(dir).await else {
+        // Read and classify a whole listing in one blocking-pool submission.
+        let target = dir.to_owned();
+        let stop = cancel.clone();
+        let read = tokio::task::spawn_blocking(move || {
+            check(&stop)?;
+            let Ok(handle) = std::fs::read_dir(target) else {
+                return Ok(None);
+            };
+            let mut entries = Vec::new();
+            let mut complete = true;
+            for entry in handle {
+                check(&stop)?;
+                let Ok(entry) = entry else {
+                    return Ok(None);
+                };
+                let Ok(kind) = entry.file_type() else {
+                    return Ok(None);
+                };
+                entries.push(DirectoryEntry {
+                    name: entry.file_name().to_string_lossy().into_owned(),
+                    directory: kind.is_dir(),
+                    symlink: kind.is_symlink(),
+                });
+                if entries.len() >= limit {
+                    complete = false;
+                    break;
+                }
+            }
+            entries.sort_by(|a, b| a.name.encode_utf16().cmp(b.name.encode_utf16()));
+            check(&stop)?;
+            Ok::<_, String>(Some((entries, complete)))
+        });
+        let listing = tokio::select! { biased; _ = cancel.cancelled() => return Err(ABORTED.into()), result = read => result.map_err(|e| e.to_string())?? };
+        let Some((entries, complete)) = listing else {
             check(cancel)?;
             return Ok(empty());
         };
-        let mut entries = Vec::new();
-        let mut complete = true;
-        loop {
-            let entry = tokio::select! { biased; _ = cancel.cancelled() => return Err(ABORTED.into()), entry = handle.next_entry() => entry };
-            let entry = match entry {
-                Ok(Some(entry)) => entry,
-                Ok(None) => break,
-                Err(_) => {
-                    check(cancel)?;
-                    return Ok(empty());
-                }
-            };
-            let Ok(kind) = entry.file_type().await else {
-                check(cancel)?;
-                return Ok(empty());
-            };
-            entries.push(DirectoryEntry {
-                name: entry.file_name().to_string_lossy().into_owned(),
-                directory: kind.is_dir(),
-                symlink: kind.is_symlink(),
-            });
-            if entries.len() >= limit {
-                complete = false;
-                break;
-            }
-        }
-        entries.sort_by(|a, b| a.name.encode_utf16().cmp(b.name.encode_utf16()));
         let stable = stamp == directory_version(dir).await;
         check(cancel)?;
         let snapshot = DirectorySnapshot {
@@ -140,6 +154,7 @@ impl Directories {
                 key,
                 stamp,
                 snapshot: snapshot.clone(),
+                names: None,
             });
             while cache.len() > 64
                 || cache
@@ -173,18 +188,57 @@ impl Directories {
         }
         let mut actual = "/".to_owned();
         for part in parts {
-            let entries = self.entries(&actual, 10000, cancel).await?;
-            let fold = |name: &str| name.nfc().collect::<String>().to_lowercase();
-            let Some(entry) = entries
-                .iter()
-                .find(|e| e.name == part)
-                .or_else(|| entries.iter().find(|e| fold(&e.name) == fold(part)))
-            else {
+            let snapshot = self.snapshot(&actual, 10000, cancel).await?;
+            let names = self.names(&snapshot).await;
+            let index = names.exact.get(part).copied().or_else(|| {
+                let folded = names.folded.get_or_init(|| {
+                    let mut index = HashMap::new();
+                    for (at, entry) in snapshot.entries.iter().enumerate() {
+                        index.entry(fold(&entry.name)).or_insert(at);
+                    }
+                    index
+                });
+                folded.get(&fold(part)).copied()
+            });
+            let Some(entry) = index.and_then(|at| snapshot.entries.get(at)) else {
                 return Ok(None);
             };
             actual = path::join(&[&actual, &entry.name]);
         }
         Ok(Some(actual))
+    }
+    async fn names(&self, snapshot: &DirectorySnapshot) -> Arc<NameIndex> {
+        if !snapshot.version.is_empty()
+            && let Some(names) = self
+                .cache
+                .lock()
+                .await
+                .iter()
+                .find(|old| old.snapshot.version == snapshot.version)
+                .and_then(|old| old.names.clone())
+        {
+            return names;
+        }
+        let names = Arc::new(NameIndex {
+            exact: snapshot
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(at, entry)| (entry.name.clone(), at))
+                .collect(),
+            folded: OnceLock::new(),
+        });
+        if !snapshot.version.is_empty()
+            && let Some(old) = self
+                .cache
+                .lock()
+                .await
+                .iter_mut()
+                .find(|old| old.snapshot.version == snapshot.version)
+        {
+            old.names = Some(names.clone());
+        }
+        names
     }
     pub async fn stat(
         &self,

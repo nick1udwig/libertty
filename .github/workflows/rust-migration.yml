@@ -117,6 +117,7 @@ jobs:
           BENCH_AFTER: .
           BENCH_RUST: '1'
           BENCH_REPEATS: '3'
+          BENCH_CPU_REPEATS: '31'
         run: npm run bench:architecture
       - name: Verify native packages and installation
         env:

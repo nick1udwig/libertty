@@ -7,6 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { rustArchitectureAdapter } from './rust-architecture-adapter.mjs';
+import { latencyStatistics, latencyRegressed, type LatencyStatistics } from './architecture-stats.ts';
 import type { Catalog } from '../src/protocol.ts';
 
 const shared = process.env.BENCH_SUITE === 'shared';
@@ -23,6 +24,8 @@ const variants = shared ? [
 ];
 const rtts = (process.env.BENCH_RTT || '0,50,150').split(',').map(Number);
 const repeats = Number(process.env.BENCH_REPEATS || 3);
+// Sub-millisecond CPU medians need more samples than the injected-RTT cases.
+const cpuRepeats = Number(process.env.BENCH_CPU_REPEATS || 31);
 const temp = await mkdtemp(path.join(os.tmpdir(), 'termai-architecture-'));
 const cwd = path.join(temp, 'fixture');
 const delay = (ms: number) => ms ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
@@ -35,6 +38,7 @@ const cases = [
   ['large directory', 'cd big/wor kspace'], ['referenced file', 'cat ~/docs/my notes dot txt'],
 ] as const;
 const rows: { variant: string; case: string; rtt: number; coldMs: number; warmMs: number; coldRequests: number; warmRequests: number; [key: string]: unknown }[] = [];
+const measurements = new WeakMap<object, { cold: number; warm: LatencyStatistics }>();
 let comparisons = 0;
 const rustPeers: (Awaited<ReturnType<typeof rustArchitectureAdapter>> | undefined)[] = [];
 try {
@@ -83,6 +87,7 @@ esac
     Object.assign(variant, { adapter });
   }
   for (const rtt of rtts) for (const [name, text] of cases) {
+    const warmRepeats = process.env.BENCH_RUST === '1' && rtt === 0 ? Math.max(repeats, cpuRepeats) : repeats;
     let expected: unknown;
     for (const variant of loaded) {
       const m = variant.modules;
@@ -105,8 +110,9 @@ esac
         await delay(rtt / 2); return JSON.parse(wire);
       };
       const times: number[] = [], counts: number[] = [], sizes: number[] = [], hostTimes: number[] = [], idleBytes: number[] = [], idleTimes: number[] = [];
+      const nativeEngineTimes: number[] = [];
       try {
-        for (let i = 0; i <= repeats; i++) {
+        for (let i = 0; i <= warmRepeats; i++) {
           // Model an already delivered periodic idle push for warm optimized-client trials.
           // Both its host time and wire bytes are recorded outside the foreground interval.
           if (i && variant.client && variant.optimized) {
@@ -127,7 +133,7 @@ esac
             requests = 1; await delay(rtt / 2);
             const start = performance.now();
             if (rust) {
-              const reply = await rust.native(text, signal); actual = reply.candidates;
+              const reply = await rust.native(text, signal); actual = reply.candidates; nativeEngineTimes.push(reply.elapsedMs);
             } else actual = await variant.engine.suggest(text, catalog, env, discovery, undefined, signal);
             hostMs = performance.now() - start;
             bytes = Buffer.byteLength(JSON.stringify({ text })) + Buffer.byteLength(JSON.stringify({ candidates: actual }));
@@ -151,6 +157,9 @@ esac
           assert.deepEqual(actual, expected, `${variant.name}: ${name}, RTT=${rtt}, iteration=${i}`); comparisons++;
         }
         const row = { variant: variant.name, case: name, rtt, coldMs: rounded(times[0]), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: counts[0], warmRequests: median(counts.slice(1)), coldBytes: sizes[0], warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), engine: rust ? variant.client ? 'rust-wasm' : 'rust-native' : 'typescript', initializationMs: rust?.initializationMs || 0, idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
+        const warm = latencyStatistics(times.slice(1));
+        measurements.set(row, { cold: times[0], warm });
+        Object.assign(row, { warmRepeats, warmP95Ms: rounded(warm.p95), ...(warm.lower95 !== undefined ? { warmMedian95Ms: [rounded(warm.lower95), rounded(warm.upper95!)] } : {}), ...(nativeEngineTimes.length ? { nativeEngineWarmMs: rounded(median(nativeEngineTimes.slice(1))), nativeEngineWarmP95Ms: rounded(latencyStatistics(nativeEngineTimes.slice(1)).p95) } : {}) });
         rows.push(row); console.log(JSON.stringify(row));
       } finally { discovery.dispose(); help?.dispose(); }
     }
@@ -160,10 +169,12 @@ esac
     assert.ok(after.coldRequests <= before.coldRequests, `${mode}: ${after.case} gained cold requests`);
     assert.ok(after.warmRequests <= before.warmRequests, `${mode}: ${after.case} gained warm requests`);
     if (process.env.BENCH_RUST === '1') {
-      for (const field of ['coldMs', 'warmMs'] as const) assert.ok(after[field] <= before[field] + Math.max(10, before[field] * 0.2), `${mode}: ${after.case} RTT=${after.rtt} ${field} regressed (${before[field]} -> ${after[field]})`);
+      const a = measurements.get(after)!, b = measurements.get(before)!;
+      assert.ok(a.cold <= b.cold + Math.max(10, b.cold * 0.2), `${mode}: ${after.case} RTT=${after.rtt} coldMs regressed (${before.coldMs} -> ${after.coldMs})`);
+      assert.ok(!latencyRegressed(a.warm, b.warm, 0.15), `${mode}: ${after.case} RTT=${after.rtt} confirmed warm median regression (${before.warmMs} -> ${after.warmMs})`);
     }
   }
   await mkdir(new URL('../.test-artifacts/', import.meta.url), { recursive: true });
   const output = process.env.BENCH_OUTPUT || new URL('../.test-artifacts/architecture-benchmark.json', import.meta.url);
-  await writeFile(output, JSON.stringify({ revisions: loaded.map(({ name, revision }) => ({ name, revision })), repeats, comparisons, runtime: process.version, platform: `${process.platform}/${process.arch}`, rows }, null, 2));
+  await writeFile(output, JSON.stringify({ revisions: loaded.map(({ name, revision }) => ({ name, revision })), repeats, cpuRepeats, comparisons, runtime: process.version, platform: `${process.platform}/${process.arch}`, rows }, null, 2));
 } finally { await Promise.all(rustPeers.map(peer => peer?.dispose())); await rm(temp, { recursive: true, force: true }); }

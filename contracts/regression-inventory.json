@@ -424,7 +424,7 @@
     },
     {
       "source": "src/engine/wasm.ts",
-      "lines": 194,
+      "lines": 217,
       "destination": "src/engine/wasm.ts",
       "status": "frontend-adapter",
       "coverage": "The production worker owns Wasm memory, host callbacks, cancellation, reset and request lifetimes; actual mounted browser checks pass."
@@ -441,6 +441,7 @@
         "node:url",
         "node:assert/strict",
         "./rust-architecture-adapter.mjs",
+        "./architecture-stats.ts",
         "../src/protocol.ts"
       ],
       "assertions": [],
@@ -449,6 +450,50 @@
       "status": "retained",
       "justification": "Retain the external browser, installation and benchmark assertions against the Rust runtime; TEST_BACKEND=node remains available for the reference oracle.",
       "coverage": []
+    },
+    {
+      "source": "test/architecture-stats.test.ts",
+      "imports": [
+        "node:test",
+        "node:assert/strict",
+        "./architecture-stats.ts"
+      ],
+      "assertions": [
+        "latency statistics preserve medians and conservative median confidence bounds",
+        "latency gates reject confirmed regressions and retain allowances",
+        "latency gates distinguish a borderline median from a confirmed regression",
+        "latency statistics reject invalid or missing measurements"
+      ],
+      "classification": "validation-harness",
+      "equivalent": "test/architecture-stats.test.ts",
+      "status": "retained",
+      "justification": "Retain the independent contract, packaging and native/Wasm rollback validation harness.",
+      "coverage": [
+        {
+          "assertion": "latency statistics preserve medians and conservative median confidence bounds",
+          "status": "retained",
+          "equivalent": "test/architecture-stats.test.ts",
+          "justification": "Retain the independent contract, packaging and native/Wasm rollback validation harness."
+        },
+        {
+          "assertion": "latency gates reject confirmed regressions and retain allowances",
+          "status": "retained",
+          "equivalent": "test/architecture-stats.test.ts",
+          "justification": "Retain the independent contract, packaging and native/Wasm rollback validation harness."
+        },
+        {
+          "assertion": "latency gates distinguish a borderline median from a confirmed regression",
+          "status": "retained",
+          "equivalent": "test/architecture-stats.test.ts",
+          "justification": "Retain the independent contract, packaging and native/Wasm rollback validation harness."
+        },
+        {
+          "assertion": "latency statistics reject invalid or missing measurements",
+          "status": "retained",
+          "equivalent": "test/architecture-stats.test.ts",
+          "justification": "Retain the independent contract, packaging and native/Wasm rollback validation harness."
+        }
+      ]
     },
     {
       "source": "test/assets.test.ts",

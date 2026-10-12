@@ -19,7 +19,7 @@ The Wasm boundary limits individual inputs to 64 MiB, outstanding buffers to 64,
 `termai_suggest_prepared` accepts `PreparedEngineRequest`, and warm repairs reuse the catalog until its version key or environment changes.
 Replacing a context rejects its old handle for new calls while pending requests retain their original snapshots, and reset releases both contexts and requests.
 Native directory callbacks carry typed immutable arrays directly, and directory snapshots share their storage until a caller edits a copy.
-The Wasm bridge imports adapter-owned immutable directory arrays once and pins opaque references immediately before each reply batch.
+The Wasm bridge imports adapter-owned immutable directory arrays once and pins opaque references in the same exchange that resumes each reply batch.
 The parsed directory cache retains at most 32 arrays and 30,000 entries, with request pins preserving snapshots through concurrent cache eviction.
 Changed arrays receive new monotonically increasing handles, reset releases the cache, and arbitrary mutable callback values continue through the JSON interface.
 Directory versions and the existing verification and retry checks remain active on every repair.
@@ -186,11 +186,15 @@ Reading, development pairing/HMR, plugins, files, transfers, gestures, touch, wo
 The native Herdr harnesses use the checksum-pinned supported Herdr executable, including mobile sizing, native scroll and shared spaces.
 Linux ARM64 and macOS Apple Silicon run the same checks on their own runners, and the release workflow waits for all three platform gates before building publishable archives.
 
-The architecture baseline uses `BENCH_SUITE=shared`, both before references set to `.`, the after reference set to `.`, three warm repetitions, and RTTs of 0, 50, and 150 milliseconds.
-The benchmark records cold and warm latency, foreground request counts, bytes, host time, and separate idle push costs for every case.
+The architecture baseline uses `BENCH_SUITE=shared`, both before references set to `.`, the after reference set to `.`, and RTTs of 0, 50, and 150 milliseconds.
+Rust comparisons use at least 31 warm CPU repetitions through `BENCH_CPU_REPEATS` and three warm network repetitions through `BENCH_REPEATS`.
+The benchmark records cold and warm latency, warm p95 latency, foreground request counts, bytes, host time, and separate idle push costs for every case.
+Native measurements additionally report engine latency separately from peer-process IPC.
 Native and Wasm candidate results must match the reference exactly, and cold and warm foreground request counts must not increase in either mode.
-Median warm and cold latency must stay within the larger of 20 percent or 10 milliseconds of the corresponding reference measurement on the same runner.
-Use at least three warm samples and rerun a noisy failed latency measurement before declaring a regression, while candidate or request-count failures always fail immediately.
+Median warm latency must stay within the larger of 20 percent or 0.15 milliseconds of the corresponding reference measurement on the same runner.
+For sufficiently sampled CPU cases, a warm regression fails only when the 95 percent median intervals confirm it exceeds that allowance, and raw medians and intervals remain in the report.
+Cold latency retains the larger of 20 percent or 10 milliseconds as its allowance for subprocess startup variation.
+Use at least 31 warm CPU samples and rerun a noisy failed latency measurement before declaring a regression, while candidate or request-count failures always fail immediately.
 Cold browser initialization and Wasm download time must be measured separately and included in the browser performance report.
 
 ## Recorded verification and release gates
@@ -214,8 +218,33 @@ History repair improved from 6.16 to 0.62 ms natively and from 7.42 to 1.60 ms i
 The directory optimization repeats the same 62-sample comparison and passes another 2,304 exact candidate-array comparisons.
 Warm large-directory repair falls from 1.37 to 0.28 ms natively and from 2.20 to 0.61 ms in Wasm, improvements of 79.6 and 72.3 percent respectively.
 The contemporaneous TypeScript medians are 0.47 ms natively and 0.535 ms in the client, so native Rust is 40.4 percent faster on this case while Wasm remains 14.0 percent slower.
-Native Rust measures faster medians in eight of nine cases in the latest comparison, and Wasm measures faster medians in five of nine cases.
+Before the additional optimization round, native Rust measured faster medians in eight of nine cases, and Wasm measured faster medians in five of nine cases.
 Exact-directory native medians are 0.185 ms for TypeScript and 0.22 ms for Rust, while the Wasm schema case is close at 1.76 ms for TypeScript and 1.845 ms for Rust.
 The native benchmark includes its peer-process IPC, and Wasm CPU measurements run in Node rather than on a phone.
 Detailed measurements are recorded in `.test-artifacts/speed-directory-optimization.json`, with both raw runs and the previous `.test-artifacts/speed-optimization.json` baseline retained alongside it.
 The pure engine profiling example is available through `cargo run --locked --release -p termai-engine --example profile`.
+
+## Additional optimization round
+
+Native completions reuse at most two idle Bash workers and run each request in a fresh subshell with freshly sourced definitions.
+Worker keys include the Bash executable, working directory and complete environment, and cancellation or invalid output discards the worker.
+Session catalogs share function arrays, history-directory maps and environments, while prepared context replies reuse unchanged catalog JSON and discovery digests.
+Flattened path strings are reused only after directory snapshots have been revalidated, including nested directories.
+Native engine futures and host callbacks run together on a local executor using the application's shared I/O and blocking pools, with a standalone runtime fallback.
+Common native host responses use typed values and request memoization uses typed keys instead of serialized JSON strings.
+Generated static regex storage removes cache locks and pattern-string allocation for literal expressions, and discovery reuses unchanged context keys.
+Candidate validation checks command membership without cloning the command catalog and retains explicit-input rules for private shell helpers.
+The Wasm bridge combines directory imports with resume, reuses UTF-8 encoding buffers and streams initialization when the asset has the Wasm content type.
+Filesystem catalog and listing scans batch their blocking operations, and validated directory snapshots retain exact and lazily folded name indexes for path spelling.
+
+The additional optimization comparison pools 62 warm samples per case and execution mode across forward and reverse run orders, with 2,304 exact candidate-array comparisons.
+Native Rust has faster warm medians and p95 latency in all nine cases, while Wasm has faster warm medians in seven of nine cases.
+Native exact-directory repair measures 0.10 ms against TypeScript's 0.20 ms, and native large-directory repair measures 0.14 ms against TypeScript's 0.46 ms.
+Native referenced-file repair measures 2.295 ms against TypeScript's 5.30 ms.
+Wasm history repair measures 0.885 ms against TypeScript's 2.18 ms, and Wasm schema repair measures 1.345 ms against TypeScript's 2.195 ms.
+The remaining Wasm median gaps are directory repair at 1.10 versus 1.00 ms and large-directory repair at 0.575 versus 0.535 ms.
+These timings retain native peer-process IPC and measure Wasm in Node, so they do not establish equivalent mobile, startup or memory performance.
+Detailed measurements are retained in `.test-artifacts/speed-six-optimizations.json` and its forward and reverse run files.
+Local validation passes 102 Rust tests, 234 frontend and reference tests with one existing skip, and Chromium parity for 16,560 pure fixtures, 469 asynchronous fixtures and 48 prewarm steps.
+Both mounted browser engine modes pass with the Rust backend, and native and Wasm Clippy checks pass with warnings denied.
+The full architecture gate passes 1,440 exact candidate-array comparisons across 108 rows at 0, 50 and 150 ms RTT, with 31 warm CPU samples and three warm network samples per case and variant.

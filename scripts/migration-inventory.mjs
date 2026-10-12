@@ -96,7 +96,7 @@ for (const file of (await readdir(path.join(root, 'test'))).filter(name => /(?:\
     continue;
   }
   const portable = imports.some(name => name.includes('/engine/') || name.includes('/server/') || name.includes('/local-engine') || name.includes('/local-discovery'));
-  const validation = /^(?:migration-contracts\.test|rust-state-compat|rust-engine-browser|rust-herdr|rust-architecture-adapter|dependencies\.test)\.mjs$/.test(file);
+  const validation = /^(?:migration-contracts\.test|rust-state-compat|rust-engine-browser|rust-herdr|rust-architecture-adapter|dependencies\.test)\.mjs$/.test(file) || file === 'architecture-stats.test.ts';
   const harness = /browser\.mjs$|native\.mjs$|benchmark\.(?:ts|mjs)$|install\.test\.mjs$|setup-integrations\.test\.mjs$/.test(file) || validation;
   if (portable && !harness) throw new Error('Unmapped backend/shared harness: ' + file);
   const justification = validation ? 'Retain the independent contract, packaging and native/Wasm rollback validation harness.' :

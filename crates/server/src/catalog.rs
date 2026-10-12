@@ -42,38 +42,49 @@ impl CatalogHost {
         env: &BTreeMap<String, String>,
         cancel: &CancellationToken,
     ) -> Result<Vec<String>, String> {
-        let mut names: BTreeSet<_> = [
-            "cd", "pwd", "echo", "printf", "export", "alias", "history", "source", "jobs", "fg",
-            "bg", "type", "exit",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-        for dir in env
-            .get("PATH")
-            .map(String::as_str)
-            .unwrap_or("")
-            .split(':')
-            .filter(|dir| !dir.is_empty())
-        {
-            let Ok(mut handle) = tokio::fs::read_dir(dir).await else {
-                continue;
-            };
-            while let Ok(Some(entry)) = handle.next_entry().await {
-                if cancel.is_cancelled() {
+        let environment = env.clone();
+        let stop = cancel.clone();
+        let scan = tokio::task::spawn_blocking(move || {
+            let mut names: BTreeSet<_> = [
+                "cd", "pwd", "echo", "printf", "export", "alias", "history", "source", "jobs",
+                "fg", "bg", "type", "exit",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+            for dir in environment
+                .get("PATH")
+                .map(String::as_str)
+                .unwrap_or("")
+                .split(':')
+                .filter(|dir| !dir.is_empty())
+            {
+                if stop.is_cancelled() {
                     return Err(ABORTED.into());
                 }
-                let file = entry.path();
-                if executable(&file.to_string_lossy())
-                    && tokio::fs::metadata(&file).await.is_ok_and(|m| m.is_file())
-                {
-                    names.insert(entry.file_name().to_string_lossy().into_owned());
+                let Ok(handle) = std::fs::read_dir(dir) else {
+                    continue;
+                };
+                for entry in handle {
+                    if stop.is_cancelled() {
+                        return Err(ABORTED.into());
+                    }
+                    let Ok(entry) = entry else {
+                        break;
+                    };
+                    let file = entry.path();
+                    if executable(&file.to_string_lossy())
+                        && std::fs::metadata(&file).is_ok_and(|m| m.is_file())
+                    {
+                        names.insert(entry.file_name().to_string_lossy().into_owned());
+                    }
                 }
             }
-        }
-        let mut names: Vec<_> = names.into_iter().collect();
-        names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
-        Ok(names)
+            let mut names: Vec<_> = names.into_iter().collect();
+            names.sort_by(|a, b| a.encode_utf16().cmp(b.encode_utf16()));
+            Ok(names)
+        });
+        tokio::select! { biased; _ = cancel.cancelled() => Err(ABORTED.into()), result = scan => result.map_err(|e| e.to_string())? }
     }
     pub async fn paths_in(
         &self,
