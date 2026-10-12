@@ -303,6 +303,13 @@
       ]
     },
     {
+      "source": "crates/server/src/directories.rs",
+      "owner": "rust",
+      "assertions": [
+        "file_name_attributes_reject_truncated_offsets_and_invalid_strings"
+      ]
+    },
+    {
       "source": "crates/server/src/herdr_redraw.rs",
       "owner": "rust",
       "assertions": [
@@ -401,6 +408,7 @@
       "assertions": [
         "batched_stats_preserve_order_symlink_targets_missing_paths_and_cancellation",
         "spelling_indexes_preserve_exact_and_unicode_matches_and_refresh_after_rename",
+        "corrected_spelling_preserves_symlink_parents_and_nested_case",
         "batched_path_scans_preserve_executable_symlinks_deduplication_and_cancellation"
       ]
     },
