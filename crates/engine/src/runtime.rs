@@ -67,6 +67,7 @@ struct RequestHost {
     completion: Cell<bool>,
     queue: RefCell<VecDeque<(Value, Slot)>>,
     cache: RefCell<HashMap<FactKey, Slot>>,
+    completions: RefCell<HashMap<Vec<String>, Slot>>,
 }
 impl Host for RequestHost {
     fn supports_completion(&self) -> bool {
@@ -79,21 +80,55 @@ impl Host for RequestHost {
         let key = OperationKey::deserialize(&operation)
             .map(FactKey::Typed)
             .unwrap_or_else(|_| FactKey::Json(operation.to_string()));
-        let slot = match self.cache.borrow_mut().entry(key) {
-            Entry::Occupied(entry) => entry.get().clone(),
-            Entry::Vacant(entry) => {
-                let slot = Rc::new(RefCell::new(None));
-                entry.insert(slot.clone());
-                self.queue.borrow_mut().push_back((operation, slot.clone()));
-                slot
+        // A successful completion is independent of the subscriber's remaining budget.
+        // Failed and pending calls retain their original timeout identity.
+        let completion = match &key {
+            FactKey::Typed(OperationKey::Completion { words, .. }) => Some(words.clone()),
+            _ => None,
+        };
+        let completed = completion
+            .as_ref()
+            .and_then(|words| self.completions.borrow().get(words).cloned())
+            .filter(|slot| matches!(slot.borrow().as_ref(), Some(Ok(_))));
+        let slot = if let Some(slot) = completed {
+            slot
+        } else {
+            match self.cache.borrow_mut().entry(key) {
+                Entry::Occupied(entry) => entry.get().clone(),
+                Entry::Vacant(entry) => {
+                    let slot = Rc::new(RefCell::new(None));
+                    entry.insert(slot.clone());
+                    self.queue.borrow_mut().push_back((operation, slot.clone()));
+                    slot
+                }
             }
         };
+        if let Some(words) = completion {
+            self.completions.borrow_mut().insert(words, slot.clone());
+        }
         Box::pin(futures::future::poll_fn(move |_| {
             match slot.borrow().as_ref() {
                 Some(result) => Poll::Ready(result.clone()),
                 None => Poll::Pending,
             }
         }))
+    }
+}
+#[cfg(test)]
+mod completion_cache_tests {
+    use super::*;
+    #[test]
+    fn successful_completion_reuses_results_across_budgets_but_errors_retry() {
+        let host = RequestHost::default();
+        let op = |timeout| serde_json::json!({"kind":"completion","words":["tool","x"],"timeoutMs":timeout});
+        drop(host.request(op(1000.0)));
+        let (_, slot) = host.queue.borrow_mut().pop_front().unwrap();
+        *slot.borrow_mut() = Some(Ok(FactValue::Completion(Arc::new(vec!["value".into()]))));
+        drop(host.request(op(900.0)));
+        assert!(host.queue.borrow().is_empty());
+        *slot.borrow_mut() = Some(Err("Timed out".into()));
+        drop(host.request(op(800.0)));
+        assert_eq!(host.queue.borrow().len(), 1);
     }
 }
 struct Task {

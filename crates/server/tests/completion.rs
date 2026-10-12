@@ -6,6 +6,49 @@ use termai_server::{
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
+async fn prepared_standard_framework_matches_reference_and_detects_custom_startup() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    std::fs::write(root.path().join("hello.py"), "").unwrap();
+    let env = BTreeMap::from([
+        ("HOME".into(), cwd.into()),
+        ("PATH".into(), "/usr/bin:/bin".into()),
+    ]);
+    let pool = ProbePool::default();
+    let provider = CompletionProvider::default();
+    let cancel = CancellationToken::new();
+    for words in [
+        vec!["python3".into(), "he".into()],
+        vec!["tool".into(), "".into()],
+        vec!["python3".into(), "".into()],
+    ] {
+        for _ in 0..2 {
+            assert_eq!(
+                provider
+                    .complete(&pool, &words, cwd, &env, &cancel)
+                    .await
+                    .unwrap(),
+                shell_complete(&pool, &words, cwd, &env, &cancel)
+                    .await
+                    .unwrap()
+            );
+        }
+    }
+    std::fs::write(
+        root.path().join(".bash_completion"),
+        "_t(){ COMPREPLY=(new); }; complete -F _t tool",
+    )
+    .unwrap();
+    assert_eq!(
+        provider
+            .complete(&pool, &["tool".into(), "".into()], cwd, &env, &cancel)
+            .await
+            .unwrap(),
+        ["new"]
+    );
+}
+
+#[tokio::test]
 async fn reused_workers_preserve_fresh_definitions_files_environment_and_isolation() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();
