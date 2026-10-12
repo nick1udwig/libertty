@@ -410,7 +410,9 @@ try {
   const remoteCols = await terminal.evaluate(() => window.__testTerminal.cols);
   await until(async () => await terminal.evaluate(cols => window.__testProjection.nativeColumns === cols, remoteCols), 'SSH controller frames match the mobile grid');
   assert.equal((await request('herdr/ticket?herdrSource=' + remote.id, {}, bearer)).status, 404, 'Another pairing cannot use an SSH host it does not own');
-  await terminal.locator('#terminal textarea').focus(); await page.keyboard.type('SSH input');
+  await terminal.evaluate(() => window.__testTerminal.focus());
+  assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Explicit terminal focus must enable SSH input');
+  await page.keyboard.type('SSH input');
   await until(() => fixture.actions.filter(a => a.method === 'pane.send_text').map(a => a.params.text).join('').includes('SSH input'), 'input through SSH Unix forwarding');
   const standalone = await context.newPage(); await standalone.goto(base + '/terminal.html');
   await standalone.waitForFunction(() => window.__state?.ready);

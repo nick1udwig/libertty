@@ -28,11 +28,12 @@ try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const errors = [];
     await installWireObserver(context);
+    await context.route(url => url.pathname.endsWith('/api/dictation'), route => route.fulfill({ json: { installed: true, available: true } }));
   await context.addInitScript(({ accessToken }) => {
       window.__copies = []; window.__inputs = []; window.__opened = [];
       window.__nativeTouches = [];
       for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel']) document.addEventListener(type, event => {
-        if (event.isTrusted) window.__nativeTouches.push({ type, at: event.timeStamp, target: event.target?.tagName, x: event.clientX, y: event.clientY,
+        if (event.isTrusted) window.__nativeTouches.push({ type, at: event.timeStamp, target: { tag: event.target?.tagName, id: event.target?.id, class: event.target?.className }, x: event.clientX, y: event.clientY, primary: event.isPrimary, pointer: event.pointerType,
           touches: event.changedTouches && [...event.changedTouches].map(touch => ({ id: touch.identifier, x: touch.clientX, y: touch.clientY })) });
       }, { capture: true });
       Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.__copies.push(text); } } });
@@ -116,8 +117,8 @@ try {
       const nativePoint = await linkPoint(), frameBounds = await page.locator('iframe').boundingBox();
       await page.touchscreen.tap(frameBounds.x + nativePoint.x, frameBounds.y + nativePoint.y);
       await frame.waitForFunction(count => window.__opened.length >= count + 1, count).catch(async error => {
-        console.error('Native link tap:', { herdr, needle, nativePoint, frameBounds, observed: await frame.evaluate(() => ({ opened: window.__opened, events: window.__nativeTouches,
-          viewport: { width: innerWidth, height: innerHeight, scale: visualViewport?.scale }, rows: window.__testTerminal.rows, cols: window.__testTerminal.cols, scroll: window.__testTerminal.getViewportY() })) });
+        console.error('Native link tap:', JSON.stringify({ herdr, needle, nativePoint, frameBounds, observed: await frame.evaluate(() => ({ opened: window.__opened, copies: window.__copies, events: window.__nativeTouches,
+          viewport: { width: innerWidth, height: innerHeight, scale: visualViewport?.scale, ratio: devicePixelRatio }, screen: { width: screen.width, height: screen.height }, rows: window.__testTerminal.rows, cols: window.__testTerminal.cols, scroll: window.__testTerminal.getViewportY() })) }));
         throw error;
       });
       assert.equal(await frame.evaluate(() => window.__opened.length), count + 1, 'Native pointer/touch delivery opens a link exactly once');
