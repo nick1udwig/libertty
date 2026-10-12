@@ -48,7 +48,7 @@ jobs:
       - name: Install modern Bash on macOS
         if: runner.os == 'macOS'
         run: |
-          brew install bash
+          brew install bash git
           echo "TERMAI_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
