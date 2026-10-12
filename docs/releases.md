@@ -5,7 +5,8 @@ Updates to `master` run the same native verification without publishing assets, 
 Publishing a prerelease also triggers the workflow, while the installer selects stable releases by default.
 All three native jobs must pass before the workflow uploads any release assets.
 
-Each archive includes an official Node runtime, production npm dependencies built for that runtime, the frontend, server sources, launch and setup scripts, licenses and release metadata.
+Each archive includes the native Rust executable, frontend and engine Wasm, launch and setup scripts, licenses and release metadata.
+An official Node runtime and `ws` support installation and validation tools, while the installed service executes Rust directly.
 Linux archives additionally include a pinned Voxtype Mobile CPU daemon and its upstream installer.
 Linux builds use Ubuntu 24.04 because the pinned ONNX Runtime imports glibc C23 symbols missing from Ubuntu 22.04.
 The supported Linux runtime baseline is glibc 2.39 or newer.
@@ -14,7 +15,7 @@ Herdr is downloaded only if requested during installation and is checked against
 ## Release procedure
 
 1. Merge the release workflow and installer into the default branch before publishing the first release.
-2. Update the version in `package.json` and `package-lock.json`, including the root package entry.
+2. Update the workspace version in `Cargo.toml` and the versions in `package.json` and `package-lock.json`, including the root package entry.
 3. Commit the version change and push the commit you want to release.
 4. Create a matching `vX.Y.Z` tag and publish a GitHub release for it.
 5. Wait for the Release workflow to finish before distributing the install command.
@@ -31,7 +32,8 @@ Use **Actions → Release → Run workflow** to build without creating or modify
 Select the workflow branch and optionally supply a branch, tag or commit in the `ref` field.
 Manual runs produce downloadable workflow artifacts and never execute the publication job.
 
-Every native build runs the type check, frontend build, unit suite and installer fixture suite.
+Release builds depend on the complete three-platform Rust parity workflow, including contracts, native tests, actual Chromium Wasm, both engine modes, SSH, Herdr, saved-data rollback, latency gates and packaged browser and installation checks.
+Every native build also runs the type check, frontend build, reference unit suite and installer fixture suite.
 The npm postinstall hook applies a version-scoped ssh2 Ed25519 key-generation fix and restores the execute permission on macOS node-pty helpers.
 Keep the deterministic leading-zero key test and helper permission checks when updating those dependencies, and remove the compatibility fixes when stable upstream releases include them.
 The packaged smoke check starts the bundled server, pairs a browser client and exercises a real PTY with Bash prompt hooks.
@@ -47,7 +49,8 @@ Use a full Voxtype Mobile parent commit so its recursive submodule pins select t
 CI builds its `parakeet` feature with CPU inference and includes the upstream `scripts/install-daemon`, license and source provenance.
 Keep the daemon's model, Opus framing and capabilities protocol compatible with Termai's dictation client when updating that pin.
 The speech model is downloaded by the upstream installer only when the user opts into dictation setup.
-Rust uses the current stable toolchain with the pinned source's Cargo lockfile.
+Termai and Voxtype use the current stable Rust toolchain and their respective Cargo lockfiles.
+Termai also requires the `wasm32-unknown-unknown` target for its shared browser engine.
 
 ## Local packaging
 
@@ -59,6 +62,7 @@ Point `VOXTYPE_MOBILE_CHECKOUT` to that checkout before packaging a distributabl
 npm ci
 npm run build
 npm test
+npm run test:rust
 npm run test:install
 VOXTYPE_MOBILE_CHECKOUT=/path/to/pinned/voxtype-mobile npm run release:package
 node scripts/smoke-release.mjs release/termai-v0.1.1-linux-x64.tar.gz

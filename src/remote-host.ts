@@ -2,9 +2,9 @@ import type { ContextReply, Fact, FactValue, Snapshot, DirectoryUpdate } from '.
 import type { DirectoryEntry, EngineHost, FileInfo } from './engine/host.ts';
 import type { Help } from './engine/help.ts';
 import type { DirectoryLookup, DirectorySnapshot } from './directory-data.ts';
+import { markImmutableDirectoryEntries } from './directory-data.ts';
 import type { Flag } from './protocol.ts';
 import { DirectoryCache, DirectoryChanged, parentDirectory } from './directory-cache.ts';
-import { prepareHistory } from './engine/suggestions.ts';
 
 export type FactTransport = <T>(body: unknown, signal: AbortSignal) => Promise<T>;
 /** Request-scoped memoization: live paths are never reused across repairs. */
@@ -87,7 +87,9 @@ export class RemoteHost implements EngineHost {
   async entries(path: string, limit: number): Promise<DirectoryEntry[]> {
     const snapshot = this.directories.get(path);
     if (snapshot?.complete && snapshot.entries.length <= limit) { this.use(path, snapshot); return snapshot.entries; }
-    return await this.request({ kind: 'entries', path, limit }) as DirectoryEntry[];
+    const entries = await this.request({ kind: 'entries', path, limit }) as DirectoryEntry[];
+    markImmutableDirectoryEntries(entries);
+    return entries;
   }
   async syntax(command: string): Promise<boolean> {
     this.signal.throwIfAborted();
@@ -126,7 +128,6 @@ export class ContextCache {
       const old = previous.catalog[field], next = catalog[field];
       if (old && next && old.length === next.length && old.every((value, i) => value === next[i])) catalog[field] = old;
     }
-    if (previous && catalog.history !== previous.catalog.history) prepareHistory(catalog, previous.catalog.history);
     this.catalogs.set(reply.catalogKey, catalog);
     if (this.catalogs.size > 8) this.catalogs.delete(this.catalogs.keys().next().value!);
     this.snapshot = { ...reply, catalog }; this.receivedAt = Date.now();

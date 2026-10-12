@@ -24,7 +24,7 @@ daemon.on('connection', (socket, request) => {
     else { const message = JSON.parse(bytes.toString()); if (message.type === 'finish') socket.send(JSON.stringify({ type: 'final', text: 'Dictated directly into Herdr' })); if (message.type === 'ack') voiceAcks++; }
   });
 });
-const backend = spawn(process.execPath, ['server/index.ts'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+const backend = spawn(process.env.TEST_BACKEND !== 'node' ? root + 'target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, TERMAI_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token', TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate', NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3167', TERMAI_BASE_PATH: '/herdr-test',
   TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/termai',
   TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory,
@@ -159,7 +159,14 @@ try {
   assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.resize' && a.params.cols === nativeSize.cols), 'Mobile screen changes resize the real terminal');
   await desktop.close(); await page.bringToFront(); await page.setViewportSize({ width: 390, height: 844 });
   const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
-  const hold = async locator => { await locator.scrollIntoViewIfNeeded(); const rect = await locator.boundingBox(); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd'); };
+  const hold = async locator => {
+    let rect;
+    await until(async () => {
+      try { await locator.scrollIntoViewIfNeeded(); rect = await locator.boundingBox(); return !!rect; }
+      catch (error) { if (!error.message.includes('not attached')) throw error; return false; }
+    }, 'attached tab for long press');
+    await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd');
+  };
   const swipeStrip = async mode => {
     const style = await page.addStyleTag({ content: '.herdr-agent-strip .herdr-agent-tab { min-width: 260px; }' });
     const strip = page.locator('.herdr-agent-strip:visible');

@@ -1,0 +1,7234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://termai.local/contracts/migration-v1",
+  "title": "Termai migration contracts",
+  "description": "Reference wire types; optional fields are omitted, and explicit null is accepted only where declared.",
+  "$defs": {
+    "EngineMode": {
+      "anyOf": [
+        {
+          "const": "server",
+          "type": "string"
+        },
+        {
+          "const": "client",
+          "type": "string"
+        }
+      ]
+    },
+    "DictationTarget": {
+      "anyOf": [
+        {
+          "const": "shell",
+          "type": "string"
+        },
+        {
+          "const": "program",
+          "type": "string"
+        }
+      ]
+    },
+    "ShellState": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "inputRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "promptRevision": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "prompt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "exited": {
+          "type": "boolean"
+        },
+        "exitCode": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "inputTarget": {
+          "anyOf": [
+            {
+              "const": "shell",
+              "type": "string"
+            },
+            {
+              "const": "program",
+              "type": "string"
+            }
+          ]
+        },
+        "terminalScroll": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "const": true,
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "required": [
+        "cwd",
+        "inputRevision",
+        "promptRevision",
+        "ready",
+        "prompt",
+        "exited"
+      ],
+      "additionalProperties": true
+    },
+    "ServerMessage": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "input-line",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "text": {
+              "type": "string"
+            },
+            "cursor": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "prompt",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "transfer",
+              "type": "string"
+            },
+            "request": {
+              "$ref": "#/$defs/TransferRequest"
+            }
+          },
+          "required": [
+            "type",
+            "request"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pasted",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "source": {
+              "const": "dictation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "replace",
+            "prompt",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dictation",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "state": {
+              "anyOf": [
+                {
+                  "const": "done",
+                  "type": "string"
+                },
+                {
+                  "const": "ready",
+                  "type": "string"
+                },
+                {
+                  "const": "error",
+                  "type": "string"
+                }
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "state"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "reading-file",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "reading-capture",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "exitCode": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "name",
+            "exitCode"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "reading-error",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ssh-command",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "command"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "herdr-command",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "command"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ssh-released",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "output",
+              "type": "string"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "data": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "seq",
+            "data"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "screen",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "herdr-frame",
+              "type": "string"
+            },
+            "width": {
+              "type": "number"
+            },
+            "height": {
+              "type": "number"
+            },
+            "full": {
+              "type": "boolean"
+            },
+            "bytes": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "width",
+            "height",
+            "full",
+            "bytes"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "state",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/ShellState"
+            }
+          },
+          "required": [
+            "type",
+            "state"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "context",
+              "type": "string"
+            },
+            "context": {
+              "$ref": "#/$defs/ContextReply"
+            },
+            "directories": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "x-utf16MaxLength": 4096,
+                    "pattern": "^[^\\u0000]*$"
+                  },
+                  "snapshot": {
+                    "$ref": "#/$defs/DirectorySnapshot"
+                  }
+                },
+                "required": [
+                  "path",
+                  "snapshot"
+                ],
+                "additionalProperties": true
+              }
+            }
+          },
+          "required": [
+            "type",
+            "context",
+            "directories"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "hello",
+              "type": "string"
+            },
+            "engine": {
+              "$ref": "#/$defs/EngineMode"
+            },
+            "reset": {
+              "type": "boolean"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "firstSeq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "streamId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "engine",
+            "reset",
+            "truncated",
+            "firstSeq",
+            "streamId"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "edit-result",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "accepted": {
+              "type": "boolean"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "accepted",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "result",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "accepted": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "accepted"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "ClientMessage": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "input-line",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "prompt",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dictation",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "action": {
+              "anyOf": [
+                {
+                  "const": "start",
+                  "type": "string"
+                },
+                {
+                  "const": "finish",
+                  "type": "string"
+                },
+                {
+                  "const": "cancel",
+                  "type": "string"
+                }
+              ]
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "const": "shell",
+                  "type": "string"
+                },
+                {
+                  "const": "program",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "action"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "input",
+              "type": "string"
+            },
+            "data": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "replace",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "id",
+            "prompt",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "command",
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "command",
+            "id",
+            "prompt"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resize",
+              "type": "string"
+            },
+            "cols": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "mobile": {
+              "anyOf": [
+                {
+                  "const": false,
+                  "type": "boolean"
+                },
+                {
+                  "const": true,
+                  "type": "boolean"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "cols",
+            "rows"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "terminal-scroll",
+              "type": "string"
+            },
+            "lines": {
+              "type": "number"
+            },
+            "column": {
+              "type": "number"
+            },
+            "row": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "lines",
+            "column",
+            "row"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "herdr-frame-request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ack",
+              "type": "string"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "seq"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "Fact": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "stat",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^/[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "lookup",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^/[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "directory",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^/[^\\u0000]*$"
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 256,
+              "x-utf16MaxLength": 256
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "entries",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^/[^\\u0000]*$"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "limit"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "syntax",
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 4000,
+              "x-utf16MaxLength": 4000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "command"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "completion",
+              "type": "string"
+            },
+            "words": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "words"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "help",
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 4000,
+              "x-utf16MaxLength": 4000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            "route": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][A-Za-z0-9_-]*$"
+              },
+              "maxItems": 3
+            }
+          },
+          "required": [
+            "kind",
+            "command",
+            "route"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "describe",
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 4000,
+              "x-utf16MaxLength": 4000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "command"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "FactValue": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "const": false,
+          "type": "boolean"
+        },
+        {
+          "const": true,
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/DirectoryUpdate"
+        },
+        {
+          "$ref": "#/$defs/DirectoryLookup"
+        },
+        {
+          "$ref": "#/$defs/FileInfo"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DirectoryEntry"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "$ref": "#/$defs/Help"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Flag"
+          }
+        }
+      ]
+    },
+    "Snapshot": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pathsIncluded": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "catalogKey": {
+          "type": "string"
+        },
+        "catalog": {
+          "$ref": "#/$defs/Catalog"
+        },
+        "home": {
+          "type": "string"
+        },
+        "discoveryKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt",
+        "pathsIncluded",
+        "key",
+        "catalogKey",
+        "catalog",
+        "home",
+        "discoveryKey"
+      ],
+      "additionalProperties": true
+    },
+    "ContextReply": {
+      "type": "object",
+      "properties": {
+        "catalog": {
+          "$ref": "#/$defs/Catalog"
+        },
+        "patch": {
+          "type": "object",
+          "properties": {
+            "cwd": {
+              "type": "string"
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "functions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "historyCwds": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": true
+        },
+        "base": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "pathsIncluded": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "catalogKey": {
+          "type": "string"
+        },
+        "home": {
+          "type": "string"
+        },
+        "discoveryKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt",
+        "pathsIncluded",
+        "key",
+        "catalogKey",
+        "home",
+        "discoveryKey"
+      ],
+      "additionalProperties": true
+    },
+    "DirectoryUpdate": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DirectoryEntry"
+          }
+        },
+        "version": {
+          "type": "string"
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "version",
+        "complete"
+      ],
+      "additionalProperties": true
+    },
+    "FileEntry": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "boolean"
+        },
+        "symlink": {
+          "type": "boolean"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "modified": {
+          "type": "number"
+        },
+        "mode": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "name",
+        "directory",
+        "symlink",
+        "size",
+        "modified",
+        "mode"
+      ],
+      "additionalProperties": true
+    },
+    "FileListing": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf16MaxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        },
+        "parent": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FileEntry"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "parent",
+        "entries",
+        "truncated"
+      ],
+      "additionalProperties": true
+    },
+    "TransferRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "action": {
+          "anyOf": [
+            {
+              "const": "upload",
+              "type": "string"
+            },
+            {
+              "const": "download",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf16MaxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "action",
+        "path",
+        "name"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrStatus": {
+      "anyOf": [
+        {
+          "const": "idle",
+          "type": "string"
+        },
+        {
+          "const": "working",
+          "type": "string"
+        },
+        {
+          "const": "blocked",
+          "type": "string"
+        },
+        {
+          "const": "done",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "type": "string"
+        }
+      ]
+    },
+    "HerdrAgent": {
+      "type": "object",
+      "properties": {
+        "terminalId": {
+          "type": "string"
+        },
+        "paneId": {
+          "type": "string"
+        },
+        "workspace": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/HerdrStatus"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "completion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "cwd": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminalId",
+        "paneId",
+        "workspace",
+        "name",
+        "kind",
+        "status",
+        "sequence",
+        "cwd"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrSpace": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "terminalIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "selectedTerminalId": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "terminalIds"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrSnapshot": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "number"
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HerdrAgent"
+          }
+        },
+        "terminals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HerdrAgent"
+          }
+        },
+        "spaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HerdrSpace"
+          }
+        }
+      },
+      "required": [
+        "version",
+        "protocol",
+        "agents"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrMessage": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "snapshot",
+              "type": "string"
+            },
+            "snapshot": {
+              "$ref": "#/$defs/HerdrSnapshot"
+            }
+          },
+          "required": [
+            "type",
+            "snapshot"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "error",
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "terminalId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "message"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "Flag": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "takesValue": {
+          "type": "boolean"
+        },
+        "optionalValue": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "const": true,
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "takesValue"
+      ],
+      "additionalProperties": true
+    },
+    "Catalog": {
+      "type": "object",
+      "properties": {
+        "cwd": {
+          "type": "string"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "historyCwds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "cwd",
+        "commands",
+        "paths",
+        "history"
+      ],
+      "additionalProperties": true
+    },
+    "Candidate": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "literal": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "const": true,
+              "type": "boolean"
+            }
+          ]
+        }
+      },
+      "required": [
+        "command",
+        "score",
+        "changes"
+      ],
+      "additionalProperties": true
+    },
+    "Help": {
+      "type": "object",
+      "properties": {
+        "flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Flag"
+          }
+        },
+        "subcommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "required": {
+          "type": "number"
+        },
+        "safeSubcommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "probeSubcommands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "aliases": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "flags",
+        "subcommands"
+      ],
+      "additionalProperties": true
+    },
+    "CommandMetadata": {
+      "type": "object",
+      "properties": {
+        "flags": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Flag"
+            }
+          }
+        },
+        "subcommands": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "requiredPositionals": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "argumentValues": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "flags",
+        "subcommands"
+      ],
+      "additionalProperties": true
+    },
+    "FileInfo": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "boolean"
+        },
+        "directory": {
+          "type": "boolean"
+        },
+        "executable": {
+          "type": "boolean"
+        },
+        "spelling": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "directory",
+        "executable"
+      ],
+      "additionalProperties": true
+    },
+    "DirectoryEntry": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "directory": {
+          "type": "boolean"
+        },
+        "symlink": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "directory",
+        "symlink"
+      ],
+      "additionalProperties": true
+    },
+    "DirectorySnapshot": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DirectoryEntry"
+          }
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "version",
+        "entries",
+        "complete"
+      ],
+      "additionalProperties": true
+    },
+    "DirectoryLookup": {
+      "type": "object",
+      "properties": {
+        "info": {
+          "$ref": "#/$defs/FileInfo"
+        },
+        "listing": {
+          "$ref": "#/$defs/DirectorySnapshot"
+        }
+      },
+      "additionalProperties": true
+    },
+    "KeyReference": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "anyOf": [
+            {
+              "const": "file",
+              "type": "string"
+            },
+            {
+              "const": "agent",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf16MaxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        }
+      },
+      "required": [
+        "type",
+        "path"
+      ],
+      "additionalProperties": true
+    },
+    "KeyInfo": {
+      "type": "object",
+      "properties": {
+        "reference": {
+          "$ref": "#/$defs/KeyReference"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "publicKey",
+        "fingerprint",
+        "createdAt"
+      ],
+      "additionalProperties": true
+    },
+    "KnownHost": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "port",
+        "fingerprint"
+      ],
+      "additionalProperties": true
+    },
+    "SSHConnection": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "number"
+        },
+        "username": {
+          "type": "string"
+        },
+        "keyId": {
+          "type": "string"
+        },
+        "privateKey": {
+          "type": "string"
+        },
+        "passphrase": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "trust": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "port",
+        "username"
+      ],
+      "additionalProperties": true
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "needsSecret": {
+          "type": "boolean"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "changed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "additionalProperties": true
+    },
+    "Ok": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "additionalProperties": true
+    },
+    "ConnectRequest": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "noSession": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": true
+    },
+    "ConnectReply": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/ShellState"
+        },
+        "accessToken": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "accessToken"
+      ],
+      "additionalProperties": true
+    },
+    "SuggestRequest": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 2000,
+          "x-utf16MaxLength": 2000
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "additionalProperties": true
+    },
+    "SuggestReply": {
+      "type": "object",
+      "properties": {
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "maxItems": 4
+        },
+        "source": {
+          "type": "string"
+        },
+        "cwd": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidates",
+        "source",
+        "cwd"
+      ],
+      "additionalProperties": true
+    },
+    "ContextRequest": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "const": "context"
+        },
+        "known": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": true
+    },
+    "FactsRequest": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "key",
+        "operations"
+      ],
+      "additionalProperties": true
+    },
+    "FactsReply": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/FactValue"
+      },
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "SessionsRequest": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ssh": {
+          "$ref": "#/$defs/SSHConnection"
+        },
+        "files": {
+          "type": "boolean"
+        }
+      },
+      "required": [],
+      "additionalProperties": true
+    },
+    "SessionReply": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ShellState"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state"
+      ],
+      "additionalProperties": true
+    },
+    "TicketReply": {
+      "type": "object",
+      "properties": {
+        "ticket": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "ticket"
+      ],
+      "additionalProperties": true
+    },
+    "PairingsData": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "tokenHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "credentials": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        }
+      },
+      "required": [
+        "version",
+        "tokenHash",
+        "credentials"
+      ],
+      "additionalProperties": true
+    },
+    "Environment": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "EngineToken": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string"
+        },
+        "quoted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "value",
+        "quoted"
+      ],
+      "additionalProperties": true
+    },
+    "EngineRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "tokens"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "symbolAlternatives"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "simpleWords"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "directoryInput"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "pipelineParts"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "transferAction"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "downloadPipeline"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "flagsFromHelp"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "commandsFromManual"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "hasCommandSlot"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "shellQuote"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "similarity"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "matches"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/EngineToken"
+                  }
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 4,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "commandNames"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "discoveryTargets"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "discoveryTarget"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "repair"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Flag"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/CommandMetadata"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "expandSymbols"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "historyCandidates"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "commandsFromHelp"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "requiredFromHelp"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "optionArity"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Flag"
+                  }
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "suggest"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "suggestWithStage"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "discover"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "cachedMetadata"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "prewarmTargets"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "markWarmed"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "seedMetadata"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                },
+                {
+                  "$ref": "#/$defs/CommandMetadata"
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "repairInputFile"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "repairDirectory"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "completeArguments"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/CommandMetadata"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Flag"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "candidateValid"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Candidate"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                },
+                {
+                  "$ref": "#/$defs/CommandMetadata"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Flag"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 5,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            }
+          },
+          "required": [
+            "operation",
+            "args"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "AsyncEngineRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "tokens"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "symbolAlternatives"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "simpleWords"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "directoryInput"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "pipelineParts"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "transferAction"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "downloadPipeline"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "flagsFromHelp"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "commandsFromManual"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "hasCommandSlot"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "shellQuote"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "similarity"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "matches"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/EngineToken"
+                  }
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 4,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "commandNames"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "discoveryTargets"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "discoveryTarget"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "repair"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Flag"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/CommandMetadata"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "expandSymbols"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "historyCandidates"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "commandsFromHelp"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "requiredFromHelp"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "optionArity"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Flag"
+                  }
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "suggest"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "suggestWithStage"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "discover"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "cachedMetadata"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "prewarmTargets"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                }
+              ],
+              "minItems": 2,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "markWarmed"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "seedMetadata"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                },
+                {
+                  "$ref": "#/$defs/CommandMetadata"
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "repairInputFile"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "repairDirectory"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "completeArguments"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/CommandMetadata"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Flag"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 3,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "operation": {
+              "const": "candidateValid"
+            },
+            "args": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "$ref": "#/$defs/Candidate"
+                },
+                {
+                  "$ref": "#/$defs/Catalog"
+                },
+                {
+                  "$ref": "#/$defs/Environment"
+                },
+                {
+                  "$ref": "#/$defs/CommandMetadata"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/Flag"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "minItems": 5,
+              "items": {
+                "$ref": "#/$defs/Json"
+              },
+              "x-trailingArguments": "ignored for compatibility with JavaScript callbacks"
+            },
+            "now": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "request",
+            "operation",
+            "args",
+            "now"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "PreparedEngineContext": {
+      "type": "object",
+      "properties": {
+        "context": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "catalog": {
+          "$ref": "#/$defs/Catalog"
+        },
+        "environment": {
+          "$ref": "#/$defs/Environment"
+        }
+      },
+      "required": [
+        "context",
+        "catalog",
+        "environment"
+      ],
+      "additionalProperties": true
+    },
+    "PreparedEngineRequest": {
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "context": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "input": {
+          "type": "string"
+        },
+        "now": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "request",
+        "context",
+        "input",
+        "now"
+      ],
+      "additionalProperties": true
+    },
+    "EngineDirectoryPins": {
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "directories": {
+          "type": "array",
+          "maxItems": 32,
+          "x-totalEntries": 30000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "directory": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4294967295
+              },
+              "entries": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/DirectoryEntry"
+                },
+                "maxItems": 30000
+              }
+            },
+            "required": [
+              "directory"
+            ],
+            "additionalProperties": true
+          }
+        }
+      },
+      "required": [
+        "request",
+        "directories"
+      ],
+      "additionalProperties": true
+    },
+    "EngineDirectoryReference": {
+      "type": "object",
+      "properties": {
+        "directory": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "version": {
+          "type": "string"
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "directory",
+        "version",
+        "complete"
+      ],
+      "additionalProperties": true
+    },
+    "EngineOperationReply": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "tokens"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/EngineToken"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "symbolAlternatives"
+            },
+            "value": {
+              "$ref": "#/$defs/Json"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "simpleWords"
+            },
+            "value": {
+              "$ref": "#/$defs/Json"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "directoryInput"
+            },
+            "value": {
+              "$ref": "#/$defs/Json"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "pipelineParts"
+            },
+            "value": {
+              "$ref": "#/$defs/Json"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "transferAction"
+            },
+            "value": {
+              "$ref": "#/$defs/Json"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "downloadPipeline"
+            },
+            "value": {
+              "$ref": "#/$defs/Json"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "flagsFromHelp"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Flag"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "commandsFromManual"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "hasCommandSlot"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "shellQuote"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "similarity"
+            },
+            "value": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "matches"
+            },
+            "value": {
+              "$ref": "#/$defs/Json"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "commandNames"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "discoveryTargets"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "discoveryTarget"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "repair"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Candidate"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "expandSymbols"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "historyCandidates"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Candidate"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "commandsFromHelp"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "requiredFromHelp"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "optionArity"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "suggest"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Candidate"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "suggestWithStage"
+            },
+            "value": {
+              "type": "object",
+              "properties": {
+                "candidates": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Candidate"
+                  }
+                },
+                "source": {
+                  "enum": [
+                    "history",
+                    "cache",
+                    "schema",
+                    "discovery",
+                    "directory"
+                  ]
+                }
+              },
+              "required": [
+                "candidates",
+                "source"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "discover"
+            },
+            "value": {
+              "type": "object",
+              "properties": {
+                "metadata": {
+                  "$ref": "#/$defs/CommandMetadata"
+                },
+                "scriptFlags": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Flag"
+                  }
+                }
+              },
+              "required": [
+                "metadata"
+              ],
+              "additionalProperties": true
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "cachedMetadata"
+            },
+            "value": {
+              "$ref": "#/$defs/CommandMetadata"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "prewarmTargets"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "markWarmed"
+            },
+            "value": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "seedMetadata"
+            },
+            "value": {
+              "type": "null"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "repairInputFile"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Candidate"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "repairDirectory"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Candidate"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "completeArguments"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Candidate"
+              }
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "const": "candidateValid"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "operation",
+            "value"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "HostRequest": {
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "minItems": 1,
+          "maxItems": 64
+        }
+      },
+      "required": [
+        "request",
+        "operations"
+      ],
+      "additionalProperties": true
+    },
+    "HostResult": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "value": {
+              "$ref": "#/$defs/FactValue"
+            }
+          },
+          "required": [
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "entries": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            }
+          },
+          "required": [
+            "entries"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "lookup": {
+              "$ref": "#/$defs/EngineDirectoryReference"
+            }
+          },
+          "required": [
+            "lookup"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "HostReply": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/FactValue"
+              },
+              "minItems": 1,
+              "maxItems": 64
+            }
+          },
+          "required": [
+            "request",
+            "values"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HostResult"
+              },
+              "minItems": 1,
+              "maxItems": 64
+            }
+          },
+          "required": [
+            "request",
+            "results"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "HostError": {
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "error"
+      ],
+      "additionalProperties": true
+    },
+    "HostCancel": {
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "cancel": {
+          "const": true
+        }
+      },
+      "required": [
+        "request",
+        "cancel"
+      ],
+      "additionalProperties": true
+    },
+    "EngineResume": {
+      "type": "object",
+      "properties": {
+        "request": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295
+        },
+        "replies": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HostReply"
+              },
+              {
+                "$ref": "#/$defs/HostError"
+              }
+            ]
+          },
+          "maxItems": 64
+        },
+        "now": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "request",
+        "replies",
+        "now"
+      ],
+      "additionalProperties": true
+    },
+    "EngineStep": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "state": {
+              "const": "pending"
+            },
+            "callbacks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HostRequest"
+              }
+            }
+          },
+          "required": [
+            "request",
+            "state",
+            "callbacks"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4294967295
+            },
+            "state": {
+              "const": "complete"
+            },
+            "value": {
+              "$ref": "#/$defs/Json"
+            }
+          },
+          "required": [
+            "request",
+            "state",
+            "value"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "request": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "state": {
+              "const": "error"
+            },
+            "error": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "request",
+            "state",
+            "error"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "Json": {
+      "type": [
+        "object",
+        "array",
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ]
+    },
+    "PathReply": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf16MaxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": true
+    },
+    "DictationStatus": {
+      "type": "object",
+      "properties": {
+        "installed": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "installed",
+        "available"
+      ],
+      "additionalProperties": true
+    },
+    "EmptyRequest": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": true
+    },
+    "HealthReply": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "version": {
+          "type": "string"
+        },
+        "commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "platform": {
+          "type": "string"
+        },
+        "node": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "version"
+      ],
+      "additionalProperties": true
+    },
+    "SessionsReply": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "http",
+              "ssh"
+            ]
+          },
+          "state": {
+            "$ref": "#/$defs/ShellState"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "state"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "SSHProbeReply": {
+      "type": "object",
+      "properties": {
+        "milliseconds": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "milliseconds"
+      ],
+      "additionalProperties": true
+    },
+    "KeychainReply": {
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KeyInfo"
+          }
+        },
+        "knownHosts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnownHost"
+          }
+        }
+      },
+      "required": [
+        "keys",
+        "knownHosts"
+      ],
+      "additionalProperties": true
+    },
+    "KeychainRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "delete"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "id"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "rename"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "x-utf16MaxLength": 100
+            }
+          },
+          "required": [
+            "action",
+            "id",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "forget"
+            },
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          },
+          "required": [
+            "action",
+            "host"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "inspect"
+            },
+            "privateKey": {
+              "type": "string",
+              "maxLength": 20000,
+              "x-utf16MaxLength": 20000
+            },
+            "passphrase": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "action",
+            "privateKey",
+            "passphrase"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "export"
+            },
+            "id": {
+              "type": "string"
+            },
+            "passphrase": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "action",
+            "id",
+            "passphrase"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "create"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "x-utf16MaxLength": 100
+            },
+            "passphrase": {
+              "type": "string",
+              "minLength": 1
+            },
+            "privateKey": {
+              "type": "string",
+              "maxLength": 20000,
+              "x-utf16MaxLength": 20000
+            }
+          },
+          "required": [
+            "action",
+            "name",
+            "passphrase"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "backup"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "x-utf16MaxLength": 100
+            },
+            "passphrase": {
+              "type": "string",
+              "minLength": 1
+            },
+            "privateKey": {
+              "type": "string",
+              "maxLength": 20000,
+              "x-utf16MaxLength": 20000
+            },
+            "replaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "name",
+            "passphrase"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "KeyInspectionReply": {
+      "type": "object",
+      "properties": {
+        "publicKey": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicKey",
+        "fingerprint"
+      ],
+      "additionalProperties": true
+    },
+    "ExportedKeyReply": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "publicKey": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "privateKey": {
+          "type": "string",
+          "maxLength": 20000,
+          "x-utf16MaxLength": 20000
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "publicKey",
+        "fingerprint",
+        "createdAt",
+        "privateKey"
+      ],
+      "additionalProperties": true
+    },
+    "KeychainMutationReply": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/KeychainReply"
+        },
+        {
+          "$ref": "#/$defs/KeyInfo"
+        },
+        {
+          "$ref": "#/$defs/KeyInspectionReply"
+        },
+        {
+          "$ref": "#/$defs/ExportedKeyReply"
+        }
+      ]
+    },
+    "VaultData": {
+      "type": "object",
+      "properties": {
+        "keys": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "x-utf16MaxLength": 100
+                  },
+                  "publicKey": {
+                    "type": "string"
+                  },
+                  "fingerprint": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "reference": {
+                    "$ref": "#/$defs/KeyReference"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "publicKey",
+                  "fingerprint",
+                  "createdAt",
+                  "reference"
+                ],
+                "additionalProperties": true
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "x-utf16MaxLength": 100
+                  },
+                  "publicKey": {
+                    "type": "string"
+                  },
+                  "fingerprint": {
+                    "type": "string"
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "salt": {
+                    "type": "string",
+                    "x-decodedBytes": 16
+                  },
+                  "iv": {
+                    "type": "string",
+                    "x-decodedBytes": 12
+                  },
+                  "tag": {
+                    "type": "string",
+                    "x-decodedBytes": 16
+                  },
+                  "ciphertext": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "publicKey",
+                  "fingerprint",
+                  "createdAt",
+                  "salt",
+                  "iv",
+                  "tag",
+                  "ciphertext"
+                ],
+                "additionalProperties": true
+              }
+            ]
+          },
+          "maxItems": 64
+        },
+        "knownHosts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnownHost"
+          },
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "keys",
+        "knownHosts"
+      ],
+      "additionalProperties": true
+    },
+    "FileActionRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "read"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "action",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "write"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "text": {
+              "type": "string",
+              "x-utf8MaxBytes": 32768,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "path",
+            "text",
+            "version"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "rename"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "x-utf8MaxBytes": 255,
+              "pattern": "^[^/\\\\\\u0000-\\u001f\\u007f]+$"
+            }
+          },
+          "required": [
+            "action",
+            "path",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "copy"
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 4096,
+                "x-utf16MaxLength": 4096,
+                "pattern": "^[^\\u0000]*$"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            },
+            "destination": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "action",
+            "paths",
+            "destination"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "delete"
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 4096,
+                "x-utf16MaxLength": 4096,
+                "pattern": "^[^\\u0000]*$"
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "action",
+            "paths"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "FileTextReply": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "text",
+        "version",
+        "mode"
+      ],
+      "additionalProperties": true
+    },
+    "FileActionReply": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ok"
+        },
+        {
+          "$ref": "#/$defs/FileTextReply"
+        }
+      ]
+    },
+    "FileMkdirRequest": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf16MaxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name"
+      ],
+      "additionalProperties": true
+    },
+    "FileDownloadRequest": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf16MaxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": true
+    },
+    "FileDownloadReply": {
+      "type": "object",
+      "properties": {
+        "ticket": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "ticket",
+        "name",
+        "size"
+      ],
+      "additionalProperties": true
+    },
+    "TransferRequestBody": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "ack"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "id"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "download"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "id"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "PluginReadReply": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf16MaxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "text",
+        "truncated"
+      ],
+      "additionalProperties": true
+    },
+    "DictationInstallRequest": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "prompt",
+        "revision"
+      ],
+      "additionalProperties": true
+    },
+    "CapturedRequest": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "passphrase": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trust": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "additionalProperties": true
+    },
+    "CapturedReply": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ok"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "native": {
+              "type": "boolean"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "native"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "$ref": "#/$defs/SessionReply"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer"
+            },
+            "username": {
+              "type": "string"
+            },
+            "key": {
+              "$ref": "#/$defs/KeyInfo"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "host",
+            "port",
+            "username"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "herdrSession": {
+              "type": "string"
+            },
+            "herdrSource": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "remote": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "herdrSession",
+            "herdrSource",
+            "name",
+            "remote"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "HerdrConnectRequest": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrConnectReply": {
+      "type": "object",
+      "properties": {
+        "herdrSession": {
+          "type": "string"
+        },
+        "herdrSource": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "herdrSession",
+        "herdrSource"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrOptionsReply": {
+      "type": "object",
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "kinds"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrActionRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "create-space"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "terminalId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "move-space"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "beforeWorkspaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "create"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "x-utf16MaxLength": 100
+            },
+            "kind": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId",
+            "name",
+            "kind"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "rename-space"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "x-utf16MaxLength": 100
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "close-space"
+            },
+            "workspaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "rename"
+            },
+            "terminalId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "x-utf16MaxLength": 100
+            }
+          },
+          "required": [
+            "action",
+            "terminalId",
+            "name"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "close"
+            },
+            "terminalId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "terminalId"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "PushSubscription": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 4096
+        },
+        "keys": {
+          "type": "object",
+          "properties": {
+            "p256dh": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+={0,2}$",
+              "x-decodedBytes": 65
+            },
+            "auth": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+={0,2}$",
+              "x-decodedBytes": 16
+            }
+          },
+          "required": [
+            "p256dh",
+            "auth"
+          ],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "endpoint",
+        "keys"
+      ],
+      "additionalProperties": true
+    },
+    "PushSubscribeRequest": {
+      "type": "object",
+      "properties": {
+        "subscription": {
+          "$ref": "#/$defs/PushSubscription"
+        }
+      },
+      "required": [
+        "subscription"
+      ],
+      "additionalProperties": true
+    },
+    "PushDeviceRequest": {
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device"
+      ],
+      "additionalProperties": true
+    },
+    "PushViewRequest": {
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        },
+        "tabId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device",
+        "tabId"
+      ],
+      "additionalProperties": true
+    },
+    "PushKeyReply": {
+      "type": "object",
+      "properties": {
+        "publicKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicKey"
+      ],
+      "additionalProperties": true
+    },
+    "PushDeviceReply": {
+      "type": "object",
+      "properties": {
+        "device": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "device"
+      ],
+      "additionalProperties": true
+    },
+    "PushKeysData": {
+      "type": "object",
+      "properties": {
+        "publicKey": {
+          "type": "string"
+        },
+        "privateKey": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "publicKey",
+        "privateKey"
+      ],
+      "additionalProperties": true
+    },
+    "PushData": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "owner": {
+                "type": "string"
+              },
+              "subscription": {
+                "$ref": "#/$defs/PushSubscription"
+              },
+              "views": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "session": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string"
+                    },
+                    "socketPath": {
+                      "type": "string"
+                    },
+                    "remote": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "session",
+                    "source",
+                    "remote"
+                  ],
+                  "additionalProperties": true
+                },
+                "maxItems": 16
+              }
+            },
+            "required": [
+              "id",
+              "owner",
+              "subscription",
+              "views"
+            ],
+            "additionalProperties": true
+          },
+          "maxItems": 256
+        },
+        "checkpoints": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/Json"
+          }
+        }
+      },
+      "required": [
+        "version",
+        "devices"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrClientMessage": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "input-line",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "prompt",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dictation",
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "action": {
+              "anyOf": [
+                {
+                  "const": "start",
+                  "type": "string"
+                },
+                {
+                  "const": "finish",
+                  "type": "string"
+                },
+                {
+                  "const": "cancel",
+                  "type": "string"
+                }
+              ]
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "target": {
+              "anyOf": [
+                {
+                  "const": "shell",
+                  "type": "string"
+                },
+                {
+                  "const": "program",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "id",
+            "action"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "input",
+              "type": "string"
+            },
+            "data": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "data"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "replace",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "id",
+            "prompt",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "command",
+              "type": "string"
+            },
+            "command": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "command",
+            "id",
+            "prompt"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "resize",
+              "type": "string"
+            },
+            "cols": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "mobile": {
+              "anyOf": [
+                {
+                  "const": false,
+                  "type": "boolean"
+                },
+                {
+                  "const": true,
+                  "type": "boolean"
+                }
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "cols",
+            "rows"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "terminal-scroll",
+              "type": "string"
+            },
+            "lines": {
+              "type": "number"
+            },
+            "column": {
+              "type": "number"
+            },
+            "row": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "lines",
+            "column",
+            "row"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "herdr-frame-request",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ack",
+              "type": "string"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "seq"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    }
+  }
+}

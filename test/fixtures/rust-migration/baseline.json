@@ -1,0 +1,59 @@
+{
+  "reference": "455386bc9443e778f381e1eeaf37cec5a35c2f75",
+  "platform": "linux/x64",
+  "runtime": "v26.8.1",
+  "unit": {
+    "pass": 214,
+    "skip": 1,
+    "fail": 0
+  },
+  "install": {
+    "pass": 26,
+    "fail": 0
+  },
+  "build": "pass",
+  "browser": [
+    {
+      "mode": "server",
+      "port": 3135,
+      "basePath": "/",
+      "status": "pass"
+    },
+    {
+      "mode": "client",
+      "port": 3136,
+      "basePath": "/terminal",
+      "status": "pass"
+    }
+  ],
+  "architecture": {
+    "comparisons": 432,
+    "rows": 108,
+    "repeats": 3
+  },
+  "corpus": {
+    "fixtures": 16404,
+    "operations": [
+      "commandNames",
+      "commandsFromHelp",
+      "commandsFromManual",
+      "directoryInput",
+      "discoveryTarget",
+      "discoveryTargets",
+      "expandSymbols",
+      "flagsFromHelp",
+      "hasCommandSlot",
+      "historyCandidates",
+      "matches",
+      "optionArity",
+      "pipelineParts",
+      "repair",
+      "requiredFromHelp",
+      "shellQuote",
+      "similarity",
+      "simpleWords",
+      "symbolAlternatives",
+      "tokens"
+    ]
+  }
+}

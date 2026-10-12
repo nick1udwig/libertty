@@ -1,0 +1,373 @@
+{
+  "commonFlags": {
+    "upload": [],
+    "download": [
+      {
+        "name": "--file",
+        "takesValue": false
+      }
+    ],
+    "cd": [
+      {
+        "name": "-L",
+        "takesValue": false
+      },
+      {
+        "name": "-P",
+        "takesValue": false
+      },
+      {
+        "name": "-e",
+        "takesValue": false
+      }
+    ],
+    "ls": [
+      {
+        "name": "-a",
+        "takesValue": false
+      },
+      {
+        "name": "-l",
+        "takesValue": false
+      },
+      {
+        "name": "-L",
+        "takesValue": false
+      },
+      {
+        "name": "-h",
+        "takesValue": false
+      },
+      {
+        "name": "-R",
+        "takesValue": false
+      },
+      {
+        "name": "--all",
+        "takesValue": false
+      },
+      {
+        "name": "--human-readable",
+        "takesValue": false
+      }
+    ],
+    "git": [
+      {
+        "name": "--help",
+        "takesValue": false
+      },
+      {
+        "name": "--version",
+        "takesValue": false
+      },
+      {
+        "name": "-C",
+        "takesValue": true
+      }
+    ],
+    "git status": [
+      {
+        "name": "--short",
+        "takesValue": false
+      },
+      {
+        "name": "--branch",
+        "takesValue": false
+      },
+      {
+        "name": "--porcelain",
+        "takesValue": false
+      },
+      {
+        "name": "--ignored",
+        "takesValue": false
+      }
+    ],
+    "git log": [
+      {
+        "name": "--oneline",
+        "takesValue": false
+      },
+      {
+        "name": "--all",
+        "takesValue": false
+      },
+      {
+        "name": "--stat",
+        "takesValue": false
+      },
+      {
+        "name": "--graph",
+        "takesValue": false
+      }
+    ],
+    "git diff": [
+      {
+        "name": "--stat",
+        "takesValue": false
+      },
+      {
+        "name": "--cached",
+        "takesValue": false
+      },
+      {
+        "name": "--name-only",
+        "takesValue": false
+      }
+    ],
+    "git add": [
+      {
+        "name": "--all",
+        "takesValue": false
+      },
+      {
+        "name": "--patch",
+        "takesValue": false
+      },
+      {
+        "name": "--update",
+        "takesValue": false
+      }
+    ],
+    "git commit": [
+      {
+        "name": "-m",
+        "takesValue": true
+      },
+      {
+        "name": "--message",
+        "takesValue": true
+      },
+      {
+        "name": "--amend",
+        "takesValue": false
+      }
+    ],
+    "python3": [
+      {
+        "name": "--version",
+        "takesValue": false
+      },
+      {
+        "name": "-m",
+        "takesValue": true
+      },
+      {
+        "name": "-c",
+        "takesValue": true
+      }
+    ],
+    "python": [
+      {
+        "name": "--version",
+        "takesValue": false
+      },
+      {
+        "name": "-m",
+        "takesValue": true
+      },
+      {
+        "name": "-c",
+        "takesValue": true
+      }
+    ],
+    "grep": [
+      {
+        "name": "-i",
+        "takesValue": false
+      },
+      {
+        "name": "-r",
+        "takesValue": false
+      },
+      {
+        "name": "-n",
+        "takesValue": false
+      },
+      {
+        "name": "--ignore-case",
+        "takesValue": false
+      }
+    ],
+    "rg": [
+      {
+        "name": "--hidden",
+        "takesValue": false
+      },
+      {
+        "name": "--glob",
+        "takesValue": true
+      },
+      {
+        "name": "--ignore-case",
+        "takesValue": false
+      }
+    ]
+  },
+  "subcommands": {
+    "git": [
+      "init",
+      "status",
+      "log",
+      "diff",
+      "add",
+      "commit",
+      "checkout",
+      "switch",
+      "branch",
+      "fetch",
+      "pull",
+      "push",
+      "show",
+      "restore",
+      "stash",
+      "clone"
+    ]
+  },
+  "symbolNames": {
+    "tilde": "~",
+    "slash": "/",
+    "forward slash": "/",
+    "backslash": "\\",
+    "back slash": "\\",
+    "backward slash": "\\",
+    "dot": ".",
+    "period": ".",
+    "full stop": ".",
+    "decimal point": ".",
+    "comma": ",",
+    "colon": ":",
+    "semicolon": ";",
+    "semi colon": ";",
+    "dash": "-",
+    "hyphen": "-",
+    "minus": "-",
+    "double dash": "--",
+    "double hyphen": "--",
+    "underscore": "_",
+    "under score": "_",
+    "plus": "+",
+    "plus sign": "+",
+    "double plus": "++",
+    "equals": "=",
+    "equal sign": "=",
+    "equals sign": "=",
+    "double equals": "==",
+    "not equals": "!=",
+    "less than": "<",
+    "greater than": ">",
+    "less than or equal": "<=",
+    "greater than or equal": ">=",
+    "double greater than": ">>",
+    "double less than": "<<",
+    "ampersand": "&",
+    "and sign": "&",
+    "double ampersand": "&&",
+    "logical and": "&&",
+    "pipe": "|",
+    "pipe through": "|",
+    "piped through": "|",
+    "tilde slash": "~/",
+    "vertical bar": "|",
+    "double pipe": "||",
+    "logical or": "||",
+    "dollar": "$",
+    "dollar sign": "$",
+    "at": "@",
+    "at sign": "@",
+    "hash": "#",
+    "hashtag": "#",
+    "hash sign": "#",
+    "pound": "#",
+    "pound sign": "#",
+    "number sign": "#",
+    "octothorpe": "#",
+    "percent": "%",
+    "percent sign": "%",
+    "caret": "^",
+    "caret sign": "^",
+    "asterisk": "*",
+    "star": "*",
+    "double asterisk": "**",
+    "question mark": "?",
+    "exclamation mark": "!",
+    "exclamation point": "!",
+    "bang": "!",
+    "quote": "\"",
+    "double quote": "\"",
+    "single quote": "'",
+    "apostrophe": "'",
+    "backtick": "`",
+    "back tick": "`",
+    "quotation mark": "\"",
+    "double quotation mark": "\"",
+    "single quotation mark": "'",
+    "open quote": "\"",
+    "close quote": "\"",
+    "open single quote": "'",
+    "close single quote": "'",
+    "open double quote": "\"",
+    "close double quote": "\"",
+    "open parenthesis": "(",
+    "close parenthesis": ")",
+    "left parenthesis": "(",
+    "right parenthesis": ")",
+    "open paren": "(",
+    "close paren": ")",
+    "left paren": "(",
+    "right paren": ")",
+    "open bracket": "[",
+    "close bracket": "]",
+    "left bracket": "[",
+    "right bracket": "]",
+    "open square bracket": "[",
+    "close square bracket": "]",
+    "left square bracket": "[",
+    "right square bracket": "]",
+    "open brace": "{",
+    "close brace": "}",
+    "left brace": "{",
+    "right brace": "}",
+    "open curly brace": "{",
+    "close curly brace": "}",
+    "left curly brace": "{",
+    "right curly brace": "}",
+    "open angle bracket": "<",
+    "close angle bracket": ">",
+    "left angle bracket": "<",
+    "right angle bracket": ">",
+    "right arrow": "->",
+    "left arrow": "<-",
+    "buc": "$",
+    "mic": ";",
+    "fas": "/",
+    "bas": "\\",
+    "pam": "&",
+    "pat": "@",
+    "soq": "'",
+    "doq": "\"",
+    "tic": "`",
+    "tis": "=",
+    "wut": "?",
+    "zap": "!",
+    "hax": "#",
+    "hep": "-",
+    "ket": "^",
+    "lac": "[",
+    "rac": "]",
+    "lit": "(",
+    "rit": ")",
+    "lob": "{",
+    "rob": "}",
+    "led": "<",
+    "ban": ">",
+    "lus": "+",
+    "stet": "==",
+    "slus": "++",
+    "shed": "--",
+    "dart": "->",
+    "dusk": "-<",
+    "lark": "+>",
+    "lush": "+<"
+  }
+}

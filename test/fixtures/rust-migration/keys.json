@@ -1,0 +1,491 @@
+{
+  "reference": "455386b",
+  "synthetic": true,
+  "cases": [
+    {
+      "name": "RSA plain",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nMIIEoAIBAAKCAQEA5OE8cz1yV1xaxv5A6vU3aDb9c2pi8XtQVEwMLOMqQzPuMdxi\nTgGfzhdOULqvSUpFWEcTO7ijo8oqbe2TokFcpF5svKQ2QpT++l1mb4EjdLwivuDl\nRvat6zHjL3wEu4fT+OSOCLhnq6sF55Ub2st2XnmoLcz3VE00xVv0YjuvzHxa8mnl\n0E413hxFPHtk0uS6pLW2cty8wToOwNN2togrFHZw0OYJ3F+L6XGbdoVuLbuCI/o0\npZRClDGJfm+uCRYmLpWbFjqLSGqPnB/TB5fdz3Oxp4I/+JvlVkySh0gDjazdOLwN\nbL3kPncF5meeetmg9WnxIAwzncDFBk8MO/ImqwIDAQABAoH/GEciQnnBas1iz4fa\nv7tGkUrVjqZO+Z3PaOkX8b5KzY+09EvfzskgmSAzPUmkJNqhZ5YqvOkYGjgUT65Q\nY+jBgQTfjCfWvMjSaF0FyAgVKMiio0JFlDuSM71R81wPcbwa5ktvkb7IoxAyv2iQ\n8vxl//h8qwCDq35xt4frer4kknOKFcnevOSKwLocV35/3Vv0LE2KFnI6OZ5bw15K\nRfYFIf6f/UBSg0mRujx0YECKwUEmyywRmxOCdwfpPl82FFf0uELZJorvXWvpV3m8\nH6oYf74M/xfz6bgQhLqRjLXaCR6xF7J6phtiy6yM07bDcr6s+ojEvn5klXGSJ1dy\nyXzxAoGBAPodcc4nK9gskauUXeGbumMLfx1gZeKmIbxnn84V+CsxbHgQNSQmDPlB\nJOaQaQpiSDcSVJvna5OMdYxK4DlB7Mslv6Lb0iB5wGuFlfhNHtUeB9T7FBkrs/GO\n75e7tdXjmeL6z970ThuiCS7IjQOU9H42fKqQ+JlhR5/R7iNonQW7AoGBAOpD4emB\n2WdMaXfCLTA4ljTgKq9PGlI72j5ilnLYNRwiyHWySz1KZfmfBFxxEH7kgVNHt/g/\nCNySZkc59rsxINBujdXhMJVm/p4Uqy7Xt4wGW71qYv3xJgObZQcPm9ZB97Ceczy0\nFwbOr3G0neJwGhEc8vzi5h8dec8Vy7bJNVvRAoGAPWIEkCek5wTpK0baU4g4kh48\nMCV8W8eR9/8mhRl3MoKKsFyp7hk4jeOi/sLqRJYiSwHAqhJ9oFSUdL3bkbHQP3sg\nMQPp6fZ3duvuBmZG7t7T5T1JjXPgUaRWwNJcqgWVutL7OSiUEswNnOGzWfGwn1kX\n93Rkzp/FSD/pRd9iygkCgYAmUp6FVYGcHWrvdWtxBQDFe5pf/V+/7hygsf4MoYPm\nq2YBov4d86rE8BeFi9V3/KePWR8mVCF9+9ERe9D6BGpqznsTbvhEqImkkJsEWbOk\nC3I8hUfWZPmkA2q+gfYrUbVURkdxucA+k9ctka92WIJbJFI3vmKI2oiPsPAXYckB\n0QKBgGYMW7+kO8Xzpl5a1c5w+YgD9ffD8rCTwofBocAS1fVAVAwTVyGsi2v60aId\n0lOdLcnkxrYgE5mR7yGq5ljPvnDgykcNmGA4+eeAzpP0UJ8lwv+8rtAuH9ORuP3+\nslv39lI/NjzvwUdKaIqwZoRq8TSUz0bZqgy0VKEDc+8lOVXf\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar",
+          "fingerprint": "SHA256:sqN7z17/k+hK4ox/h0tDTKyiYf1RSeEFXwVXFLnYyjM"
+        }
+      }
+    },
+    {
+      "name": "RSA plain",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nMIIEoAIBAAKCAQEA5OE8cz1yV1xaxv5A6vU3aDb9c2pi8XtQVEwMLOMqQzPuMdxi\nTgGfzhdOULqvSUpFWEcTO7ijo8oqbe2TokFcpF5svKQ2QpT++l1mb4EjdLwivuDl\nRvat6zHjL3wEu4fT+OSOCLhnq6sF55Ub2st2XnmoLcz3VE00xVv0YjuvzHxa8mnl\n0E413hxFPHtk0uS6pLW2cty8wToOwNN2togrFHZw0OYJ3F+L6XGbdoVuLbuCI/o0\npZRClDGJfm+uCRYmLpWbFjqLSGqPnB/TB5fdz3Oxp4I/+JvlVkySh0gDjazdOLwN\nbL3kPncF5meeetmg9WnxIAwzncDFBk8MO/ImqwIDAQABAoH/GEciQnnBas1iz4fa\nv7tGkUrVjqZO+Z3PaOkX8b5KzY+09EvfzskgmSAzPUmkJNqhZ5YqvOkYGjgUT65Q\nY+jBgQTfjCfWvMjSaF0FyAgVKMiio0JFlDuSM71R81wPcbwa5ktvkb7IoxAyv2iQ\n8vxl//h8qwCDq35xt4frer4kknOKFcnevOSKwLocV35/3Vv0LE2KFnI6OZ5bw15K\nRfYFIf6f/UBSg0mRujx0YECKwUEmyywRmxOCdwfpPl82FFf0uELZJorvXWvpV3m8\nH6oYf74M/xfz6bgQhLqRjLXaCR6xF7J6phtiy6yM07bDcr6s+ojEvn5klXGSJ1dy\nyXzxAoGBAPodcc4nK9gskauUXeGbumMLfx1gZeKmIbxnn84V+CsxbHgQNSQmDPlB\nJOaQaQpiSDcSVJvna5OMdYxK4DlB7Mslv6Lb0iB5wGuFlfhNHtUeB9T7FBkrs/GO\n75e7tdXjmeL6z970ThuiCS7IjQOU9H42fKqQ+JlhR5/R7iNonQW7AoGBAOpD4emB\n2WdMaXfCLTA4ljTgKq9PGlI72j5ilnLYNRwiyHWySz1KZfmfBFxxEH7kgVNHt/g/\nCNySZkc59rsxINBujdXhMJVm/p4Uqy7Xt4wGW71qYv3xJgObZQcPm9ZB97Ceczy0\nFwbOr3G0neJwGhEc8vzi5h8dec8Vy7bJNVvRAoGAPWIEkCek5wTpK0baU4g4kh48\nMCV8W8eR9/8mhRl3MoKKsFyp7hk4jeOi/sLqRJYiSwHAqhJ9oFSUdL3bkbHQP3sg\nMQPp6fZ3duvuBmZG7t7T5T1JjXPgUaRWwNJcqgWVutL7OSiUEswNnOGzWfGwn1kX\n93Rkzp/FSD/pRd9iygkCgYAmUp6FVYGcHWrvdWtxBQDFe5pf/V+/7hygsf4MoYPm\nq2YBov4d86rE8BeFi9V3/KePWR8mVCF9+9ERe9D6BGpqznsTbvhEqImkkJsEWbOk\nC3I8hUfWZPmkA2q+gfYrUbVURkdxucA+k9ctka92WIJbJFI3vmKI2oiPsPAXYckB\n0QKBgGYMW7+kO8Xzpl5a1c5w+YgD9ffD8rCTwofBocAS1fVAVAwTVyGsi2v60aId\n0lOdLcnkxrYgE5mR7yGq5ljPvnDgykcNmGA4+eeAzpP0UJ8lwv+8rtAuH9ORuP3+\nslv39lI/NjzvwUdKaIqwZoRq8TSUz0bZqgy0VKEDc+8lOVXf\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar",
+          "fingerprint": "SHA256:sqN7z17/k+hK4ox/h0tDTKyiYf1RSeEFXwVXFLnYyjM"
+        }
+      }
+    },
+    {
+      "name": "RSA aes-128-cbc",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,812E8F0E240DD0C701FA591A383AA7F8\n\njBobEwidzdc+2oaV/OGDSPiSbKXJotECZwfcjrBpu7d1JQ5CIehD1S67ALpf4uBd\nKmCscCYVBW8i1bxVzk9O/bM5Npe70mvTYs3SOM9inynsk4DZ4F/nB2l6cjGnAsf8\nnQyS0N72AWaMqMahp1tufxu7F1V3RBSZQtNEB2bZ6UeVvxLRZJH+g0e0FIS6Hy9+\nA8223O/kG+5qf6tBa1nsZYt8TfeW9Fx9KnwI3KnRZA+KBhShCk749hjYYK3dR90x\nUWciEpgX97l5/cOtBfjMgfSVJz5NEAWUblFKkDnTQL42/NbV1vaWf2Mta9E2ODUF\n8f6E/kGvpaHucxi4X+S6/3v3CRPE9qVzPkUVZkVwZBDTUAkM6A+acyfguMAnLZ0g\nEHpEDmsudq81v4BMk+5rXALOjKpee0ucBXqhXoZI5BTfrwekiZt1vqJOGkLPbfNa\nTY3RBqwW2Kxxxa+a9N2izCqBDoeL4WVMoOMtPlc3HbzcTpZjpc4/Y78itLVfui/7\n9ZpYsiaW1rPrcNokhENCwhLIGiQiKAmW8mlkJw96sNXRK8Q3t9RGYLQQ309VZWVc\nZcZ0J1vWMjuyCm6f0xKylL3BYNZ2vREnVnV9gi7zwUZHuvyhnNwPnCxOvQkj/osh\n5khFPu2GWGnc1f05GTny4slVgypfY/auSWlS9diMWT9xmerb5JzoTlq2tdAWI+8p\nqnwO6mvsNQKmmpk9xKw4wr/4nAeQeF23qFJWjrJlujYXbCI6vTNZarqGKECNkbHU\nr3VqyzP7vWgRgfQhN5YJv4Dd/mW8kxab8Pr+LdRSBEBisFsfdil587hDk1fpfmOo\nu7/FKt7jwMxHQlyDxU335zr2bKCgEiFQ6FWtKbJF1msgJHN/s9s45a5geonwqJwm\n9E2vv7zU49xi1s52q7lfThZkD/APxJLuDT1dJg93RfchtkdA03EuzGwW6R6stNmj\ncMfcNC4LW67mBjf2Hfw+Sx3oqAN+FZNJ9zDck3seGr5ECH5BLZKvIm3YqpN2Qf9f\nKpy/CCtyZ3RCNVbPTdXWwoGM+iK4uXlQ70RQHfawETv/tOSivHjohQOSAMt7aPN3\nfeMbvMBgLJ8aY1Inxy5A2eDe0gZ5VI9v3don6ln0UGedmrd1uR7cpvOPnGtKUKKZ\nBwV5C0uS/MV3JUKpsDUDungfsg7/Arc2oYFexMm8AJ+EgxjezxcJEPzjtNSjsgn+\nq0BriAVHHGU1B3YA1TgVA/4fV1OzBtGtsmiI6sLOre9RagOWRuesRdf6LYA4S1CX\nO8X66zxq1uFeArxb/qqBrV9+jtZNJG9z4VLbj2JOBWc2ibhbW5GdJSu+rFNTfCp/\nHOnXso6TtnAO+4wl/95txdXMFHHlA9jNVDbyVSjnXEKswupKYMagh5CW3R0CMxHe\nSZkhKgPzguhlYpaOu63ofSNdqb0mMhFyobNVL55QYZrSehV65aq0xE54jzhRWlof\n9UCC3lS9helaQ3RXb3mBJ91ApZyOOMwpCw8T/HUn8mklPzy8QyK3B9cXFYNz+J0h\np2yEinVmt0YRA+SZWjErYHcRD+WwGFRnCwrv0dVMLcc7CQs61AkZXSbAs8zln/TQ\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar",
+          "fingerprint": "SHA256:sqN7z17/k+hK4ox/h0tDTKyiYf1RSeEFXwVXFLnYyjM"
+        }
+      }
+    },
+    {
+      "name": "RSA aes-128-cbc",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,812E8F0E240DD0C701FA591A383AA7F8\n\njBobEwidzdc+2oaV/OGDSPiSbKXJotECZwfcjrBpu7d1JQ5CIehD1S67ALpf4uBd\nKmCscCYVBW8i1bxVzk9O/bM5Npe70mvTYs3SOM9inynsk4DZ4F/nB2l6cjGnAsf8\nnQyS0N72AWaMqMahp1tufxu7F1V3RBSZQtNEB2bZ6UeVvxLRZJH+g0e0FIS6Hy9+\nA8223O/kG+5qf6tBa1nsZYt8TfeW9Fx9KnwI3KnRZA+KBhShCk749hjYYK3dR90x\nUWciEpgX97l5/cOtBfjMgfSVJz5NEAWUblFKkDnTQL42/NbV1vaWf2Mta9E2ODUF\n8f6E/kGvpaHucxi4X+S6/3v3CRPE9qVzPkUVZkVwZBDTUAkM6A+acyfguMAnLZ0g\nEHpEDmsudq81v4BMk+5rXALOjKpee0ucBXqhXoZI5BTfrwekiZt1vqJOGkLPbfNa\nTY3RBqwW2Kxxxa+a9N2izCqBDoeL4WVMoOMtPlc3HbzcTpZjpc4/Y78itLVfui/7\n9ZpYsiaW1rPrcNokhENCwhLIGiQiKAmW8mlkJw96sNXRK8Q3t9RGYLQQ309VZWVc\nZcZ0J1vWMjuyCm6f0xKylL3BYNZ2vREnVnV9gi7zwUZHuvyhnNwPnCxOvQkj/osh\n5khFPu2GWGnc1f05GTny4slVgypfY/auSWlS9diMWT9xmerb5JzoTlq2tdAWI+8p\nqnwO6mvsNQKmmpk9xKw4wr/4nAeQeF23qFJWjrJlujYXbCI6vTNZarqGKECNkbHU\nr3VqyzP7vWgRgfQhN5YJv4Dd/mW8kxab8Pr+LdRSBEBisFsfdil587hDk1fpfmOo\nu7/FKt7jwMxHQlyDxU335zr2bKCgEiFQ6FWtKbJF1msgJHN/s9s45a5geonwqJwm\n9E2vv7zU49xi1s52q7lfThZkD/APxJLuDT1dJg93RfchtkdA03EuzGwW6R6stNmj\ncMfcNC4LW67mBjf2Hfw+Sx3oqAN+FZNJ9zDck3seGr5ECH5BLZKvIm3YqpN2Qf9f\nKpy/CCtyZ3RCNVbPTdXWwoGM+iK4uXlQ70RQHfawETv/tOSivHjohQOSAMt7aPN3\nfeMbvMBgLJ8aY1Inxy5A2eDe0gZ5VI9v3don6ln0UGedmrd1uR7cpvOPnGtKUKKZ\nBwV5C0uS/MV3JUKpsDUDungfsg7/Arc2oYFexMm8AJ+EgxjezxcJEPzjtNSjsgn+\nq0BriAVHHGU1B3YA1TgVA/4fV1OzBtGtsmiI6sLOre9RagOWRuesRdf6LYA4S1CX\nO8X66zxq1uFeArxb/qqBrV9+jtZNJG9z4VLbj2JOBWc2ibhbW5GdJSu+rFNTfCp/\nHOnXso6TtnAO+4wl/95txdXMFHHlA9jNVDbyVSjnXEKswupKYMagh5CW3R0CMxHe\nSZkhKgPzguhlYpaOu63ofSNdqb0mMhFyobNVL55QYZrSehV65aq0xE54jzhRWlof\n9UCC3lS9helaQ3RXb3mBJ91ApZyOOMwpCw8T/HUn8mklPzy8QyK3B9cXFYNz+J0h\np2yEinVmt0YRA+SZWjErYHcRD+WwGFRnCwrv0dVMLcc7CQs61AkZXSbAs8zln/TQ\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "RSA aes-192-cbc",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-192-CBC,219BEFF4FC4E4AB6D091300C27BB5401\n\n2GrhipjYtgj31VNNZqB2MiZDCrRWhZNvu9HXF+eEc/re76WtMvAEIoRw0DBMLm5q\na1onv8zwyq8HnMqtkBBdXTCpdZ1fgHXqdoOpXcXFqbOmDxAtvXY9cJjFWQ3ZH4ni\npF+wG/7kDicQc7IF+a5FG/WAnCIRoC2l3MFChSpMqpw5ntkWDU9pExaX8rOHJV3h\nesOGz/TqHORNz0mQA8ZTGBVvpVuijyG3t6e1OCCj5X3zTsmTZSWbTO/02G2Zk6y6\nG52lXdLynGqxb3VNWdRTOzSnrfLw1BdKhfFmLfyWiPH5Q7SWW/5cjEMI37E1irOf\n42F3YdCnPnTZJveECT7LNOTo3sfHXjDIyarNTUcmiiksOYrUKERigrL4kcC4aUr2\nWjlQF5C5P5cse4u7h5UK/d+3FtZjSH6fTg8oOeKF5nZAExTif8WiMU0Pm6nvS7MJ\nOGxEAsEiIj57eAYJsWaEkm4LyJlAzXoSzDzQT8SGMFHEYcjjVkm+zt8Xk/xqE0nY\nLwwuMCfDOgUVEBbbrs73GZjLchfIHahc1Gyua44/hW363KNZ/1liZZDVb2KXrw0z\nTmLSaTIf/2JI0aJwzWiQ6EG6UyZPPPzU6kttutR4M33wSNNp9o2Nz4QNWuHuL4gO\nI3CqHGlNbE/7GuN1HypBm7S3EYzBn4u6QVCr3htTdIIf2wsyWPqkjUxeq9IHFEkD\ncnJe3K/uq8HkM3GhuHLxDEsnSIF82Q33ZZMBK887fUKYnD8r461Bu2Ue7l5doAZg\noobFya4YasVFHcIj60KhG0nJUXOkSK8nkAWUM3zql98ZIbSAiJAZ6cA7bMjwY0FZ\neFDaiGPDdRKkp4O3P1UVE3obTpoFJP3j4qrUUHSk6KLoyuRBSu2NaWsLjfbXlZTX\nA3LVBk3mvDMdfdl3BTRnDKcaOH6CJ2FJ5EgyUmfqo6wHe4FqZ9D1F20ZnzDFrV/6\nGQazDtb674ylE+F04V/pWhP2ZDgr26GscjaPD8nQUuqa0XmmNgkYHdM0pqOt5od8\n3mp0W7kzxv7PqFSfDUBGD62iW130Fxjg4v4faGWKsr3ygmPY+ZWfryY27UWbFK+B\n4NInS/ec11nlVwI+CpZRaCkQKDysRymsycg9XSO/9S18jcdgEBAAiIoU9qaQChcA\nhMwDCs49aZEojLldeagSI50tPkceI3SD7NozVkKqjOzICBDTEfvFKB1v3pAF8HSu\nIXFlGBv0UgNuxu02syx+/wcOS80cTlt7Jgz859W6Ee/j70J6GZKLkbCgXXQ6rIch\nBxi2iejqgMGhYwW18dW/cITCx72E8tmw1xskgxOy0k8XsCT7i7xVO/BsG5bH/V5n\nFPMORobSkkxa5SbcrM1xej8am8DTwzO71Giyf5+y+hbZBXrugLZM52pkoN5Wf+Tn\nF1fX5zY+PVioOR1t9Dkbisbm37bctsQRZu4CPY9Vyli5GkhmQnoGlsgr698gtS8H\nGOn6SvyDL1wotCvsW4ofQTD0PkPbxecDzWN6ke70qojRCQmEcjut7e5O2Gf+oRSy\nw4s/hNcFRiqeqOtPRVUrhHJozmgVAJXjhKypklUTdNmGSokar1WhHCYimswwSiIs\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar",
+          "fingerprint": "SHA256:sqN7z17/k+hK4ox/h0tDTKyiYf1RSeEFXwVXFLnYyjM"
+        }
+      }
+    },
+    {
+      "name": "RSA aes-192-cbc",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-192-CBC,219BEFF4FC4E4AB6D091300C27BB5401\n\n2GrhipjYtgj31VNNZqB2MiZDCrRWhZNvu9HXF+eEc/re76WtMvAEIoRw0DBMLm5q\na1onv8zwyq8HnMqtkBBdXTCpdZ1fgHXqdoOpXcXFqbOmDxAtvXY9cJjFWQ3ZH4ni\npF+wG/7kDicQc7IF+a5FG/WAnCIRoC2l3MFChSpMqpw5ntkWDU9pExaX8rOHJV3h\nesOGz/TqHORNz0mQA8ZTGBVvpVuijyG3t6e1OCCj5X3zTsmTZSWbTO/02G2Zk6y6\nG52lXdLynGqxb3VNWdRTOzSnrfLw1BdKhfFmLfyWiPH5Q7SWW/5cjEMI37E1irOf\n42F3YdCnPnTZJveECT7LNOTo3sfHXjDIyarNTUcmiiksOYrUKERigrL4kcC4aUr2\nWjlQF5C5P5cse4u7h5UK/d+3FtZjSH6fTg8oOeKF5nZAExTif8WiMU0Pm6nvS7MJ\nOGxEAsEiIj57eAYJsWaEkm4LyJlAzXoSzDzQT8SGMFHEYcjjVkm+zt8Xk/xqE0nY\nLwwuMCfDOgUVEBbbrs73GZjLchfIHahc1Gyua44/hW363KNZ/1liZZDVb2KXrw0z\nTmLSaTIf/2JI0aJwzWiQ6EG6UyZPPPzU6kttutR4M33wSNNp9o2Nz4QNWuHuL4gO\nI3CqHGlNbE/7GuN1HypBm7S3EYzBn4u6QVCr3htTdIIf2wsyWPqkjUxeq9IHFEkD\ncnJe3K/uq8HkM3GhuHLxDEsnSIF82Q33ZZMBK887fUKYnD8r461Bu2Ue7l5doAZg\noobFya4YasVFHcIj60KhG0nJUXOkSK8nkAWUM3zql98ZIbSAiJAZ6cA7bMjwY0FZ\neFDaiGPDdRKkp4O3P1UVE3obTpoFJP3j4qrUUHSk6KLoyuRBSu2NaWsLjfbXlZTX\nA3LVBk3mvDMdfdl3BTRnDKcaOH6CJ2FJ5EgyUmfqo6wHe4FqZ9D1F20ZnzDFrV/6\nGQazDtb674ylE+F04V/pWhP2ZDgr26GscjaPD8nQUuqa0XmmNgkYHdM0pqOt5od8\n3mp0W7kzxv7PqFSfDUBGD62iW130Fxjg4v4faGWKsr3ygmPY+ZWfryY27UWbFK+B\n4NInS/ec11nlVwI+CpZRaCkQKDysRymsycg9XSO/9S18jcdgEBAAiIoU9qaQChcA\nhMwDCs49aZEojLldeagSI50tPkceI3SD7NozVkKqjOzICBDTEfvFKB1v3pAF8HSu\nIXFlGBv0UgNuxu02syx+/wcOS80cTlt7Jgz859W6Ee/j70J6GZKLkbCgXXQ6rIch\nBxi2iejqgMGhYwW18dW/cITCx72E8tmw1xskgxOy0k8XsCT7i7xVO/BsG5bH/V5n\nFPMORobSkkxa5SbcrM1xej8am8DTwzO71Giyf5+y+hbZBXrugLZM52pkoN5Wf+Tn\nF1fX5zY+PVioOR1t9Dkbisbm37bctsQRZu4CPY9Vyli5GkhmQnoGlsgr698gtS8H\nGOn6SvyDL1wotCvsW4ofQTD0PkPbxecDzWN6ke70qojRCQmEcjut7e5O2Gf+oRSy\nw4s/hNcFRiqeqOtPRVUrhHJozmgVAJXjhKypklUTdNmGSokar1WhHCYimswwSiIs\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "RSA aes-256-cbc",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,8C2F3461F9D591A20FE30FE133C52D4E\n\nZTqDWll4Ye7alQGSpvYugwaILypyk5Y/mOcoYzYx4dLT0luv9nLBYmDWPoZUj9hg\nb9f6GUaddw2pzNFAQyMl0fTXJcJ5S4gMbOx8Rd/BLRJtckNgzRkx2xiLcsSGzrzG\nJVUe6YY/A+52RoFAqqyR633THY//rsaS1I1oTihCAuDezlrT1GQjrLLPmb+mvgbS\nKixGITB8t5bVcn64fGUKInk31YsDmrE+58+/lpiQ0XM+GobqWWkmDInpM5VyOtLg\newbAO80zTcQJPkZ/ss7D7WnUCKUASuZvCoU33TYEEjIW8e/lnCnmUg37iE2kE7zF\nGuOtqYB0nt2g9uYlNHgX4wchja4WcKazMLMKpcIxnGrZNwnO30e+MH8KazalnKY1\nvByzGcnY6/9z+7hwLS1UD+9cb61UeSeZ3SlDg0rHndsk5efa+nKy3kN9QWYDvylF\ni3UecBs7H9C/KFZcGhBQ4sDiU4gaJu7+EGP5/uvxP/NhSFqWGgur7MWnw3vQtkyM\nUhNah/tlY6Q0gPDu/HcZU392OUyecBW3H5Q94zyEK+VmKqf3/QPCJ547R3u/Vaiu\nUk0LK4geDaNRovwiSpddqgbO83I5m0fKr95k2yrw05LZ8jq8JtJkyA56+BdKTFLh\nylr5oL7f6dehnp1PzsCdfbO20LdNOmzk261QVP0J75mworh6s+digFw0T415ltGQ\nMUutdPvuhuTXDlPUbxJDBTiuKfHNHwRX0FkMASsEKuYMYUPOIWmCxi2XIjo2nq/p\nNSOUl2EE+OpClgwWkRoVB311Gje9qyNCZbijO/LTYZ0SCXPXAXoBGo139h6waLW/\nPsZ9YiZTePhXclhV79s6q8WUrlUcSKxjCIwd55mxXt5sZoe/YQQEil94nJjMjDmM\nKsvAwzvtzfeFqxwjvDd8Z21JQPNNM23Dr5JGhq+ha8dvltbJ1ac5U6gyvphEOnQg\noj8KgmgYeMCi1V47SO+p8+5CB7MhtU6p2Xv/bB0Q8nY31pYX4Kr5d9vTuAzPgzXo\nUmMBXkRKY3hb87wNXMptxb7/ebleCdvZN9xnxECm8iOMkur6VFOFUCGM7TeeLkGS\n/Wpcn0tPy1OaDYaIMeWMEWalqtHD2+rxyvOcVNnkqYTS23TleHTNioHu4RQT2d5H\n3YDLXJAuZLhAdoIl2db1Y+NTkT39qk/TnmLGhR65zYBRPB6vFDy9qeBG2grkewy6\n4jQ1mBf9uW7fum7dldaXkD6gk8IJxUzemhvmUhTmBhmENWuu9Q+9QYzdsGTvRAS5\nsZS5l5yeH1lm5bE2P+6YqEsnky5hqRzMqBYVJ2USccV0utUW6PXtbsRNsEknJ2P8\nri9k9JiW6WqUIjgDR7gCQObjZqSF9U2+ZF9kYxTqGsemqut0gC1xH/oaH5n58t/q\nvVxYma6afY0x5QM6WA+fOI6Ohp5VP6QcYT6rJWMytTJM2I8Z7+4BD+R06z2jub7s\n8leobZcD7nYoqQQ9ptBERcmyf5uU/7HvOQURbqPM5pJGIlso7N0Q04NuLLShcD5j\nIT8CxBoFsPDGPAlz/kCr8tQTSD/33v5/j0yC4/QRrWdgGbUJ2e6th8khF1YvHqwy\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar",
+          "fingerprint": "SHA256:sqN7z17/k+hK4ox/h0tDTKyiYf1RSeEFXwVXFLnYyjM"
+        }
+      }
+    },
+    {
+      "name": "RSA aes-256-cbc",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,8C2F3461F9D591A20FE30FE133C52D4E\n\nZTqDWll4Ye7alQGSpvYugwaILypyk5Y/mOcoYzYx4dLT0luv9nLBYmDWPoZUj9hg\nb9f6GUaddw2pzNFAQyMl0fTXJcJ5S4gMbOx8Rd/BLRJtckNgzRkx2xiLcsSGzrzG\nJVUe6YY/A+52RoFAqqyR633THY//rsaS1I1oTihCAuDezlrT1GQjrLLPmb+mvgbS\nKixGITB8t5bVcn64fGUKInk31YsDmrE+58+/lpiQ0XM+GobqWWkmDInpM5VyOtLg\newbAO80zTcQJPkZ/ss7D7WnUCKUASuZvCoU33TYEEjIW8e/lnCnmUg37iE2kE7zF\nGuOtqYB0nt2g9uYlNHgX4wchja4WcKazMLMKpcIxnGrZNwnO30e+MH8KazalnKY1\nvByzGcnY6/9z+7hwLS1UD+9cb61UeSeZ3SlDg0rHndsk5efa+nKy3kN9QWYDvylF\ni3UecBs7H9C/KFZcGhBQ4sDiU4gaJu7+EGP5/uvxP/NhSFqWGgur7MWnw3vQtkyM\nUhNah/tlY6Q0gPDu/HcZU392OUyecBW3H5Q94zyEK+VmKqf3/QPCJ547R3u/Vaiu\nUk0LK4geDaNRovwiSpddqgbO83I5m0fKr95k2yrw05LZ8jq8JtJkyA56+BdKTFLh\nylr5oL7f6dehnp1PzsCdfbO20LdNOmzk261QVP0J75mworh6s+digFw0T415ltGQ\nMUutdPvuhuTXDlPUbxJDBTiuKfHNHwRX0FkMASsEKuYMYUPOIWmCxi2XIjo2nq/p\nNSOUl2EE+OpClgwWkRoVB311Gje9qyNCZbijO/LTYZ0SCXPXAXoBGo139h6waLW/\nPsZ9YiZTePhXclhV79s6q8WUrlUcSKxjCIwd55mxXt5sZoe/YQQEil94nJjMjDmM\nKsvAwzvtzfeFqxwjvDd8Z21JQPNNM23Dr5JGhq+ha8dvltbJ1ac5U6gyvphEOnQg\noj8KgmgYeMCi1V47SO+p8+5CB7MhtU6p2Xv/bB0Q8nY31pYX4Kr5d9vTuAzPgzXo\nUmMBXkRKY3hb87wNXMptxb7/ebleCdvZN9xnxECm8iOMkur6VFOFUCGM7TeeLkGS\n/Wpcn0tPy1OaDYaIMeWMEWalqtHD2+rxyvOcVNnkqYTS23TleHTNioHu4RQT2d5H\n3YDLXJAuZLhAdoIl2db1Y+NTkT39qk/TnmLGhR65zYBRPB6vFDy9qeBG2grkewy6\n4jQ1mBf9uW7fum7dldaXkD6gk8IJxUzemhvmUhTmBhmENWuu9Q+9QYzdsGTvRAS5\nsZS5l5yeH1lm5bE2P+6YqEsnky5hqRzMqBYVJ2USccV0utUW6PXtbsRNsEknJ2P8\nri9k9JiW6WqUIjgDR7gCQObjZqSF9U2+ZF9kYxTqGsemqut0gC1xH/oaH5n58t/q\nvVxYma6afY0x5QM6WA+fOI6Ohp5VP6QcYT6rJWMytTJM2I8Z7+4BD+R06z2jub7s\n8leobZcD7nYoqQQ9ptBERcmyf5uU/7HvOQURbqPM5pJGIlso7N0Q04NuLLShcD5j\nIT8CxBoFsPDGPAlz/kCr8tQTSD/33v5/j0yC4/QRrWdgGbUJ2e6th8khF1YvHqwy\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "RSA des-ede3-cbc",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: DES-EDE3-CBC,65DF42DA0FE9ED05\n\njcdC8qRNApb2KEMKcemY2qMMKizzxq6khYWkU+zV7uL3yLdiE8pnH4Wr865AKOEE\n+6zC3UWcNdNUXqJLPeVVHU2dhc8VprsyS/RXTU+6jC1MnI+g8sdPFQdm2KKnFIKz\n18+h0auSO4Zi7NY0oQVq+Ve3PtU7N1ShJ2H04nG436k6Hc4Z8Rs6Xv8bHDEqwJus\nw8jdSoxekjrBSjlFUbM8f5K9/mPh1I4nCgCcQjIY3U7JKvgjKatO79VSdMd1+iAg\n7NS0vSsXaQza7k44s+o6Yhu/KriIJMu0MegOsAYsbrqBx99yuFRNZQKsXKfIHxxL\nGRPvpzon9cg15t8ogxEJUdxsdz/MB8Uyf73OPv4VhZHlskKXIbExh2q57SiN15VJ\nKnuFS8g9kD7N7d5Cf9UvMy6iiyZjxbmTqKZwqfxe3NlUBZ6xRaUl9w8ux8R6cGGk\nTKMrhMgwWTMTx1sLZswnqmmuFWZn2ALT2Q0IbJtegsPDPX04+OYnRVepsJwwYGRO\nMWYAczc0ETrLcX0OAWk85PMx2G2c0sKL4W4cvLLot7bScbx6UlF/B09TLCbTGj3Q\nWHMXyOvDbK08rF0QzmsiI2wDq4OuLCTsz6DoeX5rgYwiUhK/o1Xgai6wAaiJVHUf\nJa3bUwSAS34iXfgcMSBFpVV5qI0vA6WXQiXaI5++EUWaDCaC1cSUAYAN5dsXNiSs\n4vhsmQ+hEkOGSF6Yx666RbtYWieDiXMKGIme38gqOxTV+Tqq2i54DkuPIJDONXIm\nMORsZnD4uq95MH+7ZJ/llqBmcZWNF22RIp2PHIrlo48MnM96DwQ9CmB2qu5GFBzk\nRNxFpciqM+ezsPebDMBmBDF+oi2A9XrEbnvsCtMDVXHmI1yh4CpdDrQxez7ekuex\ndQaKqwZvtfFaUwNMg54xonqtY72/ICKow5NzIrHhRdueBF/cO/J73zqRRjB9GR5z\nnlf6XRSZex9OvzVw1dnFs4McERSleaMjjpQQyQMDpm1UPBQs5FJioMqhWzrYBvHU\n5L0lg7ZwoRyvmYojErWZi+YpXt4VA8dobokTu1QrHjsLBxs2LMaYfHxvx60gV0jW\n+imAsy43x0fxS9KTmDzKZOLLPd4gnHgkMknnWaaOLQU6R8g2BYuniid3NJS7qjG2\nEaoB2H3b+n4D0zvBd0Ktz8xValKcseYeXdSTZIBmazwt5ZrVHYZjwmVJXHAMGOg5\ndomnDSgQR7imybUl/ZmdUIlOvRaaA9OCo2IBfu/8g4UO/BE7jxKmN4MMgMm/B6g7\n1WJMI0eeQNgK78AU0jnyKRSg3zHrcCVQfXEgoqE+kQpwx1NZh4+09LkQJt+FcfdB\nPbXHZKt2CVL9LVfmpgQpMVB1YqaHo6Qz/oNWAfW3xxSgFhixRbZWTCAgQnlFrJvb\nhJ6TMwbLQcwekUKfXo9BohHiSj5qxgaatJKhzvNwPaoA1hFiYzQeWdYnKMzLxfiU\n5fxSRxWvzCa2lyv90DjofrZ3K9a9m0op/I+JNRKhkKndQLGurV05xfOUM4lD9IXf\nkAIM5810MXnuPDs+SRTfEbq3Usf9xbEQctlx4EcDpq+jDZCkLDJJiw==\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar",
+          "fingerprint": "SHA256:sqN7z17/k+hK4ox/h0tDTKyiYf1RSeEFXwVXFLnYyjM"
+        }
+      }
+    },
+    {
+      "name": "RSA des-ede3-cbc",
+      "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: DES-EDE3-CBC,65DF42DA0FE9ED05\n\njcdC8qRNApb2KEMKcemY2qMMKizzxq6khYWkU+zV7uL3yLdiE8pnH4Wr865AKOEE\n+6zC3UWcNdNUXqJLPeVVHU2dhc8VprsyS/RXTU+6jC1MnI+g8sdPFQdm2KKnFIKz\n18+h0auSO4Zi7NY0oQVq+Ve3PtU7N1ShJ2H04nG436k6Hc4Z8Rs6Xv8bHDEqwJus\nw8jdSoxekjrBSjlFUbM8f5K9/mPh1I4nCgCcQjIY3U7JKvgjKatO79VSdMd1+iAg\n7NS0vSsXaQza7k44s+o6Yhu/KriIJMu0MegOsAYsbrqBx99yuFRNZQKsXKfIHxxL\nGRPvpzon9cg15t8ogxEJUdxsdz/MB8Uyf73OPv4VhZHlskKXIbExh2q57SiN15VJ\nKnuFS8g9kD7N7d5Cf9UvMy6iiyZjxbmTqKZwqfxe3NlUBZ6xRaUl9w8ux8R6cGGk\nTKMrhMgwWTMTx1sLZswnqmmuFWZn2ALT2Q0IbJtegsPDPX04+OYnRVepsJwwYGRO\nMWYAczc0ETrLcX0OAWk85PMx2G2c0sKL4W4cvLLot7bScbx6UlF/B09TLCbTGj3Q\nWHMXyOvDbK08rF0QzmsiI2wDq4OuLCTsz6DoeX5rgYwiUhK/o1Xgai6wAaiJVHUf\nJa3bUwSAS34iXfgcMSBFpVV5qI0vA6WXQiXaI5++EUWaDCaC1cSUAYAN5dsXNiSs\n4vhsmQ+hEkOGSF6Yx666RbtYWieDiXMKGIme38gqOxTV+Tqq2i54DkuPIJDONXIm\nMORsZnD4uq95MH+7ZJ/llqBmcZWNF22RIp2PHIrlo48MnM96DwQ9CmB2qu5GFBzk\nRNxFpciqM+ezsPebDMBmBDF+oi2A9XrEbnvsCtMDVXHmI1yh4CpdDrQxez7ekuex\ndQaKqwZvtfFaUwNMg54xonqtY72/ICKow5NzIrHhRdueBF/cO/J73zqRRjB9GR5z\nnlf6XRSZex9OvzVw1dnFs4McERSleaMjjpQQyQMDpm1UPBQs5FJioMqhWzrYBvHU\n5L0lg7ZwoRyvmYojErWZi+YpXt4VA8dobokTu1QrHjsLBxs2LMaYfHxvx60gV0jW\n+imAsy43x0fxS9KTmDzKZOLLPd4gnHgkMknnWaaOLQU6R8g2BYuniid3NJS7qjG2\nEaoB2H3b+n4D0zvBd0Ktz8xValKcseYeXdSTZIBmazwt5ZrVHYZjwmVJXHAMGOg5\ndomnDSgQR7imybUl/ZmdUIlOvRaaA9OCo2IBfu/8g4UO/BE7jxKmN4MMgMm/B6g7\n1WJMI0eeQNgK78AU0jnyKRSg3zHrcCVQfXEgoqE+kQpwx1NZh4+09LkQJt+FcfdB\nPbXHZKt2CVL9LVfmpgQpMVB1YqaHo6Qz/oNWAfW3xxSgFhixRbZWTCAgQnlFrJvb\nhJ6TMwbLQcwekUKfXo9BohHiSj5qxgaatJKhzvNwPaoA1hFiYzQeWdYnKMzLxfiU\n5fxSRxWvzCa2lyv90DjofrZ3K9a9m0op/I+JNRKhkKndQLGurV05xfOUM4lD9IXf\nkAIM5810MXnuPDs+SRTfEbq3Usf9xbEQctlx4EcDpq+jDZCkLDJJiw==\n-----END RSA PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "EC prime256v1 plain",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIET9b4Q9W/Gqyc0EdIKZIVK8XcQZV+5dCvlDGLOCaGS+oAoGCCqGSM49\nAwEHoUQDQgAETsd0Eb/1cZh8vfs3xhxdbwKQMo4PtVjk3ENaQbmt8CjIuT94+rth\n9zbcoocWAzUtdjn7+ZyxbfNgMnH0CLxy/g==\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBE7HdBG/9XGYfL37N8YcXW8CkDKOD7VY5NxDWkG5rfAoyLk/ePq7Yfc23KKHFgM1LXY5+/mcsW3zYDJx9Ai8cv4=",
+          "fingerprint": "SHA256:iWjO0fKap8j9EPBqkp+KVl/49NBKreKakvWmKT+ERLE"
+        }
+      }
+    },
+    {
+      "name": "EC prime256v1 plain",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIET9b4Q9W/Gqyc0EdIKZIVK8XcQZV+5dCvlDGLOCaGS+oAoGCCqGSM49\nAwEHoUQDQgAETsd0Eb/1cZh8vfs3xhxdbwKQMo4PtVjk3ENaQbmt8CjIuT94+rth\n9zbcoocWAzUtdjn7+ZyxbfNgMnH0CLxy/g==\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBE7HdBG/9XGYfL37N8YcXW8CkDKOD7VY5NxDWkG5rfAoyLk/ePq7Yfc23KKHFgM1LXY5+/mcsW3zYDJx9Ai8cv4=",
+          "fingerprint": "SHA256:iWjO0fKap8j9EPBqkp+KVl/49NBKreKakvWmKT+ERLE"
+        }
+      }
+    },
+    {
+      "name": "EC prime256v1 aes-256-cbc",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,9801E658CDA6E137BC53451BCEC77E7A\n\nhyKdoxQYvYU/CMEXZLq31MhVYvnryuMizovpSWT+w9niDvjtyToM2gOu6jtg9QYU\n8P0ccgEr2bh/2heZGDGY7RpAwK7CONov/H8gLwIuL/HKGAy5RIsxdpyjfagsPVii\nU9Ha485xp8l8WAKeesIZnhcepSMxF/yUn1inRdBrE5s=\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBE7HdBG/9XGYfL37N8YcXW8CkDKOD7VY5NxDWkG5rfAoyLk/ePq7Yfc23KKHFgM1LXY5+/mcsW3zYDJx9Ai8cv4=",
+          "fingerprint": "SHA256:iWjO0fKap8j9EPBqkp+KVl/49NBKreKakvWmKT+ERLE"
+        }
+      }
+    },
+    {
+      "name": "EC prime256v1 aes-256-cbc",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,9801E658CDA6E137BC53451BCEC77E7A\n\nhyKdoxQYvYU/CMEXZLq31MhVYvnryuMizovpSWT+w9niDvjtyToM2gOu6jtg9QYU\n8P0ccgEr2bh/2heZGDGY7RpAwK7CONov/H8gLwIuL/HKGAy5RIsxdpyjfagsPVii\nU9Ha485xp8l8WAKeesIZnhcepSMxF/yUn1inRdBrE5s=\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "Unsupported PKCS8 prime256v1",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgRP1vhD1b8arJzQR0\ngpkhUrxdxBlX7l0K+UMYs4JoZL6hRANCAAROx3QRv/VxmHy9+zfGHF1vApAyjg+1\nWOTcQ1pBua3wKMi5P3j6u2H3NtyihxYDNS12Ofv5nLFt82AycfQIvHL+\n-----END PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "Unsupported PKCS8 prime256v1",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgRP1vhD1b8arJzQR0\ngpkhUrxdxBlX7l0K+UMYs4JoZL6hRANCAAROx3QRv/VxmHy9+zfGHF1vApAyjg+1\nWOTcQ1pBua3wKMi5P3j6u2H3NtyihxYDNS12Ofv5nLFt82AycfQIvHL+\n-----END PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "EC secp384r1 plain",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nMIGkAgEBBDC6ctmqya7JFN9q5DdNbY8E4BGn4UgxCeDZYiXPM6mQkxUpqEPWxX0A\nTSMjBvKs4zegBwYFK4EEACKhZANiAARvO21e/HDS5kx3HNQEdAZWRWWYbc4sj2+2\nEImJbZ/lYNOYS6IfMM4jRvcArCI6i6URkRE4zZOanlLFvLbUbNts0dfprm3Aaavd\nEVeNye7aDfbowqbBeJ3E3Pf9JY+fqc8=\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBG87bV78cNLmTHcc1AR0BlZFZZhtziyPb7YQiYltn+Vg05hLoh8wziNG9wCsIjqLpRGRETjNk5qeUsW8ttRs22zR1+mubcBpq90RV43J7toN9ujCpsF4ncTc9/0lj5+pzw==",
+          "fingerprint": "SHA256:o/7WxPoyHfIJUbzXnubNkbBBTM18roK8gzsO6F/RGWs"
+        }
+      }
+    },
+    {
+      "name": "EC secp384r1 plain",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nMIGkAgEBBDC6ctmqya7JFN9q5DdNbY8E4BGn4UgxCeDZYiXPM6mQkxUpqEPWxX0A\nTSMjBvKs4zegBwYFK4EEACKhZANiAARvO21e/HDS5kx3HNQEdAZWRWWYbc4sj2+2\nEImJbZ/lYNOYS6IfMM4jRvcArCI6i6URkRE4zZOanlLFvLbUbNts0dfprm3Aaavd\nEVeNye7aDfbowqbBeJ3E3Pf9JY+fqc8=\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBG87bV78cNLmTHcc1AR0BlZFZZhtziyPb7YQiYltn+Vg05hLoh8wziNG9wCsIjqLpRGRETjNk5qeUsW8ttRs22zR1+mubcBpq90RV43J7toN9ujCpsF4ncTc9/0lj5+pzw==",
+          "fingerprint": "SHA256:o/7WxPoyHfIJUbzXnubNkbBBTM18roK8gzsO6F/RGWs"
+        }
+      }
+    },
+    {
+      "name": "EC secp384r1 aes-256-cbc",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,D646BBD54954F303153EDB9C6095B039\n\n2gyrvpuHf4FFxYwYw6iNjoevH8yvuWwAQ+nDCcGxgOyJw2QUYjO29RhteZY5Y7x9\nDEstl0S4sJEdX88kBOXSQA6nwv6YlOK1mLNS/tXzC21nckPzS/PEqqyCx7Dwk094\nyDeHqXD49exJleu5GkOKWVTXb5Govbfx0zwlGZWm0AqvLSuFIFbGGx0N/b/vPeMi\nRpFLE3U49y4V6HhuA4PnvzYG08fnK5UdkZ8WOWI1CYM=\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp384 AAAAE2VjZHNhLXNoYTItbmlzdHAzODQAAAAIbmlzdHAzODQAAABhBG87bV78cNLmTHcc1AR0BlZFZZhtziyPb7YQiYltn+Vg05hLoh8wziNG9wCsIjqLpRGRETjNk5qeUsW8ttRs22zR1+mubcBpq90RV43J7toN9ujCpsF4ncTc9/0lj5+pzw==",
+          "fingerprint": "SHA256:o/7WxPoyHfIJUbzXnubNkbBBTM18roK8gzsO6F/RGWs"
+        }
+      }
+    },
+    {
+      "name": "EC secp384r1 aes-256-cbc",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,D646BBD54954F303153EDB9C6095B039\n\n2gyrvpuHf4FFxYwYw6iNjoevH8yvuWwAQ+nDCcGxgOyJw2QUYjO29RhteZY5Y7x9\nDEstl0S4sJEdX88kBOXSQA6nwv6YlOK1mLNS/tXzC21nckPzS/PEqqyCx7Dwk094\nyDeHqXD49exJleu5GkOKWVTXb5Govbfx0zwlGZWm0AqvLSuFIFbGGx0N/b/vPeMi\nRpFLE3U49y4V6HhuA4PnvzYG08fnK5UdkZ8WOWI1CYM=\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "Unsupported PKCS8 secp384r1",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDC6ctmqya7JFN9q5DdN\nbY8E4BGn4UgxCeDZYiXPM6mQkxUpqEPWxX0ATSMjBvKs4zehZANiAARvO21e/HDS\n5kx3HNQEdAZWRWWYbc4sj2+2EImJbZ/lYNOYS6IfMM4jRvcArCI6i6URkRE4zZOa\nnlLFvLbUbNts0dfprm3AaavdEVeNye7aDfbowqbBeJ3E3Pf9JY+fqc8=\n-----END PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "Unsupported PKCS8 secp384r1",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDC6ctmqya7JFN9q5DdN\nbY8E4BGn4UgxCeDZYiXPM6mQkxUpqEPWxX0ATSMjBvKs4zehZANiAARvO21e/HDS\n5kx3HNQEdAZWRWWYbc4sj2+2EImJbZ/lYNOYS6IfMM4jRvcArCI6i6URkRE4zZOa\nnlLFvLbUbNts0dfprm3AaavdEVeNye7aDfbowqbBeJ3E3Pf9JY+fqc8=\n-----END PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "EC secp521r1 plain",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nMIHcAgEBBEIA3MlKYNfPQpnLgx8yowE4q8J1woVVzVmaXJVM4FI2nW6W6IR93rLi\nZ3h0KJA+ZVjvZMf7i1tOwiwyhzPwYB/yMNGgBwYFK4EEACOhgYkDgYYABADOQapD\nc7kYrcgTpN+o9UQ5EK/rvO6mqc9zDDmmvbwyzaC8fb1ve5QMl1mLy1d9xRml9l1j\nwbFxwwAzo/wb20nJdgFBdwtbHE+0IqLEfjqBcg2+VDE8WlOVJKrGhzSt0QpkwaIO\nbk3i7ot+W6hV28tRzp/EWOHARaUSTR3oWy53IYWUOg==\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBADOQapDc7kYrcgTpN+o9UQ5EK/rvO6mqc9zDDmmvbwyzaC8fb1ve5QMl1mLy1d9xRml9l1jwbFxwwAzo/wb20nJdgFBdwtbHE+0IqLEfjqBcg2+VDE8WlOVJKrGhzSt0QpkwaIObk3i7ot+W6hV28tRzp/EWOHARaUSTR3oWy53IYWUOg==",
+          "fingerprint": "SHA256:LU47tgtjOn92uaIQGLW47A2bU1S1xZX8q6LQBdzmgU8"
+        }
+      }
+    },
+    {
+      "name": "EC secp521r1 plain",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nMIHcAgEBBEIA3MlKYNfPQpnLgx8yowE4q8J1woVVzVmaXJVM4FI2nW6W6IR93rLi\nZ3h0KJA+ZVjvZMf7i1tOwiwyhzPwYB/yMNGgBwYFK4EEACOhgYkDgYYABADOQapD\nc7kYrcgTpN+o9UQ5EK/rvO6mqc9zDDmmvbwyzaC8fb1ve5QMl1mLy1d9xRml9l1j\nwbFxwwAzo/wb20nJdgFBdwtbHE+0IqLEfjqBcg2+VDE8WlOVJKrGhzSt0QpkwaIO\nbk3i7ot+W6hV28tRzp/EWOHARaUSTR3oWy53IYWUOg==\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBADOQapDc7kYrcgTpN+o9UQ5EK/rvO6mqc9zDDmmvbwyzaC8fb1ve5QMl1mLy1d9xRml9l1jwbFxwwAzo/wb20nJdgFBdwtbHE+0IqLEfjqBcg2+VDE8WlOVJKrGhzSt0QpkwaIObk3i7ot+W6hV28tRzp/EWOHARaUSTR3oWy53IYWUOg==",
+          "fingerprint": "SHA256:LU47tgtjOn92uaIQGLW47A2bU1S1xZX8q6LQBdzmgU8"
+        }
+      }
+    },
+    {
+      "name": "EC secp521r1 aes-256-cbc",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,203E719326050142474E4C783314C50F\n\noRfZSRkZ81hinvicsdMEK/JO6YPVSxQv6qfGSRWezGLWZ3kPAdmjsbmybTXC1Iqr\nbCl18pLMag9DJB88b931IyTNBhvYx2QN5wnIb5X0WwCte0rOn8IeamufiE9T9pDY\n7I4bsEhXAQ80RXi/qXoWGiViJXkHseug2Sc3LpmYb0/hzzVfMgz0O6wMOyEDNg6P\nvmUC2ybXZq6v6gbaj3f3ywEzAnrWM4uuXKgVEvIi9u8Z2fqKW0SeU44qsuzuEvQW\nHc0XPhSfZovHKoUR0J5sLiiYbi5lRuIaoLLJe7GSP+c=\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ecdsa-sha2-nistp521 AAAAE2VjZHNhLXNoYTItbmlzdHA1MjEAAAAIbmlzdHA1MjEAAACFBADOQapDc7kYrcgTpN+o9UQ5EK/rvO6mqc9zDDmmvbwyzaC8fb1ve5QMl1mLy1d9xRml9l1jwbFxwwAzo/wb20nJdgFBdwtbHE+0IqLEfjqBcg2+VDE8WlOVJKrGhzSt0QpkwaIObk3i7ot+W6hV28tRzp/EWOHARaUSTR3oWy53IYWUOg==",
+          "fingerprint": "SHA256:LU47tgtjOn92uaIQGLW47A2bU1S1xZX8q6LQBdzmgU8"
+        }
+      }
+    },
+    {
+      "name": "EC secp521r1 aes-256-cbc",
+      "privateKey": "-----BEGIN EC PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,203E719326050142474E4C783314C50F\n\noRfZSRkZ81hinvicsdMEK/JO6YPVSxQv6qfGSRWezGLWZ3kPAdmjsbmybTXC1Iqr\nbCl18pLMag9DJB88b931IyTNBhvYx2QN5wnIb5X0WwCte0rOn8IeamufiE9T9pDY\n7I4bsEhXAQ80RXi/qXoWGiViJXkHseug2Sc3LpmYb0/hzzVfMgz0O6wMOyEDNg6P\nvmUC2ybXZq6v6gbaj3f3ywEzAnrWM4uuXKgVEvIi9u8Z2fqKW0SeU44qsuzuEvQW\nHc0XPhSfZovHKoUR0J5sLiiYbi5lRuIaoLLJe7GSP+c=\n-----END EC PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "Unsupported PKCS8 secp521r1",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIHuAgEAMBAGByqGSM49AgEGBSuBBAAjBIHWMIHTAgEBBEIA3MlKYNfPQpnLgx8y\nowE4q8J1woVVzVmaXJVM4FI2nW6W6IR93rLiZ3h0KJA+ZVjvZMf7i1tOwiwyhzPw\nYB/yMNGhgYkDgYYABADOQapDc7kYrcgTpN+o9UQ5EK/rvO6mqc9zDDmmvbwyzaC8\nfb1ve5QMl1mLy1d9xRml9l1jwbFxwwAzo/wb20nJdgFBdwtbHE+0IqLEfjqBcg2+\nVDE8WlOVJKrGhzSt0QpkwaIObk3i7ot+W6hV28tRzp/EWOHARaUSTR3oWy53IYWU\nOg==\n-----END PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "Unsupported PKCS8 secp521r1",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIHuAgEAMBAGByqGSM49AgEGBSuBBAAjBIHWMIHTAgEBBEIA3MlKYNfPQpnLgx8y\nowE4q8J1woVVzVmaXJVM4FI2nW6W6IR93rLiZ3h0KJA+ZVjvZMf7i1tOwiwyhzPw\nYB/yMNGhgYkDgYYABADOQapDc7kYrcgTpN+o9UQ5EK/rvO6mqc9zDDmmvbwyzaC8\nfb1ve5QMl1mLy1d9xRml9l1jwbFxwwAzo/wb20nJdgFBdwtbHE+0IqLEfjqBcg2+\nVDE8WlOVJKrGhzSt0QpkwaIObk3i7ot+W6hV28tRzp/EWOHARaUSTR3oWy53IYWU\nOg==\n-----END PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "DSA plain",
+      "privateKey": "-----BEGIN DSA PRIVATE KEY-----\nMIIBugIBAAKBgQDC3x2tXkMWtir9d8QSwoteYOw8hpNwB+Hfr8ziGiDXuXmPAA1f\n9Gp0K56+JuzpxyYourrrS0l9sEVnitnwVa+EpPNW+QTeppK73fD4seXOjESSkdBk\nbMYUmOvtrO7DpS1dmzbu/eYHxxX4YdovP96dO0nceYjQZe3a9EaLNE0lWQIVAMOr\ndWraq0pA4DDHUm/1y5PyJH1BAoGAW0257RuVx3dV4xH4nszPZrI1I+WOvQofU2pb\n6Plsr79qXHEypiBn68k4sSJFhNw1gtIbI0opxDX+0crt29MyycY57AbCPxuWLV1G\n1ZXQxkV8B+c+ZtmjjrA4yKigliuxOXZPDgRvQQahEYSMIPk8DmzplAY9MpIY9LAe\ndm3a33sCgYAXlnj5NiUOyXr9VLraDk3mvHNTou+6tfp2yGW43xFVZ/6W6OFsySYP\nmtytRrOtYl7ji8BQRlTVqfS93qdJqftSMArfNE3iGU2gZ/yFfTNfsy3ni4IUFyAu\n/pX9SeNjVRvw6uFEm9iJbf09N3Gy+pPxWg4cNrzMxpICX8QmS/oDKQIUR8QtIImn\nW+xJLIku0/URmMZNNIA=\n-----END DSA PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-dss AAAAB3NzaC1kc3MAAACBAMLfHa1eQxa2Kv13xBLCi15g7DyGk3AH4d+vzOIaINe5eY8ADV/0anQrnr4m7OnHJii6uutLSX2wRWeK2fBVr4Sk81b5BN6mkrvd8Pix5c6MRJKR0GRsxhSY6+2s7sOlLV2bNu795gfHFfhh2i8/3p07Sdx5iNBl7dr0Ros0TSVZAAAAFQDDq3Vq2qtKQOAwx1Jv9cuT8iR9QQAAAIBbTbntG5XHd1XjEfiezM9msjUj5Y69Ch9Talvo+Wyvv2pccTKmIGfryTixIkWE3DWC0hsjSinENf7Ryu3b0zLJxjnsBsI/G5YtXUbVldDGRXwH5z5m2aOOsDjIqKCWK7E5dk8OBG9BBqERhIwg+TwObOmUBj0ykhj0sB52bdrfewAAAIAXlnj5NiUOyXr9VLraDk3mvHNTou+6tfp2yGW43xFVZ/6W6OFsySYPmtytRrOtYl7ji8BQRlTVqfS93qdJqftSMArfNE3iGU2gZ/yFfTNfsy3ni4IUFyAu/pX9SeNjVRvw6uFEm9iJbf09N3Gy+pPxWg4cNrzMxpICX8QmS/oDKQ==",
+          "fingerprint": "SHA256:zLGmhtpAl+R2wZLFv2Y5/HevXjAlh0Z0PaXkdhl0YFQ"
+        }
+      }
+    },
+    {
+      "name": "DSA plain",
+      "privateKey": "-----BEGIN DSA PRIVATE KEY-----\nMIIBugIBAAKBgQDC3x2tXkMWtir9d8QSwoteYOw8hpNwB+Hfr8ziGiDXuXmPAA1f\n9Gp0K56+JuzpxyYourrrS0l9sEVnitnwVa+EpPNW+QTeppK73fD4seXOjESSkdBk\nbMYUmOvtrO7DpS1dmzbu/eYHxxX4YdovP96dO0nceYjQZe3a9EaLNE0lWQIVAMOr\ndWraq0pA4DDHUm/1y5PyJH1BAoGAW0257RuVx3dV4xH4nszPZrI1I+WOvQofU2pb\n6Plsr79qXHEypiBn68k4sSJFhNw1gtIbI0opxDX+0crt29MyycY57AbCPxuWLV1G\n1ZXQxkV8B+c+ZtmjjrA4yKigliuxOXZPDgRvQQahEYSMIPk8DmzplAY9MpIY9LAe\ndm3a33sCgYAXlnj5NiUOyXr9VLraDk3mvHNTou+6tfp2yGW43xFVZ/6W6OFsySYP\nmtytRrOtYl7ji8BQRlTVqfS93qdJqftSMArfNE3iGU2gZ/yFfTNfsy3ni4IUFyAu\n/pX9SeNjVRvw6uFEm9iJbf09N3Gy+pPxWg4cNrzMxpICX8QmS/oDKQIUR8QtIImn\nW+xJLIku0/URmMZNNIA=\n-----END DSA PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-dss AAAAB3NzaC1kc3MAAACBAMLfHa1eQxa2Kv13xBLCi15g7DyGk3AH4d+vzOIaINe5eY8ADV/0anQrnr4m7OnHJii6uutLSX2wRWeK2fBVr4Sk81b5BN6mkrvd8Pix5c6MRJKR0GRsxhSY6+2s7sOlLV2bNu795gfHFfhh2i8/3p07Sdx5iNBl7dr0Ros0TSVZAAAAFQDDq3Vq2qtKQOAwx1Jv9cuT8iR9QQAAAIBbTbntG5XHd1XjEfiezM9msjUj5Y69Ch9Talvo+Wyvv2pccTKmIGfryTixIkWE3DWC0hsjSinENf7Ryu3b0zLJxjnsBsI/G5YtXUbVldDGRXwH5z5m2aOOsDjIqKCWK7E5dk8OBG9BBqERhIwg+TwObOmUBj0ykhj0sB52bdrfewAAAIAXlnj5NiUOyXr9VLraDk3mvHNTou+6tfp2yGW43xFVZ/6W6OFsySYPmtytRrOtYl7ji8BQRlTVqfS93qdJqftSMArfNE3iGU2gZ/yFfTNfsy3ni4IUFyAu/pX9SeNjVRvw6uFEm9iJbf09N3Gy+pPxWg4cNrzMxpICX8QmS/oDKQ==",
+          "fingerprint": "SHA256:zLGmhtpAl+R2wZLFv2Y5/HevXjAlh0Z0PaXkdhl0YFQ"
+        }
+      }
+    },
+    {
+      "name": "DSA encrypted",
+      "privateKey": "-----BEGIN DSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,0BF23814272C89FA9CAD0186BF2760C3\n\n+W6VVSYNNVyYLOX4fXsehJMwe95pd+VHLrkUmKK1KUQY//l4tdfq6aIb12H/eql1\nVqn0DqaEsVtTfQ3K7ZCm3oEsZr/fep28jXXnzuim/23o8Oti0S1KfY7gO1olxllf\nYqpMnBS7y8KZJMkAMcRy75HbuseIr9R5oIDLgP1ge+8Ck/nErqTyagZYXwXXqQX3\n7vXJPSgYEjNEfrqqCYI1tKr2G9xVa2ZnfZvTzZ8OgMqO665bemDK6kI5hVncdEJr\ny/sgHQDachoKPsBlBFfz53GmhMqKIqZNhm8nLWPJ2HL6+zJ1qvLoeoVHWWDLq5Cs\nNGtolAzqv3qfropMjVJ447WwRB+cbpnQEkI6v0o1PvjHNcrFG1Mg4EsfNtGSXvot\nn7+mlgHe8nCKjS2yQzWRyqS1XNDlSLGcZsK7+N1dRBiL9wxp4gzA8ZDM4ZQljFI4\nDqoKcF01WxhmTsrHylGzn0f81Al2CKR6H5DNO1qrkvjukAVO/ImqIfxqpB26zMXU\nSlunDPMppQ7Me5AYovDhmtAaSB8Nz3UaXDoWPBuyXKGnEiBsJv4zXRXuTKororSZ\njXYLo4dRMcFLzQTjYKE1aw==\n-----END DSA PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-dss AAAAB3NzaC1kc3MAAACBAMLfHa1eQxa2Kv13xBLCi15g7DyGk3AH4d+vzOIaINe5eY8ADV/0anQrnr4m7OnHJii6uutLSX2wRWeK2fBVr4Sk81b5BN6mkrvd8Pix5c6MRJKR0GRsxhSY6+2s7sOlLV2bNu795gfHFfhh2i8/3p07Sdx5iNBl7dr0Ros0TSVZAAAAFQDDq3Vq2qtKQOAwx1Jv9cuT8iR9QQAAAIBbTbntG5XHd1XjEfiezM9msjUj5Y69Ch9Talvo+Wyvv2pccTKmIGfryTixIkWE3DWC0hsjSinENf7Ryu3b0zLJxjnsBsI/G5YtXUbVldDGRXwH5z5m2aOOsDjIqKCWK7E5dk8OBG9BBqERhIwg+TwObOmUBj0ykhj0sB52bdrfewAAAIAXlnj5NiUOyXr9VLraDk3mvHNTou+6tfp2yGW43xFVZ/6W6OFsySYPmtytRrOtYl7ji8BQRlTVqfS93qdJqftSMArfNE3iGU2gZ/yFfTNfsy3ni4IUFyAu/pX9SeNjVRvw6uFEm9iJbf09N3Gy+pPxWg4cNrzMxpICX8QmS/oDKQ==",
+          "fingerprint": "SHA256:zLGmhtpAl+R2wZLFv2Y5/HevXjAlh0Z0PaXkdhl0YFQ"
+        }
+      }
+    },
+    {
+      "name": "DSA encrypted",
+      "privateKey": "-----BEGIN DSA PRIVATE KEY-----\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,0BF23814272C89FA9CAD0186BF2760C3\n\n+W6VVSYNNVyYLOX4fXsehJMwe95pd+VHLrkUmKK1KUQY//l4tdfq6aIb12H/eql1\nVqn0DqaEsVtTfQ3K7ZCm3oEsZr/fep28jXXnzuim/23o8Oti0S1KfY7gO1olxllf\nYqpMnBS7y8KZJMkAMcRy75HbuseIr9R5oIDLgP1ge+8Ck/nErqTyagZYXwXXqQX3\n7vXJPSgYEjNEfrqqCYI1tKr2G9xVa2ZnfZvTzZ8OgMqO665bemDK6kI5hVncdEJr\ny/sgHQDachoKPsBlBFfz53GmhMqKIqZNhm8nLWPJ2HL6+zJ1qvLoeoVHWWDLq5Cs\nNGtolAzqv3qfropMjVJ447WwRB+cbpnQEkI6v0o1PvjHNcrFG1Mg4EsfNtGSXvot\nn7+mlgHe8nCKjS2yQzWRyqS1XNDlSLGcZsK7+N1dRBiL9wxp4gzA8ZDM4ZQljFI4\nDqoKcF01WxhmTsrHylGzn0f81Al2CKR6H5DNO1qrkvjukAVO/ImqIfxqpB26zMXU\nSlunDPMppQ7Me5AYovDhmtAaSB8Nz3UaXDoWPBuyXKGnEiBsJv4zXRXuTKororSZ\njXYLo4dRMcFLzQTjYKE1aw==\n-----END DSA PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "Unsupported PKCS8 RSA",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIIEugIBADANBgkqhkiG9w0BAQEFAASCBKQwggSgAgEAAoIBAQDk4TxzPXJXXFrG\n/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt\n7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXn\nlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A\n03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+c\nH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUG\nTww78iarAgMBAAECgf8YRyJCecFqzWLPh9q/u0aRStWOpk75nc9o6RfxvkrNj7T0\nS9/OySCZIDM9SaQk2qFnliq86RgaOBRPrlBj6MGBBN+MJ9a8yNJoXQXICBUoyKKj\nQkWUO5IzvVHzXA9xvBrmS2+RvsijEDK/aJDy/GX/+HyrAIOrfnG3h+t6viSSc4oV\nyd685IrAuhxXfn/dW/QsTYoWcjo5nlvDXkpF9gUh/p/9QFKDSZG6PHRgQIrBQSbL\nLBGbE4J3B+k+XzYUV/S4Qtkmiu9da+lXebwfqhh/vgz/F/PpuBCEupGMtdoJHrEX\nsnqmG2LLrIzTtsNyvqz6iMS+fmSVcZInV3LJfPECgYEA+h1xzicr2CyRq5Rd4Zu6\nYwt/HWBl4qYhvGefzhX4KzFseBA1JCYM+UEk5pBpCmJINxJUm+drk4x1jErgOUHs\nyyW/otvSIHnAa4WV+E0e1R4H1PsUGSuz8Y7vl7u11eOZ4vrP3vROG6IJLsiNA5T0\nfjZ8qpD4mWFHn9HuI2idBbsCgYEA6kPh6YHZZ0xpd8ItMDiWNOAqr08aUjvaPmKW\nctg1HCLIdbJLPUpl+Z8EXHEQfuSBU0e3+D8I3JJmRzn2uzEg0G6N1eEwlWb+nhSr\nLte3jAZbvWpi/fEmA5tlBw+b1kH3sJ5zPLQXBs6vcbSd4nAaERzy/OLmHx15zxXL\ntsk1W9ECgYA9YgSQJ6TnBOkrRtpTiDiSHjwwJXxbx5H3/yaFGXcygoqwXKnuGTiN\n46L+wupEliJLAcCqEn2gVJR0vduRsdA/eyAxA+np9nd26+4GZkbu3tPlPUmNc+BR\npFbA0lyqBZW60vs5KJQSzA2c4bNZ8bCfWRf3dGTOn8VIP+lF32LKCQKBgCZSnoVV\ngZwdau91a3EFAMV7ml/9X7/uHKCx/gyhg+arZgGi/h3zqsTwF4WL1Xf8p49ZHyZU\nIX370RF70PoEamrOexNu+ESoiaSQmwRZs6QLcjyFR9Zk+aQDar6B9itRtVRGR3G5\nwD6T1y2Rr3ZYglskUje+YojaiI+w8BdhyQHRAoGAZgxbv6Q7xfOmXlrVznD5iAP1\n98PysJPCh8GhwBLV9UBUDBNXIayLa/rRoh3SU50tyeTGtiATmZHvIarmWM++cODK\nRw2YYDj554DOk/RQnyXC/7yu0C4f05G4/f6yW/f2Uj82PO/BR0poirBmhGrxNJTP\nRtmqDLRUoQNz7yU5Vd8=\n-----END PRIVATE KEY-----\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "Unsupported PKCS8 RSA",
+      "privateKey": "-----BEGIN PRIVATE KEY-----\nMIIEugIBADANBgkqhkiG9w0BAQEFAASCBKQwggSgAgEAAoIBAQDk4TxzPXJXXFrG\n/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt\n7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXn\nlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A\n03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+c\nH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUG\nTww78iarAgMBAAECgf8YRyJCecFqzWLPh9q/u0aRStWOpk75nc9o6RfxvkrNj7T0\nS9/OySCZIDM9SaQk2qFnliq86RgaOBRPrlBj6MGBBN+MJ9a8yNJoXQXICBUoyKKj\nQkWUO5IzvVHzXA9xvBrmS2+RvsijEDK/aJDy/GX/+HyrAIOrfnG3h+t6viSSc4oV\nyd685IrAuhxXfn/dW/QsTYoWcjo5nlvDXkpF9gUh/p/9QFKDSZG6PHRgQIrBQSbL\nLBGbE4J3B+k+XzYUV/S4Qtkmiu9da+lXebwfqhh/vgz/F/PpuBCEupGMtdoJHrEX\nsnqmG2LLrIzTtsNyvqz6iMS+fmSVcZInV3LJfPECgYEA+h1xzicr2CyRq5Rd4Zu6\nYwt/HWBl4qYhvGefzhX4KzFseBA1JCYM+UEk5pBpCmJINxJUm+drk4x1jErgOUHs\nyyW/otvSIHnAa4WV+E0e1R4H1PsUGSuz8Y7vl7u11eOZ4vrP3vROG6IJLsiNA5T0\nfjZ8qpD4mWFHn9HuI2idBbsCgYEA6kPh6YHZZ0xpd8ItMDiWNOAqr08aUjvaPmKW\nctg1HCLIdbJLPUpl+Z8EXHEQfuSBU0e3+D8I3JJmRzn2uzEg0G6N1eEwlWb+nhSr\nLte3jAZbvWpi/fEmA5tlBw+b1kH3sJ5zPLQXBs6vcbSd4nAaERzy/OLmHx15zxXL\ntsk1W9ECgYA9YgSQJ6TnBOkrRtpTiDiSHjwwJXxbx5H3/yaFGXcygoqwXKnuGTiN\n46L+wupEliJLAcCqEn2gVJR0vduRsdA/eyAxA+np9nd26+4GZkbu3tPlPUmNc+BR\npFbA0lyqBZW60vs5KJQSzA2c4bNZ8bCfWRf3dGTOn8VIP+lF32LKCQKBgCZSnoVV\ngZwdau91a3EFAMV7ml/9X7/uHKCx/gyhg+arZgGi/h3zqsTwF4WL1Xf8p49ZHyZU\nIX370RF70PoEamrOexNu+ESoiaSQmwRZs6QLcjyFR9Zk+aQDar6B9itRtVRGR3G5\nwD6T1y2Rr3ZYglskUje+YojaiI+w8BdhyQHRAoGAZgxbv6Q7xfOmXlrVznD5iAP1\n98PysJPCh8GhwBLV9UBUDBNXIayLa/rRoh3SU50tyeTGtiATmZHvIarmWM++cODK\nRw2YYDj554DOk/RQnyXC/7yu0C4f05G4/f6yW/f2Uj82PO/BR0poirBmhGrxNJTP\nRtmqDLRUoQNz7yU5Vd8=\n-----END PRIVATE KEY-----\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "PuTTY RSA false empty MAC",
+      "privateKey": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: Synthetic test identity\nPublic-Lines: 6\nAAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BU\nTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76\nXWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTF\nW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vp\ncZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VW\nTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar\nPrivate-Lines: 14\nAAAA/xhHIkJ5wWrNYs+H2r+7RpFK1Y6mTvmdz2jpF/G+Ss2PtPRL387JIJkgMz1J\npCTaoWeWKrzpGBo4FE+uUGPowYEE34wn1rzI0mhdBcgIFSjIoqNCRZQ7kjO9UfNc\nD3G8GuZLb5G+yKMQMr9okPL8Zf/4fKsAg6t+cbeH63q+JJJzihXJ3rzkisC6HFd+\nf91b9CxNihZyOjmeW8NeSkX2BSH+n/1AUoNJkbo8dGBAisFBJsssEZsTgncH6T5f\nNhRX9LhC2SaK711r6Vd5vB+qGH++DP8X8+m4EIS6kYy12gkesReyeqYbYsusjNO2\nw3K+rPqIxL5+ZJVxkidXcsl88QAAAIEA+h1xzicr2CyRq5Rd4Zu6Ywt/HWBl4qYh\nvGefzhX4KzFseBA1JCYM+UEk5pBpCmJINxJUm+drk4x1jErgOUHsyyW/otvSIHnA\na4WV+E0e1R4H1PsUGSuz8Y7vl7u11eOZ4vrP3vROG6IJLsiNA5T0fjZ8qpD4mWFH\nn9HuI2idBbsAAACBAOpD4emB2WdMaXfCLTA4ljTgKq9PGlI72j5ilnLYNRwiyHWy\nSz1KZfmfBFxxEH7kgVNHt/g/CNySZkc59rsxINBujdXhMJVm/p4Uqy7Xt4wGW71q\nYv3xJgObZQcPm9ZB97Ceczy0FwbOr3G0neJwGhEc8vzi5h8dec8Vy7bJNVvRAAAA\ngGYMW7+kO8Xzpl5a1c5w+YgD9ffD8rCTwofBocAS1fVAVAwTVyGsi2v60aId0lOd\nLcnkxrYgE5mR7yGq5ljPvnDgykcNmGA4+eeAzpP0UJ8lwv+8rtAuH9ORuP3+slv3\n9lI/NjzvwUdKaIqwZoRq8TSUz0bZqgy0VKEDc+8lOVXf\nPrivate-MAC: c31d37efc7c47269f305ec0f20eb8a77c689f02b\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "PuTTY RSA false empty MAC",
+      "privateKey": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: Synthetic test identity\nPublic-Lines: 6\nAAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BU\nTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76\nXWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTF\nW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vp\ncZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VW\nTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar\nPrivate-Lines: 14\nAAAA/xhHIkJ5wWrNYs+H2r+7RpFK1Y6mTvmdz2jpF/G+Ss2PtPRL387JIJkgMz1J\npCTaoWeWKrzpGBo4FE+uUGPowYEE34wn1rzI0mhdBcgIFSjIoqNCRZQ7kjO9UfNc\nD3G8GuZLb5G+yKMQMr9okPL8Zf/4fKsAg6t+cbeH63q+JJJzihXJ3rzkisC6HFd+\nf91b9CxNihZyOjmeW8NeSkX2BSH+n/1AUoNJkbo8dGBAisFBJsssEZsTgncH6T5f\nNhRX9LhC2SaK711r6Vd5vB+qGH++DP8X8+m4EIS6kYy12gkesReyeqYbYsusjNO2\nw3K+rPqIxL5+ZJVxkidXcsl88QAAAIEA+h1xzicr2CyRq5Rd4Zu6Ywt/HWBl4qYh\nvGefzhX4KzFseBA1JCYM+UEk5pBpCmJINxJUm+drk4x1jErgOUHsyyW/otvSIHnA\na4WV+E0e1R4H1PsUGSuz8Y7vl7u11eOZ4vrP3vROG6IJLsiNA5T0fjZ8qpD4mWFH\nn9HuI2idBbsAAACBAOpD4emB2WdMaXfCLTA4ljTgKq9PGlI72j5ilnLYNRwiyHWy\nSz1KZfmfBFxxEH7kgVNHt/g/CNySZkc59rsxINBujdXhMJVm/p4Uqy7Xt4wGW71q\nYv3xJgObZQcPm9ZB97Ceczy0FwbOr3G0neJwGhEc8vzi5h8dec8Vy7bJNVvRAAAA\ngGYMW7+kO8Xzpl5a1c5w+YgD9ffD8rCTwofBocAS1fVAVAwTVyGsi2v60aId0lOd\nLcnkxrYgE5mR7yGq5ljPvnDgykcNmGA4+eeAzpP0UJ8lwv+8rtAuH9ORuP3+slv3\n9lI/NjzvwUdKaIqwZoRq8TSUz0bZqgy0VKEDc+8lOVXf\nPrivate-MAC: c31d37efc7c47269f305ec0f20eb8a77c689f02b\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "PuTTY RSA false password MAC",
+      "privateKey": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: Synthetic test identity\nPublic-Lines: 6\nAAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BU\nTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76\nXWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTF\nW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vp\ncZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VW\nTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar\nPrivate-Lines: 14\nAAAA/xhHIkJ5wWrNYs+H2r+7RpFK1Y6mTvmdz2jpF/G+Ss2PtPRL387JIJkgMz1J\npCTaoWeWKrzpGBo4FE+uUGPowYEE34wn1rzI0mhdBcgIFSjIoqNCRZQ7kjO9UfNc\nD3G8GuZLb5G+yKMQMr9okPL8Zf/4fKsAg6t+cbeH63q+JJJzihXJ3rzkisC6HFd+\nf91b9CxNihZyOjmeW8NeSkX2BSH+n/1AUoNJkbo8dGBAisFBJsssEZsTgncH6T5f\nNhRX9LhC2SaK711r6Vd5vB+qGH++DP8X8+m4EIS6kYy12gkesReyeqYbYsusjNO2\nw3K+rPqIxL5+ZJVxkidXcsl88QAAAIEA+h1xzicr2CyRq5Rd4Zu6Ywt/HWBl4qYh\nvGefzhX4KzFseBA1JCYM+UEk5pBpCmJINxJUm+drk4x1jErgOUHsyyW/otvSIHnA\na4WV+E0e1R4H1PsUGSuz8Y7vl7u11eOZ4vrP3vROG6IJLsiNA5T0fjZ8qpD4mWFH\nn9HuI2idBbsAAACBAOpD4emB2WdMaXfCLTA4ljTgKq9PGlI72j5ilnLYNRwiyHWy\nSz1KZfmfBFxxEH7kgVNHt/g/CNySZkc59rsxINBujdXhMJVm/p4Uqy7Xt4wGW71q\nYv3xJgObZQcPm9ZB97Ceczy0FwbOr3G0neJwGhEc8vzi5h8dec8Vy7bJNVvRAAAA\ngGYMW7+kO8Xzpl5a1c5w+YgD9ffD8rCTwofBocAS1fVAVAwTVyGsi2v60aId0lOd\nLcnkxrYgE5mR7yGq5ljPvnDgykcNmGA4+eeAzpP0UJ8lwv+8rtAuH9ORuP3+slv3\n9lI/NjzvwUdKaIqwZoRq8TSUz0bZqgy0VKEDc+8lOVXf\nPrivate-MAC: 0b7343d3cbfb7c98fc2649a3891641e366b3a260\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar",
+          "fingerprint": "SHA256:sqN7z17/k+hK4ox/h0tDTKyiYf1RSeEFXwVXFLnYyjM"
+        }
+      }
+    },
+    {
+      "name": "PuTTY RSA false password MAC",
+      "privateKey": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: Synthetic test identity\nPublic-Lines: 6\nAAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BU\nTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76\nXWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTF\nW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vp\ncZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VW\nTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar\nPrivate-Lines: 14\nAAAA/xhHIkJ5wWrNYs+H2r+7RpFK1Y6mTvmdz2jpF/G+Ss2PtPRL387JIJkgMz1J\npCTaoWeWKrzpGBo4FE+uUGPowYEE34wn1rzI0mhdBcgIFSjIoqNCRZQ7kjO9UfNc\nD3G8GuZLb5G+yKMQMr9okPL8Zf/4fKsAg6t+cbeH63q+JJJzihXJ3rzkisC6HFd+\nf91b9CxNihZyOjmeW8NeSkX2BSH+n/1AUoNJkbo8dGBAisFBJsssEZsTgncH6T5f\nNhRX9LhC2SaK711r6Vd5vB+qGH++DP8X8+m4EIS6kYy12gkesReyeqYbYsusjNO2\nw3K+rPqIxL5+ZJVxkidXcsl88QAAAIEA+h1xzicr2CyRq5Rd4Zu6Ywt/HWBl4qYh\nvGefzhX4KzFseBA1JCYM+UEk5pBpCmJINxJUm+drk4x1jErgOUHsyyW/otvSIHnA\na4WV+E0e1R4H1PsUGSuz8Y7vl7u11eOZ4vrP3vROG6IJLsiNA5T0fjZ8qpD4mWFH\nn9HuI2idBbsAAACBAOpD4emB2WdMaXfCLTA4ljTgKq9PGlI72j5ilnLYNRwiyHWy\nSz1KZfmfBFxxEH7kgVNHt/g/CNySZkc59rsxINBujdXhMJVm/p4Uqy7Xt4wGW71q\nYv3xJgObZQcPm9ZB97Ceczy0FwbOr3G0neJwGhEc8vzi5h8dec8Vy7bJNVvRAAAA\ngGYMW7+kO8Xzpl5a1c5w+YgD9ffD8rCTwofBocAS1fVAVAwTVyGsi2v60aId0lOd\nLcnkxrYgE5mR7yGq5ljPvnDgykcNmGA4+eeAzpP0UJ8lwv+8rtAuH9ORuP3+slv3\n9lI/NjzvwUdKaIqwZoRq8TSUz0bZqgy0VKEDc+8lOVXf\nPrivate-MAC: 0b7343d3cbfb7c98fc2649a3891641e366b3a260\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    },
+    {
+      "name": "PuTTY RSA true password MAC",
+      "privateKey": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: aes256-cbc\nComment: Synthetic test identity\nPublic-Lines: 6\nAAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BU\nTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76\nXWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTF\nW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vp\ncZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VW\nTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar\nPrivate-Lines: 14\nI3HLl4yXjFS4LMiJMJbT8ORdHx23ogrw74Tjwi9jvzTFmjussYa8BbYV8TFoBtBU\nCbUJurWnHGaGLf1/0aVmZkXVNcGGjq1EaprP3WHV3aVqBLcO2nslzEHEmjg4ERGM\nOc1JQsv5JgRfty7mU3xKzTl4LKDdHttI3gqFXNRC/b5co82XEElESdyQZncY8OmV\nidXcNrDi9XlbpzMg0jXFblFu9kiZtJfPeCJ/rPgmV1wsJHq7aocn6JBM1neoJuzA\nsuGXbI/E52IN99LqQLNN0zeuAbVx1vBBh4CSlE97w82SZaglf3bJC/D0dKm2lU6f\ntnWAoJzB8P5T4lgPaQdxG0H50MXAGU2zDKcSKSy73YF5hozciGoEqJ0o9Y808vkv\nUDXJAz7GI1vvjetLn20C62c7wIWvNqsQZ7HgZylXaWdADxRGoGcjBk64nlgxRjNs\nwDH6IgUmanga3IVCH+3jkFl/P+PrTKCjkKqEmQFWiq/rY2E7riEWe7BN6nnLi/JX\nELQDM4ilBTFtCIfrIo98wKXtcjuXuHwio2EaTs4+/RaYod+qt60kOEDOa/RNrnyK\nDeq4z1jNvpCpq+qbx3Mu6eAW49qpAph+kuG70I8hQTwNmopvL/GjDr70W21d5PBm\nP3QmY8L1cfITso6R+aDHtv+NkciF3LDGm2OgWcadVyYYH3qEVP4Y2bQ6djfNcPgM\nErEW4fDFGCj+whWQDaNIhA32HVNkLP4HjSMRpgTjxa0520OMaq9MmTwlB1PYBY20\nXyyRM1/OAyrjgHB2eimkM3EDG8cx+6Ukk3E+VKDRdydfyx24goBS3RcmnguoGULV\n/oPEuT0SgE6DqmGTXZbagbaQC2Y3lkk7q4ixJFfqM/XhgZhWVJ12zUJsYCdHv4/b\nPrivate-MAC: c881172cbd8784e04755a2a61193269120c33a49\n",
+      "passphrase": "synthetic-import-password",
+      "expected": {
+        "value": {
+          "publicKey": "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BUTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76XWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTFW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vpcZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VWTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar",
+          "fingerprint": "SHA256:sqN7z17/k+hK4ox/h0tDTKyiYf1RSeEFXwVXFLnYyjM"
+        }
+      }
+    },
+    {
+      "name": "PuTTY RSA true password MAC",
+      "privateKey": "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: aes256-cbc\nComment: Synthetic test identity\nPublic-Lines: 6\nAAAAB3NzaC1yc2EAAAADAQABAAABAQDk4TxzPXJXXFrG/kDq9TdoNv1zamLxe1BU\nTAws4ypDM+4x3GJOAZ/OF05Quq9JSkVYRxM7uKOjyipt7ZOiQVykXmy8pDZClP76\nXWZvgSN0vCK+4OVG9q3rMeMvfAS7h9P45I4IuGerqwXnlRvay3ZeeagtzPdUTTTF\nW/RiO6/MfFryaeXQTjXeHEU8e2TS5LqktbZy3LzBOg7A03a2iCsUdnDQ5gncX4vp\ncZt2hW4tu4Ij+jSllEKUMYl+b64JFiYulZsWOotIao+cH9MHl93Pc7Gngj/4m+VW\nTJKHSAONrN04vA1sveQ+dwXmZ5562aD1afEgDDOdwMUGTww78iar\nPrivate-Lines: 14\nI3HLl4yXjFS4LMiJMJbT8ORdHx23ogrw74Tjwi9jvzTFmjussYa8BbYV8TFoBtBU\nCbUJurWnHGaGLf1/0aVmZkXVNcGGjq1EaprP3WHV3aVqBLcO2nslzEHEmjg4ERGM\nOc1JQsv5JgRfty7mU3xKzTl4LKDdHttI3gqFXNRC/b5co82XEElESdyQZncY8OmV\nidXcNrDi9XlbpzMg0jXFblFu9kiZtJfPeCJ/rPgmV1wsJHq7aocn6JBM1neoJuzA\nsuGXbI/E52IN99LqQLNN0zeuAbVx1vBBh4CSlE97w82SZaglf3bJC/D0dKm2lU6f\ntnWAoJzB8P5T4lgPaQdxG0H50MXAGU2zDKcSKSy73YF5hozciGoEqJ0o9Y808vkv\nUDXJAz7GI1vvjetLn20C62c7wIWvNqsQZ7HgZylXaWdADxRGoGcjBk64nlgxRjNs\nwDH6IgUmanga3IVCH+3jkFl/P+PrTKCjkKqEmQFWiq/rY2E7riEWe7BN6nnLi/JX\nELQDM4ilBTFtCIfrIo98wKXtcjuXuHwio2EaTs4+/RaYod+qt60kOEDOa/RNrnyK\nDeq4z1jNvpCpq+qbx3Mu6eAW49qpAph+kuG70I8hQTwNmopvL/GjDr70W21d5PBm\nP3QmY8L1cfITso6R+aDHtv+NkciF3LDGm2OgWcadVyYYH3qEVP4Y2bQ6djfNcPgM\nErEW4fDFGCj+whWQDaNIhA32HVNkLP4HjSMRpgTjxa0520OMaq9MmTwlB1PYBY20\nXyyRM1/OAyrjgHB2eimkM3EDG8cx+6Ukk3E+VKDRdydfyx24goBS3RcmnguoGULV\n/oPEuT0SgE6DqmGTXZbagbaQC2Y3lkk7q4ixJFfqM/XhgZhWVJ12zUJsYCdHv4/b\nPrivate-MAC: c881172cbd8784e04755a2a61193269120c33a49\n",
+      "passphrase": "incorrect-password",
+      "expected": {
+        "error": "Cannot unlock this private key. Check its passphrase and format."
+      }
+    }
+  ],
+  "commands": [
+    {
+      "command": "ssh -i '/tmp/key with spaces' -p2222 user@host",
+      "expected": [
+        "-i",
+        "/tmp/key with spaces",
+        "-p2222",
+        "user@host"
+      ]
+    },
+    {
+      "command": "ssh -o IdentityFile=~/.ssh/work host",
+      "expected": [
+        "-o",
+        "IdentityFile=~/.ssh/work",
+        "host"
+      ]
+    },
+    {
+      "command": "ssh -i \"key\\\\name\" host",
+      "expected": [
+        "-i",
+        "key\\name",
+        "host"
+      ]
+    },
+    {
+      "command": "echo ssh host",
+      "expected": null
+    },
+    {
+      "command": "ssh host uptime",
+      "expected": null
+    },
+    {
+      "command": "ssh -L 8080:localhost:80 host",
+      "expected": null
+    },
+    {
+      "command": "ssh -N host",
+      "expected": null
+    },
+    {
+      "command": "ssh $HOST",
+      "expected": null
+    },
+    {
+      "command": "ssh host; echo second",
+      "expected": null
+    },
+    {
+      "command": "ssh host && true",
+      "expected": null
+    },
+    {
+      "command": "ssh $(hostname)",
+      "expected": null
+    },
+    {
+      "command": "ssh \"${HOST}\"",
+      "expected": null
+    },
+    {
+      "command": "ssh -oProxyCommand=foo host",
+      "expected": null
+    },
+    {
+      "command": "ssh -i",
+      "expected": null
+    },
+    {
+      "command": "ssh \"broken",
+      "expected": null
+    },
+    {
+      "command": "ssh host # comment",
+      "expected": null
+    },
+    {
+      "command": "/usr/bin/ssh -tt -l nick -oIdentitiesOnly=yes fixture",
+      "expected": [
+        "-tt",
+        "-l",
+        "nick",
+        "-oIdentitiesOnly=yes",
+        "fixture"
+      ]
+    },
+    {
+      "command": "ssh \"\"",
+      "expected": [
+        ""
+      ]
+    },
+    {
+      "command": "ssh -F /tmp/config -o IdentityAgent=none host",
+      "expected": [
+        "-F",
+        "/tmp/config",
+        "-o",
+        "IdentityAgent=none",
+        "host"
+      ]
+    }
+  ]
+}

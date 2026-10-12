@@ -10,4 +10,8 @@ for (const [name, value] of Object.entries(config.env)) {
 }
 process.env.NODE_ENV = 'production';
 process.chdir(path.resolve(import.meta.dirname, '..'));
-await import('../server/index.ts');
+const metadata = JSON.parse(await readFile('release.json', 'utf8'));
+if (metadata.backend === 'rust') {
+  const args = process.argv.slice(2); args.splice(args.indexOf('--config'), 2);
+  process.execve(path.resolve('bin/termai-backend'), [path.resolve('bin/termai-backend'), ...args], process.env);
+} else await import('../server/index.ts');

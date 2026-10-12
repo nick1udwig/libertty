@@ -31,6 +31,20 @@ test('installer validates explicit options before making changes', () => {
   assert.deepEqual(parseOptions(['--yes', '--port', '7400', '--base-path', '/workspace']), { yes: true, port: '7400', 'base-path': '/workspace' });
   for (const args of [['--port', '0'], ['--port', '65536'], ['--base-path', '/x?'], ['--prefix'], ['--surprise']]) assert.throws(() => parseOptions(args));
 });
+test('Rust releases install a direct native launcher and upgrades can roll back to Node', async t => {
+  const f = await fixture(t);
+  f.metadata.backend = 'rust';
+  await writeFile(f.bundle + '/release.json', JSON.stringify(f.metadata));
+  const installed = await install({ yes: true, 'no-service': true }, f.dependencies);
+  const launcher = await readFile(installed.launch, 'utf8');
+  assert.ok(launcher.includes("/bin/termai-backend' --config '"));
+  assert.ok(!launcher.includes('/bin/node'));
+  f.metadata.version = '0.2.0'; f.metadata.tag = 'v0.2.0'; f.metadata.commit = '2'.repeat(40); f.metadata.backend = 'node';
+  await writeFile(f.bundle + '/release.json', JSON.stringify(f.metadata));
+  await install({ yes: true, 'no-service': true }, f.dependencies);
+  assert.ok((await readFile(installed.launch, 'utf8')).includes('/scripts/launch.mjs'));
+  assert.ok(await stat(installed.releaseDir));
+});
 test('fresh install uses user systemd, preserves pairing data, and quotes paths with spaces', async t => {
   const f = await fixture(t); await mkdir(f.home + '/data/termai', { recursive: true });
   await writeFile(f.home + '/data/termai/pairing-token', 'existing-token');

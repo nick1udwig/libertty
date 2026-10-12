@@ -8,16 +8,18 @@ The MVP uses **Ghostty `0.4.0-next.20.g1858a59`**, pinned to the browser build s
 
 ## Run locally
 
-Requires Node **22.18+**, Bash, Python 3 (for static Python argument discovery), and `base64`.
+Source builds require Rust **1.89+**, the `wasm32-unknown-unknown` target, Node **22.18+**, a C/C++ build toolchain, Bash **4.4+**, Python 3 (for static Python argument discovery), and `base64`.
 Developed and tested on Linux with Node 26 and Chromium.
-`node-pty` supplies the real terminal process; platforms without a usable prebuilt binary also need a C++ toolchain and Python to build it.
+The Rust server uses `portable-pty` for terminal processes and one shared engine crate for native and browser WebAssembly execution.
 
 ```sh
+rustup target add wasm32-unknown-unknown
 npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:3000**. The server opens a shell in the directory where it was launched.
+Open **http://127.0.0.1:3000**.
+The server opens a shell in the directory where it was launched.
 Override that with `TERMAI_CWD=/path/to/project`.
 It sources your `.bashrc` for aliases/functions, then installs its own prompt/history hooks and Emacs Readline bindings inside this session.
 It does not edit your shell configuration or save new commands into your existing Bash history files.
@@ -45,6 +47,7 @@ Activation removes older caches for this installation.
 Hashed assets use cached responses first; navigation refreshes the single cached HTML entry.
 The app shell can load offline after installation completes; running commands requires a connection to the host.
 The development server does not register a service worker.
+It pairs clients before proxying loopback Vite assets and checks both pairing and Origin before forwarding hot-reload WebSockets.
 
 ## Use it
 
@@ -238,7 +241,7 @@ For example, with an existing HTTPS reverse proxy on the same machine:
 ```sh
 TERMAI_TOKEN='a-long-random-token-of-at-least-24-characters' \
 TERMAI_ALLOWED_HOSTS='termai.example.com' \
-NODE_ENV=production node server/index.ts
+npm start
 ```
 
 Point the proxy at `127.0.0.1:3000`, preserve the `Host` header, and forward WebSocket upgrades.
@@ -278,10 +281,14 @@ Tailscale Serve strips its mount prefix.
 
 ```sh
 npm test
+npm run test:rust
 npm run build
-npm run test:browser
+TEST_BACKEND=rust TEST_ENGINE=server npm run test:browser
+TEST_BACKEND=rust TEST_ENGINE=client TEST_BASE_PATH=/terminal npm run test:browser
+TEST_BACKEND=rust npm run test:reconnect
 ```
 
+The reconnect test covers stalled authorization and Herdr ticket requests, delayed close events, stale open sockets, and recovery without replaying input.
 The browser test uses `/usr/bin/chromium` (override with `CHROMIUM=/path/to/chromium`), a loopback server, temporary fixture files and isolated Bash sessions.
 It covers loading and ready alternatives, real Readline replacement, default tap-to-send with duplicate-tap protection, replacement-only selection, reopenable collapsed menus and saved preferences, incremental mobile composition and ordinary typing, mobile Backspace after dictation and during pending repair, case alternatives, spoken symbols, home-relative directory resolution, completion-helper exclusion, eternal-history context, non-executing validation, late-response cancellation, composition-event deduplication, cached help discovery, Git alias flags and explicit `-m` preservation despite corrupt history, Python inspection, command shortcuts, Ctrl-R, busy guards, current-directory updates, mobile and keyboard-sized layouts, reconnect/offline behavior, authentication, command deduplication, stale edit rejection, and output acknowledgements.
 Screenshots are saved to `.test-artifacts/`.

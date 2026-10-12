@@ -5,3 +5,6 @@ release/
 .release-companions/
 .env
 *.log
+/target/
+/public/termai-engine.wasm
+/src/engine/termai-engine.wasm

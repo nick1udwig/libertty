@@ -9,7 +9,7 @@ const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pat
 const base = 'http://127.0.0.1:3183', history = Array.from({ length: 160 }, (_, i) => `ROW-${i} alpha beta gamma`).join('\n')
   + '\nRead https://example.com/touch\n\x1b]8;;https://example.com/help\x07Open help\x1b]8;;\x07\n';
 fixture.setScreen(0, history);
-const server = spawn(process.execPath, ['server/index.ts'], { cwd: root, stdio: 'ignore', env: { ...process.env,
+const server = spawn(process.env.TEST_BACKEND !== 'node' ? new URL('../target/debug/termai', import.meta.url).pathname : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, stdio: 'ignore', env: { ...process.env,
   NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3183', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base,
   TERMAI_DATA_DIR: fixture.directory + '/termai', HOME: fixture.directory, TERMAI_CWD: fixture.directory, TERMAI_TOKEN: '',
   TERMAI_NO_RC: '1', HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH,

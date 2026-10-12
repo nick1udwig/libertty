@@ -1,6 +1,6 @@
 # Install and set up Termai
 
-The release installer bundles Node, production dependencies and the built frontend, so you do not need npm or a compiler on the server.
+The release installer bundles the native Rust executable, built frontend and a Node runtime for setup tools, so you do not need npm or a compiler on the server.
 The command below becomes available after the first release built by the [release workflow](../.github/workflows/release.yml) has finished publishing its assets.
 
 ```sh

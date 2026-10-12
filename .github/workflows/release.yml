@@ -24,7 +24,13 @@ defaults:
     shell: bash
 
 jobs:
+  verify:
+    name: Verify Rust parity on all supported platforms
+    uses: ./.github/workflows/rust-migration.yml
+    with:
+      ref: ${{ github.event.release.tag_name || inputs.ref || github.ref }}
   build:
+    needs: verify
     name: Build and verify ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -63,6 +69,9 @@ jobs:
         with:
           node-version: ${{ steps.pins.outputs.node }}
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - name: Verify native architecture
         env:
           EXPECTED_TARGET: ${{ matrix.target }}

@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
+import { rustArchitectureAdapter } from './rust-architecture-adapter.mjs';
 import type { Catalog } from '../src/protocol.ts';
 
 const shared = process.env.BENCH_SUITE === 'shared';
@@ -35,6 +36,7 @@ const cases = [
 ] as const;
 const rows: { variant: string; case: string; rtt: number; coldMs: number; warmMs: number; coldRequests: number; warmRequests: number; [key: string]: unknown }[] = [];
 let comparisons = 0;
+const rustPeers: (Awaited<ReturnType<typeof rustArchitectureAdapter>> | undefined)[] = [];
 try {
   await mkdir(cwd);
   await mkdir(path.join(cwd, 'git', 'pebble-agent'), { recursive: true });
@@ -69,18 +71,26 @@ esac
     const discovery = await load(variant.client ? 'src/engine/discovery.ts' : 'server/discovery.ts');
     const modules = variant.client ? {
       ...await load('server/facts.ts'), ...await load('server/help.ts'), ...await load('src/remote-host.ts'),
+      ...(process.env.BENCH_RUST === '1' && variant.name.endsWith(' after') ? await load('src/engine/wasm.ts') : {}),
       ...(variant.optimized ? { ...await load('src/directory-cache.ts'), ...await load('server/directories.ts'), ...await load('src/engine/path-repair.ts') } : {}),
     } : {};
-    loaded.push({ ...variant, revision, engine, discovery, modules });
+    loaded.push({ ...variant, revision, engine, discovery, modules, rust: process.env.BENCH_RUST === '1' && variant.name.endsWith(' after') });
   }
   if (process.env.BENCH_REVERSE === '1') loaded.reverse();
+  for (const variant of loaded) {
+    const adapter = variant.rust ? await rustArchitectureAdapter(catalog, env, variant.client, variant.modules.WasmEngine) : undefined;
+    rustPeers.push(adapter);
+    Object.assign(variant, { adapter });
+  }
   for (const rtt of rtts) for (const [name, text] of cases) {
     let expected: unknown;
     for (const variant of loaded) {
       const m = variant.modules;
-      const help = variant.client ? new m.HelpProvider() : undefined;
+      const rust = (variant as typeof variant & { adapter?: Awaited<ReturnType<typeof rustArchitectureAdapter>> }).adapter;
+      await rust?.reset();
+      const help = variant.client && !rust ? new m.HelpProvider() : undefined;
       const source = { state: { cwd, prompt: 1, ready: true, exited: false }, catalog: async (includePaths = true) => includePaths ? catalog : { ...catalog, paths: [] }, environment: async () => env, help };
-      const facts = variant.client ? new m.Facts(source) : undefined;
+      const facts = variant.client ? rust || new m.Facts(source) : undefined;
       const cache = variant.client ? new m.ContextCache() : undefined;
       const syntax = new Map<string, boolean>(), directories = variant.client && variant.optimized ? new m.DirectoryCache() : undefined;
       let host: any, requests = 0, bytes = 0, hostMs = 0, pushKey: string | undefined, pushDirectoryVersion: string | undefined;
@@ -102,7 +112,7 @@ esac
           if (i && variant.client && variant.optimized) {
             const start = performance.now();
             const context = await facts.context(pushKey, false); pushKey = context.catalogKey;
-            const snapshot = await m.directorySnapshot(cwd, 10000);
+            const snapshot = rust ? await rust.directory(cwd) : await m.directorySnapshot(cwd, 10000);
             const prefetch = snapshot.version === pushDirectoryVersion ? [] : [{ path: cwd, snapshot }]; pushDirectoryVersion = snapshot.version;
             const wire = JSON.stringify({ context, directories: prefetch });
             idleBytes.push(Buffer.byteLength(wire));
@@ -116,7 +126,9 @@ esac
           if (!variant.client) {
             requests = 1; await delay(rtt / 2);
             const start = performance.now();
-            actual = await variant.engine.suggest(text, catalog, env, discovery, undefined, signal);
+            if (rust) {
+              const reply = await rust.native(text, signal); actual = reply.candidates;
+            } else actual = await variant.engine.suggest(text, catalog, env, discovery, undefined, signal);
             hostMs = performance.now() - start;
             bytes = Buffer.byteLength(JSON.stringify({ text })) + Buffer.byteLength(JSON.stringify({ candidates: actual }));
             await delay(rtt / 2);
@@ -128,7 +140,7 @@ esac
               try {
                 const requestHost = host;
                 const metadata = discovery.forHost ? discovery.forHost({ help: (command: string, route: string[]) => requestHost.help(command, route), describe: (command: string) => requestHost.describe(command) }) : discovery;
-                actual = await variant.engine.suggest(text, snapshot.catalog, { HOME: snapshot.home, HOST_CONTEXT: snapshot.discoveryKey }, metadata, host, undefined, signal);
+                actual = rust ? await rust.suggest(text, snapshot, host, signal) : await variant.engine.suggest(text, snapshot.catalog, { HOME: snapshot.home, HOST_CONTEXT: snapshot.discoveryKey }, metadata, host, undefined, signal);
                 if (variant.optimized) await host.verify();
                 break;
               } catch (error) { if (!variant.optimized || !(error instanceof m.DirectoryChanged) || attempt >= 2) throw error; }
@@ -138,7 +150,7 @@ esac
           if (expected === undefined) expected = actual;
           assert.deepEqual(actual, expected, `${variant.name}: ${name}, RTT=${rtt}, iteration=${i}`); comparisons++;
         }
-        const row = { variant: variant.name, case: name, rtt, coldMs: rounded(times[0]), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: counts[0], warmRequests: median(counts.slice(1)), coldBytes: sizes[0], warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
+        const row = { variant: variant.name, case: name, rtt, coldMs: rounded(times[0]), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: counts[0], warmRequests: median(counts.slice(1)), coldBytes: sizes[0], warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), engine: rust ? variant.client ? 'rust-wasm' : 'rust-native' : 'typescript', initializationMs: rust?.initializationMs || 0, idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
         rows.push(row); console.log(JSON.stringify(row));
       } finally { discovery.dispose(); help?.dispose(); }
     }
@@ -147,8 +159,11 @@ esac
     const before = rows.find(row => row.variant === mode + ' before' && row.case === after.case && row.rtt === after.rtt)!;
     assert.ok(after.coldRequests <= before.coldRequests, `${mode}: ${after.case} gained cold requests`);
     assert.ok(after.warmRequests <= before.warmRequests, `${mode}: ${after.case} gained warm requests`);
+    if (process.env.BENCH_RUST === '1') {
+      for (const field of ['coldMs', 'warmMs'] as const) assert.ok(after[field] <= before[field] + Math.max(10, before[field] * 0.2), `${mode}: ${after.case} RTT=${after.rtt} ${field} regressed (${before[field]} -> ${after[field]})`);
+    }
   }
   await mkdir(new URL('../.test-artifacts/', import.meta.url), { recursive: true });
   const output = process.env.BENCH_OUTPUT || new URL('../.test-artifacts/architecture-benchmark.json', import.meta.url);
   await writeFile(output, JSON.stringify({ revisions: loaded.map(({ name, revision }) => ({ name, revision })), repeats, comparisons, runtime: process.version, platform: `${process.platform}/${process.arch}`, rows }, null, 2));
-} finally { await rm(temp, { recursive: true, force: true }); }
+} finally { await Promise.all(rustPeers.map(peer => peer?.dispose())); await rm(temp, { recursive: true, force: true }); }
