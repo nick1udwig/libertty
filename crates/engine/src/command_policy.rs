@@ -17,30 +17,33 @@ pub(crate) fn vocabulary() -> &'static Vocabulary {
     })
 }
 pub fn flags_for(scope: &str, metadata: &CommandMetadata) -> Vec<Flag> {
-    flags_with_fallback(scope, metadata, &[])
+    flags_ref(scope, metadata, &[]).to_vec()
 }
-pub(crate) fn flags_with_fallback(
+pub(crate) fn flags_ref<'a>(
     scope: &str,
-    metadata: &CommandMetadata,
-    fallback: &[Flag],
-) -> Vec<Flag> {
+    metadata: &'a CommandMetadata,
+    fallback: &'a [Flag],
+) -> &'a [Flag] {
     metadata
         .flags
         .get(scope)
         .or_else(|| vocabulary().common_flags.get(scope))
-        .cloned()
-        .unwrap_or_else(|| fallback.to_vec())
+        .map(Vec::as_slice)
+        .unwrap_or(fallback)
 }
 pub fn subcommands_for(scope: &str, metadata: &CommandMetadata) -> Vec<String> {
+    subcommands_ref(scope, metadata).to_vec()
+}
+pub(crate) fn subcommands_ref<'a>(scope: &str, metadata: &'a CommandMetadata) -> &'a [String] {
     metadata
         .subcommands
         .get(scope)
         .or_else(|| vocabulary().subcommands.get(scope))
-        .cloned()
+        .map(Vec::as_slice)
         .unwrap_or_default()
 }
 pub fn child_scope(scope: &str, word: &str, metadata: &CommandMetadata) -> Option<String> {
-    subcommands_for(scope, metadata)
+    subcommands_ref(scope, metadata)
         .iter()
         .any(|name| name == word)
         .then(|| format!("{scope} {word}"))
@@ -79,13 +82,13 @@ pub fn input_file_command(command: &str) -> bool {
 pub fn editor_command(command: &str) -> bool {
     ["vi", "vim", "nvim", "view", "nano", "emacs", "micro", "hx"].contains(&command)
 }
-pub fn is_path_position(args: &[String]) -> bool {
-    let Some(command) = args.first().map(String::as_str) else {
+pub fn is_path_position<T: AsRef<str>>(args: &[T]) -> bool {
+    let Some(command) = args.first().map(AsRef::as_ref) else {
         return false;
     };
     input_file_command(command)
         || editor_command(command)
         || directory_command(command)
         || (script_command(command) && args.len() == 1)
-        || (command == "git" && args.get(1).is_some_and(|arg| arg == "add"))
+        || (command == "git" && args.get(1).is_some_and(|arg| arg.as_ref() == "add"))
 }

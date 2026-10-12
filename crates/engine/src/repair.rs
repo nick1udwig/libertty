@@ -5,6 +5,7 @@ use crate::{
 use std::{
     cell::RefCell,
     collections::{BTreeSet, HashMap, HashSet},
+    rc::Rc,
     sync::{Arc, Mutex, OnceLock},
 };
 
@@ -783,14 +784,57 @@ fn repair_normalized(
 }
 
 #[derive(Clone)]
-struct State {
-    args: Vec<String>,
+struct Trail(Rc<TrailNode>);
+struct TrailNode {
+    parent: Option<Trail>,
+    value: String,
+    len: usize,
+}
+impl Trail {
+    fn new(value: String) -> Self {
+        Self(Rc::new(TrailNode {
+            parent: None,
+            value,
+            len: 1,
+        }))
+    }
+    fn push(&mut self, value: String) {
+        *self = Self(Rc::new(TrailNode {
+            parent: Some(self.clone()),
+            value,
+            len: self.len() + 1,
+        }));
+    }
+    fn len(&self) -> usize {
+        self.0.len
+    }
+    fn first(&self) -> &str {
+        let mut node = self;
+        while let Some(parent) = &node.0.parent {
+            node = parent;
+        }
+        &node.0.value
+    }
+    fn values(&self) -> Vec<&String> {
+        let mut values = Vec::with_capacity(self.len());
+        let mut node = Some(self);
+        while let Some(current) = node {
+            values.push(&current.0.value);
+            node = current.0.parent.as_ref();
+        }
+        values.reverse();
+        values
+    }
+}
+#[derive(Clone)]
+struct State<'a> {
+    args: Trail,
     scope: String,
     index: usize,
     score: f64,
-    changes: Vec<String>,
+    changes: Option<Trail>,
     value_next: bool,
-    flags: Vec<Flag>,
+    flags: &'a [Flag],
     literal_rest: bool,
     quoted: Vec<usize>,
     fold_flags: bool,
@@ -805,13 +849,13 @@ struct Push {
     quoted: bool,
     subcommand: bool,
 }
-fn push(
-    next: &mut Vec<State>,
-    state: &State,
+fn push<'a>(
+    next: &mut Vec<State<'a>>,
+    state: &State<'a>,
     value: String,
     opts: Push,
-    script_flags: Option<&[Flag]>,
-    metadata: &CommandMetadata,
+    script_flags: Option<&'a [Flag]>,
+    metadata: &'a CommandMetadata,
 ) {
     let mut new = state.clone();
     new.args.push(value.clone());
@@ -821,18 +865,22 @@ fn push(
     new.index += opts.consumed.max(1);
     new.score += opts.score;
     if let Some(change) = opts.change {
-        new.changes.push(change);
+        if let Some(changes) = &mut new.changes {
+            changes.push(change);
+        } else {
+            new.changes = Some(Trail::new(change));
+        }
         new.repaired_flag |= opts.flag.is_some();
     }
     new.value_next = opts.flag.as_ref().is_some_and(|flag| flag.takes_value);
-    new.flags = if ["python", "python3"].contains(&new.args[0].as_str())
+    new.flags = if ["python", "python3"].contains(&new.args.first())
         && new.args.len() == 2
         && value.ends_with(".py")
         && let Some(script_flags) = script_flags
     {
-        script_flags.to_vec()
+        script_flags
     } else {
-        flags_with_fallback(&new.scope, metadata, &state.flags)
+        flags_ref(&new.scope, metadata, state.flags)
     };
     if opts.quoted {
         new.quoted.push(new.args.len() - 1);
@@ -860,10 +908,13 @@ fn repair_one(
     if words.is_empty() || words.len() > 64 || utf16_len(input) > 2000 {
         return vec![literal];
     }
-    let exact: Vec<_> = catalog
-        .commands
-        .iter()
-        .filter(|name| name.to_lowercase() == words[0].value.to_lowercase())
+    let name_index = match_index(&catalog.commands, Some(&catalog.commands));
+    let exact: Vec<_> = name_index
+        .lower
+        .get(&words[0].value.to_lowercase())
+        .into_iter()
+        .flatten()
+        .map(|at| &catalog.commands[*at])
         .collect();
     let commands = command_matches(&words, &catalog.commands)
         .into_iter()
@@ -877,17 +928,17 @@ fn repair_one(
                 .collect::<Vec<_>>()
                 .join(" ");
             State {
-                args: vec![item.value.clone()],
+                args: Trail::new(item.value.clone()),
                 scope: item.value.clone(),
                 index: item.consumed,
                 score: item.score,
                 changes: if item.value != text {
-                    vec![format!("Command → {}", item.value)]
+                    Some(Trail::new(format!("Command → {}", item.value)))
                 } else {
-                    vec![]
+                    None
                 },
                 value_next: false,
-                flags: flags_for(&item.value, metadata),
+                flags: flags_ref(&item.value, metadata, &[]),
                 literal_rest: false,
                 quoted: vec![],
                 fold_flags: original[0].value != words[0].value
@@ -926,13 +977,13 @@ fn repair_one(
                 );
                 continue;
             }
-            let subs = subcommands_for(&state.scope, metadata);
+            let subs = subcommands_ref(&state.scope, metadata);
             if !subs.is_empty() {
                 let exact = subs
                     .iter()
                     .find(|sub| sub.to_lowercase() == word.value.to_lowercase());
                 let choices = exact.map_or_else(
-                    || matches(&words, state.index, &subs, 3, false),
+                    || matches(&words, state.index, subs, 3, false),
                     |sub| {
                         vec![Match {
                             value: sub.clone(),
@@ -986,7 +1037,7 @@ fn repair_one(
                     consumed = 2;
                 }
                 let mut alternatives = Vec::new();
-                if option_arity(&option, &state.flags).is_some() {
+                if option_arity(&option, state.flags).is_some() {
                     alternatives.push(option.clone());
                 }
                 let (name, suffix) = option
@@ -994,7 +1045,7 @@ fn repair_one(
                     .map_or((option.as_str(), String::new()), |(name, value)| {
                         (name, format!("={value}"))
                     });
-                for flag in &state.flags {
+                for flag in state.flags {
                     if flag.name.to_lowercase() == name.to_lowercase() {
                         let value = format!("{}{suffix}", flag.name);
                         if !alternatives.contains(&value) {
@@ -1003,7 +1054,7 @@ fn repair_one(
                     }
                 }
                 for value in alternatives {
-                    let Some(takes_value) = option_arity(&value, &state.flags) else {
+                    let Some(takes_value) = option_arity(&value, state.flags) else {
                         continue;
                     };
                     let flag_name = value.split('=').next().unwrap();
@@ -1041,7 +1092,7 @@ fn repair_one(
                 continue;
             }
             let exact_path = catalog.paths.contains(&word.value) && test("[./_-]", &word.value);
-            let file_matches = if !is_path_position(&state.args) {
+            let file_matches = if !is_path_position(&state.args.values()) {
                 vec![]
             } else if exact_path {
                 vec![Match {
@@ -1097,7 +1148,7 @@ fn repair_one(
                         .join(" "),
                     "",
                 );
-                for flag in &state.flags {
+                for flag in state.flags {
                     if !key(&spoken).is_empty() && key(&spoken) == key(&flag.name) {
                         matched_flag = true;
                         push(
@@ -1117,12 +1168,9 @@ fn repair_one(
                     }
                 }
             }
-            let args_key = serde_json::to_string(&state.args).unwrap();
-            if let Some(values) = metadata
-                .argument_values
-                .as_ref()
-                .and_then(|values| values.get(&args_key))
-                && !matched_flag
+            if let Some(values) = metadata.argument_values.as_ref().and_then(|values| {
+                values.get(&serde_json::to_string(&state.args.values()).unwrap())
+            }) && !matched_flag
             {
                 for matched in argument_matches(&words, state.index, values) {
                     let spoken = words[state.index..state.index + matched.consumed]
@@ -1172,15 +1220,15 @@ fn repair_one(
         .into_iter()
         .filter(|state| state.index == words.len() && !state.value_next)
     {
+        let args = state.args.values();
         if state.repaired_flag
-            && state.args.iter().enumerate().any(|(index, arg)| {
+            && args.iter().enumerate().any(|(index, arg)| {
                 test("(?i)^(dash|hep|hyphen)$", arg) && !state.quoted.contains(&index)
             })
         {
             continue;
         }
-        let command = state
-            .args
+        let command = args
             .iter()
             .enumerate()
             .map(|(index, value)| {
@@ -1192,19 +1240,15 @@ fn repair_one(
             })
             .collect::<Vec<_>>()
             .join(" ");
-        let history_boost = 12.min(
-            catalog
-                .history
-                .iter()
-                .filter(|line| **line == command)
-                .count()
-                * 3,
-        ) as f64;
+        let history_boost = crate::history::command_boost(&catalog.history, &command);
         if seen.insert(command.clone()) {
             unique.push(Candidate {
                 command,
                 score: state.score + history_boost,
-                changes: state.changes,
+                changes: state
+                    .changes
+                    .map(|trail| trail.values().into_iter().cloned().collect())
+                    .unwrap_or_default(),
                 literal: None,
             });
         }

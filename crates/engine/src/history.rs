@@ -18,6 +18,7 @@ struct Entry {
 struct HistoryIndex {
     lengths: BTreeMap<usize, Vec<Arc<Entry>>>,
     entries: HashMap<String, Arc<Entry>>,
+    counts: HashMap<String, usize>,
 }
 fn history_index(history: &SharedList<String>) -> Arc<HistoryIndex> {
     static CACHE: OnceLock<Mutex<ArrayCache<HistoryIndex>>> = OnceLock::new();
@@ -35,6 +36,7 @@ fn history_index(history: &SharedList<String>) -> Arc<HistoryIndex> {
         ..HistoryIndex::default()
     };
     for line in history {
+        *index.counts.entry(line.clone()).or_default() += 1;
         if !seen.insert(line) {
             continue;
         }
@@ -65,6 +67,15 @@ fn history_index(history: &SharedList<String>) -> Arc<HistoryIndex> {
     let index = Arc::new(index);
     cache.lock().unwrap().insert_shared(history, index.clone());
     index
+}
+pub(crate) fn command_boost(history: &SharedList<String>, command: &str) -> f64 {
+    (history_index(history)
+        .counts
+        .get(command)
+        .copied()
+        .unwrap_or(0)
+        * 3)
+    .min(12) as f64
 }
 fn word_length(value: &str) -> usize {
     value
@@ -177,6 +188,17 @@ pub fn history_candidates(input: &str, catalog: &Catalog) -> Vec<Candidate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn history_frequency_boost_refreshes_without_changing_old_snapshots() {
+        let first: SharedList<String> = vec!["git init".into(), "git init".into()].into();
+        assert_eq!(command_boost(&first, "git init"), 6.0);
+        let mut changed = first.clone();
+        changed.extend(std::iter::repeat_n("git init".into(), 5));
+        assert_eq!(command_boost(&changed, "git init"), 12.0);
+        assert_eq!(command_boost(&first, "git init"), 6.0);
+        changed.clear();
+        assert_eq!(command_boost(&changed, "git init"), 0.0);
+    }
     #[test]
     fn refresh_reuses_parsed_entries_while_adding_and_evicting_commands() {
         let first = history_index(&vec!["git init".into(), "git status".into()].into());
