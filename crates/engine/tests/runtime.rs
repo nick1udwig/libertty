@@ -93,6 +93,47 @@ fn prepared_contexts_preserve_pending_snapshots_reject_stale_ids_and_reset() {
         .prepare_context(3, Catalog::default(), Default::default())
         .unwrap();
 }
+
+#[test]
+fn fused_directory_import_and_resume_matches_separate_calls_and_rejects_partial_imports() {
+    use termai_engine::runtime::{DirectoryPin, message};
+    let request: Request = serde_json::from_value(json!({"operation":"repairDirectory","args":["cd work space",{"cwd":"/fixture","commands":["cd"],"paths":[],"history":[]},""]})).unwrap();
+    let mut fused = Runtime::default();
+    let mut separate = Runtime::default();
+    let Step::Pending { callbacks, .. } = fused.start(
+        1,
+        Request {
+            operation: request.operation.clone(),
+            args: request.args.clone(),
+        },
+        0.0,
+    ) else {
+        panic!("Expected lookup");
+    };
+    separate.start(1, request, 0.0);
+    let pins =
+        json!([{"directory":1,"entries":[{"name":"Workspace","directory":true,"symlink":false}]}]);
+    let replies = json!([{"request":callbacks[0].request,"results":[{"lookup":{"directory":1,"version":"v1","complete":true}}]}]);
+    let bad = json!({"request":1,"replies":replies,"now":1,"directories":[pins[0],pins[0]]});
+    assert!(matches!(
+        message(&mut fused, &serde_json::to_vec(&bad).unwrap(), true),
+        Step::Error { request: 1, .. }
+    ));
+    let valid = json!({"request":1,"replies":replies,"now":1,"directories":pins});
+    let actual = message(&mut fused, &serde_json::to_vec(&valid).unwrap(), true);
+    assert!(!matches!(actual, Step::Error { .. }));
+    separate
+        .pin_directories(
+            1,
+            serde_json::from_value::<Vec<DirectoryPin>>(pins).unwrap(),
+        )
+        .unwrap();
+    let expected = separate.resume(1, serde_json::from_value(replies).unwrap(), 1.0);
+    assert_eq!(
+        serde_json::to_value(actual).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+}
 fn request(path: &str) -> Request {
     serde_json::from_value(json!({"operation":"candidateValid","args":["cat",{"command":format!("cat {path}"),"score":100,"changes":[]},
         {"cwd":"/fixture","commands":["cat"],"paths":[],"history":[]},{},{"flags":{},"subcommands":{}}]})).unwrap()

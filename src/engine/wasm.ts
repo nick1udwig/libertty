@@ -25,6 +25,7 @@ type EngineStep<T> = { request: number } & (
 );
 type DirectoryResult = HostResult | { entries: number } | { lookup: { directory: number; version: string; complete: boolean } };
 type HostReply = { request: number; values: unknown[] } | { request: number; results: DirectoryResult[] } | { request: number; error: string };
+type DirectoryPins = Map<DirectoryEntry[], { directory: number; entries?: DirectoryEntry[] }>;
 export class WasmEngine {
   private exports: EngineExports;
   private constructor(exports: EngineExports) { this.exports = exports; }
@@ -35,16 +36,25 @@ export class WasmEngine {
   private nextDirectory = 0;
   private directoryIds = new WeakMap<DirectoryEntry[], number>();
   private directories = new Map<number, number>();
+  private encoder = new TextEncoder();
+  private decoder = new TextDecoder('utf-8', { fatal: true });
+  private scratch = new Uint8Array(4096);
   static async load(url: string | URL, signal?: AbortSignal): Promise<WasmEngine> {
     signal?.throwIfAborted();
     const response = await fetch(url, { credentials: 'same-origin', signal });
     if (!response.ok) throw new Error('Rust engine download failed: ' + response.status);
-    const bytes = await response.arrayBuffer();
-    return WasmEngine.fromBytes(bytes, signal);
+    const streaming = typeof WebAssembly.instantiateStreaming === 'function' && response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() === 'application/wasm';
+    const { instance } = streaming
+      ? await WebAssembly.instantiateStreaming(response, {})
+      : await WebAssembly.instantiate(await response.arrayBuffer(), {});
+    return WasmEngine.fromInstance(instance, signal);
   }
   static async fromBytes(bytes: BufferSource, signal?: AbortSignal): Promise<WasmEngine> {
     signal?.throwIfAborted();
     const { instance } = await WebAssembly.instantiate(bytes, {});
+    return WasmEngine.fromInstance(instance, signal);
+  }
+  private static fromInstance(instance: WebAssembly.Instance, signal?: AbortSignal): WasmEngine {
     const exports = instance.exports;
     if (!(exports.memory instanceof WebAssembly.Memory) ||
         ['termai_alloc', 'termai_dispatch', 'termai_len', 'termai_free', 'termai_start', 'termai_resume', 'termai_cancel', 'termai_reset', 'termai_initialize', 'termai_context', 'termai_suggest_prepared', 'termai_directories'].some(name => typeof exports[name] !== 'function')) {
@@ -109,7 +119,7 @@ export class WasmEngine {
         if (step.state === 'complete') return step.value;
         if (step.state === 'error') throw new Error(step.error);
         if (step.state !== 'pending' || !step.callbacks.length) throw new Error('Rust engine made no progress.');
-        let replies: HostReply[] = await Promise.race([cancelled, Promise.all(step.callbacks.map(async callback => {
+        const replies: HostReply[] = await Promise.race([cancelled, Promise.all(step.callbacks.map(async callback => {
           try {
             const reply = await provide(callback, controller.signal);
             controller.signal.throwIfAborted();
@@ -120,8 +130,12 @@ export class WasmEngine {
           }
         }))]);
         controller.signal.throwIfAborted();
-        if (context !== undefined) replies = this.packDirectories(request, step.callbacks, replies);
-        step = this.exchange<EngineStep<T>>({ request, replies, now: performance.now() }, 'termai_resume');
+        const packed = context === undefined ? { replies } : this.packDirectories(step.callbacks, replies);
+        step = this.exchange<EngineStep<T>>({ request, replies: packed.replies, directories: packed.directories, now: performance.now() }, 'termai_resume');
+        if (packed.arrays) {
+          if (step.state === 'error') { this.directories.clear(); this.directoryIds = new WeakMap(); }
+          else this.rememberDirectories(packed.arrays);
+        }
       }
     } finally {
       signal?.removeEventListener('abort', cancel);
@@ -131,8 +145,8 @@ export class WasmEngine {
       controller.abort();
     }
   }
-  private packDirectories(request: number, callbacks: HostRequest[], replies: HostReply[]): HostReply[] {
-    const arrays = new Map<DirectoryEntry[], { directory: number; entries?: DirectoryEntry[] }>();
+  private packDirectories(callbacks: HostRequest[], replies: HostReply[]): { replies: HostReply[]; directories?: { directory: number; entries?: DirectoryEntry[] }[]; arrays?: DirectoryPins } {
+    const arrays: DirectoryPins = new Map();
     let count = 0;
     const packed = replies.map((reply, index): HostReply => {
       if ('error' in reply) return reply;
@@ -160,31 +174,40 @@ export class WasmEngine {
       });
       return changed ? { request: reply.request, results: converted } : reply;
     });
-    if (!arrays.size) return replies;
-    // Import and pin after every provider has resolved, so concurrent calls cannot evict a pending reference.
+    if (!arrays.size) return { replies };
+    // Import, pin, and resume in one synchronous exchange after every provider resolves.
     const directories = [...arrays.values()].sort((a, b) => a.directory - b.directory);
-    const reply = this.exchange<{ ok: boolean; error?: string }>({ request, directories }, 'termai_directories');
-    if (!reply.ok) throw new Error(reply.error || 'Rust engine directory snapshots failed.');
+    return { replies: packed, directories, arrays };
+  }
+  private rememberDirectories(arrays: DirectoryPins) {
     for (const [entries, pin] of [...arrays].sort((a, b) => a[1].directory - b[1].directory)) {
       this.directoryIds.set(entries, pin.directory);
       this.directories.delete(pin.directory);
       this.directories.set(pin.directory, entries.length);
     }
     while (this.directories.size > 32 || [...this.directories.values()].reduce((sum, length) => sum + length, 0) > 30000) this.directories.delete(this.directories.keys().next().value!);
-    return packed;
   }
   private exchange<T>(request: unknown, method: 'termai_dispatch' | 'termai_start' | 'termai_resume' | 'termai_context' | 'termai_suggest_prepared' | 'termai_directories'): T {
-    const bytes = new TextEncoder().encode(JSON.stringify(request));
-    if (bytes.length > 64 * 1024 * 1024) throw new Error('Engine request exceeds 64 MiB.');
-    const input = this.exports.termai_alloc(bytes.length);
+    const text = JSON.stringify(request);
+    const limit = 64 * 1024 * 1024;
+    if (text.length > limit) throw new Error('Engine request exceeds 64 MiB.');
+    const capacity = Math.min(limit, text.length * 3);
+    let scratch = this.scratch;
+    if (scratch.length < capacity) {
+      scratch = new Uint8Array(capacity);
+      if (capacity <= 8 * 1024 * 1024) this.scratch = scratch;
+    }
+    const { read, written } = this.encoder.encodeInto(text, scratch);
+    if (read !== text.length) throw new Error('Engine request exceeds 64 MiB.');
+    const input = this.exports.termai_alloc(written);
     if (!input) throw new Error('Rust engine allocation limit reached.');
     let output = 0;
     try {
-      new Uint8Array(this.exports.memory.buffer, input, bytes.length).set(bytes);
+      new Uint8Array(this.exports.memory.buffer, input, written).set(scratch.subarray(0, written));
       output = this.exports[method](input);
       const length = this.exports.termai_len(output);
       if (!output || !length) throw new Error('Rust engine returned an invalid allocation.');
-      const result = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(this.exports.memory.buffer, output, length)));
+      const result = JSON.parse(this.decoder.decode(new Uint8Array(this.exports.memory.buffer, output, length)));
       return result as T;
     } finally {
       this.exports.termai_free(input);

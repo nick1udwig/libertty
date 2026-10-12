@@ -17,6 +17,7 @@ const server = http.createServer((req, res) => {
   if (req.url === '/terminal/engine.js') { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(bridge); }
   else if (req.url === '/directory-data.ts') { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(directoryData); }
   else if (req.url === '/terminal/termai-engine.wasm') { res.writeHead(200, { 'Content-Type': 'application/wasm' }); res.end(wasm); }
+  else if (req.url === '/terminal/engine-fallback.wasm') { res.writeHead(200, { 'Content-Type': 'application/octet-stream' }); res.end(wasm); }
   else if (req.url === '/terminal/corpus.json') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(corpus)); }
   else if (req.url === '/terminal/host-corpus.json') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(hostCorpus)); }
   else if (req.url === '/terminal/prewarm-corpus.json') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(prewarmCorpus)); }
@@ -32,11 +33,17 @@ try {
   const report = await page.evaluate(async () => {
     const { WasmEngine } = await import('./engine.js');
     const { markImmutableDirectoryEntries } = await import('../directory-data.ts');
+    const originalStreaming = WebAssembly.instantiateStreaming;
+    let streamingCalls = 0;
+    WebAssembly.instantiateStreaming = (...args) => { streamingCalls++; return originalStreaming(...args); };
     const initializationStart = performance.now();
     const engine = await WasmEngine.load(new URL('termai-engine.wasm', location.href));
     const initializationMs = performance.now() - initializationStart;
     const resource = performance.getEntriesByType('resource').find(entry => entry.name.endsWith('/termai-engine.wasm'));
     const initialization = { initializationMs, downloadMs: resource?.duration, transferredBytes: resource?.transferSize, artifactBytes: resource?.decodedBodySize, browser: navigator.userAgent };
+    const fallback = await WasmEngine.load(new URL('engine-fallback.wasm', location.href));
+    const loading = { streamingCalls, fallback: fallback.call('tokens', ['echo fallback'])[1].value };
+    WebAssembly.instantiateStreaming = originalStreaming;
     const corpus = await (await fetch('./corpus.json')).json();
     const failures = [];
     // Sort object keys without disturbing array order or numeric values.
@@ -125,10 +132,11 @@ try {
       if (operation.kind === 'entries' || operation.kind === 'completion') return [];
       return null;
     });
-    let imported = 0, referenced = 0;
+    let imported = 0, referenced = 0, separateImports = 0;
     const directoryExchange = engine.exchange;
     engine.exchange = function(request, method) {
-      if (method === 'termai_directories') for (const pin of request.directories) pin.entries ? imported++ : referenced++;
+      if (method === 'termai_directories') separateImports++;
+      if (method === 'termai_resume') for (const pin of request.directories || []) pin.entries ? imported++ : referenced++;
       return directoryExchange.call(this, request, method);
     };
     const directorySnapshot = (name, version = name) => {
@@ -190,7 +198,7 @@ try {
     const invalidReply = JSON.parse(new TextDecoder().decode(new Uint8Array(raw.memory.buffer, invalid, raw.termai_len(invalid))));
     raw.termai_free(invalid);
     const recovered = raw.termai_alloc(1); raw.termai_free(recovered);
-    return { initialization, count: corpus.fixtures.length, failures, unknown, cancelled, unicode, hostCount: hostCorpus.fixtures.length, hostFailures, preparedFailures, preparedSnapshots, directorySnapshots, isolated,
+    return { initialization, loading, separateImports, count: corpus.fixtures.length, failures, unknown, cancelled, unicode, hostCount: hostCorpus.fixtures.length, hostFailures, preparedFailures, preparedSnapshots, directorySnapshots, isolated,
       cancelledPending, reused, hostError, incomplete, allocated, invalidReply, recovered: !!recovered, prewarmFailures, prewarmCount: prewarm.steps.length };
   });
   assert.deepEqual(report.failures, []);
@@ -200,6 +208,8 @@ try {
   assert.deepEqual(report.preparedFailures, []);
   assert.deepEqual(report.preparedSnapshots, { reused: true, sharedPreparation: true, ordinary: true, pending: true, reset: true, changed: true });
   assert.deepEqual(report.directorySnapshots, { warmShared: true, changed: true, eviction: true, mutable: true, reset: true });
+  assert.deepEqual(report.loading, { streamingCalls: 1, fallback: 'fallback' });
+  assert.equal(report.separateImports, 0);
   assert.deepEqual(report.prewarmFailures, []);
   console.log('PASS Rust browser prewarm parity: ' + report.prewarmCount + ' reference cache steps.');
   assert.equal(report.cancelledPending, 'AbortError'); assert.equal(report.reused, true);

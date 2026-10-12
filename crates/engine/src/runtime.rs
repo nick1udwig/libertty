@@ -196,13 +196,30 @@ struct Resume {
     request: u32,
     replies: Vec<Reply>,
     now: f64,
+    #[serde(default, deserialize_with = "present_pins")]
+    directories: Option<Vec<DirectoryPin>>,
+}
+fn present_pins<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<DirectoryPin>>, D::Error> {
+    Vec::<DirectoryPin>::deserialize(deserializer).map(Some)
 }
 pub fn message(runtime: &mut Runtime, bytes: &[u8], resume: bool) -> Step {
     let result = if bytes.len() > crate::INPUT_LIMIT {
         Err("Engine request exceeds 64 MiB.".into())
     } else if resume {
         crate::deserialize_bytes::<Resume>(bytes)
-            .map(|message| runtime.resume(message.request, message.replies, message.now))
+            .map(|message| {
+                if let Some(directories) = message.directories
+                    && let Err(error) = runtime.pin_directories(message.request, directories)
+                {
+                    return Step::Error {
+                        request: message.request,
+                        error,
+                    };
+                }
+                runtime.resume(message.request, message.replies, message.now)
+            })
             .map_err(|error| error.to_string())
     } else {
         crate::deserialize_bytes::<Start>(bytes)
