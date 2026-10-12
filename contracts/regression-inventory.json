@@ -1497,7 +1497,8 @@
         "node:os",
         "node:path",
         "node:assert/strict",
-        "ssh2"
+        "ssh2",
+        "./support/sshd.mjs"
       ],
       "assertions": [],
       "classification": "integration-harness",
@@ -1566,6 +1567,7 @@
         "ws",
         "node:os",
         "ssh2",
+        "./support/sshd.mjs",
         "../server/vault.ts",
         "./herdr-fixture.ts"
       ],
@@ -2760,6 +2762,7 @@
         "node:net",
         "node:os",
         "ssh2",
+        "./support/sshd.mjs",
         "ws",
         "./herdr-fixture.ts"
       ],
@@ -4207,7 +4210,8 @@
         "node:os",
         "node:path",
         "node:assert/strict",
-        "ssh2"
+        "ssh2",
+        "./support/sshd.mjs"
       ],
       "assertions": [],
       "classification": "integration-harness",
@@ -4524,6 +4528,7 @@
         "node:path",
         "node:assert/strict",
         "ssh2",
+        "./support/sshd.mjs",
         "ws",
         "../server/vault.ts"
       ],

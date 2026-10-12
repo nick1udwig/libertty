@@ -65,7 +65,13 @@ impl Fixture {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
         let config = format!("{root}/sshd_config");
-        tokio::fs::write(&config,format!("Port {port}\nListenAddress 127.0.0.1\nHostKey {root}/host\nPidFile {root}/pid\nAuthorizedKeysFile {root}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers {user}\nSetEnv HOME={root}/home\nSubsystem sftp internal-sftp\n")).await.unwrap();
+        // The loopback remote must use the same supported Bash as local tests.
+        let bash = termai_server::shell::local_bash(&std::env::vars().collect()).unwrap();
+        let remote_path = format!(
+            "{}:/usr/bin:/bin",
+            std::path::Path::new(&bash).parent().unwrap().display()
+        );
+        tokio::fs::write(&config,format!("Port {port}\nListenAddress 127.0.0.1\nHostKey {root}/host\nPidFile {root}/pid\nAuthorizedKeysFile {root}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers {user}\nSetEnv HOME={root}/home PATH={remote_path}\nSubsystem sftp internal-sftp\n")).await.unwrap();
         let executable = std::env::var("TERMAI_TEST_SSHD").unwrap_or_else(|_| {
             if std::path::Path::new("/usr/bin/sshd").exists() {
                 "/usr/bin/sshd"

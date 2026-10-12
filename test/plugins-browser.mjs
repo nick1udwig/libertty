@@ -6,6 +6,7 @@ import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import ssh2 from 'ssh2';
+import { sshdPath, sshFixturePath } from './support/sshd.mjs';
 import { WebSocket } from 'ws';
 import { herdrFixture } from './herdr-fixture.ts';
 
@@ -99,8 +100,8 @@ try {
 
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'), identity = ssh2.utils.generateKeyPairSync('ed25519');
   await writeFile(fixture.directory + '/host-key', hostKey.private, { mode: 0o600 }); await writeFile(fixture.directory + '/authorized', identity.public + '\n');
-  const config = ['Port ' + sshPort, 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + fixture.directory + ':/usr/bin:/bin', 'Subsystem sftp internal-sftp'].join('\n') + '\n';
-  await writeFile(fixture.directory + '/sshd_config', config); start('/usr/bin/sshd', ['-D', '-e', '-f', fixture.directory + '/sshd_config']);
+  const config = ['Port ' + sshPort, 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + sshFixturePath(fixture.directory), 'Subsystem sftp internal-sftp'].join('\n') + '\n';
+  await writeFile(fixture.directory + '/sshd_config', config); start(sshdPath(), ['-D', '-e', '-f', fixture.directory + '/sshd_config']);
   await delay(150);
   const key = await (await request('keychain', { action: 'create', name: 'Fixture key', privateKey: identity.private, passphrase: 'fixture-secret' })).json();
   assert.ok(key.id);
