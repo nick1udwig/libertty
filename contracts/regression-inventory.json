@@ -349,6 +349,7 @@
       "source": "crates/server/src/viewer_queue.rs",
       "owner": "rust",
       "assertions": [
+        "concurrent_senders_preserve_the_byte_limit_and_release_reservations",
         "queued_and_in_flight_bytes_are_bounded_and_released"
       ]
     },
