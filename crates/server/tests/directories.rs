@@ -78,6 +78,34 @@ async fn spelling_indexes_preserve_exact_and_unicode_matches_and_refresh_after_r
 }
 
 #[tokio::test]
+async fn corrected_spelling_preserves_symlink_parents_and_nested_case() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("Actual/Nested")).unwrap();
+    std::fs::write(root.path().join("Actual/Nested/My Notes.txt"), "").unwrap();
+    symlink("Actual", root.path().join("Alias")).unwrap();
+    let directories = Directories::default();
+    let cancel = CancellationToken::new();
+    assert_eq!(
+        directories
+            .path_spelling(
+                root.path()
+                    .join("alias/nESTED/my NOTES.txt")
+                    .to_str()
+                    .unwrap(),
+                &cancel
+            )
+            .await
+            .unwrap(),
+        Some(
+            root.path()
+                .join("Alias/Nested/My Notes.txt")
+                .to_string_lossy()
+                .into_owned()
+        )
+    );
+}
+
+#[tokio::test]
 async fn batched_path_scans_preserve_executable_symlinks_deduplication_and_cancellation() {
     let root = tempfile::tempdir().unwrap();
     std::fs::write(root.path().join("tool"), "#!/bin/sh\n").unwrap();
