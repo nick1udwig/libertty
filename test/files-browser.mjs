@@ -64,7 +64,7 @@ try {
     assert.equal((await fetch(base + 'api/files/download?ticket=' + ticket.ticket)).status, 404);
     assert.equal((await request(base, 'api/files/download?session=' + id, owner, { path: folder })).status, 400);
   }
-  browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true });
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   const page = await context.newPage(); page.on('response', async r => { if (r.url().includes('/api/files') && !r.ok()) console.log('File error', r.status(), await r.text().catch(() => '')); }); const errors = []; page.on('pageerror', e => errors.push(String(e))); page.on('dialog', d => d.accept());

@@ -33,7 +33,7 @@ try {
   const ssh = { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, privateKey: key.private, passphrase: 'test-passphrase-123' };
   const trust = await (await request(base, 'api/sessions', owner, { name: 'Remote', ssh })).json(); assert.ok(trust.fingerprint, JSON.stringify(trust)); ssh.trust = trust.fingerprint;
   const remote = await (await request(base, 'api/sessions', owner, { name: 'Remote', ssh })).json(); assert.ok(remote.id, JSON.stringify(remote));
-  browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true });
+  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
