@@ -117,3 +117,26 @@ Run `node test/transport-budgets.mjs` against the final artifacts to check the s
 
 Raw experiment, isolated verification, noisy repeat and encrypted-hop samples are checked in under [docs/benchmarks/transport](benchmarks/transport).
 The benchmark-generated working copies remain in `.test-artifacts`.
+
+## Herdr space switching
+
+The authenticated terminal ticket now includes measured mobile columns and rows, and the frame hub opens its controller directly at that size.
+This avoids creating a desktop observer and subsequently replacing it after a browser resize message.
+New mobile subscribers reject a cached baseline from a different geometry, and joining an incremental stream requests a complete baseline.
+Geometry retains the existing 1–1,000 column and row bounds, owner-scoped tickets and desktop observer behavior.
+Older servers without `initialGeometry` retain their existing client path.
+
+Resizing alone still exposed stale desktop history in the real browser, and a matching grid could arrive one animation frame before the PTY application redraw.
+Those failed trials are retained under [docs/benchmarks/herdr](benchmarks/herdr).
+The mobile viewport now waits for a complete matching frame, paints its baseline while hidden, and becomes visible at the following animation-frame boundary.
+History received during this transition is ignored, and the existing full-frame request also refreshes shared history after the viewport is ready.
+Replaced connections and mismatched geometry cancel a pending reveal.
+The gate follows browser paint boundaries without a fixed millisecond sleep.
+
+Thirty real mobile space switches passed visible-layout assertions across normal and constrained gzip transport, including ten switches with Chromium script CPU throttled sixfold.
+The native test samples terminal content on every animation frame and rejects an inherited desktop title or clipped desktop border when the viewport is visible.
+The constrained run's first visible mobile paint was 392 ms median and 581 ms p95, including iframe creation, asset loading, terminal initialization, authorization and the controller connection.
+The sixfold CPU-throttled verification passed at 634 ms median and 639 ms p95 for the first visible mobile paint.
+These are browser-emulated mobile measurements rather than physical-device measurements.
+Native resize, multiple-viewer release, keyboard geometry, live scrolling, selection, links and full Herdr lifecycle regressions also passed.
+Run `npm run test:herdr-flash`, `npm run test:herdr-resize` and `npm run test:herdr-scroll` with the pinned test Herdr binary to reproduce them.

@@ -150,6 +150,7 @@ struct Ticket {
     until: Instant,
 }
 struct HerdrTicket {
+    size: Option<herdr_terminal_stream::Size>,
     owner: String,
     session: String,
     source: String,
@@ -1626,6 +1627,31 @@ async fn herdr_request(
     }
     if path == "/api/herdr/ticket" && *req.method() == Method::POST {
         let terminal = query.get("terminalId").cloned().unwrap_or_default();
+        // Existing ticket callers may omit a JSON body entirely.
+        let input = if req
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("application/json"))
+        {
+            body(req, 2048).await?
+        } else {
+            json!({})
+        };
+        let size = if input["mobile"] == true && !terminal.is_empty() {
+            let dimension = |key: &str| {
+                input[key]
+                    .as_u64()
+                    .filter(|n| (1..=1000).contains(n))
+                    .map(|n| n as u16)
+            };
+            Some(herdr_terminal_stream::Size {
+                cols: dimension("cols").ok_or_else(|| fail("Invalid terminal size."))?,
+                rows: dimension("rows").ok_or_else(|| fail("Invalid terminal size."))?,
+            })
+        } else {
+            None
+        };
         if !terminal.is_empty()
             && !target.snapshot().await.map_err(fail)?["terminals"]
                 .as_array()
@@ -1642,6 +1668,7 @@ async fn herdr_request(
         tickets.insert(
             ticket.clone(),
             HerdrTicket {
+                size,
                 owner: owner.into(),
                 session: session_name,
                 source: source.into(),
@@ -1650,7 +1677,9 @@ async fn herdr_request(
                 until: Instant::now() + Duration::from_secs(15),
             },
         );
-        return ok(json!({"ticket":ticket,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}));
+        return ok(
+            json!({"ticket":ticket,"initialGeometry":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
+        );
     }
     Err((StatusCode::NOT_FOUND, "Not found".into()))
 }
@@ -1768,6 +1797,7 @@ async fn herdr_socket_session(
             agent,
             &app.herdr_terminals,
             &app.herdr_history,
+            ticket.size,
             send,
             cancel.clone(),
         ) {

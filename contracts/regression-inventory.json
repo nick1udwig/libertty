@@ -1713,6 +1713,27 @@
       "coverage": []
     },
     {
+      "source": "test/herdr-space-flash-native.mjs",
+      "imports": [
+        "node:assert/strict",
+        "node:fs/promises",
+        "node:child_process",
+        "node:events",
+        "node:net",
+        "node-pty",
+        "playwright-core",
+        "../server/herdr.ts",
+        "../src/engine/repair.ts",
+        "./wire-observer.mjs"
+      ],
+      "assertions": [],
+      "classification": "integration-harness",
+      "equivalent": "test/herdr-space-flash-native.mjs",
+      "status": "retained",
+      "justification": "Retain the external browser, installation and benchmark assertions against the Rust runtime; TEST_BACKEND=node remains available for the reference oracle.",
+      "coverage": []
+    },
+    {
       "source": "test/herdr-spaces-browser.mjs",
       "imports": [
         "node:assert/strict",
@@ -4252,6 +4273,19 @@
       "equivalent": "test/transport-benchmark.mjs",
       "status": "retained",
       "justification": "Retain the external browser, installation and benchmark assertions against the Rust runtime; TEST_BACKEND=node remains available for the reference oracle.",
+      "coverage": []
+    },
+    {
+      "source": "test/transport-budgets.mjs",
+      "imports": [
+        "node:assert/strict",
+        "node:fs/promises"
+      ],
+      "assertions": [],
+      "classification": "frontend",
+      "equivalent": "test/transport-budgets.mjs",
+      "status": "retained",
+      "justification": "Frontend behavior remains TypeScript and retains its existing unit harness.",
       "coverage": []
     },
     {

@@ -23,6 +23,7 @@ const baseURL = new URL(params.get('backend') || document.baseURI);
 const session = params.get('session') || 'default';
 const herdrTerminal = params.get('herdrTerminal');
 let herdrReady = false;
+let herdrLayoutPending = false, herdrLayoutMatched = false, herdrLayoutFrame = 0;
 let offeredWire: string[] | undefined;
 let accessToken: string | undefined = backendAccess(baseURL.href);
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
@@ -132,6 +133,7 @@ function drain() {
 function sizeTerminal() {
   try {
     const wide = fullWidth();
+    if (herdrLayoutPending && !mobileTerminal()) { herdrLayoutPending = false; terminalViewport.classList.remove('awaiting-herdr-layout'); }
     terminalViewport.classList.toggle('full-width', wide);
     const element = $('terminal');
     if (wide) {
@@ -260,9 +262,15 @@ const gestures = new TerminalGestures(term, {
 async function socketURL(signal: AbortSignal) {
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
   if (herdrTerminal) {
-    const response = await fetch(herdrEndpoint('api/herdr/ticket'), { method: 'POST', credentials: 'same-origin', headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json' }, body: '{}', signal });
+    sizeTerminal();
+    const geometry = { cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && !document.hidden };
+    cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutMatched = false;
+    herdrLayoutPending = geometry.mobile;
+    terminalViewport.classList.toggle('awaiting-herdr-layout', herdrLayoutPending);
+    const response = await fetch(herdrEndpoint('api/herdr/ticket'), { method: 'POST', credentials: 'same-origin', headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(geometry), signal });
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error(result.error), { status: response.status });
+    if (!result.initialGeometry) { herdrLayoutPending = false; terminalViewport.classList.remove('awaiting-herdr-layout'); }
     socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire;
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
   socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:'; socketURL.searchParams.set('after', String(after));
@@ -286,10 +294,30 @@ function socketOpened() {
 function socketMessage(event: MessageEvent) {
   const message: ServerMessage = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
   if (message.type === 'herdr-frame') {
-    if (projection?.frame(message)) requestAnimationFrame(() => notify('terminal-rendered'));
+    if (herdrLayoutPending) {
+      if (message.width !== term.cols || message.height !== term.rows) {
+        herdrLayoutMatched = false; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; return;
+      }
+      if (!herdrLayoutMatched && !message.full) return;
+      herdrLayoutMatched = true;
+      if (!herdrLayoutFrame) {
+        const socket = transport.socket;
+        // Let Ghostty paint the baseline and consume the PTY's resize redraw
+        // before making this viewport visible at the next paint boundary.
+        herdrLayoutFrame = requestAnimationFrame(() => {
+          herdrLayoutFrame = requestAnimationFrame(() => {
+            herdrLayoutFrame = 0;
+            if (transport.socket !== socket || !herdrLayoutPending || !herdrLayoutMatched) return;
+            herdrLayoutPending = false; terminalViewport.classList.remove('awaiting-herdr-layout');
+            send({ type: 'herdr-frame-request' }); notify('terminal-rendered');
+          });
+        });
+      }
+    }
+    if (projection?.frame(message) && !herdrLayoutPending) requestAnimationFrame(() => notify('terminal-rendered'));
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
   }
-  if (message.type === 'screen') { projection?.update(message.text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); requestAnimationFrame(() => notify('terminal-rendered')); return; }
+  if (message.type === 'screen') { if (herdrLayoutPending) return; projection?.update(message.text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); requestAnimationFrame(() => notify('terminal-rendered')); return; }
   if (message.type === 'input-line') {
     const intact = message.prompt === state.prompt && message.revision === state.inputRevision && state.ready;
     inputLines.get(message.id)?.(intact && typeof message.text === 'string' && typeof message.cursor === 'number' ? { text: message.text, cursor: message.cursor } : undefined);

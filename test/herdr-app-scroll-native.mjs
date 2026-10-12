@@ -58,7 +58,7 @@ try {
     window.WebSocket = class extends WebSocket {
       set onmessage(handler) {
         window.__receive = message => handler.call(this, { data: JSON.stringify(message) });
-        super.onmessage = event => {
+        super.onmessage = async event => {
           const message = await window.__wireMessage(event.data, this);
           if (message.type === 'herdr-frame') { window.__frames++; if (!message.full) window.__deltas++; }
           if (message.type === 'screen') { window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }

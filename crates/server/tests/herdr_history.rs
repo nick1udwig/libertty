@@ -29,6 +29,17 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
         fixture.actions.lock().unwrap().len() <= 2,
         "two viewers must share one poll"
     );
+    second.refresh.notify_one();
+    second.receive.changed().await.unwrap();
+    assert_eq!(
+        second.receive.borrow().as_ref().unwrap().as_ref().unwrap()["text"],
+        "Live Herdr terminal"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(180), second.receive.changed())
+            .await
+            .is_err()
+    );
     let mut isolated = hub.subscribe(other.target.clone(), json!("w1:p0")).unwrap();
     isolated.receive.changed().await.unwrap();
     *fixture.screen.lock().unwrap() = "changed 界😀".into();

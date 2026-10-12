@@ -22,6 +22,7 @@ pub struct View {
     capacity: Arc<Semaphore>,
     send: crate::viewer_queue::Sender,
     terminal: Subscription,
+    history_refresh: Arc<tokio::sync::Notify>,
     cancel: CancellationToken,
 }
 fn integer(value: &Value) -> Option<f64> {
@@ -38,14 +39,16 @@ impl View {
         agent: Value,
         hub: &Hub,
         history: &crate::herdr_history::Hub,
+        initial_size: Option<Size>,
         send: crate::viewer_queue::Sender,
         cancel: CancellationToken,
     ) -> Result<Arc<Self>, String> {
         let (frames, mut receive) = mpsc::channel(16);
-        let terminal = hub.subscribe(
+        let terminal = hub.subscribe_sized(
             target.clone(),
             agent["terminalId"].as_str().ok_or("Agent ended")?.into(),
             frames,
+            initial_size,
         )?;
         let mut history = history.subscribe(target.clone(), agent["paneId"].clone())?;
         let view = Arc::new(Self {
@@ -60,6 +63,7 @@ impl View {
             capacity: Arc::new(Semaphore::new(128)),
             send,
             terminal,
+            history_refresh: history.refresh.clone(),
             cancel,
         });
         view.send(json!({"type":"state","state":{"cwd":view.agent["cwd"],"ready":false,"inputTarget":"program","terminalScroll":true,"exited":false,"prompt":1,"promptRevision":0,"inputRevision":0}}));
@@ -168,6 +172,7 @@ impl View {
             "ack" => Ok(()),
             "herdr-frame-request" => {
                 self.terminal.refresh();
+                self.history_refresh.notify_one();
                 Ok(())
             }
             "resize" => {

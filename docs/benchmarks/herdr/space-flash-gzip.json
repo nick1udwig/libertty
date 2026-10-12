@@ -1,0 +1,162 @@
+{
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "desktop": {
+    "cols": 150,
+    "rows": 45
+  },
+  "timings": [
+    {
+      "name": "ALPHA",
+      "ms": 413.699951171875,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ALPHA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816406479.7,
+          "terminal": "term_65da5c44b1f301"
+        }
+      ]
+    },
+    {
+      "name": "BETA",
+      "ms": 497.7998046875,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816407079.7998,
+          "terminal": "term_65da5c44e96942"
+        }
+      ]
+    },
+    {
+      "name": "ALPHA",
+      "ms": 294,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ALPHA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816407463,
+          "terminal": "term_65da5c44b1f301"
+        }
+      ]
+    },
+    {
+      "name": "BETA",
+      "ms": 391.5,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816407946.5,
+          "terminal": "term_65da5c44e96942"
+        }
+      ]
+    },
+    {
+      "name": "ALPHA",
+      "ms": 180.699951171875,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ALPHA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816408229.7,
+          "terminal": "term_65da5c44b1f301"
+        }
+      ]
+    },
+    {
+      "name": "BETA",
+      "ms": 482.89990234375,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816408812.9,
+          "terminal": "term_65da5c44e96942"
+        }
+      ]
+    },
+    {
+      "name": "ALPHA",
+      "ms": 374.300048828125,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ALPHA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816409296.3,
+          "terminal": "term_65da5c44b1f301"
+        }
+      ]
+    },
+    {
+      "name": "BETA",
+      "ms": 381.60009765625,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816409779.6,
+          "terminal": "term_65da5c44e96942"
+        }
+      ]
+    },
+    {
+      "name": "ALPHA",
+      "ms": 581,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ALPHA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816410463,
+          "terminal": "term_65da5c44b1f301"
+        }
+      ]
+    },
+    {
+      "name": "BETA",
+      "ms": 276.699951171875,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "╭───────────────────────────────────────────╮",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791816410829.7,
+          "terminal": "term_65da5c44e96942"
+        }
+      ]
+    }
+  ]
+}

@@ -32,6 +32,7 @@ enum Command {
         u64,
         mpsc::Sender<Value>,
         tokio_util::sync::CancellationToken,
+        Option<Size>,
     ),
     Remove(u64),
     Resize(u64, Option<Size>),
@@ -64,6 +65,20 @@ impl Hub {
         terminal: String,
         send: mpsc::Sender<Value>,
     ) -> Result<Subscription, String> {
+        self.subscribe_sized(target, terminal, send, None)
+    }
+    pub fn subscribe_sized(
+        &self,
+        target: Target,
+        terminal: String,
+        send: mpsc::Sender<Value>,
+        size: Option<Size>,
+    ) -> Result<Subscription, String> {
+        if size.is_some_and(|size| {
+            size.cols == 0 || size.rows == 0 || size.cols > 1000 || size.rows > 1000
+        }) {
+            return Err("Invalid terminal size.".into());
+        }
         let transport = target
             .remote
             .as_ref()
@@ -88,7 +103,7 @@ impl Hub {
         let slow = tokio_util::sync::CancellationToken::new();
         handle
             .send
-            .try_send(Command::Add(id, send, slow.clone()))
+            .try_send(Command::Add(id, send, slow.clone(), size))
             .map_err(|_| "Terminal input exceeded its limit.")?;
         Ok(Subscription { id, handle, slow })
     }
@@ -328,15 +343,27 @@ async fn run(
             break;
         };
         match command {
-            Command::Add(id, send, slow) => {
-                if let Some(frame) = &frame {
+            Command::Add(id, send, slow, size) => {
+                // A new controller needs a complete baseline even when it joins
+                // an already-sized stream whose last message was a delta.
+                refresh |= size.is_some_and(|size| {
+                    frame.as_ref().is_none_or(|frame| {
+                        frame["width"] != size.cols || frame["height"] != size.rows
+                    })
+                });
+                if let Some(frame) = &frame
+                    && size.is_none_or(|size| {
+                        frame["width"] == size.cols && frame["height"] == size.rows
+                    })
+                {
                     let _ = send.try_send(frame.clone());
                 }
+                sequence += 1;
                 viewers.push(Viewer {
                     id,
                     send,
-                    size: None,
-                    order: 0,
+                    size,
+                    order: sequence,
                     slow,
                 });
             }

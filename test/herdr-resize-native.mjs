@@ -50,7 +50,16 @@ try {
   });
   await installWireObserver(context);
   await context.addInitScript(() => {
-    window.__resizes = []; window.__frames = []; const Original = WebSocket;
+    window.__resizes = []; window.__frames = []; window.__layoutPaints = []; const Original = WebSocket;
+    const observe = () => {
+      const t = window.__terminal;
+      if (t && window.__layoutPaints.length < 300) {
+        const buffer = t.buffer.active, top = buffer.viewportY;
+        const title = buffer.getLine(top)?.translateToString(true), border = buffer.getLine(top+1)?.translateToString(true);
+        if (title?.startsWith('Responsive terminal')) window.__layoutPaints.push({ time: performance.now(), cols:t.cols, rows:t.rows, title, border, visible: getComputedStyle(document.querySelector('#terminal-viewport')).visibility !== 'hidden' });
+      }
+      requestAnimationFrame(observe);
+    }; requestAnimationFrame(observe);
     window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'herdr-frame') window.__frames.push({ width: m.width, height: m.height }); }); } send(data) { try { const m = window.__wireSent(data); if (m.type === 'resize') window.__resizes.push(m); } catch {} return super.send(data); } };
   });
   const errors = [];
@@ -62,6 +71,11 @@ try {
   const mobile = await geometry();
   assert.ok(mobile.cols < original.cols);
   await phone.waitForFunction(() => { const t = window.__terminal; return t.buffer.active.getLine(1)?.translateToString(true) === '╭' + '─'.repeat(t.cols - 2) + '╮' && t.buffer.active.cursorX === 4 && t.buffer.active.cursorY === 2; });
+  const firstFrames = await phone.evaluate(() => window.__frames.filter(f => f.width));
+  if (process.env.TEST_BACKEND !== 'node') assert.deepEqual(firstFrames[0], { width:mobile.cols, height:mobile.rows }, 'First native frame must already have the requested mobile geometry');
+  const paints = await phone.evaluate(() => window.__layoutPaints);
+  await writeFile(root + '.test-artifacts/herdr-initial-layout-paints.json', JSON.stringify({ original, mobile, firstFrames, paints }, null, 2));
+  assert.deepEqual(paints.filter(p => p.visible && p.border !== '╭' + '─'.repeat(p.cols - 2) + '╮'), [], 'Every visible mobile paint must already contain the resized native layout');
   await mkdir(root + '.test-artifacts', { recursive: true }); await phone.screenshot({ path: root + '.test-artifacts/herdr-resize-mobile.png' });
   const webDesktop = await context.newPage(); await webDesktop.setViewportSize({ width: 1200, height: 800 });
   await webDesktop.goto(phone.url()); await webDesktop.waitForFunction(() => window.__terminal && document.querySelector('#connection-label').textContent === 'Connected');

@@ -108,6 +108,7 @@ jobs:
           export PATH="$PWD/.test-artifacts/bin:$PATH"
           npm run test:herdr-spaces
           npm run test:herdr-resize
+          npm run test:herdr-flash
           npm run test:herdr-scroll
       - name: Verify architecture latency and foreground requests
         env:

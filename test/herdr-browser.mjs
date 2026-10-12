@@ -45,6 +45,10 @@ try {
   const bearer = (await (await request('connect', { noSession: true, token })).json()).accessToken;
   assert.equal((await request('herdr/snapshot?herdrSession=../../escape', undefined, bearer)).status, 400);
   assert.equal((await request('herdr/action', { action: 'rename', terminalId: 'missing', name: 'x' }, bearer)).status, 400);
+  if (process.env.TEST_BACKEND !== 'node') {
+    for (const geometry of [{ mobile: true, cols: 0, rows: 30 }, { mobile: true, cols: 40, rows: 1001 }, { mobile: true, cols: 40.5, rows: 30 }, { mobile: true, cols: 40 }]) assert.equal((await request('herdr/ticket?terminalId=term_0', geometry, bearer)).status, 400);
+    const reply = await (await request('herdr/ticket?terminalId=term_0', { mobile: true, cols: 40, rows: 30 }, bearer)).json(); assert.equal(reply.initialGeometry, true);
+  }
   const ticket = (await (await request('herdr/ticket', {}, bearer)).json()).ticket;
   const wsURL = base.replace('http:', 'ws:') + '/herdr/ws?ticket=' + ticket;
   await new Promise((resolve, reject) => { const ws = new WebSocket(wsURL, { origin }); ws.once('open', () => { ws.close(); resolve(); }); ws.once('error', reject); });
