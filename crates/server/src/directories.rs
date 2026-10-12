@@ -31,6 +31,64 @@ struct NameIndex {
 fn fold(name: &str) -> String {
     name.nfc().collect::<String>().to_lowercase()
 }
+#[cfg(any(target_os = "macos", test))]
+fn attribute_name(buffer: &[u8]) -> Option<&str> {
+    // ATTR_CMN_NAME follows a u32 buffer length and an attrreference_t.
+    // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/getattrlist.2.html
+    let length = u32::from_ne_bytes(buffer.get(..4)?.try_into().ok()?) as usize;
+    let buffer = buffer.get(..length)?;
+    let offset = i32::from_ne_bytes(buffer.get(4..8)?.try_into().ok()?) as isize;
+    let count = u32::from_ne_bytes(buffer.get(8..12)?.try_into().ok()?) as usize;
+    let start = 4usize.checked_add_signed(offset)?;
+    if start < 12 {
+        return None;
+    }
+    let end = start.checked_add(count)?;
+    std::ffi::CStr::from_bytes_with_nul(buffer.get(start..end)?)
+        .ok()
+        .and_then(|name| name.to_str().ok())
+        .filter(|name| !name.is_empty())
+}
+#[cfg(target_os = "macos")]
+fn native_path_spelling(file: &str, cancel: &CancellationToken) -> Result<Option<String>, String> {
+    let mut actual = "/".to_owned();
+    for part in file.split('/').filter(|part| !part.is_empty()) {
+        check(cancel)?;
+        let requested = path::join(&[&actual, part]);
+        let Ok(requested) = CString::new(requested) else {
+            return Ok(None);
+        };
+        let mut attributes = libc::attrlist {
+            bitmapcount: libc::ATTR_BIT_MAP_COUNT,
+            reserved: 0,
+            commonattr: libc::ATTR_CMN_NAME,
+            volattr: 0,
+            dirattr: 0,
+            fileattr: 0,
+            forkattr: 0,
+        };
+        let mut buffer = [0u8; 4096];
+        // Query each logical component without replacing a symlink with its target.
+        let result = unsafe {
+            libc::getattrlist(
+                requested.as_ptr(),
+                (&mut attributes as *mut libc::attrlist).cast(),
+                buffer.as_mut_ptr().cast(),
+                buffer.len(),
+                libc::FSOPT_NOFOLLOW,
+            )
+        };
+        let Some(name) = (result == 0).then(|| attribute_name(&buffer)).flatten() else {
+            return Ok(None);
+        };
+        if name != part && fold(name) != fold(part) {
+            return Ok(None);
+        }
+        actual = path::join(&[&actual, name]);
+    }
+    check(cancel)?;
+    Ok(Some(actual))
+}
 #[derive(Clone, Default)]
 pub struct Directories {
     cache: Arc<Mutex<VecDeque<Listing>>>,
@@ -219,6 +277,17 @@ impl Directories {
         if parts.len() > 64 {
             return Ok(None);
         }
+        #[cfg(target_os = "macos")]
+        {
+            let file = resolved.clone();
+            let stop = cancel.clone();
+            let work = tokio::task::spawn_blocking(move || native_path_spelling(&file, &stop));
+            let spelling = tokio::select! {biased;_=cancel.cancelled()=>return Err(ABORTED.into()),result=work=>result.map_err(|e|e.to_string())??};
+            check(cancel)?;
+            if spelling.is_some() {
+                return Ok(spelling);
+            }
+        }
         let mut actual = "/".to_owned();
         for part in parts {
             let snapshot = self.snapshot(&actual, 10000, cancel).await?;
@@ -328,5 +397,39 @@ impl Directories {
                 ),
             }
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::attribute_name;
+
+    #[test]
+    fn file_name_attributes_reject_truncated_offsets_and_invalid_strings() {
+        let name = "Café\0".as_bytes();
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&((12 + name.len()) as u32).to_ne_bytes());
+        buffer.extend_from_slice(&8i32.to_ne_bytes());
+        buffer.extend_from_slice(&(name.len() as u32).to_ne_bytes());
+        buffer.extend_from_slice(name);
+        assert_eq!(attribute_name(&buffer), Some("Café"));
+        for length in 0..buffer.len() {
+            assert_eq!(attribute_name(&buffer[..length]), None);
+        }
+        let mut invalid = buffer.clone();
+        invalid[4..8].copy_from_slice(&(-8i32).to_ne_bytes());
+        assert_eq!(attribute_name(&invalid), None);
+        let mut invalid = buffer.clone();
+        invalid[8..12].copy_from_slice(&u32::MAX.to_ne_bytes());
+        assert_eq!(attribute_name(&invalid), None);
+        let mut invalid = buffer.clone();
+        *invalid.last_mut().unwrap() = b'x';
+        assert_eq!(attribute_name(&invalid), None);
+        let mut invalid = buffer.clone();
+        invalid[13] = 0;
+        assert_eq!(attribute_name(&invalid), None);
+        let mut invalid = buffer;
+        invalid[12] = 0xff;
+        assert_eq!(attribute_name(&invalid), None);
     }
 }
