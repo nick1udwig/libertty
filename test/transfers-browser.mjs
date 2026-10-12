@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
@@ -19,7 +20,7 @@ try {
   await writeFile(fixture + '/host', hostKey.private, { mode: 0o600 }); await writeFile(fixture + '/authorized', key.public);
   await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote\nSubsystem sftp internal-sftp\n`);
   start('/usr/bin/sshd', ['-D', '-e', '-f', fixture + '/sshd_config']);
-  for (const [port, dir] of [[3184, 'local'], [3185, 'secondary']]) start(process.execPath, ['server/index.ts'], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: 'files-feature-test-123456789', TERMAI_CWD: fixture + '/' + dir, TERMAI_DATA_DIR: fixture + '/data-' + dir, TERMAI_NO_RC: '1', HOME: fixture + '/' + dir });
+  for (const [port, dir] of [[3184, 'local'], [3185, 'secondary']]) start(process.env.TEST_BACKEND !== 'node' ? root + '/target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: 'files-feature-test-123456789', TERMAI_CWD: fixture + '/' + dir, TERMAI_DATA_DIR: fixture + '/data-' + dir, TERMAI_NO_RC: '1', HOME: fixture + '/' + dir });
   for (let n = 0; n < 200; n++) { try { if ((await fetch(base)).ok && (await fetch(second)).ok) break; } catch {} await delay(50); }
   const owner = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
   const other = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
@@ -34,9 +35,10 @@ try {
   browser = await chromium.launch({ executablePath: '/usr/bin/chromium', headless: true });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
+  await installWireObserver(context);
   await context.addInitScript(({ base, owner }) => {
     localStorage.setItem('termai.access:' + base, owner);
-    const Original = WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', event => { const m = JSON.parse(event.data); if (m.type === 'state') window.__state = m.state; if (m.type === 'transfer') window.__transfer = m.request; if (m.type === 'output') window.__output = (window.__output || '') + m.data; }); } };
+    const Original = WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'state') window.__state = m.state; if (m.type === 'transfer') window.__transfer = m.request; if (m.type === 'output') window.__output = (window.__output || '') + m.data; }); } };
   }, { base, owner });
   const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(String(error)));
   async function type(command) { await page.locator('#terminal textarea').focus(); await page.keyboard.type(command); await page.keyboard.press('Enter'); }

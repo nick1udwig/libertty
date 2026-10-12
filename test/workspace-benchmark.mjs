@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 // Local Chromium comparison: initial/reload readiness and input-to-renderer-drain latency.
 // No injected network delay or CPU throttling; not a phone performance guarantee.
 import { chromium } from 'playwright-core';
@@ -26,17 +27,18 @@ try {
     let logs = ''; proc.stdout.on('data', chunk => logs += chunk); proc.stderr.on('data', chunk => logs += chunk);
     for (let i = 0; ; i++) { if (await fetch(origin).then(r => r.ok).catch(() => false)) break; if (i >= 150 || proc.exitCode !== null) throw new Error(logs); await delay(40); }
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });
-    await context.addInitScript(() => {
+    await installWireObserver(context);
+  await context.addInitScript(() => {
       window.__submit = []; window.__submitBegan = 0; window.__echo = []; window.__began = 0; window.__sequence = 0;
       const Original = WebSocket;
       window.WebSocket = class extends Original {
-        constructor(...args) { super(...args); this.addEventListener('message', event => {
-          const m = JSON.parse(event.data);
+        constructor(...args) { super(...args); this.addEventListener('message', async event => {
+          const m = await window.__wireMessage(event.data, this);
           if (m.type === 'state' && m.state.ready && window.__submitBegan) { window.__submit.push(performance.now() - window.__submitBegan); window.__submitBegan = 0; }
           if (m.type === 'state' && m.state.ready && !window.__readyScheduled) { window.__readyScheduled = true; requestAnimationFrame(() => requestAnimationFrame(() => window.__readyAt = performance.timeOrigin + performance.now())); }
           if (m.type === 'output' && window.__began && m.data.includes('x')) window.__sequence = m.seq;
         }); }
-        send(raw) { const m = JSON.parse(raw);
+        send(raw) { const m = window.__wireSent(raw);
           if (m.type === 'input' && m.data === '\r') window.__submitBegan = performance.now();
           if (m.type === 'input' && m.data === 'x') { window.__began = performance.now(); window.__sequence = 0; }
           if (m.type === 'ack' && window.__sequence && m.seq >= window.__sequence) { window.__echo.push(performance.now() - window.__began); window.__began = window.__sequence = 0; }

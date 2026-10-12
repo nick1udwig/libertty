@@ -1,3 +1,4 @@
+import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
 import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
 import { Ghostty, Terminal, FitAddon } from 'ghostty-web';
@@ -22,6 +23,7 @@ const baseURL = new URL(params.get('backend') || document.baseURI);
 const session = params.get('session') || 'default';
 const herdrTerminal = params.get('herdrTerminal');
 let herdrReady = false;
+let offeredWire: string[] | undefined;
 let accessToken: string | undefined = backendAccess(baseURL.href);
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
 function herdrEndpoint(name: string) {
@@ -35,6 +37,7 @@ if (embedded) document.documentElement.classList.add('embedded-terminal');
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const transport = new ReconnectingSocket({
   available: () => !document.hidden && (!herdrTerminal || tabVisible) && navigator.onLine,
+  protocols: () => wireProtocols(offeredWire),
   prepare: prepareConnection, open: socketOpened, message: socketMessage, close: socketClosed, error: connectionError,
 });
 let state: ShellState = { cwd: '', inputRevision: 0, promptRevision: 0, ready: false, prompt: 0, exited: false };
@@ -77,14 +80,14 @@ function updateRun() {
 }
 async function api<T>(url: string, data?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(endpoint(url), { method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
-    headers: { ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal });
+    headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal });
   const result = await response.json();
   if (!response.ok) throw Object.assign(new Error(result.error || 'Request failed'), { status: response.status });
   return result;
 }
 function send(message: ClientMessage): boolean {
   if (transport.socket?.readyState !== WebSocket.OPEN) return false;
-  transport.socket.send(JSON.stringify(message)); return true;
+  transport.socket.send(encodeWire(message, transport.socket.protocol)); return true;
 }
 const fontSizeInput = $<HTMLInputElement>('font-size');
 try {
@@ -190,7 +193,7 @@ const inline = new InlineSuggestions(term, { latencyKey: baseURL.href, state: ()
   },
   suggest: (text, signal) => suggestions.suggest(text, signal), raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, key: baseURL.href,
-  audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(data); return true; },
+  audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data, transport.socket.protocol)); return true; },
   prepare: () => inline.prepareExternalPaste(), notice: toast, focus: () => term.focus() });
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
@@ -257,18 +260,18 @@ const gestures = new TerminalGestures(term, {
 async function socketURL(signal: AbortSignal) {
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
   if (herdrTerminal) {
-    const response = await fetch(herdrEndpoint('api/herdr/ticket'), { method: 'POST', credentials: 'same-origin', headers: { ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json' }, body: '{}', signal });
+    const response = await fetch(herdrEndpoint('api/herdr/ticket'), { method: 'POST', credentials: 'same-origin', headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json' }, body: '{}', signal });
     const result = await response.json();
     if (!response.ok) throw Object.assign(new Error(result.error), { status: response.status });
-    socketURL.searchParams.set('ticket', result.ticket);
+    socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire;
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
   socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:'; socketURL.searchParams.set('after', String(after));
   if (streamId) socketURL.searchParams.set('stream', streamId);
   return socketURL;
 }
 async function prepareConnection(signal: AbortSignal, token?: string) {
-  const result = await api<{ state?: ShellState; accessToken: string }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
-  signal.throwIfAborted();
+  const result = await api<{ state?: ShellState; accessToken: string; wire?: string[] }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
+  signal.throwIfAborted(); offeredWire = result.wire;
   if (result.state) state = result.state; accessToken = result.accessToken; notify('terminal-authorized', { accessToken });
   rememberBackendAccess(baseURL.href, accessToken);
   $<HTMLInputElement>('token').value = '';
@@ -281,7 +284,7 @@ function socketOpened() {
   sizeTerminal();
 }
 function socketMessage(event: MessageEvent) {
-  const message: ServerMessage = JSON.parse(event.data);
+  const message: ServerMessage = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
   if (message.type === 'herdr-frame') {
     if (projection?.frame(message)) requestAnimationFrame(() => notify('terminal-rendered'));
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;

@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, access, mkdir, rm } from 'node:fs/promises';
@@ -57,13 +58,14 @@ try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(String(e)));
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
+  await installWireObserver(page.context());
   await page.addInitScript(() => {
     const paint = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', event => { const message = JSON.parse(event.data); if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'context') window.__shellContext = message.context; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
-      send(data) { const message = JSON.parse(data); if (message.type === 'resize') window.__terminalSize = message; super.send(data); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'context') window.__shellContext = message.context; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
+      send(data) { const message = window.__wireSent(data); if (message.type === 'resize') window.__terminalSize = message; super.send(data); }
     };
   });
   const workers = []; page.on('worker', worker => workers.push(worker));

@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
@@ -26,20 +27,21 @@ try {
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
+  await installWireObserver(context);
   await context.addInitScript(() => {
     window.__sockets = []; window.__states = 0; window.__sent = []; window.__lateCloses = [];
     const Original = WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) {
         super(...args); window.__sockets.push(this);
-        this.addEventListener('message', event => { if (JSON.parse(event.data).type === 'state') window.__states++; });
+        this.addEventListener('message', async event => { if ((await window.__wireMessage(event.data, this)).type === 'state') window.__states++; });
       }
       set onclose(handler) {
         this.addEventListener('close', event => {
           if (window.__holdCloses) window.__lateCloses.push(() => handler(event)); else handler(event);
         });
       }
-      send(data) { if (typeof data === 'string') window.__sent.push(JSON.parse(data)); return super.send(data); }
+      send(data) { if (window.__wireSent(data).type !== 'audio') window.__sent.push(window.__wireSent(data)); return super.send(data); }
     };
   });
   const page = await context.newPage(), errors = [];

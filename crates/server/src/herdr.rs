@@ -774,15 +774,19 @@ pub async fn metadata(
     send: tokio::sync::mpsc::Sender<Value>,
     cancel: CancellationToken,
 ) {
+    let mut previous = None;
     loop {
         if cancel.is_cancelled() {
             break;
         }
         let work = async {
             let snapshot = target.snapshot().await?;
-            send.send(json!({"type":"snapshot","snapshot":snapshot}))
-                .await
-                .map_err(|_| "Viewer closed".to_owned())?;
+            if previous.as_ref() != Some(&snapshot) {
+                send.send(json!({"type":"snapshot","snapshot":snapshot}))
+                    .await
+                    .map_err(|_| "Viewer closed".to_owned())?;
+                previous = Some(snapshot.clone());
+            }
             let stream = target.open().await?;
             let mut stream = BufReader::new(stream);
             let mut subscriptions: Vec<Value> = [
@@ -835,9 +839,12 @@ pub async fn metadata(
                 let snapshot = target.snapshot().await?;
                 let changed = pane_key != self::pane_key(&snapshot);
                 pane_key = self::pane_key(&snapshot);
-                send.send(json!({"type":"snapshot","snapshot":snapshot}))
-                    .await
-                    .map_err(|_| "Viewer closed".to_owned())?;
+                if previous.as_ref() != Some(&snapshot) {
+                    send.send(json!({"type":"snapshot","snapshot":snapshot}))
+                        .await
+                        .map_err(|_| "Viewer closed".to_owned())?;
+                    previous = Some(snapshot);
+                }
                 if changed {
                     break;
                 }

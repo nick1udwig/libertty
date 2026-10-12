@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -51,13 +52,14 @@ try {
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
+  await installWireObserver(context);
   await context.addInitScript(() => {
     window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0;
     window.WebSocket = class extends WebSocket {
       set onmessage(handler) {
         window.__receive = message => handler.call(this, { data: JSON.stringify(message) });
         super.onmessage = event => {
-          const message = JSON.parse(event.data);
+          const message = await window.__wireMessage(event.data, this);
           if (message.type === 'herdr-frame') { window.__frames++; if (!message.full) window.__deltas++; }
           if (message.type === 'screen') { window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }
           handler.call(this, event);

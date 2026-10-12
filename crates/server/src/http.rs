@@ -7,10 +7,11 @@ use crate::{
     session::{Session, Transport},
     ssh, storage, system_ssh,
     vault::{Vault, inspect_private_key},
+    wire,
 };
 use axum::{
     Router,
-    body::Body,
+    body::{Body, HttpBody},
     extract::{
         FromRequestParts, State,
         ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade},
@@ -180,6 +181,7 @@ pub struct App {
     herdr_capacity: Arc<tokio::sync::Semaphore>,
     ssh_probes: tokio::sync::Semaphore,
     herdr_terminals: herdr_terminal_stream::Hub,
+    herdr_history: crate::herdr_history::Hub,
     notifications: Arc<notifications::Notifications>,
     services: HostServices,
     commands: Vec<String>,
@@ -278,6 +280,7 @@ impl App {
             herdr_capacity: Arc::new(tokio::sync::Semaphore::new(64)),
             ssh_probes: tokio::sync::Semaphore::new(4),
             herdr_terminals: herdr_terminal_stream::Hub::default(),
+            herdr_history: crate::herdr_history::Hub::default(),
             notifications,
             services,
             commands,
@@ -676,7 +679,7 @@ async fn security(State(app): State<Arc<App>>, req: Request<Body>, next: Next) -
             ("access-control-allow-credentials", "true"),
             (
                 "access-control-allow-headers",
-                "Content-Type, Authorization",
+                "Content-Type, Authorization, If-None-Match, X-Termai-Link",
             ),
             ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS"),
             ("access-control-allow-private-network", "true"),
@@ -731,9 +734,65 @@ async fn bounded<T>(
         .map_err(fail)
 }
 async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response<Body> {
-    match request(&app, req).await {
+    let accepted = assets::accepted_encodings(
+        req.headers()
+            .get("accept-encoding")
+            .and_then(|value| value.to_str().ok()),
+    );
+    let constrained = req
+        .headers()
+        .get("x-termai-link")
+        .is_some_and(|value| value == "constrained");
+    let head = *req.method() == Method::HEAD;
+    let response = match request(&app, req).await {
         Ok(response) => response,
         Err((status, message)) => error(status, message),
+    };
+    let mime = response
+        .headers()
+        .get("content-type")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let size = response.body().size_hint().exact().unwrap_or(0);
+    let threshold = if constrained { 2048 } else { 128 * 1024 };
+    if head
+        || !accepted.contains(&"gzip")
+        || response.headers().contains_key("content-encoding")
+        || !(mime.starts_with("text/")
+            || mime.starts_with("application/json")
+            || mime.starts_with("application/xml")
+            || mime.starts_with("image/svg+xml"))
+        || size < threshold
+        || size > reading::MAX_READING_BYTES as u64 + 1024 * 1024
+    {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let bytes = match axum::body::to_bytes(body, reading::MAX_READING_BYTES + 1024 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "Response unavailable."),
+    };
+    let shared = bytes.clone();
+    let compressed = tokio::task::spawn_blocking(move || wire::gzip(&shared))
+        .await
+        .ok()
+        .flatten()
+        .filter(|compressed| compressed.len() < bytes.len() * 7 / 8);
+    if let Some(compressed) = compressed {
+        parts
+            .headers
+            .insert("content-encoding", HeaderValue::from_static("gzip"));
+        parts.headers.insert(
+            "content-length",
+            HeaderValue::from_str(&compressed.len().to_string()).unwrap(),
+        );
+        parts.headers.append(
+            "vary",
+            HeaderValue::from_static("Accept-Encoding, X-Termai-Link"),
+        );
+        Response::from_parts(parts, Body::from(compressed))
+    } else {
+        Response::from_parts(parts, Body::from(bytes))
     }
 }
 async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body>, Failure> {
@@ -816,7 +875,7 @@ async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body
         let owner = owner.unwrap();
         let sid = session_id(input.get("session"))?;
         let result = if input["noSession"] == true {
-            json!({"accessToken":owner})
+            json!({"accessToken":owner,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
         } else {
             if sid != "default"
                 && !app
@@ -830,7 +889,7 @@ async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body
                     "This terminal has ended. Open its saved host to reconnect.".into(),
                 ));
             }
-            json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state(),"accessToken":owner})
+            json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state(),"accessToken":owner,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
         };
         let secure = if req
             .headers()
@@ -1047,7 +1106,7 @@ async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body
                 until: Instant::now() + Duration::from_secs(15),
             },
         );
-        return ok(json!({"ticket":ticket}));
+        return ok(json!({"ticket":ticket,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}));
     }
     if sid != "default" && !app.sessions.lock().await.contains_key(&key) {
         return Err((StatusCode::NOT_FOUND, "Terminal not found.".into()));
@@ -1057,16 +1116,45 @@ async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body
     let home = session.home();
     if pathname == "/api/plugins/read" && get {
         let path = query.get("path").ok_or_else(|| fail("Select a file."))?;
-        let file = reading::read(&cwd, &home, path)
+        let known = req
+            .headers()
+            .get("if-none-match")
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.trim_start_matches("W/").trim_matches('"'));
+        let mut cache = session.plugin_files.lock().await;
+        let snapshot = cache
+            .read(
+                &session.filesystem(),
+                &cwd,
+                &home,
+                path,
+                known,
+                &CancellationToken::new(),
+            )
             .await
             .map_err(file_failure)?;
-        let text = std::str::from_utf8(&file.data)
-            .ok()
-            .filter(|t| !t.contains('\0'))
-            .ok_or_else(|| fail("This plugin can read only UTF-8 text files."))?;
-        let units = text.encode_utf16().collect::<Vec<_>>();
-        let text = String::from_utf16_lossy(&units[units.len().saturating_sub(256 * 1024)..]);
-        return ok(json!({"path":file.path,"text":text,"truncated":units.len()>256*1024}));
+        let mut response = if known == Some(snapshot.etag.as_str()) {
+            Response::builder()
+                .status(StatusCode::NOT_MODIFIED)
+                .header("cache-control", "no-store")
+                .body(Body::empty())
+                .unwrap()
+        } else {
+            let delta = if query.get("delta").is_some_and(|value| value == "1") {
+                known.and_then(|known| cache.delta(known, &snapshot))
+            } else {
+                None
+            };
+            json_response(
+                StatusCode::OK,
+                delta.unwrap_or_else(|| snapshot.value.as_ref().clone()),
+            )
+        };
+        response.headers_mut().insert(
+            "etag",
+            HeaderValue::from_str(&format!("\"{}\"", snapshot.etag)).unwrap(),
+        );
+        return Ok(response);
     }
     if pathname == "/api/files/list" && get {
         return ok(serde_json::to_value(
@@ -1562,7 +1650,7 @@ async fn herdr_request(
                 until: Instant::now() + Duration::from_secs(15),
             },
         );
-        return ok(json!({"ticket":ticket}));
+        return ok(json!({"ticket":ticket,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}));
     }
     Err((StatusCode::NOT_FOUND, "Not found".into()))
 }
@@ -1606,6 +1694,7 @@ async fn herdr_websocket(
         .map_err(|_| denied())?;
     let app = app.clone();
     Ok(upgrade
+        .protocols([wire::GZIP, wire::GZIP_FAST, wire::BINARY])
         .max_message_size(128 * 1024)
         .max_frame_size(128 * 1024)
         .on_upgrade(move |socket| async move {
@@ -1633,6 +1722,11 @@ async fn herdr_socket_session(
     cancel: CancellationToken,
     id: &str,
 ) {
+    let mode = wire::Mode::protocol(
+        socket
+            .protocol()
+            .and_then(|protocol| protocol.to_str().ok()),
+    );
     let (send, mut output, slow) = crate::viewer_queue::channel();
     let notification_target = ticket.target.clone();
     let view = if ticket.terminal.is_empty() {
@@ -1673,6 +1767,7 @@ async fn herdr_socket_session(
             ticket.target,
             agent,
             &app.herdr_terminals,
+            &app.herdr_history,
             send,
             cancel.clone(),
         ) {
@@ -1691,7 +1786,7 @@ async fn herdr_socket_session(
             _=cancel.cancelled()=>{let _=send.send(Message::Close(Some(CloseFrame{code:1000,reason:"Connection closed".into()}))).await;break;},
             item=output.recv()=>match item {
                 Some(item)=>match &item.message {
-                    Transport::Message(message)=>{if !matches!(tokio::time::timeout(Duration::from_secs(5),send.send(Message::Text(message.to_string().into()))).await,Ok(Ok(()))){break;}},
+                    Transport::Message(message)=>{if !matches!(tokio::time::timeout(Duration::from_secs(5),send.send(wire_message(message, mode))).await,Ok(Ok(()))){break;}},
                     Transport::Close(code,reason)=>{let _=send.send(Message::Close(Some(CloseFrame{code:*code,reason:reason.clone().into()}))).await;break;},
                 },
                 None=>break,
@@ -1711,7 +1806,10 @@ async fn herdr_socket_session(
                         let _=app.notifications.acknowledge(&ticket.owner,&message["device"],&ticket.source,&notification_target,&message["event"]);
                     }
                 },
-                Some(Ok(Message::Binary(bytes)))=>if let Some(view)=&view{view.audio(bytes.to_vec());},
+                Some(Ok(Message::Binary(bytes)))=>if let Some(view)=&view{
+                    if mode==wire::Mode::Json { view.audio(bytes.to_vec()); }
+                    else { match wire::decode(&bytes) { Ok(wire::Incoming::Audio(audio)) => view.audio(audio), Ok(wire::Incoming::Message(message)) => { if view.receive(message).is_err() { break; } }, Err(_) => { let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid wire message".into()}))).await; break; } } }
+                },
                 Some(Ok(Message::Ping(bytes)))=>if send.send(Message::Pong(bytes)).await.is_err(){break;},
                 Some(Ok(Message::Pong(_)))=>alive=true,
                 _=>break,
@@ -1771,10 +1869,19 @@ async fn websocket(
     }
     let stream = query.get("stream").cloned();
     Ok(upgrade
+        .protocols([wire::GZIP, wire::GZIP_FAST, wire::BINARY])
         .max_message_size(128 * 1024)
         .max_frame_size(128 * 1024)
         .on_upgrade(move |socket| socket_session(socket, session, after as u64, stream))
         .into_response())
+}
+fn wire_message(value: &Value, mode: wire::Mode) -> Message {
+    let encoded = wire::encode(value, mode);
+    if encoded.binary {
+        Message::Binary(encoded.bytes.into())
+    } else {
+        Message::Text(String::from_utf8(encoded.bytes).expect("wire UTF-8").into())
+    }
 }
 async fn socket_session(
     socket: WebSocket,
@@ -1782,20 +1889,28 @@ async fn socket_session(
     after: u64,
     stream: Option<String>,
 ) {
+    let mode = wire::Mode::protocol(
+        socket
+            .protocol()
+            .and_then(|protocol| protocol.to_str().ok()),
+    );
     let (id, mut output) = session.attach(after, stream.as_deref());
     let (mut send, mut receive) = socket.split();
     loop {
         tokio::select! {
             biased;
             event=output.recv()=>match event {
-                Some(Transport::Message(value))=>if send.send(Message::Text(value.to_string().into())).await.is_err(){break},
+                Some(Transport::Message(value))=>if send.send(wire_message(&value, mode)).await.is_err(){break},
                 Some(Transport::Close(code,reason))=>{let _=send.send(Message::Close(Some(CloseFrame{code,reason:reason.into()}))).await;break},
                 None=>break,
             },
             event=receive.next()=>match event {
                 Some(Ok(Message::Text(value)))=>match serde_json::from_str::<Value>(&value) { Ok(message)=>session.receive(id,message),Err(_)=>{let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid message".into()}))).await;break} },
                 Some(Ok(Message::Ping(bytes)))=>if send.send(Message::Pong(bytes)).await.is_err(){break},
-                Some(Ok(Message::Binary(bytes)))=>session.receive_binary(id,bytes.to_vec()),
+                Some(Ok(Message::Binary(bytes)))=>{
+                    if mode==wire::Mode::Json { session.receive_binary(id,bytes.to_vec()); }
+                    else { match wire::decode(&bytes) { Ok(wire::Incoming::Audio(audio))=>session.receive_binary(id,audio), Ok(wire::Incoming::Message(message))=>session.receive(id,message), Err(_)=>{let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid wire message".into()}))).await;break;} } }
+                },
                 Some(Ok(Message::Pong(_)))=>{},
                 _=>break,
             }

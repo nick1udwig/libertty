@@ -507,3 +507,217 @@ async fn remote_pty_and_sftp_share_session_guards_and_file_actions() {
     assert!(!std::path::Path::new(&directory).exists());
     fixture.stop().await;
 }
+
+#[tokio::test]
+async fn compressed_ssh_selected_file_unchanged_and_delta_preserve_remote_bytes() {
+    let fixture = Fixture::start().await;
+    let mut input = fixture.input.clone();
+    input["trust"] = json!(fixture.pin);
+    input["compression"] = json!("on");
+    let cancel = CancellationToken::new();
+    let host = SSHHost::connect(&input, fixture.vault.clone(), None, true, &cancel)
+        .await
+        .unwrap();
+    let fs = FileSystem {
+        remote: Some(host.clone()),
+    };
+    let path = format!("{}/plugin.log", fixture.home());
+    let text = "remote 界😀\n".repeat(1000);
+    tokio::fs::write(&path, &text).await.unwrap();
+    let mut cache = termai_server::plugin_file::Cache::default();
+    let first = cache
+        .read(&fs, &fixture.home(), &fixture.home(), &path, None, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(first.value["text"], text);
+    let same = cache
+        .read(
+            &fs,
+            &fixture.home(),
+            &fixture.home(),
+            &path,
+            Some(&first.etag),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(same.etag, first.etag);
+    assert!(same.value.is_null());
+    tokio::fs::write(&path, text + "new 😀\n").await.unwrap();
+    let second = cache
+        .read(
+            &fs,
+            &fixture.home(),
+            &fixture.home(),
+            &path,
+            Some(&first.etag),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        cache.delta(&first.etag, &second).unwrap()["append"],
+        "new 😀\n"
+    );
+    tokio::fs::write(&path, b"binary\0").await.unwrap();
+    assert_eq!(
+        cache
+            .read(&fs, &fixture.home(), &fixture.home(), &path, None, &cancel)
+            .await
+            .err()
+            .unwrap()
+            .status,
+        400
+    );
+    host.dispose().await;
+    fixture.stop().await;
+}
+
+/// Real encrypted SSH socket counts with bounded FIFO pacing in each direction.
+#[tokio::test]
+#[ignore = "transport benchmark; run explicitly with --ignored --nocapture"]
+async fn transport_ssh_benchmark() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    async fn pump(
+        mut read: tokio::net::tcp::OwnedReadHalf,
+        mut write: tokio::net::tcp::OwnedWriteHalf,
+        count: Arc<AtomicU64>,
+        rtt: f64,
+        mbps: f64,
+        cancel: CancellationToken,
+    ) {
+        let (send, mut receive) = mpsc::channel::<(tokio::time::Instant, Vec<u8>)>(16);
+        let reader_cancel = cancel.clone();
+        let reader = tokio::spawn(async move {
+            let mut departure = tokio::time::Instant::now();
+            loop {
+                let mut bytes = vec![0; 16 * 1024];
+                let n = tokio::select! { _=reader_cancel.cancelled()=>break, n=read.read(&mut bytes)=>match n{Ok(0)|Err(_)=>break,Ok(n)=>n} };
+                bytes.truncate(n);
+                count.fetch_add(n as u64, Ordering::Relaxed);
+                departure = departure.max(tokio::time::Instant::now())
+                    + Duration::from_secs_f64(n as f64 * 8.0 / (mbps * 1e6));
+                let item = (departure + Duration::from_secs_f64(rtt / 2000.0), bytes);
+                tokio::select! { _=reader_cancel.cancelled()=>break, result=send.send(item)=>if result.is_err(){break;} }
+            }
+        });
+        loop {
+            let item = tokio::select! { _=cancel.cancelled()=>break, item=receive.recv()=>item };
+            let Some((when, bytes)) = item else { break };
+            tokio::select! { _=cancel.cancelled()=>break, _=tokio::time::sleep_until(when)=>{} }
+            if write.write_all(&bytes).await.is_err() {
+                break;
+            }
+        }
+        reader.abort();
+        let _ = write.shutdown().await;
+    }
+    let fixture = Fixture::start().await;
+    let mut rows = vec![];
+    for (profile, rtt, mbps) in [("fast", 2.0, 100.0), ("constrained", 150.0, 1.0)] {
+        for compression in ["off", "on"] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let destination = fixture.input["port"].as_u64().unwrap() as u16;
+            let up = Arc::new(AtomicU64::new(0));
+            let down = Arc::new(AtomicU64::new(0));
+            let (u, d) = (up.clone(), down.clone());
+            let cancel = CancellationToken::new();
+            let lifetime = cancel.clone();
+            let proxy = tokio::spawn(async move {
+                let (client, _) = listener.accept().await.unwrap();
+                let server = tokio::net::TcpStream::connect(("127.0.0.1", destination))
+                    .await
+                    .unwrap();
+                let (cr, cw) = client.into_split();
+                let (sr, sw) = server.into_split();
+                tokio::join!(
+                    pump(cr, sw, u, rtt, mbps, lifetime.clone()),
+                    pump(sr, cw, d, rtt, mbps, lifetime)
+                );
+            });
+            let mut input = fixture.input.clone();
+            input["port"] = json!(port);
+            input["trust"] = json!(fixture.pin);
+            input["compression"] = json!(compression);
+            let start = std::time::Instant::now();
+            let host = SSHHost::connect(&input, fixture.vault.clone(), None, false, &cancel)
+                .await
+                .unwrap();
+            rows.push(json!({"profile":profile,"compression":compression,"case":"startup","ms":start.elapsed().as_secs_f64()*1000.0,"up":up.load(Ordering::Relaxed),"down":down.load(Ordering::Relaxed)}));
+            for (name, bytes) in [
+                ("typing", "hello 界😀\n".as_bytes().to_vec()),
+                ("text", "INFO completed 界😀\n".repeat(10_000).into_bytes()),
+                (
+                    "random",
+                    (0..65_536).map(|_| rand::random::<u8>()).collect(),
+                ),
+            ] {
+                let path = format!("{}/wire-{name}", fixture.home());
+                tokio::fs::write(&path, &bytes).await.unwrap();
+                for sample in 0..7 {
+                    let (u, d) = (up.load(Ordering::Relaxed), down.load(Ordering::Relaxed));
+                    let start = std::time::Instant::now();
+                    let mut stream = host
+                        .open_stream(
+                            &format!("cat {}", termai_engine::repair::shell_quote(&path)),
+                            &cancel,
+                        )
+                        .await
+                        .unwrap()
+                        .into_stream();
+                    let mut out = vec![];
+                    stream.read_to_end(&mut out).await.unwrap();
+                    assert_eq!(out, bytes);
+                    rows.push(json!({"profile":profile,"compression":compression,"case":name,"sample":sample,"ms":start.elapsed().as_secs_f64()*1000.0,"up":up.load(Ordering::Relaxed)-u,"down":down.load(Ordering::Relaxed)-d,"bytes":bytes.len()}));
+                }
+            }
+            let fs = FileSystem {
+                remote: Some(host.clone()),
+            };
+            let path = format!("{}/wire-text", fixture.home());
+            let mut cache = termai_server::plugin_file::Cache::default();
+            let initial = cache
+                .read(&fs, &fixture.home(), &fixture.home(), &path, None, &cancel)
+                .await
+                .unwrap();
+            for method in ["sftp-full", "plugin-unchanged"] {
+                for sample in 0..7 {
+                    let (u, d) = (up.load(Ordering::Relaxed), down.load(Ordering::Relaxed));
+                    let start = std::time::Instant::now();
+                    if method == "sftp-full" {
+                        let mut bytes = vec![];
+                        fs.open_read(&path)
+                            .await
+                            .unwrap()
+                            .read_to_end(&mut bytes)
+                            .await
+                            .unwrap();
+                        assert_eq!(bytes, "INFO completed 界😀\n".repeat(10_000).into_bytes());
+                    } else {
+                        let same = cache
+                            .read(
+                                &fs,
+                                &fixture.home(),
+                                &fixture.home(),
+                                &path,
+                                Some(&initial.etag),
+                                &cancel,
+                            )
+                            .await
+                            .unwrap();
+                        assert_eq!(same.etag, initial.etag);
+                    }
+                    rows.push(json!({"profile":profile,"compression":compression,"case":method,"sample":sample,"ms":start.elapsed().as_secs_f64()*1000.0,"up":up.load(Ordering::Relaxed)-u,"down":down.load(Ordering::Relaxed)-d}));
+                }
+            }
+            host.dispose().await;
+            cancel.cancel();
+            proxy.abort();
+        }
+    }
+    std::fs::create_dir_all("../../.test-artifacts").unwrap();
+    std::fs::write("../../.test-artifacts/transport-ssh.json", serde_json::to_vec_pretty(&json!({"measurement":"Actual encrypted SSH TCP bytes, excluding TCP/IP headers; request to complete read; FIFO paced socket per direction; current CPU, no throttling; seven warm samples per case.","rows":rows})).unwrap()).unwrap();
+    fixture.stop().await;
+}

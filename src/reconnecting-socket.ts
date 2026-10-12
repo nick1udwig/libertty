@@ -1,6 +1,8 @@
+import { decodeWire } from './wire.ts';
 interface ReconnectingSocketOptions {
   prepare(signal: AbortSignal, token?: string): Promise<URL>;
   available(): boolean;
+  protocols?(): string[];
   open(): void;
   message(event: MessageEvent): void;
   close(event?: CloseEvent): boolean;
@@ -81,10 +83,19 @@ export class ReconnectingSocket {
       const url = await this.options.prepare(attempt.signal, token);
       if (this.attempt !== attempt) return;
       if (!this.options.available()) { this.release(); return; }
-      const socket = new WebSocket(url);
+      const socket = new WebSocket(url, this.options.protocols?.() || []);
+      socket.binaryType = 'arraybuffer';
+      let decoded = Promise.resolve();
       this.socket = socket;
       socket.onopen = () => { if (this.socket === socket) this.options.open(); };
-      socket.onmessage = event => { if (this.socket === socket) this.options.message(event); };
+      socket.onmessage = event => {
+        if (this.socket !== socket) return;
+        if (!socket.protocol?.startsWith('termai.')) { this.options.message(event); return; }
+        decoded = decoded.then(async () => {
+          const value = await decodeWire(event.data);
+          if (this.socket === socket) this.options.message(new MessageEvent('message', { data: value }));
+        }).catch(error => { if (this.socket === socket) { this.options.error(error, token); socket.close(4002, 'Invalid transport message'); } });
+      };
       socket.onclose = event => {
         if (this.socket !== socket) return;
         this.release(event);

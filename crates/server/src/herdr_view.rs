@@ -5,10 +5,7 @@ use crate::{
     session::Transport,
 };
 use serde_json::{Value, json};
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -40,6 +37,7 @@ impl View {
         target: Target,
         agent: Value,
         hub: &Hub,
+        history: &crate::herdr_history::Hub,
         send: crate::viewer_queue::Sender,
         cancel: CancellationToken,
     ) -> Result<Arc<Self>, String> {
@@ -49,6 +47,7 @@ impl View {
             agent["terminalId"].as_str().ok_or("Agent ended")?.into(),
             frames,
         )?;
+        let mut history = history.subscribe(target.clone(), agent["paneId"].clone())?;
         let view = Arc::new(Self {
             target,
             agent,
@@ -80,22 +79,21 @@ impl View {
         let weak = Arc::downgrade(&view);
         let lifetime = view.cancel.clone();
         tokio::spawn(async move {
-            let mut screen = None;
             loop {
-                let Some(view) = weak.upgrade() else { break };
-                let work = view.target.request("pane.read",json!({"pane_id":view.agent["paneId"],"source":"recent_unwrapped","lines":1000,"format":"ansi","strip_ansi":false}));
-                let result =
-                    tokio::select! {biased;_=lifetime.cancelled()=>break, result=work=>result};
-                match result.and_then(|value| value["read"]["text"].as_str().map(str::to_owned).ok_or("Herdr did not return terminal history. Update Herdr to a version supporting recent-unwrapped reads.".into())) {
-                    Ok(text)=>if screen.as_ref()!=Some(&text){screen=Some(text.clone());view.send(json!({"type":"screen","text":text}));},
-                    Err(message)=>{
-                        view.send(json!({"type":"reading-error","message":message}));
-                        view.send.send(Transport::Close(1011,"Herdr terminal unavailable".into()));
-                        break;
+                let message = history.receive.borrow_and_update().clone();
+                if let Some(message) = message {
+                    let Some(view) = weak.upgrade() else { break };
+                    match message {
+                        Ok(message) => view.send(message.as_ref().clone()),
+                        Err(message) => {
+                            view.send(json!({"type":"reading-error","message":message.as_ref()}));
+                            view.send
+                                .send(Transport::Close(1011, "Herdr terminal unavailable".into()));
+                            break;
+                        }
                     }
                 }
-                drop(view);
-                tokio::select! {biased;_=lifetime.cancelled()=>break,_=tokio::time::sleep(Duration::from_millis(150))=>{}}
+                tokio::select! { biased; _=lifetime.cancelled()=>break, changed=history.receive.changed()=>if changed.is_err(){break;} }
             }
         });
         Ok(view)

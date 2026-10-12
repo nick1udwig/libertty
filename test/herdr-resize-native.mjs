@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -47,9 +48,10 @@ try {
     const body = source.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
     assert.notEqual(body, source); await route.fulfill({ response, body });
   });
+  await installWireObserver(context);
   await context.addInitScript(() => {
     window.__resizes = []; window.__frames = []; const Original = WebSocket;
-    window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', event => { const m = JSON.parse(event.data); if (m.type === 'herdr-frame') window.__frames.push({ width: m.width, height: m.height }); }); } send(data) { try { const m = JSON.parse(data); if (m.type === 'resize') window.__resizes.push(m); } catch {} return super.send(data); } };
+    window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'herdr-frame') window.__frames.push({ width: m.width, height: m.height }); }); } send(data) { try { const m = window.__wireSent(data); if (m.type === 'resize') window.__resizes.push(m); } catch {} return super.send(data); } };
   });
   const errors = [];
   const phone = await context.newPage(); phone.on('pageerror', error => errors.push(error.message));

@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -26,13 +27,14 @@ try {
   for (const herdr of [false, true]) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const errors = [];
-    await context.addInitScript(({ accessToken }) => {
+    await installWireObserver(context);
+  await context.addInitScript(({ accessToken }) => {
       window.__copies = []; window.__inputs = []; window.__opened = [];
       Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.__copies.push(text); } } });
       window.open = (...args) => { window.__opened.push(args); return null; };
       const Original = WebSocket;
-      window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', e => { const m = JSON.parse(e.data); if (m.type === 'state') window.__state = m.state; }); } send(data) { if (typeof data === 'string' && JSON.parse(data).type === 'input') window.__inputs.push(data); return super.send(data); } };
-      if (parent === window) addEventListener('message', e => { if (e.data?.type === 'terminal-loaded') e.source.postMessage({ type: 'authorize', accessToken }, location.origin); });
+      window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; }); } send(data) { if (window.__wireSent(data).type === 'input') window.__inputs.push(JSON.stringify(window.__wireSent(data))); return super.send(data); } };
+      if (parent === window) addEventListener('message', async e => { if (e.data?.type === 'terminal-loaded') e.source.postMessage({ type: 'authorize', accessToken }, location.origin); });
     }, { accessToken });
     await context.route('**/assets/terminal-*.js', async route => {
       const response = await route.fetch(), original = await response.text();

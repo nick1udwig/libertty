@@ -257,6 +257,10 @@ impl SSHHost {
             keepalive_max: 3,
             ..client::Config::default()
         };
+        if input["compression"] == "on" {
+            config.preferred.compression =
+                vec![russh::compression::ZLIB_LEGACY, russh::compression::NONE].into();
+        }
         if let Some(system) = &system
             && !system.algorithms.is_empty()
         {

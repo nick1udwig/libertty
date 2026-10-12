@@ -457,3 +457,101 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
         [0, 255, 65, 66, 67]
     );
 }
+
+#[test]
+fn conditional_plugin_reads_compression_and_owner_scoping() {
+    let backend = Backend::start("client");
+    let owner = backend.pair();
+    let sid = backend
+        .api(
+            "POST",
+            "/api/sessions",
+            Some(&owner),
+            Some(json!({"files":true})),
+        )
+        .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let text = "plugin events 界😀\n".repeat(20_000);
+    std::fs::write(backend.root.path().join("plugin.log"), &text).unwrap();
+    let route = format!("/api/plugins/read?path=plugin.log&session={sid}&delta=1");
+    let origin = format!("http://127.0.0.1:{}", backend.port);
+    let bearer = format!("Bearer {owner}");
+    let headers = [
+        ("Origin", origin.as_str()),
+        ("Authorization", bearer.as_str()),
+        ("Accept-Encoding", "gzip"),
+    ];
+    let first = backend.request("GET", &route, &headers, b"");
+    assert_eq!(first.status, 200);
+    assert!(
+        first
+            .headers
+            .to_lowercase()
+            .contains("content-encoding: gzip")
+    );
+    assert!(first.bytes.len() < 5000);
+    let mut decoded = String::new();
+    flate2::read::GzDecoder::new(&first.bytes[..])
+        .read_to_string(&mut decoded)
+        .unwrap();
+    let value: Value = serde_json::from_str(&decoded).unwrap();
+    // Long selected files retain the bounded tail, including Unicode.
+    assert_eq!(
+        value["text"].as_str().unwrap().encode_utf16().count(),
+        256 * 1024
+    );
+    let etag = format!("\"{}\"", value["version"].as_str().unwrap());
+    let conditional = [
+        ("Origin", origin.as_str()),
+        ("Authorization", bearer.as_str()),
+        ("If-None-Match", etag.as_str()),
+    ];
+    let same = backend.request("GET", &route, &conditional, b"");
+    assert_eq!(same.status, 304);
+    assert!(same.bytes.is_empty());
+    let other = backend.pair();
+    assert_eq!(backend.api("GET", &route, Some(&other), None).status, 404);
+    let raw = backend.request(
+        "GET",
+        &route,
+        &[
+            ("Origin", origin.as_str()),
+            ("Authorization", bearer.as_str()),
+            ("Accept-Encoding", "gzip;q=0"),
+        ],
+        b"",
+    );
+    assert!(
+        !raw.headers
+            .to_lowercase()
+            .contains("content-encoding: gzip")
+    );
+    std::fs::write(
+        backend.root.path().join("plugin.log"),
+        "short text\n".repeat(100),
+    )
+    .unwrap();
+    let initial = backend.api("GET", &route, Some(&owner), None).json();
+    std::fs::write(
+        backend.root.path().join("plugin.log"),
+        "short text\n".repeat(100) + "append 😀\n",
+    )
+    .unwrap();
+    let etag = format!("\"{}\"", initial["version"].as_str().unwrap());
+    let delta = backend
+        .request(
+            "GET",
+            &route,
+            &[
+                ("Origin", origin.as_str()),
+                ("Authorization", bearer.as_str()),
+                ("If-None-Match", etag.as_str()),
+            ],
+            b"",
+        )
+        .json();
+    assert_eq!(delta["append"], "append 😀\n");
+    assert_eq!(delta["baseVersion"], initial["version"]);
+}

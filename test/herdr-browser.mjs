@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
@@ -70,6 +71,7 @@ try {
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:').replace(/([\w$]+)=([\w$]+)\?new ([\w$]+)\(([\w$]+),([\w$]+)\):void 0/, '$1=$2?(window.__testProjection=new $3($4,$5)):void 0');
     assert.notEqual(body, original); assert.ok(body.includes('window.__testProjection')); await route.fulfill({ response, body });
   });
+  await installWireObserver(context);
   await context.addInitScript(() => {
     window.__installed = false; window.__permissionRequests = 0; window.__presence = [];
     const media = window.matchMedia.bind(window); window.matchMedia = query => query === '(display-mode: standalone)' ? { ...media(query), matches: window.__installed } : media(query);
@@ -86,7 +88,7 @@ try {
     window.__notices = [];
     if (window.parent === window && !location.pathname.endsWith('terminal.html')) document.addEventListener('DOMContentLoaded', () => new MutationObserver(() => window.__notices.push(document.querySelector('#notice')?.textContent)).observe(document.querySelector('#notice'), { childList: true }));
     window.__herdrMessages = [];
-    const Original = window.WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', e => { const m = JSON.parse(e.data); if (m.type === 'state') window.__state = m.state; }); if (String(args[0]).includes('/herdr/ws')) { this.addEventListener('message', e => window.__herdrMessages.push(JSON.parse(e.data))); this.addEventListener('close', e => window.__herdrMessages.push({ closed: e.code })); } } send(data) { try { const message = JSON.parse(data); if (message.type === 'notification-presence') window.__presence.push(message); } catch {} return super.send(data); } };
+    const Original = window.WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; }); if (String(args[0]).includes('/herdr/ws')) { this.addEventListener('message', async e => window.__herdrMessages.push(await window.__wireMessage(e.data, this))); this.addEventListener('close', e => window.__herdrMessages.push({ closed: e.code })); } } send(data) { try { const message = window.__wireSent(data); if (message.type === 'notification-presence') window.__presence.push(message); } catch {} return super.send(data); } };
     Object.defineProperty(document, 'hasFocus', { value: () => window.__focused });
     // Capture scheduled playback while still fetching/decoding the real bundled assets.
     if (window.parent !== window) return;

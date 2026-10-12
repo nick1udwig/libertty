@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
 import { spawn, execFile } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access } from 'node:fs/promises';
@@ -58,9 +59,10 @@ try {
   });
   page.on('response', async response => { if (response.url().includes('/api/facts')) { const request = response.request().postDataJSON(); const value = await response.json().catch(() => undefined); facts.push({ request, status: response.status(), result: request.kind === 'context' ? { home: value?.home, cwd: value?.catalog?.cwd, cd: value?.catalog?.commands.includes('cd'), prompt: value?.prompt } : value }); } });
   page.on('pageerror', error => errors.push(String(error))); page.on('dialog', d => d.accept());
+  await installWireObserver(context);
   await context.addInitScript(() => {
     const Original = window.WebSocket; window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', event => { const m = JSON.parse(event.data); if (m.type === 'state') window.__shellState = m.state; if (m.type === 'hello') window.__engine = m.engine; if (m.type === 'output') window.__output = (window.__output || '') + m.data; }); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'state') window.__shellState = m.state; if (m.type === 'hello') window.__engine = m.engine; if (m.type === 'output') window.__output = (window.__output || '') + m.data; }); }
     };
   });
   await page.goto(origin);

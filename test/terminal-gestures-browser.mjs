@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -28,6 +29,7 @@ try {
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
   });
+  await installWireObserver(context);
   await context.addInitScript(() => {
     window.__sent = [];
     window.__clipboardWrites = [];
@@ -45,8 +47,8 @@ try {
     };
     const Original = WebSocket;
     window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', e => { const m = JSON.parse(e.data); if (m.type === 'state') window.__state = m.state; if (m.type === 'output') window.__outputSeq = m.seq; }); }
-      send(data) { if (typeof data === 'string') window.__sent.push(JSON.parse(data)); super.send(data); }
+      constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; if (m.type === 'output') window.__outputSeq = m.seq; }); }
+      send(data) { if (window.__wireSent(data).type !== 'audio') window.__sent.push(window.__wireSent(data)); super.send(data); }
     };
   });
   const page = await context.newPage(), errors = []; page.on('pageerror', e => errors.push(String(e)));

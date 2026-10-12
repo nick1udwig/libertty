@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, mkdir, rm, access, readFile } from 'node:fs/promises';
@@ -66,6 +67,7 @@ try {
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const page = await browser.newPage({ viewport: { width: 600, height: 850 }, hasTouch: true });
   const errors = []; page.on('pageerror', error => errors.push(String(error)));
+  await installWireObserver(page.context());
   await page.addInitScript(() => {
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = constraints => { window.__captureConstraints = constraints; return capture(constraints); };
@@ -74,8 +76,8 @@ try {
     CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...args) { window.__paint.push({ text, x, y }); return paint.call(this, text, x, y, ...args); };
     const Original = WebSocket;
     window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', event => { const m = JSON.parse(event.data); window.__messages.push(m); if (m.type === 'output') window.__out += m.data; if (m.type === 'state') window.__state = m.state; }); }
-      send(data) { if (typeof data === 'string') { const m = JSON.parse(data); window.__sent.push(m); if (m.type === 'resize') window.__size = m; } super.send(data); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); window.__messages.push(m); if (m.type === 'output') window.__out += m.data; if (m.type === 'state') window.__state = m.state; }); }
+      send(data) { if (window.__wireSent(data).type !== 'audio') { const m = window.__wireSent(data); window.__sent.push(m); if (m.type === 'resize') window.__size = m; } super.send(data); }
     };
   });
   page.setDefaultTimeout(20000);

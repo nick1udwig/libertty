@@ -1,3 +1,4 @@
+import { wireProtocols, decodeWire } from './wire.ts';
 import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSpace } from './herdr-protocol.ts';
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
 import { tabGestures } from './tab-gestures.ts';
@@ -116,12 +117,12 @@ export class HerdrView {
   private async connect() {
     if (this.disposed || this.connecting) return; this.connecting = true;
     try {
-      const { ticket } = await this.host.api<{ ticket: string }>('api/herdr/ticket', {});
+      const { ticket, wire } = await this.host.api<{ ticket: string; wire?: string[] }>('api/herdr/ticket', {});
       if (this.disposed) return;
       const url = this.endpoint('herdr/ws'); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
-      const ws = new WebSocket(url); this.ws = ws;
+      const ws = new WebSocket(url, wireProtocols(wire)); ws.binaryType = 'arraybuffer'; this.ws = ws; let decoded = Promise.resolve();
       ws.onopen = () => { if (this.ws !== ws) return; this.connected = true; this.quietSnapshot = true; this.status.textContent = ''; this.updatePresence(); this.render(); };
-      ws.onmessage = event => { if (this.ws === ws) this.receive(JSON.parse(event.data)); };
+      ws.onmessage = event => { decoded = decoded.then(async () => { const value = await decodeWire(event.data); if (this.ws === ws) this.receive(value); }).catch(() => { if (this.ws === ws) ws.close(4002, 'Invalid transport message'); }); };
       ws.onclose = () => {
         if (this.ws !== ws || this.disposed) return;
         this.connected = false; this.status.textContent = 'Herdr disconnected. Reconnecting…'; this.render();

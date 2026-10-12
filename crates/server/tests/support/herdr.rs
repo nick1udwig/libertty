@@ -166,6 +166,10 @@ impl Fixture {
         fixture
     }
     #[allow(dead_code)]
+    pub fn notify(&self) {
+        let _ = self.events.send(());
+    }
+    #[allow(dead_code)]
     pub fn update(&self, status: &str) {
         let mut snapshot = self.snapshot.lock().unwrap();
         let agent = &mut snapshot["agents"][0];

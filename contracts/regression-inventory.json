@@ -573,6 +573,7 @@
     {
       "source": "test/browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "playwright-core",
         "node:child_process",
         "node:fs/promises",
@@ -917,6 +918,7 @@
     {
       "source": "test/dictation-browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "playwright-core",
         "node:child_process",
         "node:fs/promises",
@@ -1534,6 +1536,7 @@
     {
       "source": "test/herdr-app-scroll-native.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "node:assert/strict",
         "node:fs/promises",
         "node:child_process",
@@ -1553,6 +1556,7 @@
     {
       "source": "test/herdr-browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "node:assert/strict",
         "playwright-core",
         "node:child_process",
@@ -1691,6 +1695,7 @@
     {
       "source": "test/herdr-resize-native.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "node:assert/strict",
         "node:fs/promises",
         "node:child_process",
@@ -2675,6 +2680,36 @@
       ]
     },
     {
+      "source": "test/plugin-file.test.ts",
+      "imports": [
+        "node:test",
+        "node:assert/strict",
+        "../src/plugin-file.ts"
+      ],
+      "assertions": [
+        "selected-file deltas retain full API snapshots and reject different capabilities or bases",
+        "conditional reads coalesce and scope snapshots to URL and authentication"
+      ],
+      "classification": "frontend",
+      "equivalent": "test/plugin-file.test.ts",
+      "status": "retained",
+      "justification": "Frontend behavior remains TypeScript and retains its existing unit harness.",
+      "coverage": [
+        {
+          "assertion": "selected-file deltas retain full API snapshots and reject different capabilities or bases",
+          "status": "retained",
+          "equivalent": "test/plugin-file.test.ts",
+          "justification": "Frontend behavior remains TypeScript and retains its existing unit harness."
+        },
+        {
+          "assertion": "conditional reads coalesce and scope snapshots to URL and authentication",
+          "status": "retained",
+          "equivalent": "test/plugin-file.test.ts",
+          "justification": "Frontend behavior remains TypeScript and retains its existing unit harness."
+        }
+      ]
+    },
+    {
       "source": "test/plugins-browser.mjs",
       "imports": [
         "node:assert/strict",
@@ -2845,6 +2880,7 @@
     {
       "source": "test/reading-browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "playwright-core",
         "node:child_process",
         "node:util",
@@ -2994,6 +3030,7 @@
     {
       "source": "test/reconnect-browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "node:assert/strict",
         "playwright-core",
         "node:child_process",
@@ -3904,6 +3941,7 @@
     {
       "source": "test/terminal-gestures-browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "playwright-core",
         "node:child_process",
         "node:fs/promises",
@@ -4037,6 +4075,7 @@
     {
       "source": "test/terminal-touch-browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "node:assert/strict",
         "node:child_process",
         "node:events",
@@ -4121,6 +4160,7 @@
     {
       "source": "test/transfers-browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "playwright-core",
         "node:child_process",
         "node:fs/promises",
@@ -4192,6 +4232,27 @@
           "justification": "The named native tests preserve these assertions; reference corpora compare complete values and recorded host operations in native Rust and Chromium Wasm."
         }
       ]
+    },
+    {
+      "source": "test/transport-benchmark.mjs",
+      "imports": [
+        "node:assert/strict",
+        "node:http",
+        "node:child_process",
+        "node:readline",
+        "node:events",
+        "node:fs/promises",
+        "node:crypto",
+        "node:module",
+        "ws",
+        "playwright-core"
+      ],
+      "assertions": [],
+      "classification": "integration-harness",
+      "equivalent": "test/transport-benchmark.mjs",
+      "status": "retained",
+      "justification": "Retain the external browser, installation and benchmark assertions against the Rust runtime; TEST_BACKEND=node remains available for the reference oracle.",
+      "coverage": []
     },
     {
       "source": "test/validation.test.ts",
@@ -4326,8 +4387,67 @@
       ]
     },
     {
+      "source": "test/wire-observer.mjs",
+      "imports": [
+        "node:fs/promises",
+        "node:module"
+      ],
+      "assertions": [],
+      "classification": "frontend",
+      "equivalent": "test/wire-observer.mjs",
+      "status": "retained",
+      "justification": "Frontend behavior remains TypeScript and retains its existing unit harness.",
+      "coverage": []
+    },
+    {
+      "source": "test/wire.test.ts",
+      "imports": [
+        "node:test",
+        "node:assert/strict",
+        "node:zlib",
+        "../src/wire.ts"
+      ],
+      "assertions": [
+        "wire decoder preserves compressed Unicode output, raw ANSI frames and legacy JSON",
+        "compact client controls keep sequence, geometry, input and audio distinct",
+        "malformed headers, sequences, UTF-8 and compressed streams reject without poisoning later messages",
+        "compression negotiation uses capability and connection profile"
+      ],
+      "classification": "frontend",
+      "equivalent": "test/wire.test.ts",
+      "status": "retained",
+      "justification": "Frontend behavior remains TypeScript and retains its existing unit harness.",
+      "coverage": [
+        {
+          "assertion": "wire decoder preserves compressed Unicode output, raw ANSI frames and legacy JSON",
+          "status": "retained",
+          "equivalent": "test/wire.test.ts",
+          "justification": "Frontend behavior remains TypeScript and retains its existing unit harness."
+        },
+        {
+          "assertion": "compact client controls keep sequence, geometry, input and audio distinct",
+          "status": "retained",
+          "equivalent": "test/wire.test.ts",
+          "justification": "Frontend behavior remains TypeScript and retains its existing unit harness."
+        },
+        {
+          "assertion": "malformed headers, sequences, UTF-8 and compressed streams reject without poisoning later messages",
+          "status": "retained",
+          "equivalent": "test/wire.test.ts",
+          "justification": "Frontend behavior remains TypeScript and retains its existing unit harness."
+        },
+        {
+          "assertion": "compression negotiation uses capability and connection profile",
+          "status": "retained",
+          "equivalent": "test/wire.test.ts",
+          "justification": "Frontend behavior remains TypeScript and retains its existing unit harness."
+        }
+      ]
+    },
+    {
       "source": "test/workspace-benchmark.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "playwright-core",
         "node:child_process",
         "node:fs/promises",
@@ -4343,6 +4463,7 @@
     {
       "source": "test/workspace-browser.mjs",
       "imports": [
+        "./wire-observer.mjs",
         "playwright-core",
         "node:child_process",
         "node:fs/promises",

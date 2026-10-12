@@ -1,3 +1,4 @@
+import { constrainedLink } from './wire.ts';
 import type { BackendProfile, TerminalTab } from './connections.ts';
 import { BUILTIN_VERSION, type PluginView, type TabPlugin } from './plugins.ts';
 import { readingMessage, readingView, type ReadingView } from './reading-view.ts';
@@ -27,7 +28,7 @@ export function readingPlugin(s: ReadingServices): TabPlugin {
   };
 }
 
-function authorization(token?: string): HeadersInit { return token ? { Authorization: 'Bearer ' + token } : {}; }
+function authorization(token?: string): HeadersInit { return token ? { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), Authorization: 'Bearer ' + token } : constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}; }
 
 function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
   const path = tab.readPath;

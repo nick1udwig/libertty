@@ -1,3 +1,5 @@
+import { constrainedLink } from './wire.ts';
+import { selectedFileReader } from './plugin-file.ts';
 import './workspace.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
 import { BrowserVault } from './browser-vault.ts';
@@ -61,11 +63,20 @@ for (const plugin of builtinPlugins({
   notification: (connection, event) => herdrSounds.play(connection, event), notificationDevice: id => herdrNotifications.device(id),
   watch: tab => herdrNotifications.watch(tab.backendId, tab.id, herdrSession(tab.herdrSession), tab.herdrSource), unwatch: tab => herdrNotifications.unwatch(tab.backendId, tab.id),
 })) plugins.register(plugin);
+const selectedFileReaders = new WeakMap<TerminalTab, ReturnType<typeof selectedFileReader>>();
 function registerExternal(pkg: PluginPackage) {
   plugins.register(externalPlugin(pkg, { connect: (host, pkg) => configureConnection(host, pkg.manifest.id, pkg), close: closeTabSession, store,
     async read(tab) {
       if (!tab.readPath) throw new Error('This connection has no file permission. Reconnect and select a file.');
-      return api(backendFor(tab.backendId), 'api/plugins/read?' + new URLSearchParams({ path: tab.readPath, session: tab.session }));
+      const backend = backendFor(tab.backendId), url = new URL('api/plugins/read?' + new URLSearchParams({ path: tab.readPath, session: tab.session }), backend.url);
+      let reader = selectedFileReaders.get(tab); if (!reader) { reader = selectedFileReader(); selectedFileReaders.set(tab, reader); }
+      const token = tokenFor(backend);
+      try { return await reader(url, token); }
+      catch (error: any) {
+        if (error.status !== 401) throw error;
+        if (tokenFor(backend) === token) await authenticate(backend, true); else await authenticating.get(backend.id);
+        return reader(url, tokenFor(backend));
+      }
     },
   }));
 }
@@ -93,7 +104,7 @@ async function api<T>(backend: BackendProfile, name: string, data?: unknown, ses
   const url = new URL(name, backend.url); if (session) url.searchParams.set('session', session);
   const token = tokenFor(backend);
   const response = await fetch(url, { method: data === undefined ? 'GET' : 'POST', cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(['api/sessions', 'api/ssh/captured'].includes(name) ? 25000 : 12000),
-    headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
+    headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   const result = await response.json();
   // Revoked credentials can expire while the workspace stays open.
   // Retry only an explicit authentication rejection: the server has not performed
@@ -536,7 +547,7 @@ $<HTMLFormElement>('backend-form').onsubmit = event => {
 let sshHost: HostProfile | undefined;
 const keyValue = (key: KeyInfo) => key.reference ? 'backend:' + key.id : key.fingerprint;
 const selectedBackendKey = () => vaults.get(sshHost?.backendId || '')?.keys.find(key => keyValue(key) === select('ssh-key').value);
-let selectedRoute: { backend: BackendProfile; keyId?: string } | undefined, routeGeneration = 0;
+let selectedRoute: { backend: BackendProfile; keyId?: string; compression?: boolean } | undefined, routeGeneration = 0;
 const openingHosts = new Map<string, Promise<void>>();
 interface ConnectionRequest { pluginId: string; pluginVersion?: string; readPath?: string; herdrSession?: string }
 let sshRequest: ConnectionRequest = { pluginId: 'terminal' };
@@ -617,8 +628,8 @@ async function connectHost(host: HostProfile, request: ConnectionRequest) {
 function sshSecretLabel() { input('ssh-secret').required = !selectedBackendKey()?.reference; $('ssh-secret-label').textContent = select('ssh-key').value === 'password' ? 'Account password' : 'Key passphrase'; }
 select('ssh-key').onchange = () => { sshSecretLabel(); input('ssh-secret').value = ''; void prepareRoute(); };
 input('ssh-show-secret').onchange = () => input('ssh-secret').type = input('ssh-show-secret').checked ? 'text' : 'password';
-const routes = new Map<string, { at: number; backend: BackendProfile; keyId?: string }>();
-async function chooseRoute(host: HostProfile, keyFingerprint: string): Promise<{ backend: BackendProfile; keyId?: string }> {
+const routes = new Map<string, { at: number; backend: BackendProfile; keyId?: string; compression?: boolean }>();
+async function chooseRoute(host: HostProfile, keyFingerprint: string): Promise<{ backend: BackendProfile; keyId?: string; compression?: boolean }> {
   const selected = backendFor(host.backendId), localKey = vaults.get(selected.id)?.keys.find(k => keyValue(k) === keyFingerprint);
   const portable = keyFingerprint === 'password' || keyFingerprint.startsWith('browser:');
   if (!portable && !localKey) throw new Error('Choose a key on this backend.');
@@ -628,9 +639,9 @@ async function chooseRoute(host: HostProfile, keyFingerprint: string): Promise<{
   const measurements = await Promise.all(candidates.map(async backend => {
     try {
       const matching = portable ? undefined : (await api<{ keys: KeyInfo[] }>(backend, 'api/keychain')).keys.find(k => keyValue(k) === keyFingerprint); if (!portable && !matching) return;
-      const samples: number[] = [];
-      for (let i = 0; i < 2; i++) { const start = performance.now(); await api(backend, 'api/ssh/probe', { host: host.hostname, port: host.port, username: host.username }); samples.push(performance.now() - start); }
-      return { backend, keyId: matching?.id, latency: (samples[0] + samples[1]) / 2 };
+      const samples: number[] = [], remote: number[] = [];
+      for (let i = 0; i < 2; i++) { const start = performance.now(); const measured = await api<{ milliseconds: number }>(backend, 'api/ssh/probe', { host: host.hostname, port: host.port, username: host.username }); samples.push(performance.now() - start); remote.push(measured.milliseconds); }
+      return { backend, keyId: matching?.id, latency: (samples[0] + samples[1]) / 2, compression: (remote[0] + remote[1]) / 2 >= 40 };
     } catch { return undefined; }
   }));
   const best = measurements.filter((m): m is NonNullable<typeof m> => !!m).sort((a, b) => a.latency - b.latency)[0];
@@ -657,7 +668,7 @@ async function connectSSH() {
   try {
     const selected = select('ssh-key').value, route = selectedRoute;
     $('ssh-progress').textContent = 'Connecting through ' + route.backend.name + '…';
-    ssh = { host: host.hostname!, port: host.port!, username: host.username!, ...(selected.startsWith('browser:') ? { privateKey: await browserVault.unlock(selected.slice(8), input('ssh-secret').value), passphrase: input('ssh-secret').value } : route.keyId ? { keyId: route.keyId, passphrase: input('ssh-secret').value } : { password: input('ssh-secret').value }) };
+    ssh = { host: host.hostname!, port: host.port!, username: host.username!, ...(route.compression ? { compression: 'on' } : {}), ...(selected.startsWith('browser:') ? { privateKey: await browserVault.unlock(selected.slice(8), input('ssh-secret').value), passphrase: input('ssh-secret').value } : route.keyId ? { keyId: route.keyId, passphrase: input('ssh-secret').value } : { password: input('ssh-secret').value }) };
     const create = () => api<{ id: string }>(route.backend, 'api/sessions', { name: host.name, ssh, files: request.pluginId !== 'terminal' });
     let result;
     try { result = await create(); } catch (error: any) {
