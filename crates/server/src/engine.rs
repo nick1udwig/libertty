@@ -128,7 +128,7 @@ impl NativeEngine {
                                                                             .operations
                                                                             .iter()
                                                                             .map(|operation| {
-                                                                                host.engine_fact(
+                                                                                host.engine_operation(
                                                                                     operation,
                                                                                     cancel,
                                                                                 )

@@ -1,7 +1,7 @@
 //! Cooperative executor for native and browser adapters, with request-owned futures.
 use crate::{
     Request,
-    host::{FactValue, Host},
+    host::{FactValue, Host, HostOperation},
 };
 use futures::{future::LocalBoxFuture, task::noop_waker};
 use serde::{Deserialize, Serialize};
@@ -23,50 +23,12 @@ pub enum Call {
 }
 
 type Slot = Rc<RefCell<Option<Result<FactValue, String>>>>;
-#[derive(Deserialize, Hash, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
-enum OperationKey {
-    Stat {
-        path: String,
-        executable: bool,
-    },
-    Lookup {
-        path: String,
-    },
-    Entries {
-        path: String,
-        limit: usize,
-    },
-    Syntax {
-        command: String,
-    },
-    Completion {
-        words: Vec<String>,
-        #[serde(rename = "timeoutMs", deserialize_with = "timeout_bits")]
-        timeout: u64,
-    },
-    Help {
-        command: String,
-        route: Vec<String>,
-    },
-    Describe {
-        command: String,
-    },
-}
-fn timeout_bits<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
-    f64::deserialize(deserializer).map(f64::to_bits)
-}
-#[derive(Hash, PartialEq, Eq)]
-enum FactKey {
-    Typed(OperationKey),
-    Json(String),
-}
 #[derive(Default)]
 struct RequestHost {
     now: Cell<f64>,
     completion: Cell<bool>,
-    queue: RefCell<VecDeque<(Value, Slot)>>,
-    cache: RefCell<HashMap<FactKey, Slot>>,
+    queue: RefCell<VecDeque<(HostOperation, Slot)>>,
+    cache: RefCell<HashMap<HostOperation, Slot>>,
     completions: RefCell<HashMap<Vec<String>, Slot>>,
 }
 impl Host for RequestHost {
@@ -77,13 +39,17 @@ impl Host for RequestHost {
         self.now.get()
     }
     fn request(&self, operation: Value) -> LocalBoxFuture<'_, Result<FactValue, String>> {
-        let key = OperationKey::deserialize(&operation)
-            .map(FactKey::Typed)
-            .unwrap_or_else(|_| FactKey::Json(operation.to_string()));
+        match crate::deserialize(&operation) {
+            Ok(operation) => self.fact(operation),
+            Err(error) => Box::pin(async move { Err(format!("Invalid host operation: {error}")) }),
+        }
+    }
+    fn fact(&self, operation: HostOperation) -> LocalBoxFuture<'_, Result<FactValue, String>> {
+        let key = operation.clone();
         // A successful completion is independent of the subscriber's remaining budget.
         // Failed and pending calls retain their original timeout identity.
         let completion = match &key {
-            FactKey::Typed(OperationKey::Completion { words, .. }) => Some(words.clone()),
+            HostOperation::Completion { words, .. } => Some(words.clone()),
             _ => None,
         };
         let completed = completion
@@ -140,7 +106,7 @@ struct Task {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HostRequest {
     pub request: u32,
-    pub operations: Vec<Value>,
+    pub operations: Vec<HostOperation>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(untagged)]

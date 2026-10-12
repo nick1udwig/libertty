@@ -51,83 +51,70 @@ impl NativeHost {
         operation: &Value,
         cancel: &CancellationToken,
     ) -> Result<termai_engine::host::FactValue, String> {
-        use termai_engine::host::FactValue;
-        if self.remote.is_none() {
-            if cancel.is_cancelled() {
-                return Err(ABORTED.into());
-            }
-            let text = |field| {
-                operation
-                    .get(field)
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| format!("Invalid host field {field}."))
-            };
-            let value = match text("kind")? {
-                "lookup" => FactValue::Lookup(Arc::new(
-                    self.services
-                        .directories
-                        .lookup(text("path")?, cancel)
-                        .await?,
-                )),
-                "entries" => FactValue::Entries(
-                    self.services
-                        .directories
-                        .entries(
-                            text("path")?,
-                            operation["limit"]
-                                .as_u64()
-                                .ok_or("Invalid directory limit.")?
-                                as usize,
-                            cancel,
-                        )
-                        .await?,
-                ),
-                "stat" => FactValue::Stat(
-                    self.services
-                        .directories
-                        .stat(
-                            text("path")?,
-                            operation["executable"].as_bool().unwrap_or(true),
-                            cancel,
-                        )
-                        .await?,
-                ),
-                "syntax" => FactValue::Syntax(
-                    self.services
-                        .syntax
-                        .valid(text("command")?, &self.catalog.cwd, cancel)
-                        .await?,
-                ),
-                "completion" => {
-                    FactValue::Completion(Arc::new(self.complete(operation, cancel).await?))
-                }
-                "help" => {
-                    let route: Vec<String> = serde_json::from_value(
-                        operation
-                            .get("route")
-                            .cloned()
-                            .ok_or("Invalid help route.")?,
-                    )
-                    .map_err(|e| e.to_string())?;
-                    FactValue::Help(Arc::new(
-                        self.read_help(text("command")?, &route, true, cancel)
-                            .await?,
-                    ))
-                }
-                "describe" => FactValue::Describe(Arc::new(
-                    self.services
-                        .catalog
-                        .describe(text("command")?, &self.catalog.cwd, cancel)
-                        .await?,
-                )),
-                _ => return Err("Unknown host operation.".into()),
-            };
-            if cancel.is_cancelled() {
-                return Err(ABORTED.into());
-            }
-            return Ok(value);
+        self.engine_operation(
+            &serde_json::from_value(operation.clone()).map_err(|e| e.to_string())?,
+            cancel,
+        )
+        .await
+    }
+    pub async fn engine_operation(
+        &self,
+        operation: &termai_engine::host::HostOperation,
+        cancel: &CancellationToken,
+    ) -> Result<termai_engine::host::FactValue, String> {
+        use termai_engine::host::{FactValue, HostOperation};
+        if self.remote.is_some() {
+            return self
+                .fact(
+                    &serde_json::to_value(operation).map_err(|e| e.to_string())?,
+                    cancel,
+                )
+                .await
+                .map(Into::into);
         }
-        self.fact(operation, cancel).await.map(Into::into)
+        if cancel.is_cancelled() {
+            return Err(ABORTED.into());
+        }
+        let value = match operation {
+            HostOperation::Lookup { path } => FactValue::Lookup(Arc::new(
+                self.services.directories.lookup(path, cancel).await?,
+            )),
+            HostOperation::Entries { path, limit } => FactValue::Entries(
+                self.services
+                    .directories
+                    .entries(path, *limit, cancel)
+                    .await?,
+            ),
+            HostOperation::Stat { path, executable } => FactValue::Stat(
+                self.services
+                    .directories
+                    .stat(path, *executable, cancel)
+                    .await?,
+            ),
+            HostOperation::Syntax { command } => FactValue::Syntax(
+                self.services
+                    .syntax
+                    .valid(command, &self.catalog.cwd, cancel)
+                    .await?,
+            ),
+            HostOperation::Completion { words, timeout } => FactValue::Completion(Arc::new(
+                self.complete_words(words, f64::from_bits(*timeout), cancel)
+                    .await?,
+            )),
+            HostOperation::Help { command, route } => FactValue::Help(Arc::new(
+                self.read_help(command, route, true, cancel).await?,
+            )),
+            HostOperation::Describe { command } => FactValue::Describe(Arc::new(
+                self.services
+                    .catalog
+                    .describe(command, &self.catalog.cwd, cancel)
+                    .await?,
+            )),
+        };
+        if cancel.is_cancelled() {
+            return Err(ABORTED.into());
+        }
+        Ok(value)
     }
     async fn complete(
         &self,
@@ -145,6 +132,14 @@ impl NativeHost {
             .get("timeoutMs")
             .and_then(Value::as_f64)
             .unwrap_or(1500.0);
+        self.complete_words(&words, timeout, cancel).await
+    }
+    async fn complete_words(
+        &self,
+        words: &[String],
+        timeout: f64,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<String>, String> {
         if !timeout.is_finite() || timeout < 0.0 {
             return Err("Invalid completion timeout.".into());
         }
@@ -152,7 +147,7 @@ impl NativeHost {
             Duration::from_secs_f64(timeout.min(1500.0) / 1000.0),
             self.services.completion.complete(
                 &self.services.pool,
-                &words,
+                words,
                 &self.catalog.cwd,
                 &self.environment,
                 cancel,

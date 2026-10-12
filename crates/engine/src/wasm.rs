@@ -96,6 +96,56 @@ pub extern "C" fn termai_suggest_prepared(pointer: u32) -> u32 {
             .into_boxed_slice(),
     )
 }
+fn borrowed<T>(
+    pointer: u32,
+    length: u32,
+    read: impl FnOnce(&[u8]) -> Result<T, String>,
+) -> Result<T, String> {
+    BUFFERS.with(|buffers| {
+        let buffers = buffers.borrow();
+        let bytes = buffers
+            .get(&pointer)
+            .and_then(|bytes| bytes.get(..length as usize))
+            .ok_or("Invalid engine buffer.")?;
+        read(bytes)
+    })
+}
+fn retain_step(step: crate::runtime::Step) -> u32 {
+    retain(
+        serde_json::to_vec(&step)
+            .expect("engine step")
+            .into_boxed_slice(),
+    )
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn termai_suggest_buffer(
+    pointer: u32,
+    length: u32,
+    request: u32,
+    context: u32,
+    now: f64,
+) -> u32 {
+    let input = borrowed(pointer, length, |bytes| {
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|e| e.to_string())
+    });
+    retain_step(match input {
+        Ok(input) => RUNTIME.with(|runtime| {
+            runtime
+                .borrow_mut()
+                .start_prepared(request, input, context, now)
+        }),
+        Err(error) => crate::runtime::Step::Error { request, error },
+    })
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn termai_resume_buffer(pointer: u32, length: u32) -> u32 {
+    let step = borrowed(pointer, length, |bytes| {
+        Ok(RUNTIME.with(|runtime| crate::runtime::message(&mut runtime.borrow_mut(), bytes, true)))
+    });
+    retain_step(step.unwrap_or_else(|error| crate::runtime::Step::Error { request: 0, error }))
+}
 fn retain(bytes: Box<[u8]>) -> u32 {
     let pointer = bytes.as_ptr() as u32;
     BUFFERS.with(|buffers| {

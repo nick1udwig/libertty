@@ -19,10 +19,15 @@ fn prepared_contexts_preserve_pending_snapshots_reject_stale_ids_and_reset() {
                             values: callback
                                 .operations
                                 .iter()
-                                .map(|op| match op["kind"].as_str().unwrap() {
-                                    "syntax" => json!(true),
-                                    "entries" | "completion" => json!([]),
-                                    _ => Value::Null,
+                                .map(|op| {
+                                    match serde_json::to_value(op).unwrap()["kind"]
+                                        .as_str()
+                                        .unwrap()
+                                    {
+                                        "syntax" => json!(true),
+                                        "entries" | "completion" => json!([]),
+                                        _ => Value::Null,
+                                    }
                                 })
                                 .collect(),
                         })

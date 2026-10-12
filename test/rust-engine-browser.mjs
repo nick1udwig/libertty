@@ -139,6 +139,14 @@ try {
       if (method === 'termai_resume') for (const pin of request.directories || []) pin.entries ? imported++ : referenced++;
       return directoryExchange.call(this, request, method);
     };
+    const directoryBufferExchange = engine.bufferExchange;
+    engine.bufferExchange = function(text, invoke) {
+      if (text.startsWith('{')) {
+        const request = JSON.parse(text);
+        for (const pin of request.directories || []) pin.entries ? imported++ : referenced++;
+      }
+      return directoryBufferExchange.call(this, text, invoke);
+    };
     const directorySnapshot = (name, version = name) => {
       const entries = [{ name, directory: true, symlink: false }];
       markImmutableDirectoryEntries(entries);
@@ -197,9 +205,17 @@ try {
     const invalid = raw.termai_dispatch(0);
     const invalidReply = JSON.parse(new TextDecoder().decode(new Uint8Array(raw.memory.buffer, invalid, raw.termai_len(invalid))));
     raw.termai_free(invalid);
+    const inputBuffer = raw.termai_alloc(4);
+    const readStep = pointer => { const step = JSON.parse(new TextDecoder().decode(new Uint8Array(raw.memory.buffer, pointer, raw.termai_len(pointer)))); raw.termai_free(pointer); return step; };
+    const bufferBounds = readStep(raw.termai_resume_buffer(inputBuffer, 5));
+    new Uint8Array(raw.memory.buffer, inputBuffer, 4).set([0xff, 0, 0, 0]);
+    const bufferUtf8 = readStep(raw.termai_suggest_buffer(inputBuffer, 1, 1, 1, 0));
+    new TextEncoder().encodeInto('echo', new Uint8Array(raw.memory.buffer, inputBuffer, 4));
+    const bufferReused = readStep(raw.termai_suggest_buffer(inputBuffer, 4, 2, 1, 0));
+    raw.termai_free(inputBuffer);
     const recovered = raw.termai_alloc(1); raw.termai_free(recovered);
     return { initialization, loading, separateImports, count: corpus.fixtures.length, failures, unknown, cancelled, unicode, hostCount: hostCorpus.fixtures.length, hostFailures, preparedFailures, preparedSnapshots, directorySnapshots, isolated,
-      cancelledPending, reused, hostError, incomplete, allocated, invalidReply, recovered: !!recovered, prewarmFailures, prewarmCount: prewarm.steps.length };
+      cancelledPending, reused, hostError, incomplete, allocated, invalidReply, bufferBounds, bufferUtf8, bufferReused, recovered: !!recovered, prewarmFailures, prewarmCount: prewarm.steps.length };
   });
   assert.deepEqual(report.failures, []);
   assert.equal(report.unknown, 'Unknown engine operation.'); assert.equal(report.cancelled, 'AbortError');
@@ -210,6 +226,9 @@ try {
   assert.deepEqual(report.directorySnapshots, { warmShared: true, changed: true, eviction: true, mutable: true, reset: true });
   assert.deepEqual(report.loading, { streamingCalls: 1, fallback: 'fallback' });
   assert.equal(report.separateImports, 0);
+  assert.equal(report.bufferBounds.state, 'error'); assert.match(report.bufferBounds.error, /Invalid engine buffer/);
+  assert.equal(report.bufferUtf8.state, 'error'); assert.match(report.bufferUtf8.error, /utf-8/);
+  assert.equal(report.bufferReused.request, 2); assert.match(report.bufferReused.error, /context/i);
   assert.deepEqual(report.prewarmFailures, []);
   console.log('PASS Rust browser prewarm parity: ' + report.prewarmCount + ' reference cache steps.');
   assert.equal(report.cancelledPending, 'AbortError'); assert.equal(report.reused, true);

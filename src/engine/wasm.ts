@@ -15,6 +15,8 @@ interface EngineExports {
   termai_context(pointer: number): number;
   termai_suggest_prepared(pointer: number): number;
   termai_directories(pointer: number): number;
+  termai_suggest_buffer(pointer: number, length: number, request: number, context: number, now: number): number;
+  termai_resume_buffer(pointer: number, length: number): number;
 }
 export interface HostRequest { request: number; operations: { kind: string; [field: string]: unknown }[] }
 export type HostResult = { value: unknown } | { error: string };
@@ -39,6 +41,7 @@ export class WasmEngine {
   private encoder = new TextEncoder();
   private decoder = new TextDecoder('utf-8', { fatal: true });
   private scratch = new Uint8Array(4096);
+  private inputBuffer?: { pointer: number; capacity: number };
   static async load(url: string | URL, signal?: AbortSignal): Promise<WasmEngine> {
     signal?.throwIfAborted();
     const response = await fetch(url, { credentials: 'same-origin', signal });
@@ -57,7 +60,7 @@ export class WasmEngine {
   private static fromInstance(instance: WebAssembly.Instance, signal?: AbortSignal): WasmEngine {
     const exports = instance.exports;
     if (!(exports.memory instanceof WebAssembly.Memory) ||
-        ['termai_alloc', 'termai_dispatch', 'termai_len', 'termai_free', 'termai_start', 'termai_resume', 'termai_cancel', 'termai_reset', 'termai_initialize', 'termai_context', 'termai_suggest_prepared', 'termai_directories'].some(name => typeof exports[name] !== 'function')) {
+        ['termai_alloc', 'termai_dispatch', 'termai_len', 'termai_free', 'termai_start', 'termai_resume', 'termai_cancel', 'termai_reset', 'termai_initialize', 'termai_context', 'termai_suggest_prepared', 'termai_directories', 'termai_suggest_buffer', 'termai_resume_buffer'].some(name => typeof exports[name] !== 'function')) {
       throw new Error('Incompatible Rust engine WebAssembly interface.');
     }
     signal?.throwIfAborted();
@@ -68,6 +71,7 @@ export class WasmEngine {
   reset() {
     for (const controller of this.active.values()) controller.abort();
     this.exports.termai_reset();
+    if (this.inputBuffer) { this.exports.termai_free(this.inputBuffer.pointer); this.inputBuffer = undefined; }
     this.prepared = undefined;
     this.directories.clear();
     this.directoryIds = new WeakMap();
@@ -112,7 +116,7 @@ export class WasmEngine {
     try {
       let step = context === undefined
         ? this.exchange<EngineStep<T>>({ request, operation, args, now: performance.now() }, 'termai_start')
-        : this.exchange<EngineStep<T>>({ request, input: args[0], context, now: performance.now() }, 'termai_suggest_prepared');
+        : this.bufferExchange<EngineStep<T>>(args[0] as string, (pointer, length) => this.exports.termai_suggest_buffer(pointer, length, request, context, performance.now()));
       for (;;) {
         controller.signal.throwIfAborted();
         if (step.request !== request) throw new Error('Rust engine returned a mismatched request.');
@@ -131,7 +135,7 @@ export class WasmEngine {
         }))]);
         controller.signal.throwIfAborted();
         const packed = context === undefined ? { replies } : this.packDirectories(step.callbacks, replies);
-        step = this.exchange<EngineStep<T>>({ request, replies: packed.replies, directories: packed.directories, now: performance.now() }, 'termai_resume');
+        step = this.bufferExchange<EngineStep<T>>(JSON.stringify({ request, replies: packed.replies, directories: packed.directories, now: performance.now() }), (pointer, length) => this.exports.termai_resume_buffer(pointer, length));
         if (packed.arrays) {
           if (step.state === 'error') { this.directories.clear(); this.directoryIds = new WeakMap(); }
           else this.rememberDirectories(packed.arrays);
@@ -186,6 +190,33 @@ export class WasmEngine {
       this.directories.set(pin.directory, entries.length);
     }
     while (this.directories.size > 32 || [...this.directories.values()].reduce((sum, length) => sum + length, 0) > 30000) this.directories.delete(this.directories.keys().next().value!);
+  }
+  private bufferExchange<T>(text: string, invoke: (pointer: number, length: number) => number): T {
+    const limit = 64 * 1024 * 1024;
+    if (text.length > limit) throw new Error('Engine request exceeds 64 MiB.');
+    const capacity = Math.max(4096, Math.min(limit, text.length * 3));
+    let buffer = this.inputBuffer;
+    if (!buffer || buffer.capacity < capacity) {
+      if (buffer) this.exports.termai_free(buffer.pointer);
+      this.inputBuffer = undefined;
+      const pointer = this.exports.termai_alloc(capacity);
+      if (!pointer) throw new Error('Rust engine allocation limit reached.');
+      buffer = { pointer, capacity };
+      if (capacity <= 8 * 1024 * 1024) this.inputBuffer = buffer;
+    }
+    let output = 0;
+    try {
+      const view = new Uint8Array(this.exports.memory.buffer, buffer.pointer, buffer.capacity);
+      const { read, written } = this.encoder.encodeInto(text, view);
+      if (read !== text.length) throw new Error('Engine request exceeds 64 MiB.');
+      output = invoke(buffer.pointer, written);
+      const length = this.exports.termai_len(output);
+      if (!output || !length) throw new Error('Rust engine returned an invalid allocation.');
+      return JSON.parse(this.decoder.decode(new Uint8Array(this.exports.memory.buffer, output, length))) as T;
+    } finally {
+      if (output) this.exports.termai_free(output);
+      if (this.inputBuffer !== buffer) this.exports.termai_free(buffer.pointer);
+    }
   }
   private exchange<T>(request: unknown, method: 'termai_dispatch' | 'termai_start' | 'termai_resume' | 'termai_context' | 'termai_suggest_prepared' | 'termai_directories'): T {
     const text = JSON.stringify(request);

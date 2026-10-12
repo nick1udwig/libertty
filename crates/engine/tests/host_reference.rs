@@ -47,7 +47,7 @@ fn check(source: &str) {
                                 let mut results = Vec::new();
                                 let mut native = Vec::new();
                                 for operation in callback.operations {
-                                    let mut operation = operation;
+                                    let mut operation = serde_json::to_value(operation).unwrap();
                                     if let Some(object) = operation.as_object_mut() {
                                         object.remove("timeoutMs");
                                     }
