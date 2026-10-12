@@ -3,7 +3,7 @@ use crate::{
     command_policy::*,
     host::{self, Host},
     path,
-    repair::command_names,
+    repair::command_available,
     types::{Candidate, Catalog, CommandMetadata, Flag},
     util::test,
 };
@@ -58,7 +58,7 @@ async fn policy_valid(
         return Ok(false);
     };
     let command = &first.value;
-    if !command_names(input, catalog).contains(command) {
+    if !command_available(input, catalog, command) {
         if !command.contains('/') {
             return Ok(false);
         }

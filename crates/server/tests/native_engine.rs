@@ -554,3 +554,25 @@ async fn shared_probes_survive_the_engine_that_started_them() {
     assert_eq!(help.help_probes(), 1);
     help.dispose();
 }
+
+#[tokio::test]
+async fn borrowed_command_checks_keep_private_helpers_explicit_and_public_functions_available() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut catalog = catalog(dir.path().to_str().unwrap(), &["_helper", "visible"]);
+    catalog.functions = Some(vec!["_helper".into(), "visible".into()].into());
+    let services = HostServices::new();
+    let help = HelpProvider::new(services.pool.clone());
+    let host = NativeHost::new(services, catalog.clone(), BTreeMap::new(), help);
+    let engine = NativeEngine::new().unwrap();
+    let cancel = CancellationToken::new();
+    for (input, command, expected) in [
+        ("different", "_helper", false),
+        ("_helper", "_helper", true),
+        ("'_helper'", "_helper", true),
+        ("different", "visible", true),
+        ("different", "unknown", false),
+    ] {
+        let actual = engine.invoke(request("candidateValid", json!([input,{"command":command,"score":100,"changes":[]},catalog,{}, {"flags":{},"subcommands":{}}])), &host, &cancel).await.unwrap();
+        assert_eq!(actual, json!(expected));
+    }
+}

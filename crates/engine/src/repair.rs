@@ -52,6 +52,23 @@ pub fn command_names(input: &str, catalog: &Catalog) -> Vec<String> {
         .cloned()
         .collect()
 }
+pub(crate) fn command_available(input: &str, catalog: &Catalog, command: &str) -> bool {
+    if !catalog.commands.iter().any(|name| name == command) {
+        return false;
+    }
+    if !command.starts_with('_')
+        || !catalog
+            .functions
+            .iter()
+            .flatten()
+            .any(|name| name == command)
+    {
+        return true;
+    }
+    tokens(input)
+        .first()
+        .is_some_and(|word| word.value == command)
+}
 fn filtered_commands(input: &str, catalog: &Catalog) -> SharedList<String> {
     if catalog
         .functions
