@@ -5,13 +5,11 @@ import { fileClient } from './file-client.ts';
 import { herdrSession } from './herdr-protocol.ts';
 import type { HerdrView } from './herdr-view.ts';
 import { BUILTIN_VERSION, type TabPlugin } from './plugins.ts';
+import { readingPlugin, type ReadingServices } from './reading-plugin.ts';
 
-export interface BuiltinServices {
+export interface BuiltinServices extends ReadingServices {
   active(tab: TerminalTab): boolean;
-  backend(tab: TerminalTab): BackendProfile;
   host(id?: string): HostProfile | undefined;
-  authenticate(backend: BackendProfile, force?: boolean): Promise<void>;
-  token(backend: BackendProfile): string | undefined;
   api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string): Promise<T>;
   connect(host: HostProfile, pluginId: string): Promise<void>;
   closeSession(tab: TerminalTab): Promise<void>;
@@ -73,5 +71,6 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       },
       async close(tab) { await s.unwatch(tab); if (tab.ownsSession) await s.closeSession(tab); return true; },
     },
+    readingPlugin(s),
   ];
 }

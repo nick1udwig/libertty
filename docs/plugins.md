@@ -1,8 +1,9 @@
 # Runtime plugin experiment
 
 Termai's host menu gets its connection actions from a plugin registry.
-Terminal, SFTP / Files and Herdr are included.
+Terminal, SFTP / Files, Herdr and Reading Mode are included.
 Browser plugins can add a connection action and a tab at runtime by loading a package in Settings, without rebuilding Termai or restarting its server.
+Reading Mode opens through terminal reading phrases such as `look at README.md` or `git diff | look at`, rather than a host-menu connection action.
 
 This experiment supports browser views with permission to read one user-selected text file and save their own view state.
 Pairing, SSH authentication, routing, credentials and resource cleanup stay in Termai.
@@ -123,7 +124,9 @@ Built-ins and external packages implement the registry's `TabPlugin` contract in
 Mounted views supply `setVisible` and `dispose`, with optional focus, settings and selection methods.
 Built-ins keep their existing trusted views and terminal frames.
 The workspace performs common mounting, restoration, switching and disposal.
-Legacy terminal/file/Herdr modes migrate to plugin IDs; Reading Mode still uses its existing separate tab implementation.
+Legacy terminal/file/Herdr modes and saved Reading Mode tabs migrate to plugin IDs.
+Reading Mode uses the same tab storage and view lifecycle as the other plugins, preserving file previews, Markdown links and captured command output.
+Its tabs borrow the source terminal's session, so closing a reader releases its captured output and view resources while keeping the terminal running.
 
 ## Validation
 

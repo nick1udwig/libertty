@@ -25,6 +25,15 @@ const serverExited = once(server, 'exit');
 let logs = '', browser;
 server.stdout.on('data', data => logs += data); server.stderr.on('data', data => logs += data);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function saveLegacyReading(page, retainPluginTab = false) {
+  await page.evaluate(retain => {
+    const tabs = JSON.parse(localStorage.getItem('termai.tabs')), active = JSON.parse(localStorage.getItem('termai.activeTab'));
+    const tab = tabs.find(tab => tab.id === active);
+    localStorage.setItem('termai.readingTabs', JSON.stringify([{ id: tab.id, name: tab.name, backendId: tab.backendId, session: tab.session,
+      path: tab.readPath, capture: tab.readCapture, exitCode: tab.readExitCode, sourceTabId: tab.parentTabId, lastUsed: tab.lastUsed }]));
+    if (!retain) localStorage.setItem('termai.tabs', JSON.stringify(tabs.filter(tab => tab.id !== active)));
+  }, retainPluginTab);
+}
 try {
   for (let i = 0; i < 200; i++) { try { if ((await fetch(base + '/')).ok) break; } catch {} if (server.exitCode !== null) throw new Error(logs); await delay(50); }
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
@@ -56,9 +65,15 @@ try {
   assert.deepEqual(history, [], 'Reading Mode and its setup must stay out of shell history');
   assert.equal(await page.locator('[role=tab]').count(), 2);
   assert.equal(await page.locator('[role=tab][aria-selected=true] svg circle').count(), 1);
+  const reader = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))));
+  assert.equal(reader.pluginId, 'reading'); assert.equal(reader.pluginVersion, '1'); assert.equal(reader.ownsSession, false);
+  assert.equal(await page.locator('#' + await page.locator('[role=tab][aria-selected=true]').getAttribute('aria-controls')).count(), 1);
+  await saveLegacyReading(page);
   await page.reload();
   await page.locator('.reading-view .reading-text').waitFor();
   assert.equal(await page.locator('.reading-text').textContent(), 'A quiet place to read.\nSecond line.\n');
+  assert.equal(await page.evaluate(() => localStorage.getItem('termai.readingTabs')), null, 'Legacy storage is cleared after migration');
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'reading')), reader, 'Migration preserves the selected reader and its source');
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
   await frame.waitForFunction(() => window.__shellState?.ready);
@@ -106,8 +121,9 @@ try {
     assert.match(text, /diff --git/); assert.match(text, /-before\n\+after/);
     assert.equal(await page.locator('.reading-view:not([hidden]) .reading-header').count(), 0);
     const beforeReload = await page.locator('[role=tab]').count();
-    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.readingTabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).capture);
+    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).readCapture);
     assert.match(capture, /^[a-f0-9]{32}$/);
+    if (input === 'git diff | look at') await saveLegacyReading(page, true);
     await page.reload();
     await page.locator('.reading-view:not([hidden]) .reading-text').waitFor();
     assert.equal(await page.locator('.reading-view:not([hidden]) .reading-text').textContent(), text);
@@ -149,6 +165,22 @@ try {
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at ls /definitely/not/present'); await page.keyboard.press('Enter');
   await page.locator('.reading-view.reading-empty:not([hidden])').waitFor();
   assert.match(await page.locator('.reading-view.reading-empty:not([hidden])').textContent(), /Exited with status 2.*Check the terminal for errors/s);
+  await page.locator('[role=tab][aria-selected=true] .tab-close').click();
+  let finishRead, startedRead;
+  const readingStarted = new Promise(resolve => startedRead = resolve);
+  await page.route('**/api/reading/file?**', route => {
+    startedRead(); return new Promise(resolve => finishRead = async () => { await route.fulfill({ contentType: 'text/plain', body: 'Late reader content' }).catch(() => {}); resolve(); });
+  });
+  await frame.waitForFunction(() => window.__shellState.ready);
+  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at note.txt'); await page.keyboard.press('Enter');
+  await readingStarted;
+  await page.getByText('Opening file…', { exact: true }).waitFor();
+  const pendingReader = await page.locator('[role=tab][aria-selected=true]').getAttribute('aria-controls');
+  await page.locator('[role=tab][aria-selected=true] .tab-close').click();
+  await finishRead(); await page.unroute('**/api/reading/file?**');
+  assert.equal(await page.locator('#' + pendingReader).count(), 0, 'Closing a pending reader disposes its plugin view');
+  assert.equal(await page.getByText('Late reader content', { exact: true }).count(), 0);
+  await frame.waitForFunction(() => window.__shellState.ready);
   await page.close();
   const standalone = await context.newPage();
   standalone.on('pageerror', error => errors.push(String(error)));

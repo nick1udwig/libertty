@@ -1,6 +1,7 @@
 export interface BackendProfile { id: string; name: string; url: string }
 export interface HostProfile { id: string; name: string; kind: 'http' | 'ssh' | 'herdr'; herdrSession?: string; herdrSource?: string; herdrSourceHostId?: string; backendId: string; hostname?: string; port?: number; username?: string; keyFingerprint?: string; browserKeyId?: string; backendKeyId?: string; route?: 'auto' | 'fixed' }
-export interface TerminalTab { pluginId?: string; pluginVersion?: string; pluginState?: unknown; readPath?: string; ownsSession?: boolean; mode?: 'files' | 'herdr'; herdrSession?: string; herdrSource?: string; directory?: string; id: string; name: string; backendId: string; session: string; hostId?: string; lastUsed?: number; ended?: boolean; parentTabId?: string }
+export interface TerminalTab { pluginId?: string; pluginVersion?: string; pluginState?: unknown; readPath?: string; readCapture?: string; readExitCode?: number; ownsSession?: boolean; mode?: 'files' | 'herdr'; herdrSession?: string; herdrSource?: string; directory?: string; id: string; name: string; backendId: string; session: string; hostId?: string; lastUsed?: number; ended?: boolean; parentTabId?: string }
+export interface LegacyReadingTab extends Pick<TerminalTab, 'id' | 'name' | 'backendId' | 'session' | 'lastUsed'> { path: string; capture?: string; exitCode?: number; sourceTabId: string }
 export interface KeyReference { type: 'file' | 'agent'; path: string }
 export interface KeyInfo { reference?: KeyReference; id: string; name: string; publicKey: string; fingerprint: string; createdAt: string }
 export interface KnownHost { host: string; port: number; fingerprint: string }

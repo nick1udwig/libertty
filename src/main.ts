@@ -5,17 +5,17 @@ import type { BrowserKeyInfo } from './browser-key.ts';
 import { defaults, validateShortcuts } from './shortcuts.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { readingPhrases, defaultReadingPhrases } from './reading-request.ts';
-import { readingView, readingMessage, type ReadingView } from './reading-view.ts';
+import { readingMessage } from './reading-view.ts';
 import { herdrName, herdrSession } from './herdr-protocol.ts';
 import { HerdrSounds } from './herdr-sounds.ts';
 import { HerdrNotifications } from './herdr-notifications.ts';
 import { tabGestures } from './tab-gestures.ts';
-import { PluginRegistry, migratePluginTab, tabPluginId, type PluginView } from './plugins.ts';
+import { BUILTIN_VERSION, PluginRegistry, migratePluginTab, migrateReadingTab, tabPluginId, type PluginView } from './plugins.ts';
 import { builtinPlugins } from './builtin-plugins.ts';
 import { externalPlugin } from './external-plugin.ts';
 import { parsePluginPackage, MAX_PLUGIN_BYTES, type PluginPackage, type InstalledPlugin } from './plugin-package.ts';
 import type { HerdrView } from './herdr-view.ts';
-import { backendURL, sshAddress, type BackendProfile, type HostProfile, type TerminalTab, type KeyInfo, type KnownHost, type SSHConnection } from './connections.ts';
+import { backendURL, sshAddress, type BackendProfile, type HostProfile, type TerminalTab, type LegacyReadingTab, type KeyInfo, type KnownHost, type SSHConnection } from './connections.ts';
 const browserVault = new BrowserVault();
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const input = (id: string) => $<HTMLInputElement>(id);
@@ -27,9 +27,10 @@ let backends: BackendProfile[] = saved<BackendProfile[]>('backends', []).filter(
 backends.unshift(primary);
 let hosts: HostProfile[] = saved<HostProfile[]>('hosts', [{ id: 'local', name: 'This machine', kind: 'http', backendId: 'primary' }]).filter(h => h && typeof h.id === 'string' && typeof h.name === 'string' && ['http', 'ssh', 'herdr'].includes(h.kind) && backends.some(b => b.id === h.backendId));
 let tabs: TerminalTab[] = saved<TerminalTab[]>('tabs', []).filter(t => t && typeof t.id === 'string' && typeof t.name === 'string' && backends.some(b => b.id === t.backendId) && (t.session === 'default' || /^[a-f0-9-]{36}$/.test(t.session))).map(migratePluginTab);
-interface ReadingTab { id: string; name: string; backendId: string; session: string; path: string; capture?: string; exitCode?: number; sourceTabId: string; lastUsed?: number }
-let readingTabs: ReadingTab[] = saved<ReadingTab[]>('readingTabs', []).filter(t => t && typeof t.id === 'string' && typeof t.name === 'string' && typeof t.path === 'string' && typeof t.sourceTabId === 'string' && backends.some(b => b.id === t.backendId) && (t.session === 'default' || /^[a-f0-9-]{36}$/.test(t.session)));
-let active = saved<string>('activeTab', '') || tabs[0]?.id || readingTabs[0]?.id || '';
+for (const tab of saved<LegacyReadingTab[]>('readingTabs', []).filter(t => t && typeof t.id === 'string' && typeof t.name === 'string' && typeof t.path === 'string' && typeof t.sourceTabId === 'string' && backends.some(b => b.id === t.backendId) && (t.session === 'default' || /^[a-f0-9-]{36}$/.test(t.session)))) {
+  if (!tabs.some(existing => existing.id === tab.id)) tabs.push(migrateReadingTab(tab));
+}
+let active = saved<string>('activeTab', '') || tabs[0]?.id || '';
 let page: 'terminal' | 'hosts' | 'vault' | 'keychain' | 'backends' | 'known' | 'settings' = 'terminal';
 let alphabetical = false, editingHost: string | undefined, keyDetail: { backend?: BackendProfile; key: KeyInfo | BrowserKeyInfo } | undefined;
 const frames = new Map<string, HTMLIFrameElement>(), tokens = new Map<string, string>(), vaults = new Map<string, { keys: KeyInfo[]; knownHosts: KnownHost[] }>();
@@ -41,7 +42,6 @@ try {
     try { installedPlugins.push({ package: parsePluginPackage(entry.package), enabled: entry.enabled === true }); } catch { /* Keep unavailable tabs until the package is installed again. */ }
   }
 } catch { /* A corrupt plugin inventory cannot prevent terminal startup. */ }
-const readingViews = new Map<string, ReadingView>();
 const herdrViews = new Map<string, HerdrView>(), herdrAttention = new Map<string, number>();
 const herdrSounds = new HerdrSounds();
 const herdrNotifications = new HerdrNotifications(<T>(id: string, name: string, data?: unknown) => api<T>(backendFor(id), name, data), () => {
@@ -54,7 +54,7 @@ const herdrNotifications = new HerdrNotifications(<T>(id: string, name: string, 
 for (const plugin of builtinPlugins({
   active: tab => tabs.includes(tab),
   backend: tab => backendFor(tab.backendId), host: id => hosts.find(host => host.id === id), authenticate, token: tokenFor, api,
-  connect: (host, id) => configureConnection(host, id), closeSession: closeTabSession, store, notice, terminalURL,
+  connect: (host, id) => configureConnection(host, id), closeSession: closeTabSession, store, notice, terminalURL, openReading,
   frame(tab, frame) { if (frame) frames.set(tab.id, frame); else frames.delete(tab.id); },
   herdr(tab, view) { if (view) herdrViews.set(tab.id, view); else { herdrViews.delete(tab.id); herdrAttention.delete(tab.id); } },
   attention(tab, count) { herdrAttention.set(tab.id, count); const badge = $('tabs').querySelector<HTMLElement>('[aria-controls="herdr-' + tab.id + '"] .herdr-attention'); if (badge) { badge.textContent = String(count); badge.hidden = !count; badge.setAttribute('aria-label', count + ' agents need attention'); } },
@@ -78,7 +78,7 @@ const handledEnds = new Map<string, string>();
 let terminalLoading: { id: string; waitForPrompt: boolean } | undefined;
 let notification: ReturnType<typeof setTimeout>;
 function notice(message: string) { $('notice').textContent = message; $('notice').hidden = false; clearTimeout(notification); notification = setTimeout(() => $('notice').hidden = true, 6000); }
-function store() { try { for (const [key, value] of Object.entries({ backends: backends.filter(b => b.id !== 'primary'), hosts, tabs, readingTabs, activeTab: active })) localStorage.setItem('termai.' + key, JSON.stringify(value)); } catch { notice('Browser storage is unavailable. Connections will last for this page only.'); } }
+function store() { try { for (const [key, value] of Object.entries({ backends: backends.filter(b => b.id !== 'primary'), hosts, tabs, activeTab: active })) localStorage.setItem('termai.' + key, JSON.stringify(value)); localStorage.removeItem('termai.readingTabs'); } catch { notice('Browser storage is unavailable. Connections will last for this page only.'); } }
 function tokenFor(backend: BackendProfile) { return tokens.get(backend.id) || backendAccess(backend.url); }
 function authorizeTerminals(backend: BackendProfile, accessToken: string) {
   tokens.set(backend.id, accessToken);
@@ -220,17 +220,17 @@ window.addEventListener('resize', () => closeHostMenu());
 const tabMenu = document.createElement('div'); tabMenu.className = 'host-terminal-menu'; tabMenu.role = 'menu'; tabMenu.hidden = true; document.body.append(tabMenu);
 let tabMenuAnchor: HTMLElement | undefined;
 function closeTabMenu() { tabMenu.hidden = true; tabMenuAnchor = undefined; }
-function openTabMenu(tab: TerminalTab | ReadingTab, anchor: HTMLElement) {
+function openTabMenu(tab: TerminalTab, anchor: HTMLElement) {
   tabMenuAnchor = anchor; tabMenu.replaceChildren();
   const rename = button('Rename', () => { closeTabMenu(); renameTab(tab); }); rename.role = 'menuitem';
-  const close = button('Close tab', () => { closeTabMenu(); if ('path' in tab) closeReading(tab); else void closeTab(tab).catch(error => notice(error.message)); }); close.role = 'menuitem';
+  const close = button('Close tab', () => { closeTabMenu(); void closeTab(tab).catch(error => notice(error.message)); }); close.role = 'menuitem';
   tabMenu.append(rename, close); tabMenu.hidden = false;
   tabMenu.setAttribute('aria-label', tab.name + ' tab actions');
   const rect = anchor.getBoundingClientRect();
   tabMenu.style.left = Math.max(8, Math.min(rect.left, innerWidth - tabMenu.offsetWidth - 8)) + 'px'; tabMenu.style.top = rect.bottom + 5 + 'px';
   rename.focus({ preventScroll: true });
 }
-function renameTab(tab: TerminalTab | ReadingTab) {
+function renameTab(tab: TerminalTab) {
   const modal = document.createElement('dialog'), form = document.createElement('form'), title = document.createElement('h2'), field = document.createElement('input'), error = document.createElement('p'), actions = document.createElement('div');
   title.textContent = 'Rename tab'; field.value = tab.name; field.maxLength = 100; field.required = true; field.setAttribute('aria-label', 'Tab name'); error.className = 'form-error'; actions.className = 'actions';
   const cancel = button('Cancel', () => modal.close(), 'secondary'), save = button('Save', () => {}, 'primary'); save.type = 'submit'; actions.append(cancel, save);
@@ -264,7 +264,7 @@ async function renderCards() {
     }
   } else if (page === 'backends') {
     for (const backend of backends.filter(b => matches(b.name + ' ' + b.url))) card(backend.name, backend.url, '⌘', () => void authenticate(backend).then(() => notice('Connected to ' + backend.name)).catch(error => notice(error.message)), backend.id === 'primary' ? undefined : () => {
-      if (tabs.some(t => t.backendId === backend.id) || readingTabs.some(t => t.backendId === backend.id)) { notice('Close this backend’s tabs before removing it.'); return; }
+      if (tabs.some(t => t.backendId === backend.id)) { notice('Close this backend’s tabs before removing it.'); return; }
       if (confirm('Remove this backend and its saved hosts? Its SSH keys will stay on the server.')) void herdrNotifications.forgetBackend(backend.id).then(() => { backends = backends.filter(b => b.id !== backend.id); hosts = hosts.filter(h => h.backendId !== backend.id); routes.clear(); tokens.delete(backend.id); forgetBackendAccess(backend.url); store(); void renderCards(); }).catch(error => notice(error.message));
     }, 'HTTP');
   } else if (page === 'keychain' || page === 'known') {
@@ -290,17 +290,16 @@ function showTerminalLoading(id: string, waitForPrompt = false) { terminalLoadin
 function hideTerminalLoading(id: string) { if (terminalLoading?.id === id) { terminalLoading = undefined; updateTerminalLoading(); } }
 function renderTabs() {
   $('tabs').replaceChildren();
-  const all = [...tabs, ...readingTabs];
+  const all = tabs;
   for (const tab of all) {
-    const reading = 'path' in tab, plugin = reading ? undefined : plugins.forTab(tab);
-    const el = document.createElement('div'); el.className = 'tab'; if (plugin?.className) el.classList.add(plugin.className); el.role = 'tab'; el.tabIndex = tab.id === active ? 0 : -1; el.setAttribute('aria-selected', String(tab.id === active)); el.setAttribute('aria-controls', reading ? 'reading-' + tab.id : pluginViews.get(tab.id)?.element.id || (plugin?.panelPrefix || 'plugin-') + tab.id); el.title = (reading ? tab.path : tabLabel(tab)) + ' · ' + backendFor(tab.backendId).name;
+    const plugin = plugins.forTab(tab);
+    const el = document.createElement('div'); el.className = 'tab'; if (plugin?.className) el.classList.add(plugin.className); el.role = 'tab'; el.tabIndex = tab.id === active ? 0 : -1; el.setAttribute('aria-selected', String(tab.id === active)); el.setAttribute('aria-controls', pluginViews.get(tab.id)?.element.id || (plugin?.panelPrefix || 'plugin-') + tab.id); el.title = (tab.readPath || tabLabel(tab)) + ' · ' + backendFor(tab.backendId).name;
     const icon = document.createElement('span'); icon.className = 'tab-icon';
-    if (reading) icon.innerHTML = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>';
-    else if (plugin?.iconHTML) icon.innerHTML = plugin.iconHTML;
+    if (plugin?.iconHTML) icon.innerHTML = plugin.iconHTML;
     else icon.textContent = plugin?.icon || '◇';
-    const name = document.createElement('span'); name.className = 'tab-name'; name.textContent = reading ? tab.name : tabLabel(tab);
-    const close = button('×', () => reading ? closeReading(tab) : void closeTab(tab).catch(error => notice(error.message)), 'tab-close'); close.setAttribute('aria-label', 'Close ' + tab.name); close.addEventListener('click', event => event.stopPropagation());
-    if (!reading && tabPluginId(tab) === 'herdr') {
+    const name = document.createElement('span'); name.className = 'tab-name'; name.textContent = tabLabel(tab);
+    const close = button('×', () => void closeTab(tab).catch(error => notice(error.message)), 'tab-close'); close.setAttribute('aria-label', 'Close ' + tab.name); close.addEventListener('click', event => event.stopPropagation());
+    if (tabPluginId(tab) === 'herdr') {
       el.classList.add('herdr-tab'); icon.textContent = 'H';
       const badge = document.createElement('span'); badge.className = 'herdr-attention'; badge.textContent = String(herdrAttention.get(tab.id) || 0); badge.hidden = !herdrAttention.get(tab.id); badge.setAttribute('aria-label', badge.textContent + ' agents need attention');
       el.append(icon, name, badge, close);
@@ -312,66 +311,23 @@ function renderTabs() {
     }; $('tabs').append(el);
   }
   for (const [id, view] of pluginViews) view.setVisible(id === active && page === 'terminal' && !document.hidden);
-  for (const [id, view] of readingViews) view.element.hidden = id !== active;
   $('empty-terminal').hidden = !!all.length;
   updateTerminalLoading();
   requestAnimationFrame(() => $('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
 }
-function activate(id: string) { const tab = [...tabs, ...readingTabs].find(tab => tab.id === id); if (!tab) return; tab.lastUsed = Date.now(); active = id; store(); show('terminal'); pluginViews.get(id)?.focus?.(); }
+function activate(id: string) { const tab = tabs.find(tab => tab.id === id); if (!tab) return; tab.lastUsed = Date.now(); active = id; store(); show('terminal'); pluginViews.get(id)?.focus?.(); }
 
-function closeReading(tab: ReadingTab) {
-  const wasActive = active === tab.id;
-  const index = readingTabs.indexOf(tab); readingTabs = readingTabs.filter(item => item.id !== tab.id);
-  readingViews.get(tab.id)?.dispose(); readingViews.delete(tab.id);
-  if (tab.capture) {
-    const backend = backendFor(tab.backendId), url = new URL('api/reading/capture', backend.url);
-    url.searchParams.set('id', tab.capture); url.searchParams.set('session', tab.session);
-    void fetch(url, { method: 'DELETE', credentials: 'same-origin', headers: tokenFor(backend) ? { Authorization: 'Bearer ' + tokenFor(backend) } : {} }).catch(() => {});
-  }
-  if (wasActive) active = tabs.find(item => item.id === tab.sourceTabId)?.id || readingTabs[Math.min(index, readingTabs.length - 1)]?.id || tabs.at(-1)?.id || '';
-  store(); renderTabs();
-  if (wasActive) frames.get(active)?.contentWindow?.postMessage({ type: 'focus-terminal' }, location.origin);
-}
-
-async function loadReading(tab: ReadingTab) {
-  const backend = backendFor(tab.backendId);
-  const readFile = async (path: string, capture?: string) => {
-    const url = new URL(capture ? 'api/reading/capture' : 'api/reading/file', backend.url);
-    url.searchParams.set(capture ? 'id' : 'path', capture || path); url.searchParams.set('session', tab.session);
-    const fetchFile = () => fetch(url, { cache: 'no-store', credentials: 'same-origin', headers: tokenFor(backend) ? { Authorization: 'Bearer ' + tokenFor(backend) } : {} });
-    let response = await fetchFile();
-    if (response.status === 401) { await authenticate(backend, true); response = await fetchFile(); }
-    if (!response.ok) { const result = await response.json(); throw new Error(result.error || 'Could not open file.'); }
-    return response.blob();
-  };
-  const display = (view: ReadingView) => {
-    if (!readingTabs.includes(tab)) { view.dispose(); return; }
-    readingViews.get(tab.id)?.dispose(); readingViews.set(tab.id, view);
-    view.element.id = 'reading-' + tab.id; view.element.hidden = tab.id !== active;
-    $('terminal-stack').append(view.element); renderTabs();
-  };
-  display({ element: readingMessage(tab.path, 'Opening file…'), dispose() { this.element.remove(); } });
-  try {
-    const blob = await readFile(tab.path, tab.capture);
-    if (tab.capture && !blob.size) {
-      const failed = typeof tab.exitCode === 'number' && tab.exitCode !== 0;
-      const message = failed ? `Exited with status ${tab.exitCode} without writing to standard output. Check the terminal for errors.`
-        : typeof tab.exitCode === 'number' ? 'Finished successfully without writing to standard output.' : 'No standard output was captured.';
-      const hint = !failed && tab.name.trim() === 'git diff' ? 'git diff is silent when there are no unstaged changes. Try git status or git diff --cached.' : undefined;
-      display({ element: readingMessage(tab.name, message, hint), dispose() { this.element.remove(); } }); return;
-    }
-    display(readingView(tab.capture ? 'Command output' : tab.path, blob, tab.capture ? undefined : { load: readFile, open: path => openReading(tab, path) }));
-  } catch (error: any) { display({ element: readingMessage(tab.path, error.message || 'Could not open file.'), dispose() { this.element.remove(); } }); }
-}
-
-function openReading(source: TerminalTab | ReadingTab, path: string) {
-  const tab: ReadingTab = { id: crypto.randomUUID(), name: path.split('/').at(-1) || path, path, backendId: source.backendId, session: source.session, sourceTabId: 'path' in source ? source.sourceTabId : source.id, lastUsed: Date.now() };
-  readingTabs.push(tab); active = tab.id; store(); show('terminal'); void loadReading(tab);
+function openReading(source: TerminalTab, path: string) {
+  const tab: TerminalTab = { id: crypto.randomUUID(), pluginId: 'reading', pluginVersion: BUILTIN_VERSION, ownsSession: false,
+    name: path.split('/').at(-1) || path, readPath: path, backendId: source.backendId, session: source.session,
+    parentTabId: tabPluginId(source) === 'reading' ? source.parentTabId : source.id, lastUsed: Date.now() };
+  tabs.push(tab); active = tab.id; store(); show('terminal'); void mount(tab);
 }
 function openReadingCapture(source: TerminalTab, capture: string, name: string, exitCode?: number) {
-  if (readingTabs.some(tab => tab.backendId === source.backendId && tab.session === source.session && tab.capture === capture)) return;
-  const tab: ReadingTab = { id: crypto.randomUUID(), name, path: name, capture, exitCode, backendId: source.backendId, session: source.session, sourceTabId: source.id, lastUsed: Date.now() };
-  readingTabs.push(tab); active = tab.id; store(); show('terminal'); void loadReading(tab);
+  if (tabs.some(tab => tabPluginId(tab) === 'reading' && tab.backendId === source.backendId && tab.session === source.session && tab.readCapture === capture)) return;
+  const tab: TerminalTab = { id: crypto.randomUUID(), pluginId: 'reading', pluginVersion: BUILTIN_VERSION, ownsSession: false,
+    name, readPath: name, readCapture: capture, readExitCode: exitCode, backendId: source.backendId, session: source.session, parentTabId: source.id, lastUsed: Date.now() };
+  tabs.push(tab); active = tab.id; store(); show('terminal'); void mount(tab);
 }
 function unmount(tab: TerminalTab) {
   mountGeneration.set(tab.id, (mountGeneration.get(tab.id) || 0) + 1);
@@ -412,11 +368,13 @@ async function addTerminal(backend: BackendProfile, session: string, name: strin
 async function closeTab(tab: TerminalTab) {
   const plugin = plugins.forTab(tab);
   if (plugin) { if (!await plugin.close(tab)) return; }
-  else if (tab.ownsSession || tabPluginId(tab) !== 'herdr') await closeTabSession(tab);
+  else if (tab.ownsSession ?? !['herdr', 'reading'].includes(tabPluginId(tab))) await closeTabSession(tab);
+  const wasActive = active === tab.id;
   unmount(tab); lockedTerminals.delete(tab.id); handledEnds.delete(tab.id); const index = tabs.indexOf(tab); tabs = tabs.filter(t => t.id !== tab.id);
   hideTerminalLoading(tab.id);
-  if (active === tab.id) active = tabs.find(t => t.id === tab.parentTabId)?.id || tabs[Math.min(index, tabs.length - 1)]?.id || readingTabs.at(-1)?.id || '';
+  if (active === tab.id) active = tabs.find(t => t.id === tab.parentTabId)?.id || tabs[Math.min(index, tabs.length - 1)]?.id || '';
   store(); renderTabs(); if (!tabs.length) { $('empty-terminal').querySelector('p')!.textContent = 'Open a saved host to start a terminal.'; }
+  if (wasActive) pluginViews.get(active)?.focus?.();
 }
 async function closeTabSession(tab: TerminalTab) {
   const backend = backendFor(tab.backendId); await authenticate(backend); await api(backend, 'api/sessions/close', {}, tab.session);
@@ -512,7 +470,7 @@ function capturedSSH(backend: BackendProfile, parent: TerminalTab, id: string, c
         trust = error.fingerprint; result = await request({ passphrase, trust });
       }
       if (result.native) { await request({ action: 'ack' }); hideTerminalLoading(parent.id); if (result.message) notice(result.message); return true; }
-      const existing = tabs.find(tab => tab.backendId === backend.id && tab.session === result.id);
+      const existing = tabs.find(tab => tabPluginId(tab) === 'terminal' && tab.backendId === backend.id && tab.session === result.id);
       if (existing) { hideTerminalLoading(parent.id); activate(existing.id); await request({ action: 'ack' }); return true; }
       let host = hosts.find(h => h.kind === 'ssh' && h.backendId === backend.id && h.hostname === result.host && h.port === result.port && h.username === result.username);
       if (!host) { host = { id: crypto.randomUUID(), name: result.name, kind: 'ssh', backendId: backend.id, hostname: result.host, port: result.port, username: result.username, route: 'fixed' }; hosts.push(host); }
@@ -842,7 +800,7 @@ function refreshPluginTabs(id: string) {
 }
 function renderPluginSettings() {
   const list = $('plugin-list'); list.replaceChildren();
-  const defaults = document.createElement('p'); defaults.textContent = 'Included: Terminal · SFTP / Files · Herdr'; list.append(defaults);
+  const defaults = document.createElement('p'); defaults.textContent = 'Included: Terminal · SFTP / Files · Herdr · Reading Mode'; list.append(defaults);
   const current = new Map(installedPlugins.map(entry => [entry.package.manifest.id, entry]));
   for (const [id, entry] of current) {
     const row = document.createElement('div'); row.className = 'plugin-entry';
@@ -908,8 +866,8 @@ document.addEventListener('visibilitychange', () => { for (const [id, view] of p
 show('terminal');
 async function boot() {
   try {
-    if (!tabs.length) { await addTerminal(primary, 'default', 'This machine', 'local'); await Promise.all(readingTabs.map(tab => loadReading(tab))); }
-    else { if (![...tabs, ...readingTabs].some(tab => tab.id === active)) active = tabs[0].id; renderTabs(); await Promise.all([...tabs.map(tab => mount(tab).catch(error => notice(error.message))), ...readingTabs.map(tab => loadReading(tab))]); }
+    if (!tabs.length) await addTerminal(primary, 'default', 'This machine', 'local');
+    else { if (!tabs.some(tab => tab.id === active)) active = tabs[0].id; store(); renderTabs(); await Promise.all(tabs.map(tab => mount(tab).catch(error => notice(error.message)))); }
     await consumePendingReading();
     await consumePendingHerdr();
     const route = new URLSearchParams(location.search);
@@ -933,7 +891,7 @@ async function consumePendingHerdr() {
     const url = backendURL(request.backendUrl);
     let backend = backends.find(backend => backend.url === url);
     if (!backend) { backend = { id: crypto.randomUUID(), name: new URL(url).host, url }; backends.push(backend); }
-    let source = tabs.find(tab => tab.backendId === backend.id && tab.session === request.session);
+    let source = tabs.find(tab => tabPluginId(tab) === 'terminal' && tab.backendId === backend.id && tab.session === request.session);
     if (!source) {
       source = { id: crypto.randomUUID(), name: backend.name, backendId: backend.id, session: request.session, lastUsed: Date.now() };
       tabs.push(source); store(); await mount(source);
@@ -953,7 +911,7 @@ async function consumePendingReading() {
     const url = backendURL(request.backendUrl);
     let backend = backends.find(item => item.url === url);
     if (!backend) { backend = { id: crypto.randomUUID(), name: new URL(url).host, url }; backends.push(backend); }
-    let source = tabs.find(tab => tab.backendId === backend.id && tab.session === request.session);
+    let source = tabs.find(tab => tabPluginId(tab) === 'terminal' && tab.backendId === backend.id && tab.session === request.session);
     if (!source) {
       source = { id: crypto.randomUUID(), name: backend.name, backendId: backend.id, session: request.session, lastUsed: Date.now() };
       tabs.push(source); store(); await mount(source);
