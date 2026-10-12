@@ -382,6 +382,13 @@ async fn run(
             }
             Command::Remove(id) => viewers.retain(|v| v.id != id),
             Command::Resize(id, size) => {
+                // Joining an incremental stream can retain the owner's geometry
+                // while still requiring a full baseline for this viewer.
+                refresh |= size.is_some_and(|size| {
+                    frame.as_ref().is_none_or(|frame| {
+                        frame["width"] != size.cols || frame["height"] != size.rows
+                    })
+                });
                 if let Some(viewer) = viewers.iter_mut().find(|v| v.id == id)
                     && viewer.size != size
                 {

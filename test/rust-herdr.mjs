@@ -152,8 +152,10 @@ try {
   await until(() => joining.inbox.some(m => m.type === 'screen'), 'new incremental-stream viewer');
   assert.ok(!joining.inbox.some(m => m.type === 'herdr-frame'), 'A partial frame cannot serve as a new baseline');
   joining.resize(41, 28);
+  await until(() => joining.inbox.some(m => m.type === 'herdr-frame' && m.full === true && m.width === 41), 'same-size joining viewer receives a full baseline');
+  const repaints = joining.inbox.filter(m => m.type === 'herdr-frame' && m.full === true).length;
   joining.ws.send(JSON.stringify({ type: 'herdr-frame-request' }));
-  await until(() => joining.inbox.some(m => m.type === 'herdr-frame' && m.full === true && m.width === 41), 'full repaint without replacing controller');
+  await until(() => joining.inbox.filter(m => m.type === 'herdr-frame' && m.full === true && m.width === 41).length > repaints, 'full repaint without replacing controller');
   phone.resize(55, 25);
   await until(() => joining.inbox.at(-1)?.width === 55, 'new owner geometry');
   joining.ws.send(JSON.stringify({ type: 'herdr-frame-request' }));
