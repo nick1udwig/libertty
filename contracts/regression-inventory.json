@@ -943,6 +943,11 @@
       ]
     },
     {
+      "source": "test/support/sshd.mjs",
+      "owner": "integration",
+      "assertions": []
+    },
+    {
       "source": "test/terminal-gestures-browser.mjs",
       "owner": "integration",
       "assertions": []
