@@ -43,6 +43,8 @@ export function encodeWire(message: { type: string; [key: string]: unknown }, pr
   else return JSON.stringify(message);
   const result = new Uint8Array(4 + payload.length); result.set([84, 77, 1, kind]); result.set(payload, 4); return result.buffer;
 }
+export function encodeAudio(data: ArrayBuffer, protocol: string): Uint8Array<ArrayBuffer> | ArrayBuffer;
+export function encodeAudio<B extends ArrayBufferLike>(data: Uint8Array<B>, protocol: string): Uint8Array<B> | Uint8Array<ArrayBuffer>;
 export function encodeAudio(data: Uint8Array | ArrayBuffer, protocol: string): Uint8Array | ArrayBuffer {
   if (![BINARY_PROTOCOL, GZIP_PROTOCOL, GZIP_FAST_PROTOCOL].includes(protocol)) return data;
   const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;

@@ -132,9 +132,10 @@ test('bootstrap installs its launcher when the temporary directory is reached th
   await symlink(path.join(directory, 'temporary'), temporary);
   await symlink(process.execPath, path.join(bundle, 'bin/node'));
   await symlink(path.join(root, 'node_modules/ws'), path.join(bundle, 'node_modules/ws'));
-  for (const entry of ['setup.mjs', 'setup-integrations.mjs', 'launch.mjs']) await cp(path.join(root, 'scripts', entry), path.join(bundle, 'scripts', entry));
+  for (const entry of ['setup.mjs', 'setup-integrations.mjs']) await cp(path.join(root, 'scripts', entry), path.join(bundle, 'scripts', entry));
   await cp(path.join(root, 'build/release-config.json'), path.join(bundle, 'build/release-config.json'));
   await writeFile(path.join(bundle, 'release.json'), JSON.stringify({ version: '0.1.1', tag: 'v0.1.1', commit: '1'.repeat(40), platform: process.platform + '-' + process.arch }));
+  await writeFile(path.join(bundle,'scripts/launch.mjs'), "import { readFile } from 'node:fs/promises'; const config=JSON.parse(await readFile(process.argv[process.argv.indexOf('--config')+1],'utf8')); Object.assign(process.env,config.env); await import('../server/index.ts');\n");
   await writeFile(path.join(bundle, 'server/index.ts'), 'console.log("termai 0.1.1");\n');
   const archive = path.join(directory, 'app.tar.gz');
   execFileSync('tar', ['-czf', archive, '-C', bundle, '.']);

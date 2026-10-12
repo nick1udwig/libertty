@@ -1,0 +1,142 @@
+name: Rust contracts and regression checks
+
+on:
+  push:
+    branches: [master, "feat/rust-backend*", feat/cleanup-post-rust]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    name: Native and Wasm parity on ${{ matrix.target }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.1'
+          cache: npm
+      - name: Install native test prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config openssh-server bash-completion
+          sudo mkdir -p /run/sshd
+      - name: Install modern Bash on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install bash
+          echo "TERMAI_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - name: Verify runner architecture
+        env:
+          EXPECTED_TARGET: ${{ matrix.target }}
+        run: node -e 'if (process.platform + "-" + process.arch !== process.env.EXPECTED_TARGET) throw new Error("Runner architecture mismatch")'
+      - name: Install dependencies and verify generated contracts
+        run: |
+          npm ci --no-audit --no-fund
+          npm run migration:schemas -- --check
+          npm run migration:inventory -- --check
+          npm run migration:vocabulary -- --check
+          npm run test:contracts
+      - name: Verify Rust and saved-data compatibility
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo clippy --package termai-engine --target wasm32-unknown-unknown --lib --locked -- -D warnings
+          npm run test:rust
+          npm run test:rust-state
+          npm run build:rust-engine
+          npm run build
+          npm test
+          npm run test:install
+          cargo build --locked -p termai-server --bin termai
+          cargo build --locked --release -p termai-server --example engine_host
+      - name: Verify actual browser WebAssembly
+        run: |
+          npx --no-install playwright-core install --with-deps chromium
+          echo "CHROME_PATH=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+          echo "CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Verify native and Wasm browser workflows
+        run: |
+          npm run test:rust-browser
+          TEST_ENGINE=server TEST_PORT=3137 npm run test:browser
+          TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
+          TEST_BASE_PATH=/terminal npm run test:reading
+          node test/files-browser.mjs
+          npm run test:workspace
+          npm run test:herdr
+          npm run test:herdr-loading
+          npm run test:plugins
+          npm run test:pairing
+          npm run test:reconnect
+          npm run test:gestures
+          npm run test:touch
+          node test/dictation-browser.mjs
+          node test/transfers-browser.mjs
+          npm run test:rust-herdr
+      - name: Verify supported native Herdr integration
+        run: |
+          node scripts/install-test-herdr.mjs
+          export HERDR_BINARY="$PWD/.test-artifacts/bin/herdr"
+          export PATH="$PWD/.test-artifacts/bin:$PATH"
+          npm run test:herdr-spaces
+          npm run test:herdr-resize
+          npm run test:herdr-flash
+          npm run test:herdr-scroll
+      - name: Verify architecture latency and foreground requests
+        env:
+          BENCH_SUITE: shared
+          BENCH_BEFORE_MASTER: '0e0646c'
+          BENCH_BEFORE_CLIENT: '0e0646c'
+          BENCH_AFTER: .
+          BENCH_REPEATS: '3'
+          BENCH_CPU_REPEATS: '31'
+        run: npm run bench:architecture
+      - name: Verify native packages and installation
+        env:
+          TERMAI_RELEASE_ALLOW_DIRTY: '1'
+          TARGET: ${{ matrix.target }}
+        run: |
+          npm run release:package
+          node scripts/smoke-release.mjs "release/termai-v$(node -p 'require("./package.json").version')-$TARGET.tar.gz"
+          node scripts/smoke-install.mjs "release/termai-v$(node -p 'require("./package.json").version')-$TARGET.tar.gz"
+          package_directory=$(mktemp -d)
+          tar -xzf "release/termai-v$(node -p 'require("./package.json").version')-$TARGET.tar.gz" -C "$package_directory"
+          TEST_EXECUTABLE="$package_directory/bin/termai" TEST_ENGINE=server TEST_PORT=3137 TEST_BASE_PATH=/terminal npm run test:browser
+          TEST_EXECUTABLE="$package_directory/bin/termai" TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
+          rm -rf "$package_directory"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: rust-migration-${{ matrix.target }}
+          path: |
+            .test-artifacts/*.json
+            release/*.sha256
+          if-no-files-found: ignore

@@ -41,7 +41,7 @@ By default, the after variants use a copied snapshot of the working tree; set `B
 `BENCH_RTT`, `BENCH_REPEATS` and `BENCH_OUTPUT` control the measurement.
 The original four-way architecture benchmark remains available without `BENCH_SUITE`.
 
-Run `npm test`, `npm run test:rust` and `npm run build`, then `TEST_BACKEND=rust TEST_ENGINE=server npm run test:browser` and `TEST_BACKEND=rust TEST_ENGINE=client npm run test:browser`.
+Run `npm test`, `npm run test:rust` and `npm run build`, then `TEST_ENGINE=server npm run test:browser` and `TEST_ENGINE=client npm run test:browser`.
 `TEST_BASE_PATH=/t` checks a mounted deployment.
 Server browser checks reject worker creation, fact requests and context pushes.
 Client browser checks require one warm directory request containing freshness validation.

@@ -5,8 +5,8 @@ import { once } from 'node:events';
 import net from 'node:net';
 import pty from 'node-pty';
 import { chromium } from 'playwright-core';
-import { herdrRequest, herdrSnapshot } from '../server/herdr.ts';
-import { shellQuote } from '../src/engine/repair.ts';
+import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
+import { shellQuote } from '../src/shell-words.ts';
 import { installWireObserver } from './wire-observer.mjs';
 
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-flash-');

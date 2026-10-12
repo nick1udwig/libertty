@@ -170,7 +170,7 @@ The normal, delayed, throttled and six-space eviction samples are retained as `s
 Run `npm run test:herdr-flash` for the default case, and use `TEST_REDRAW_DELAY=600 TEST_CPU=6 TEST_WIRE=gzip` for the slow-redraw case.
 Use `TEST_SPACES=6 TEST_SWITCHES=6 TEST_RETURNS=1 TEST_REDRAW_DELAY=200` to verify cache eviction and controller release.
 Run `npm run test:herdr-resize`, `npm run test:herdr-scroll` and `npm run test:herdr` for keyboard geometry, multiple viewers, live scrolling, selection, links and the wider Herdr lifecycle.
-Set `TEST_BACKEND=node` on the lifecycle test to verify legacy-backend compatibility.
+The lifecycle test runs against the native Rust backend.
 
 ## Herdr loading handoff
 
@@ -187,6 +187,6 @@ Legacy backends keep the previous iframe frozen during the handoff without requi
 Once a mobile pane has passed its paint barrier, keyboard resizes retain that view and its focused input while awaiting the new geometry and redraw.
 The mobile paint certificate resets on reconnects and desktop layouts, so an initial desktop grid still waits behind the loading gate.
 
-Run `npm run test:herdr-loading` and repeat with `TEST_BACKEND=node` to exercise cold loading panels, pane and top-level handoffs, stale acknowledgements, viewport changes, cancellation, live composited canvas updates and input delivery through keyboard opening and dismissal.
+Run `npm run test:herdr-loading` to exercise cold loading panels, pane and top-level handoffs, stale acknowledgements, viewport changes, cancellation, live composited canvas updates and input delivery through keyboard opening and dismissal.
 The native flash test samples visibility from the parent window, so it includes the old displayed pane and the incoming pane across iframe visibility transitions.
 The real-Herdr test also captures composited browser pixels independently of the terminal-buffer assertions.

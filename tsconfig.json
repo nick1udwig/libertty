@@ -5,5 +5,5 @@
     "strict": true, "noEmit": true, "allowImportingTsExtensions": true,
     "skipLibCheck": true, "esModuleInterop": true, "verbatimModuleSyntax": true
   },
-  "include": ["src", "server", "test/**/*.ts", "vite.config.ts"]
+  "include": ["src", "test/**/*.ts", "vite.config.ts"]
 }

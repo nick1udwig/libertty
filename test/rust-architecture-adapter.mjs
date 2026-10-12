@@ -39,6 +39,7 @@ export async function rustArchitectureAdapter(catalog, environment, client, brid
   const initializationMs = performance.now() - start;
   return {
     initializationMs,
+    directoryInput: text => wasm.call('directoryInput', [text]),
     async reset() { wasm?.reset(); await call('benchReset', []); },
     context: (known, paths) => call('benchContext', [known ?? null, paths]),
     read: (key, operations, signal) => call('benchFacts', [key, operations], signal),

@@ -14,7 +14,7 @@ const base = 'http://127.0.0.1:' + port, first = 'loading-first', second = 'load
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function wait(check, label) { for (const end = Date.now() + 15000; Date.now() < end;) { if (await check()) return; await delay(20); } throw new Error('Timed out: ' + label); }
 fixture.setScreen(0, 'SCREEN_ALPHA\nAlready ready\n'); fixture.setScreen(1, 'SCREEN_BETA\nNewly loaded\n');
-const backend = spawn(process.env.TEST_BACKEND === 'node' ? process.execPath : root + 'target/debug/termai', process.env.TEST_BACKEND === 'node' ? ['server/index.ts'] : [], {
+const backend = spawn(root + 'target/debug/termai', [], {
   cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV:'production', HOST:'127.0.0.1', PORT:String(port), TERMAI_ALLOWED_HOSTS:'127.0.0.1', TERMAI_ALLOWED_ORIGINS:base, TERMAI_DATA_DIR:fixture.directory+'/termai', TERMAI_TOKEN:'', TERMAI_NO_RC:'1', TERMAI_CWD:fixture.directory, HOME:fixture.directory, PATH:fixture.directory+':'+process.env.PATH, HERDR_SOCKET_PATH:fixture.socketPath },
 });
 const exited = once(backend, 'exit'); let browser, logs = '';

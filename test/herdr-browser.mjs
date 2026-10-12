@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import os from 'node:os';
 import ssh2 from 'ssh2';
-import { fingerprint } from '../server/vault.ts';
+import { fingerprint } from './support/ssh-key.ts';
 import { herdrFixture } from './herdr-fixture.ts';
 
 const fixture = await herdrFixture(), origin = 'http://127.0.0.1:3167', base = origin + '/herdr-test';
@@ -25,7 +25,7 @@ daemon.on('connection', (socket, request) => {
     else { const message = JSON.parse(bytes.toString()); if (message.type === 'finish') socket.send(JSON.stringify({ type: 'final', text: 'Dictated directly into Herdr' })); if (message.type === 'ack') voiceAcks++; }
   });
 });
-const backend = spawn(process.env.TEST_BACKEND !== 'node' ? root + 'target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+const backend = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, TERMAI_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token', TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate', NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3167', TERMAI_BASE_PATH: '/herdr-test',
   TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/termai',
   TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory,
@@ -45,7 +45,7 @@ try {
   const bearer = (await (await request('connect', { noSession: true, token })).json()).accessToken;
   assert.equal((await request('herdr/snapshot?herdrSession=../../escape', undefined, bearer)).status, 400);
   assert.equal((await request('herdr/action', { action: 'rename', terminalId: 'missing', name: 'x' }, bearer)).status, 400);
-  if (process.env.TEST_BACKEND !== 'node') {
+  {
     for (const geometry of [{ mobile: true, cols: 0, rows: 30 }, { mobile: true, cols: 40, rows: 1001 }, { mobile: true, cols: 40.5, rows: 30 }, { mobile: true, cols: 40 }]) assert.equal((await request('herdr/ticket?terminalId=term_0', geometry, bearer)).status, 400);
     const reply = await (await request('herdr/ticket?terminalId=term_0', { mobile: true, cols: 40, rows: 30 }, bearer)).json(); assert.equal(reply.initialGeometry, true);
   }

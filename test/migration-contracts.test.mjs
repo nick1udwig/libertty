@@ -2,15 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import Ajv from 'ajv/dist/2020.js';
-import ts from 'typescript-reference';
-import { HERDR_SHELL } from '../server/herdr-capture.ts';
-import { SSH_WRAPPER_CHECK } from '../server/ssh-capture.ts';
-import { TRANSFER_SHELL } from '../server/transfer-shell.ts';
-import { READING_SHELL } from '../server/reading-shell.ts';
-import { HISTORY_SHELL } from '../server/history-shell.ts';
-import { HISTORY_ENTRIES } from '../server/history.ts';
-import { COMPLETION_SNAPSHOT, COMPLETION_SCRIPT } from '../server/completion.ts';
-import { pairingPage } from '../server/pairing-page.ts';
+import { createHash } from 'node:crypto';
 
 const schemas = JSON.parse(await readFile(new URL('../contracts/schemas.json', import.meta.url), 'utf8'));
 const http = JSON.parse(await readFile(new URL('../contracts/http.json', import.meta.url), 'utf8'));
@@ -21,26 +13,18 @@ ajv.addKeyword({ keyword: 'x-utf8MaxBytes', type: 'string', schemaType: 'number'
 ajv.addKeyword({ keyword: 'x-decodedBytes', type: 'string', schemaType: 'number', validate: (length, value) => Buffer.from(value, 'base64').length === length });
 const validate = name => ajv.compile({ $defs: schemas.$defs, $ref: '#/$defs/' + name });
 
-test('Rust embeds the exact reference Bash utilities covered by the retained shell harnesses', async () => {
-  const source = await readFile(new URL('../server/session.ts', import.meta.url), 'utf8');
-  const tree = ts.createSourceFile('session.ts', source, ts.ScriptTarget.Latest, true);
-  let initializer;
-  for (const statement of tree.statements) if (ts.isVariableStatement(statement)) {
-    for (const declaration of statement.declarationList.declarations) if (declaration.name.getText(tree) === 'RC') initializer = declaration.initializer.getText(tree);
+test('Rust shell utilities and pairing assets retain their pre-cleanup bytes', async () => {
+  const assets = JSON.parse(await readFile(new URL('../contracts/assets.json', import.meta.url), 'utf8'));
+  for (const [file, digest] of Object.entries(assets)) {
+    assert.equal(createHash('sha256').update(await readFile(new URL('../'+file, import.meta.url))).digest('hex'), digest, file);
   }
-  assert.ok(initializer, 'Reference RC template must exist');
-  const scope = { HERDR_SHELL, SSH_WRAPPER_CHECK, TRANSFER_SHELL, READING_SHELL, HISTORY_SHELL, HISTORY_ENTRIES, COMPLETION_SNAPSHOT };
-  const reference = Function(...Object.keys(scope), 'return ' + initializer)(...Object.values(scope));
-  assert.equal(await readFile(new URL('../crates/server/assets/bashrc.sh', import.meta.url), 'utf8'), reference);
-  assert.equal(await readFile(new URL('../crates/server/assets/completion.sh', import.meta.url), 'utf8'), COMPLETION_SCRIPT);
-  assert.equal(await readFile(new URL('../crates/server/assets/pairing.html', import.meta.url), 'utf8'), pairingPage('__TERMAI_PUBLIC_BASE__'));
 });
 
 test('all migration schemas compile and every API route has a resolvable request, response and error contract', async () => {
   for (const name of Object.keys(schemas.$defs)) validate(name);
-  const source = await readFile(new URL('../server/index.ts', import.meta.url), 'utf8');
-  const endpoints = [...source.matchAll(/url\.pathname === '(\/[^']+)'/g)].map(match => match[1]);
-  for (const path of new Set(endpoints)) assert.ok(http.routes.some(route => route.path === path), 'Missing HTTP contract: ' + path);
+  const source = await readFile(new URL('../crates/server/src/http.rs', import.meta.url), 'utf8');
+  const endpoints = [...source.matchAll(/\b(?:pathname|path) == "(\/[^"]+)"/g)].map(match => match[1]);
+  for (const path of new Set(endpoints)) assert.ok([...http.routes,...http.sockets].some(route => route.path === path), 'Missing HTTP contract: ' + path);
   const seen = new Set();
   for (const route of http.routes) {
     const key = route.method + ' ' + route.path; assert.ok(!seen.has(key), 'Duplicate HTTP contract: ' + key); seen.add(key);

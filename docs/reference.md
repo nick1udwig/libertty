@@ -283,9 +283,9 @@ Tailscale Serve strips its mount prefix.
 npm test
 npm run test:rust
 npm run build
-TEST_BACKEND=rust TEST_ENGINE=server npm run test:browser
-TEST_BACKEND=rust TEST_ENGINE=client TEST_BASE_PATH=/terminal npm run test:browser
-TEST_BACKEND=rust npm run test:reconnect
+TEST_ENGINE=server npm run test:browser
+TEST_ENGINE=client TEST_BASE_PATH=/terminal npm run test:browser
+npm run test:reconnect
 ```
 
 The reconnect test covers stalled authorization and Herdr ticket requests, delayed close events, stale open sockets, and recovery without replaying input.

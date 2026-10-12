@@ -25,8 +25,8 @@ defaults:
 
 jobs:
   verify:
-    name: Verify Rust parity on all supported platforms
-    uses: ./.github/workflows/rust-migration.yml
+    name: Verify Rust on all supported platforms
+    uses: ./.github/workflows/rust.yml
     with:
       ref: ${{ github.event.release.tag_name || inputs.ref || github.ref }}
   build:

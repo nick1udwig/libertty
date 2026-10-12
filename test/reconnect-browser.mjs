@@ -8,7 +8,7 @@ import { herdrFixture } from './herdr-fixture.ts';
 const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pathname;
 const origin = 'http://127.0.0.1:' + (process.env.TEST_PORT || '3178'), base = origin + '/reconnect-test/';
 const token = 'reconnect-test-pairing-token';
-const server = spawn(process.env.TEST_BACKEND !== 'node' ? root + 'target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+const server = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: new URL(origin).port,
   TERMAI_BASE_PATH: '/reconnect-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_TOKEN: token,
   TERMAI_DATA_DIR: fixture.directory + '/termai', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory,

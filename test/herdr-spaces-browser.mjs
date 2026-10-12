@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
 import { chromium } from 'playwright-core';
-import { herdrRequest, herdrSnapshot } from '../server/herdr.ts';
+import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-spaces-');
 const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:3174';
@@ -19,7 +19,7 @@ try {
   desktop = pty.spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', [], { cwd: dir, env, cols: 150, rows: 45, name: 'xterm-256color' }); desktop.onData(() => {});
   const alpha = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/alpha', label: 'Alpha', focus: false })).workspace.workspace_id;
   const beta = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/beta project', label: 'Beta', focus: false })).workspace.workspace_id;
-  backend = spawn(process.env.TEST_BACKEND !== 'node' ? root + 'target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3174', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  backend = spawn(root + 'target/debug/termai', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3174', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });

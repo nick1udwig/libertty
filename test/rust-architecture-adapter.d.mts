@@ -2,6 +2,7 @@ import type { Catalog, Candidate } from '../src/engine/types.ts';
 import type { WasmEngine } from '../src/engine/wasm.ts';
 export function rustArchitectureAdapter(catalog: Catalog, environment: Record<string, string>, client: boolean, bridge?: typeof WasmEngine): Promise<{
   initializationMs: number;
+  directoryInput(text: string): unknown;
   reset(): Promise<void>;
   context(known: string | undefined, paths: boolean): Promise<any>;
   read(key: string, operations: any[], signal?: AbortSignal): Promise<any>;

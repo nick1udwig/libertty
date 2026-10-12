@@ -7,7 +7,6 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import ssh2 from 'ssh2';
 import { WebSocket } from 'ws';
-import { Vault } from '../server/vault.ts';
 const root = path.resolve(import.meta.dirname, '..'), fixture = await mkdtemp('/tmp/termai-workspace-');
 const origin = 'http://127.0.0.1:3153', secondary = 'http://127.0.0.1:3154', sshPort = 3158;
 const processes = [], logs = [], errors = [], facts = [];
@@ -15,6 +14,17 @@ let browser;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(fn, timeout = 15000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await fn()) return; await delay(40); } throw new Error('Timed out'); }
 function start(command, args, env = {}) { const proc = spawn(command, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(proc); proc.stdout.on('data', b => logs.push(String(b))); proc.stderr.on('data', b => logs.push(String(b))); return proc; }
+async function vaultData(name) {
+  const bytes=await readFile(fixture+'/'+name+'/vault.json','utf8').catch(error=>{if(error.code!=='ENOENT')throw error;return '{"keys":[],"knownHosts":[]}';});
+  return JSON.parse(bytes);
+}
+async function setFixturePin(fingerprint) {
+  // Corrupt only the disposable stored pin to exercise the production verifier.
+  const data=await vaultData('secondary');
+  data.knownHosts=data.knownHosts.filter(pin=>pin.host!=='127.0.0.1'||pin.port!==sshPort);
+  if(fingerprint)data.knownHosts.push({host:'127.0.0.1',port:sshPort,fingerprint});
+  await writeFile(fixture+'/secondary/vault.json',JSON.stringify(data),{mode:0o600});
+}
 async function activeFrame(page) { const iframe = await page.locator('#terminal-stack iframe:visible').elementHandle(); const frame = await iframe.contentFrame(); await frame.waitForFunction(() => window.__shellState?.ready); return frame; }
 async function connectNew(page, name) { await page.getByRole('button', { name: new RegExp('^Terminals for ' + name + ' ') }).click(); await page.getByRole('menuitem', { name: 'Connect new terminal', exact: true }).click(); }
 async function command(frame, text) { const prompt = await frame.evaluate(() => window.__shellState.prompt); await frame.locator('#terminal textarea').focus(); await frame.page().keyboard.type(text); await frame.page().keyboard.press('Enter'); await frame.waitForFunction(prompt => window.__shellState.ready && window.__shellState.prompt > prompt, prompt); }
@@ -26,7 +36,7 @@ try {
   await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote\nSubsystem sftp internal-sftp\n`);
   start('/usr/bin/sshd', ['-D', '-e', '-f', fixture + '/sshd_config']);
   const backendSpecs = [[3153, 'primary', ''], [3154, 'secondary', 'test-backend-token-123456789']];
-  const startBackend = ([port, name, token]) => start(process.env.TEST_BACKEND !== 'node' ? root + '/target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '', TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: token, TERMAI_ENGINE: 'server', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, HOME: fixture, TERMAI_DATA_DIR: fixture + '/' + name, TERMAI_HISTORY_FILE: fixture + '/no-history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/no-history' });
+  const startBackend = ([port, name, token]) => start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '', TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: token, TERMAI_ENGINE: 'server', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, HOME: fixture, TERMAI_DATA_DIR: fixture + '/' + name, TERMAI_HISTORY_FILE: fixture + '/no-history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/no-history' });
   const backends = backendSpecs.map(startBackend);
   await until(async () => { try { return (await fetch(origin)).ok && (await fetch(secondary)).ok; } catch { return false; } });
   const primaryPairingToken = (await readFile(fixture + '/primary/pairing-token', 'utf8')).trim();
@@ -160,8 +170,7 @@ try {
   await page.locator('#add-tab').click(); await page.locator('#page-back').click(); await page.getByRole('button', { name: /Keychain Encrypted/ }).click(); await page.locator('#library-add').click(); await page.locator('#key-name').fill('Personal SSH key'); await page.locator('#key-passphrase').fill('test-key-passphrase'); await page.locator('#key-confirm').fill('test-key-passphrase'); await page.getByRole('button', { name: 'Save key', exact: true }).click(); await page.locator('#key-details').waitFor({ state: 'visible' });
   const publicKey = await page.locator('#public-key').inputValue(); assert.match(publicKey, /^ssh-ed25519 /); await writeFile(fixture + '/authorized', publicKey + '\n');
   assert.equal(await page.locator('#backend-filter').inputValue(), 'browser');
-  const primaryVault = new Vault(fixture + '/primary'), remoteVault = new Vault(fixture + '/secondary');
-  assert.equal((await primaryVault.list()).keys.length, 0); assert.equal((await remoteVault.list()).keys.length, 0);
+  assert.equal((await vaultData('primary')).keys.length, 0); assert.equal((await vaultData('secondary')).keys.length, 0);
   const records = await page.evaluate(() => new Promise((resolve, reject) => {
     const open = indexedDB.open('termai-keychain', 1); open.onerror = () => reject(open.error); open.onsuccess = () => { const db = open.result, read = db.transaction('keys').objectStore('keys').getAll(); read.onsuccess = () => { resolve(read.result); db.close(); }; };
   }));
@@ -250,28 +259,28 @@ try {
   await page.getByRole('button', { name: 'This machine HTTP' }).click(); frame = await activeFrame(page);
   assert.equal(await page.locator('#terminal-stack iframe:visible').getAttribute('id'), endedFrameId); assert.equal(sessionCreates, createsBeforeRecoveredReuse);
   await page.locator(`[role=tab][aria-controls="${endedFrameId}"] .tab-close`).click();
-  assert.equal((await primaryVault.list()).keys.length, 0); assert.equal((await remoteVault.list()).keys.length, 0, 'SSH must not persist browser keys');
+  assert.equal((await vaultData('primary')).keys.length, 0); assert.equal((await vaultData('secondary')).keys.length, 0, 'SSH must not persist browser keys');
   // Browser storage survives reload; selected devices receive explicit encrypted copies.
   await page.locator('#add-tab').click(); await page.locator('#page-back').click(); await page.getByRole('button', { name: /Keychain Encrypted/ }).click();
   await page.getByRole('button', { name: /Personal SSH key ED25519/ }).click();
   await page.locator('#backup-key').click(); await page.locator('#backup-devices input').nth(0).check();
   await page.locator('#key-transfer-passphrase').fill('test-key-passphrase'); await page.locator('#key-transfer-submit').click(); await page.locator('#key-transfer').waitFor({ state: 'hidden' });
-  assert.equal((await primaryVault.list()).keys.length, 1); assert.equal((await remoteVault.list()).keys.length, 0);
+  assert.equal((await vaultData('primary')).keys.length, 1); assert.equal((await vaultData('secondary')).keys.length, 0);
   await page.locator('#backup-key').click(); assert.equal(await page.locator('#backup-devices input:checked').count(), 0);
   for (const check of await page.locator('#backup-devices input').all()) await check.check();
   await page.locator('#key-transfer-passphrase').fill('test-key-passphrase'); await page.locator('#key-transfer-submit').click(); await page.locator('#key-transfer').waitFor({ state: 'hidden' });
-  assert.equal((await primaryVault.list()).keys.length, 1); assert.equal((await remoteVault.list()).keys.length, 1);
+  assert.equal((await vaultData('primary')).keys.length, 1); assert.equal((await vaultData('secondary')).keys.length, 1);
   const disk = await readFile(fixture + '/primary/vault.json', 'utf8'); assert.ok(!disk.includes('PRIVATE KEY') && !disk.includes('test-key-passphrase'));
-  const backupKey = (await primaryVault.list()).keys[0];
+  const backupKey = (await vaultData('primary')).keys[0];
   assert.equal((await request(origin, 'keychain', ownerA, { action: 'export', id: backupKey.id, passphrase: 'wrong' })).status, 400);
   // A failed destination does not erase successful backups; retry updates, not duplicates.
   await context.route(secondary + '/api/keychain', route => route.request().method() === 'POST' ? route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Test device unavailable' }) }) : route.continue());
   await page.locator('#backup-key').click(); for (const check of await page.locator('#backup-devices input').all()) await check.check();
   await page.locator('#key-transfer-passphrase').fill('test-key-passphrase'); await page.locator('#key-transfer-submit').click();
   await page.waitForFunction(() => document.querySelector('#key-transfer-error').textContent.includes('Test device unavailable'));
-  assert.equal((await primaryVault.list()).keys.length, 1); await context.unroute(secondary + '/api/keychain');
+  assert.equal((await vaultData('primary')).keys.length, 1); await context.unroute(secondary + '/api/keychain');
   await page.locator('#key-transfer-passphrase').fill('test-key-passphrase'); await page.locator('#key-transfer-submit').click(); await page.locator('#key-transfer').waitFor({ state: 'hidden' });
-  assert.equal((await remoteVault.list()).keys.length, 1);
+  assert.equal((await vaultData('secondary')).keys.length, 1);
   // A backend backup can restore the canonical key after local deletion.
   await page.locator('#delete-key').click(); await page.locator('#key-details').waitFor({ state: 'hidden' });
   await page.locator('#backend-filter').selectOption('primary'); await page.getByRole('button', { name: /Personal SSH key ED25519/ }).click();
@@ -283,14 +292,14 @@ try {
   await page.locator('#add-tab').click(); await page.locator('#page-back').click(); await page.getByRole('button', { name: /Keychain Encrypted/ }).click();
   await page.locator('#library-add').click(); await page.locator('#key-name').fill('Imported SSH file'); await page.locator('#key-method').selectOption('import'); await page.locator('#key-import').fill(rawKey);
   await page.locator('#key-passphrase').fill('x'); await page.locator('#key-confirm').fill('x'); await page.locator('#key-form button[type=submit]').click(); await page.locator('#key-details').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#public-key').inputValue(), publicKey); assert.equal((await primaryVault.list()).keys.length, 1);
+  assert.equal(await page.locator('#public-key').inputValue(), publicKey); assert.equal((await vaultData('primary')).keys.length, 1);
   await page.locator('#key-rename').fill('Renamed import'); await page.locator('#rename-key').click();
   await page.getByRole('button', { name: /Renamed import ED25519/ }).click(); await page.locator('#delete-key').click(); await page.locator('#key-details').waitFor({ state: 'hidden' });
   await page.locator('#nav-terminals').click();
   // A changed pin must fail even if the caller supplies trust for the new key.
   const backendToken = await page.evaluate(url => localStorage.getItem('termai.access:' + url + '/'), secondary);
-  const remoteKey = (await remoteVault.list()).keys[0];
-  await remoteVault.forget('127.0.0.1', sshPort); await remoteVault.trust('127.0.0.1', sshPort, 'SHA256:changed-fixture');
+  const remoteKey = (await vaultData('secondary')).keys[0];
+  await setFixturePin('SHA256:changed-fixture');
   const changed = await request(secondary, 'sessions', backendToken, { name: 'changed host', ssh: { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, keyId: remoteKey.id, passphrase: 'test-key-passphrase', trust: 'ignored' } });
   assert.equal(changed.status, 409); assert.equal((await changed.json()).changed, true);
   // A phone may resume on Hosts with cached credentials after its backend restarted.
@@ -340,7 +349,7 @@ try {
   const sshCommand = `ssh -F ${captureConfig} capture-host`, parentId = await page.locator('#terminal-stack iframe:visible').getAttribute('id');
   const capturedTabsBefore = await page.locator('[role=tab]').count();
   // The secondary test backend's changed-key fixture must be explicitly forgotten.
-  await remoteVault.forget('127.0.0.1', sshPort);
+  await setFixturePin();
   // Reconnection/terminal-cleanup wrappers must still hand off to remote facts.
   await command(frame, 'ssh() { local rc started; started=$SECONDS; command ssh "$@"; rc=$?; printf wrapper-cleanup; return "$rc"; }');
   for (const method of ['typing', 'history', 'search', 'completion', 'paste', 'reload']) {
@@ -398,7 +407,7 @@ try {
     await until(async () => await page.locator('#terminal-stack iframe:visible').getAttribute('id') === parentId);
     await page.locator(`[role=tab][aria-controls="${childId}"] .tab-close`).click();
   }
-  const references = (await remoteVault.list()).keys.filter(key => key.reference);
+  const references = (await vaultData('secondary')).keys.filter(key => key.reference);
   assert.equal(references.length, 1); assert.equal(references[0].reference.path, fixture + '/nested-key');
   const persisted = JSON.parse(await readFile(fixture + '/secondary/vault.json', 'utf8')).keys.find(key => key.reference);
   assert.equal(persisted.ciphertext, undefined); assert.equal(persisted.privateKey, undefined);
@@ -423,7 +432,7 @@ try {
   await until(async () => await page.locator('[role=tab]').count() === capturedTabsBefore + 1, 20000);
   frame = await activeFrame(page); assert.equal(await page.locator('#captured-ssh-dialog').isVisible(), false);
   await command(frame, 'printf agent > capture-agent.txt'); assert.equal(await readFile(fixture + '/remote/capture-agent.txt', 'utf8'), 'agent');
-  const agentReference = (await remoteVault.list()).keys.find(key => key.reference?.type === 'agent'); assert.equal(agentReference.reference.path, agentSocket);
+  const agentReference = (await vaultData('secondary')).keys.find(key => key.reference?.type === 'agent'); assert.equal(agentReference.reference.path, agentSocket);
   assert.ok(await page.evaluate(id => JSON.parse(localStorage.getItem('termai.hosts')).some(host => host.backendKeyId === id), agentReference.id));
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   await until(async () => await page.locator('[role=tab]').count() === capturedTabsBefore);
@@ -434,13 +443,13 @@ try {
   await writeFile(fixture + '/locked-key', lockedPair.private, { mode: 0o600 }); await writeFile(fixture + '/locked-key.pub', lockedPair.public); await writeFile(fixture + '/authorized', lockedPair.public + '\n');
   await writeFile(captureConfig, configBase + ` IdentityFile ${fixture}/locked-key\n IdentitiesOnly yes\n IdentityAgent none\n`);
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type(sshCommand); await page.keyboard.press('Enter');
-  await page.locator('#captured-ssh-dialog').waitFor({ state: 'visible' }); assert.ok(!(await remoteVault.list()).keys.some(key => key.reference?.path.endsWith('/locked-key')));
+  await page.locator('#captured-ssh-dialog').waitFor({ state: 'visible' }); assert.ok(!(await vaultData('secondary')).keys.some(key => key.reference?.path.endsWith('/locked-key')));
   await page.locator('#captured-ssh-secret').fill('wrong'); await page.locator('#captured-ssh-connect').click();
   await page.waitForFunction(() => !document.querySelector('#captured-ssh-connect').disabled && document.querySelector('#captured-ssh-error').textContent.includes('unlocked'));
   await page.locator('#captured-ssh-secret').fill('existing-pass'); await page.locator('#captured-ssh-connect').click();
   await page.locator('#captured-ssh-dialog').waitFor({ state: 'hidden' }); frame = await activeFrame(page);
   await command(frame, 'printf unlocked > capture-unlocked.txt'); assert.equal(await readFile(fixture + '/remote/capture-unlocked.txt', 'utf8'), 'unlocked');
-  const lockedReference = (await remoteVault.list()).keys.find(key => key.reference?.path.endsWith('/locked-key')); assert.ok(lockedReference);
+  const lockedReference = (await vaultData('secondary')).keys.find(key => key.reference?.path.endsWith('/locked-key')); assert.ok(lockedReference);
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   await until(async () => await page.locator('[role=tab]').count() === capturedTabsBefore);
   await page.locator(`[role=tab][aria-controls="${parentId}"]`).click(); frame = await activeFrame(page);

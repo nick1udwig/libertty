@@ -59,7 +59,7 @@ daemon.on('connection', (socket, request) => {
   });
 });
 const port = Number(process.env.TEST_PORT || 3176), base = `http://127.0.0.1:${port}`;
-const server = spawn(process.execPath, ['server/index.ts'], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: 'feature-test-pairing-token-123456789', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_VOXTYPE_SOURCE: path.join(fixture, 'source'), TERMAI_VOXTYPE_TOKEN_FILE: path.join(fixture, 'token'), TERMAI_VOXTYPE_URL: `ws://127.0.0.1:${daemon.address().port}/v1/dictate` }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(path.join(root,'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: 'feature-test-pairing-token-123456789', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_VOXTYPE_SOURCE: path.join(fixture, 'source'), TERMAI_VOXTYPE_TOKEN_FILE: path.join(fixture, 'token'), TERMAI_VOXTYPE_URL: `ws://127.0.0.1:${daemon.address().port}/v1/dictate` }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 let browser;
 try {

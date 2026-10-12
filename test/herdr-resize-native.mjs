@@ -5,8 +5,8 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
 import { chromium } from 'playwright-core';
-import { herdrRequest, herdrSnapshot } from '../server/herdr.ts';
-import { shellQuote } from '../src/engine/repair.ts';
+import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
+import { shellQuote } from '../src/shell-words.ts';
 
 // A real Herdr desktop and responsive PTY app, in an entirely disposable HOME.
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-resize-');
@@ -38,7 +38,7 @@ try {
   await wait(async () => (await geometry()).cols > 80, 'desktop application geometry');
   const original = await geometry();
   const base = 'http://127.0.0.1:3172';
-  backend = spawn(process.env.TEST_BACKEND !== 'node' ? new URL('../target/debug/termai', import.meta.url).pathname : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3172', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  backend = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3172', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated Termai backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
@@ -72,7 +72,7 @@ try {
   assert.ok(mobile.cols < original.cols);
   await phone.waitForFunction(() => { const t = window.__terminal; return t.buffer.active.getLine(1)?.translateToString(true) === '╭' + '─'.repeat(t.cols - 2) + '╮' && t.buffer.active.cursorX === 4 && t.buffer.active.cursorY === 2; });
   const firstFrames = await phone.evaluate(() => window.__frames.filter(f => f.width));
-  if (process.env.TEST_BACKEND !== 'node') assert.deepEqual(firstFrames[0], { width:mobile.cols, height:mobile.rows }, 'First native frame must already have the requested mobile geometry');
+  assert.deepEqual(firstFrames[0], { width:mobile.cols, height:mobile.rows }, 'First native frame must already have the requested mobile geometry');
   const paints = await phone.evaluate(() => window.__layoutPaints);
   await writeFile(root + '.test-artifacts/herdr-initial-layout-paints.json', JSON.stringify({ original, mobile, firstFrames, paints }, null, 2));
   assert.deepEqual(paints.filter(p => p.visible && p.border !== '╭' + '─'.repeat(p.cols - 2) + '╮'), [], 'Every visible mobile paint must already contain the resized native layout');

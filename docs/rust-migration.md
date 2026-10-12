@@ -4,7 +4,7 @@ Issue [#10](https://github.com/nick1udwig/termai/issues/10) migrates the backend
 The reference revision is `455386b`, and the implementation branch is `feat/rust-backend`.
 The contract inventory, regression matrix, reference fixtures and reference baseline were captured before production conversion.
 The Rust executable is the default for source commands, release packaging and installed services.
-The TypeScript backend remains available through the explicit reference commands and `TERMAI_BACKEND=node` packaging for parity and rollback checks.
+The TypeScript backend and duplicate engine implementation were retired on `feat/cleanup-post-rust`, after their assertions were ported to native Rust and preserved as reference fixtures.
 
 ## Implementation status
 
@@ -35,7 +35,7 @@ Local file listing, folder creation, exclusive streaming uploads, single-use dow
 The unchanged Bash hooks are embedded in the executable, and native tests cover actual Readline behavior, binary captures, attachment replacement, stale edits, command deduplication and large output.
 Synthetic Voxtype daemon tests cover authenticated discovery, capability negotiation, bounded Opus frames, final transcript insertion, terminal control rejection and explicit cancellation.
 The existing browser harness passes against the Rust executable in server mode and client mode under `/terminal/`, and the mounted Reading Mode browser harness also passes.
-Synthetic fixtures verify encrypted and unencrypted OpenSSH imports, saved credential reuse, host pins, key fingerprints, private-file modes, and Node-to-Rust-to-Node rollback.
+Synthetic fixtures verify encrypted and unencrypted OpenSSH imports, saved credential reuse, host pins, key fingerprints, private-file modes, and compatibility with archived Node-written state and independent verification of Rust-written encryption and credential formats.
 OpenSSH import preserves the original private-key bytes and accepts both the reference writer's 64-column wrapping and ordinary OpenSSH wrapping.
 Forty synthetic legacy-key fixtures cover traditional RSA, DSA and EC PEM, encrypted imports, PuTTY passphrase integrity, incorrect passwords, and the reference's rejection of generic PKCS8 imports.
 System SSH configuration resolution preserves identity-file and agent ordering, external references, known-host verification, and native fallback for unsupported shell invocations and SSH configuration.
@@ -70,26 +70,26 @@ npm run test:rust-browser
 npm run build
 npm test
 cargo build --locked -p termai-server --bin termai
-TEST_BACKEND=rust TEST_ENGINE=server TEST_PORT=3137 npm run test:browser
-TEST_BACKEND=rust TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
-TEST_BACKEND=rust TEST_BASE_PATH=/terminal npm run test:reading
-TEST_BACKEND=rust node test/files-browser.mjs
-TEST_BACKEND=rust npm run test:herdr
-TEST_BACKEND=rust npm run test:workspace
+TEST_ENGINE=server TEST_PORT=3137 npm run test:browser
+TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
+TEST_BASE_PATH=/terminal npm run test:reading
+node test/files-browser.mjs
+npm run test:herdr
+npm run test:workspace
 npm run test:rust-herdr
 ```
 
-`npm run migration:fixtures`, `npm run migration:host-fixtures`, and `npm run migration:state-fixtures` regenerate independent TypeScript oracles and synthetic state.
+The captured reference fixtures remain immutable regression inputs, and their historical generators can be recovered from Git revision `0e0646c` when additional reference cases are needed.
 Do not regenerate expected outputs to accommodate a Rust mismatch.
 The native oracle accepts one `{operation, args}` JSON request per line through `cargo run --locked --release -p termai-engine`.
 The asynchronous Rust `Runtime` and JavaScript `WasmEngine.invoke` interfaces support full suggestions, discovery, completion, file and directory repairs, candidate validation, and session metadata caching.
-`npm run migration:async-fixtures` and `npm run migration:prewarm-fixtures` record unchanged reference behavior for real host assertions and prewarm cache steps.
+The archived asynchronous and prewarm fixtures retain the original host operations, complete results and cache steps.
 
 ## Contracts and inventory
 
 `contracts/schemas.json` contains JSON Schema 2020-12 definitions generated from the five existing protocol modules, shared engine data types, help metadata, and SSH key metadata.
 `contracts/engine-operations.json` defines operation-specific argument tuples, optional argument nulls, result schemas and ignored trailing callback arguments.
-`contracts/regression-inventory.json` records every backend and shared engine module and every existing test harness with its assertions, destination, and retention justification.
+`contracts/regression-inventory.json` records active Rust modules and regression harnesses, while `contracts/retired-regressions.json` maps retired reference assertions to their retained native or integration checks.
 Run `npm run migration:schemas` and `npm run migration:inventory` to regenerate these files, or append `-- --check` to detect drift.
 Optional properties are omitted, and null is accepted only by explicitly nullable unions or the fact result for a missing file or description.
 Unknown object fields and terminal message tags are ignored for compatibility, while unknown fact operation kinds and Herdr actions are rejected before starting work.
@@ -167,14 +167,14 @@ Preserve key UUIDs, names, ISO timestamps, public keys, and host/port pins, and 
 Vault mutations remain serialized and atomic, and concurrent updates must not lose entries.
 Notification state retains its existing subscription keys, device ownership digests, source watches, and VAPID identity across restarts.
 Browser host profiles, keys, plugins, workspaces, and service-worker cache formats are retained because their owning frontend remains TypeScript.
-No persisted-data rewrite is required for a compatible port, and rollback must be tested by opening Rust-written state with the reference implementation.
+No persisted-data rewrite is required, and an independent crypto reader verifies that Rust-written state retains the legacy encryption and credential formats.
 Compatibility fixtures must use synthetic credentials and keys rather than material from the user's home directory.
 
 ## Regression baseline and performance gates
 
 `npm test` passes 214 tests with one existing installed-manual skip, and `npm run test:install` passes all 26 tests on Linux x86_64 with Node 26.8.1.
 `npm run build` passes against the reference implementation.
-`npm run migration:fixtures` executes the unchanged reference assertions through a recording loader and captures complete pure-engine arguments and results.
+The pre-conversion recording loader captured complete pure-engine arguments and results in the retained reference corpus.
 The corpus compares full arrays, ordering, scores, change descriptions, literal alternatives, quoted values, paths, Unicode, help flags, history, and pipeline parsing.
 The corpus must remain an independent oracle and must not be rewritten to make Rust failures pass.
 The recorded loader only instruments pure functions and does not replace process, filesystem, authorization, or browser assertions.
@@ -265,3 +265,12 @@ This round does not meet the tenfold target in every case, and native peer IPC, 
 Local validation passes 102 Rust tests, 234 frontend and reference tests with one existing skip, and Chromium parity for 16,560 pure fixtures, 469 asynchronous fixtures and 48 prewarm steps.
 Both mounted browser engine modes pass with the Rust backend, and native and Wasm Clippy checks pass with warnings denied.
 The full architecture gate passes 1,440 exact candidate-array comparisons across 108 rows at 0, 50 and 150 ms RTT, with 31 warm CPU samples and three warm network samples per case and variant.
+
+## Post-migration cleanup
+
+Rust is the only backend in the working tree and release packages.
+The frontend retains TypeScript wire types, its Wasm bridge and the shell helpers used by reading and transfer actions.
+Command and speech vocabulary comes from the canonical contract data rather than a second engine implementation.
+Captured expected outputs remain unchanged, and the retired regression ledger points each removed reference assertion at its retained checks.
+Historical benchmark references are recovered into temporary directories from Git revision `0e0646c`, so performance comparisons remain available without shipping a Node backend.
+The installer continues to support rollback to already published Node bundles through their own archived launchers.

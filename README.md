@@ -53,7 +53,7 @@ The shell starts in the checkout directory.
 Set `TERMAI_CWD=/path/to/project` to change it.
 For development, use `npm run dev`.
 Vite runs as a loopback frontend tool behind the Rust server's pairing gate, including authenticated hot reload.
-The TypeScript backend remains available through `npm run dev:reference` and `npm run start:reference` for parity and rollback checks.
+Rust is the only backend, while Node supports frontend builds, installation tools and test fixtures.
 
 ## Connect from your phone
 

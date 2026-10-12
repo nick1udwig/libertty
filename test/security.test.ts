@@ -18,10 +18,13 @@ for (const mode of ['production', 'development']) {
     const origin = `http://127.0.0.1:${port}`, base = origin + '/audit';
     const sentinel = 'PRIVATE-ENVIRONMENT-SENTINEL';
     await writeFile(path.join(directory, 'private.txt'), sentinel);
-    const child = spawn(process.execPath, ['server/index.ts'], { cwd: root, env: {
+    const development = mode === 'development';
+    const child = spawn(development ? process.execPath : path.join(root,'target/debug/termai'), development ? ['scripts/dev.mjs'] : [], { cwd: root, env: {
       ...process.env, NODE_ENV: mode, HOST: '127.0.0.1', PORT: String(port), HOME: directory,
       TERMAI_TOKEN: '', TERMAI_DATA_DIR: directory, TERMAI_BASE_PATH: '/audit',
       TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: '', TERMAI_ENGINE: 'server',
+      CARGO_HOME: process.env.CARGO_HOME || path.join(process.env.HOME!,'.cargo'),
+      RUSTUP_HOME: process.env.RUSTUP_HOME || path.join(process.env.HOME!,'.rustup'),
     }, stdio: ['ignore', 'pipe', 'pipe'] });
     const exited = once(child, 'exit');
     let logs = ''; child.stdout.on('data', data => logs += data); child.stderr.on('data', data => logs += data);
@@ -67,7 +70,12 @@ for (const mode of ['production', 'development']) {
           const socket = net.connect(port, '127.0.0.1'); let response = '';
           socket.setTimeout(2000, () => { socket.destroy(); reject(new Error('Upgrade was left open')); });
           socket.on('error', error => { if ((error as NodeJS.ErrnoException).code !== 'ECONNRESET') reject(error); });
-          socket.on('data', chunk => response += chunk);
+          socket.on('data', chunk => {
+            response += chunk;
+            // Hyper can reject an upgrade while keeping the HTTP connection
+            // alive; the complete rejection is sufficient to end this probe.
+            if (response.includes('\r\n\r\n')) socket.destroy();
+          });
           socket.once('close', () => { try { assert.ok(!response.includes('101 Switching'), 'unpaired upgrades must not succeed'); resolve(); } catch (error) { reject(error); } });
           socket.once('connect', () => socket.write(`GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: AAAAAAAAAAAAAAAAAAAAAA==\r\n${includeOrigin ? 'Origin: ' + origin + '\r\n' : ''}${protocol ? 'Sec-WebSocket-Protocol: ' + protocol + '\r\n' : ''}\r\n`));
         });
