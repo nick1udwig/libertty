@@ -11,6 +11,60 @@ use tokio_util::sync::CancellationToken;
 #[path = "support/herdr.rs"]
 mod support;
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
+    let fixture = support::Fixture::new().await;
+    let mut target = fixture.target.clone();
+    target.binary = "/bin/false".into();
+    let history = herdr_history::Hub::default();
+    let frames = Hub::default();
+    let (send, mut receive, _) = viewer_queue::channel();
+    let cancel = CancellationToken::new();
+    let view = View::open(
+        target,
+        json!({"terminalId":"term_0","paneId":"w1:p0","cwd":"/fixture"}),
+        &frames,
+        &history,
+        None,
+        send,
+        cancel.clone(),
+    )
+    .unwrap();
+    let mut expected = String::new();
+    for i in 0..100 {
+        let text = format!("[{i:03}]");
+        expected.push_str(&text);
+        view.receive(json!({"type":"input","data":text})).unwrap();
+    }
+    view.receive(json!({"type":"command","id":"ordered","command":"done"}))
+        .unwrap();
+    expected.push_str("done\r");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let item = receive.recv().await.unwrap();
+            if let Transport::Message(value) = item.message
+                && value["type"] == "result"
+                && value["id"] == "ordered"
+            {
+                assert_eq!(value["accepted"], true);
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let actual = fixture
+        .actions
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|action| action["method"] == "pane.send_text")
+        .map(|action| action["params"]["text"].as_str().unwrap())
+        .collect::<String>();
+    assert_eq!(actual, expected);
+    cancel.cancel();
+}
+
 #[tokio::test]
 async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_updates() {
     let fixture = support::Fixture::new().await;
