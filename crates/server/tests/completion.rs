@@ -39,12 +39,30 @@ async fn prepared_standard_framework_matches_reference_and_detects_custom_startu
         "_t(){ COMPREPLY=(new); }; complete -F _t tool",
     )
     .unwrap();
+    // Bare Bash does not source ~/.bash_completion without a system framework.
+    let expected = if [
+        "/usr/share/bash-completion/bash_completion",
+        "/etc/bash_completion",
+    ]
+    .iter()
+    .any(|file| std::path::Path::new(file).is_file())
+    {
+        vec!["new"]
+    } else {
+        vec![]
+    };
+    assert_eq!(
+        shell_complete(&pool, &["tool".into(), "".into()], cwd, &env, &cancel)
+            .await
+            .unwrap(),
+        expected
+    );
     assert_eq!(
         provider
             .complete(&pool, &["tool".into(), "".into()], cwd, &env, &cancel)
             .await
             .unwrap(),
-        ["new"]
+        expected
     );
 }
 
