@@ -205,8 +205,8 @@ try {
   assert.equal(await page.locator('.reading-markdown h1').textContent(), 'Skill');
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   await frame.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'look at skill dot md', bubbles: true, cancelable: true })));
-  await frame.locator('.reading-choice').filter({ hasText: 'Read SKILL.md' }).waitFor();
-  await frame.locator('.reading-choice').filter({ hasText: 'Read SKILL.md' }).click();
+  await frame.getByRole('button', { name: 'Read SKILL.md', exact: true }).waitFor();
+  await frame.getByRole('button', { name: 'Read SKILL.md', exact: true }).click();
   await page.locator('.reading-view:not([hidden]) .reading-markdown h1').waitFor();
   assert.equal(await page.locator('.reading-view:not([hidden]) .reading-markdown h1').textContent(), 'Skill');
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
