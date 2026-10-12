@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
 import { chromium } from 'playwright-core';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 
-const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-spaces-');
+const root = new URL('../', import.meta.url).pathname, dir = await realpath(await mkdtemp('/tmp/termai-herdr-spaces-'));
 const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:3174';
 const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));

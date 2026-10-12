@@ -461,7 +461,9 @@ try {
   await frame.waitForFunction(() => window.__sshCapture === undefined);
   await command(frame, 'printf usable > capture-cancelled.txt'); assert.equal(await readFile(fixture + '/capture-cancelled.txt', 'utf8'), 'usable');
   await command(frame, 'ssh() { printf native > capture-function.txt; }');
-  await command(frame, 'ssh capture-host'); assert.equal(await readFile(fixture + '/capture-function.txt', 'utf8'), 'native');
+  await command(frame, 'ssh capture-host');
+  await until(async () => readFile(fixture + '/capture-function.txt', 'utf8').then(value => value === 'native', error => { if (error.code === 'ENOENT') return false; throw error; }));
+  assert.equal(await readFile(fixture + '/capture-function.txt', 'utf8'), 'native');
   await command(frame, 'unset -f ssh');
   // Replacing a referenced file cannot silently authenticate as a different identity.
   await writeFile(fixture + '/locked-key', nestedKey.private);
