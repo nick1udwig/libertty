@@ -184,7 +184,9 @@ Rapid selections can cancel a pending switch without exposing its unfinished pan
 If returning to the displayed pane requires different dimensions, a separate iframe prepares the new grid while the old iframe remains frozen until the handoff completes.
 Old iframes are retired after the swap, and leaving or disposing the view also cleans up a temporarily retained iframe.
 Legacy backends keep the previous iframe frozen during the handoff without requiring backend parking support.
+Once a mobile pane has passed its paint barrier, keyboard resizes retain that view and its focused input while awaiting the new geometry and redraw.
+The mobile paint certificate resets on reconnects and desktop layouts, so an initial desktop grid still waits behind the loading gate.
 
-Run `npm run test:herdr-loading` and repeat with `TEST_BACKEND=node` to exercise cold loading panels, pane and top-level handoffs, stale acknowledgements, viewport changes, cancellation and live composited canvas updates after reveal.
+Run `npm run test:herdr-loading` and repeat with `TEST_BACKEND=node` to exercise cold loading panels, pane and top-level handoffs, stale acknowledgements, viewport changes, cancellation, live composited canvas updates and input delivery through keyboard opening and dismissal.
 The native flash test samples visibility from the parent window, so it includes the old displayed pane and the incoming pane across iframe visibility transitions.
 The real-Herdr test also captures composited browser pixels independently of the terminal-buffer assertions.

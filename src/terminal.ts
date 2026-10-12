@@ -23,7 +23,7 @@ const baseURL = new URL(params.get('backend') || document.baseURI);
 const session = params.get('session') || 'default';
 const herdrTerminal = params.get('herdrTerminal');
 let herdrReady = false;
-let herdrLayoutPending = false, herdrLayoutMatched = false, herdrLayoutFrame = 0;
+let herdrLayoutPending = false, herdrLayoutMatched = false, herdrLayoutFrame = 0, herdrMobileRendered = false;
 let herdrBarrier = false, herdrBarrierReady = true, herdrParkable = false, herdrParked = false, herdrPreserve = false;
 let herdrPresentation = '';
 let offeredWire: string[] | undefined;
@@ -139,6 +139,7 @@ function sizeTerminal() {
   }
   try {
     const wide = fullWidth();
+    if (!mobileTerminal()) { herdrMobileRendered = false; herdrPreserve = false; }
     if (herdrLayoutPending && !mobileTerminal()) { herdrLayoutPending = false; terminalViewport.classList.remove('awaiting-herdr-layout'); }
     terminalViewport.classList.toggle('full-width', wide);
     const element = $('terminal');
@@ -153,8 +154,11 @@ function sizeTerminal() {
     const nextCols = wide ? projection?.nativeColumns || 80 : dimensions?.cols;
     if (dimensions && nextCols && (term.cols !== nextCols || term.rows !== dimensions.rows)) {
       if (mobileTerminal()) {
+        // Keep a certified mobile view and its focused textarea visible while
+        // keyboard geometry redraws; hiding the input would dismiss the IME.
+        herdrPreserve ||= herdrMobileRendered;
         cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutPending = true; herdrLayoutMatched = false;
-        herdrBarrierReady = !herdrBarrier; herdrPreserve = false; terminalViewport.classList.add('awaiting-herdr-layout');
+        herdrBarrierReady = !herdrBarrier; terminalViewport.classList.toggle('awaiting-herdr-layout', !herdrPreserve);
       }
       preserveScrollback(term, () => term.resize(nextCols, dimensions.rows));
       notifyHerdrSizing();
@@ -278,7 +282,7 @@ async function socketURL(signal: AbortSignal) {
     sizeTerminal();
     const geometry = { cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && !document.hidden };
     cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutMatched = false;
-    herdrPreserve = false;
+    herdrPreserve = false; herdrMobileRendered = false;
     herdrLayoutPending = geometry.mobile;
     terminalViewport.classList.toggle('awaiting-herdr-layout', herdrLayoutPending && !herdrParked);
     const response = await fetch(herdrEndpoint('api/herdr/ticket'), { method: 'POST', credentials: 'same-origin', headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(geometry), signal });
@@ -315,7 +319,7 @@ function revealHerdrLayout() {
   const reveal = () => {
     herdrLayoutFrame = 0;
     if (transport.socket !== socket || presentation !== herdrPresentation || term.cols !== cols || term.rows !== rows || !herdrLayoutPending || !herdrLayoutMatched || !herdrBarrierReady || herdrParked) return;
-    herdrLayoutPending = false; herdrPreserve = false; terminalViewport.classList.remove('awaiting-herdr-layout');
+    herdrLayoutPending = false; herdrPreserve = false; herdrMobileRendered = true; terminalViewport.classList.remove('awaiting-herdr-layout');
     send({ type:'herdr-frame-request' }); notifyHerdrRendered(presentation);
   };
   herdrLayoutFrame = requestAnimationFrame(() => { herdrLayoutFrame = requestAnimationFrame(reveal); });
@@ -522,6 +526,7 @@ if (embedded) {
       if (!parked) {
         const cols = term.cols, rows = term.rows; sizeTerminal();
         herdrPreserve = event.data.preserve === true && cols === term.cols && rows === term.rows;
+        herdrMobileRendered = herdrPreserve && mobileTerminal();
         herdrLayoutPending = mobileTerminal(); herdrLayoutMatched = false;
         herdrBarrierReady = !herdrBarrier; terminalViewport.classList.toggle('awaiting-herdr-layout', herdrLayoutPending && !herdrPreserve);
         send({ type:'herdr-frame-request' });

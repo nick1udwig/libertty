@@ -129,7 +129,28 @@ try {
   await page.locator('#tabs .tab').filter({hasText:'Herdr 2'}).click();
   await wait(async () => await page.locator('#herdr-'+second).evaluate(element => element.checkVisibility({checkVisibilityCSS:true})), 'top-level completed handoff');
   await assertVisible(page.locator('#herdr-'+first),false); assert.equal(await page.locator('#terminal-loading').isVisible(),false);
+
+  // Opening the software keyboard resizes the loaded pane without taking input away.
+  const input = incoming.locator('#terminal textarea');
+  await input.evaluate(element => { window.__inputBlurs=0; element.addEventListener('blur',()=>window.__inputBlurs++); });
+  const canvas = await incoming.locator('#terminal canvas').boundingBox();
+  await page.touchscreen.tap(canvas.x+canvas.width*.5,canvas.y+canvas.height*.3);
+  assert.equal(await input.evaluate(element => element === document.activeElement && !element.readOnly),true,'A tap enables Herdr input');
+  const rows = await incoming.evaluate(() => window.__terminal.rows);
+  await page.setViewportSize({width:390,height:460});
+  await wait(async () => await incoming.evaluate(rows => window.__terminal.rows < rows,rows),'keyboard opening resizes the pane');
+  await wait(async () => await incoming.locator('#terminal-viewport').evaluate(element => !element.classList.contains('awaiting-herdr-layout')),'keyboard-sized redraw completes');
+  assert.equal(await incoming.evaluate(() => window.__inputBlurs),0,'Keyboard opening must never blur the Herdr input');
+  assert.equal(await input.evaluate(element => element === document.activeElement && !element.readOnly),true,'Herdr remains editable after keyboard resize');
+  const inputStart = fixture.actions.length;
+  await page.keyboard.type('Still editable');
+  await wait(() => fixture.actions.slice(inputStart).filter(action => action.method==='pane.send_text').map(action => action.params.text).join('')==='Still editable','typed input reaches Herdr after keyboard resize');
+  await page.setViewportSize({width:390,height:844});
+  await wait(async () => await input.evaluate(element => element !== document.activeElement && element.readOnly),'keyboard dismissal disarms input');
+  const restoredCanvas = await incoming.locator('#terminal canvas').boundingBox();
+  await page.touchscreen.tap(restoredCanvas.x+restoredCanvas.width*.5,restoredCanvas.y+restoredCanvas.height*.3);
+  assert.equal(await input.evaluate(element => element === document.activeElement && !element.readOnly),true,'A fresh tap reopens Herdr input after dismissal');
   assert.deepEqual(errors,[]);
-  console.log('PASS: Herdr pane and top-level tab handoffs keep the old mobile view visible with a loading indicator, wait for a fresh painted presentation, disable old input, and reject stale, resized or cancelled switches.');
+  console.log('PASS: Herdr handoffs keep the old mobile view until a fresh painted presentation, reject stale/resized/cancelled switches, and preserve tapped input through keyboard opening while disarming it on dismissal.');
 } catch(error) { console.error(logs); throw error; }
 finally { await browser?.close(); backend.kill(); await exited; await fixture.close(); }
