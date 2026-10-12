@@ -38,7 +38,8 @@ It checks complete candidate arrays and rejects increases in cold or warm foregr
 
 Run `BENCH_SUITE=shared BENCH_BEFORE_MASTER=. BENCH_BEFORE_CLIENT=. BENCH_AFTER=. BENCH_RUST=1 BENCH_REPEATS=3 npm run bench:architecture`.
 By default, the after variants use a copied snapshot of the working tree; set `BENCH_AFTER` to a commit for a reproducible revision.
-`BENCH_RTT`, `BENCH_REPEATS` and `BENCH_OUTPUT` control the measurement.
+`BENCH_RTT`, `BENCH_REPEATS`, `BENCH_COLD_REPEATS` and `BENCH_OUTPUT` control the measurement.
+Cold latency uses the median of fresh application-cache trials and retains the first call and individual cold samples separately.
 The original four-way architecture benchmark remains available without `BENCH_SUITE`.
 
 Run `npm test`, `npm run test:rust` and `npm run build`, then `TEST_ENGINE=server npm run test:browser` and `TEST_ENGINE=client npm run test:browser`.

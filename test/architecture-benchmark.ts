@@ -22,6 +22,8 @@ const rtts = (process.env.BENCH_RTT || '0,50,150').split(',').map(Number);
 const repeats = Number(process.env.BENCH_REPEATS || 3);
 // Sub-millisecond CPU medians need more samples than the injected-RTT cases.
 const cpuRepeats = Number(process.env.BENCH_CPU_REPEATS || 31);
+const coldRepeats = Number(process.env.BENCH_COLD_REPEATS || repeats);
+if (!Number.isInteger(coldRepeats) || coldRepeats < 1) throw new Error('Cold repeats must be a positive integer.');
 const temp = await mkdtemp(path.join(os.tmpdir(), 'termai-architecture-'));
 const cwd = path.join(temp, 'fixture');
 const delay = (ms: number) => ms ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
@@ -88,87 +90,96 @@ esac
     const warmRepeats = rtt === 0 ? Math.max(repeats, cpuRepeats) : repeats;
     let expected: unknown;
     for (const variant of loaded) {
-      const m = variant.modules;
-      const rust = (variant as typeof variant & { adapter?: Awaited<ReturnType<typeof rustArchitectureAdapter>> }).adapter;
-      await rust?.reset();
-      const help = variant.client && !rust ? new m.HelpProvider() : undefined;
-      const source = { state: { cwd, prompt: 1, ready: true, exited: false }, catalog: async (includePaths = true) => includePaths ? catalog : { ...catalog, paths: [] }, environment: async () => env, help };
-      const facts = variant.client ? rust || new m.Facts(source) : undefined;
-      const cache = variant.client ? new m.ContextCache() : undefined;
-      const syntax = new Map<string, boolean>(), directories = variant.client && variant.optimized ? new m.DirectoryCache() : undefined;
-      let host: any, requests = 0, bytes = 0, hostMs = 0, pushKey: string | undefined, pushDirectoryVersion: string | undefined;
-      const discovery = rust ? { dispose() {} } : variant.client ? new variant.discovery!.Discovery({ help: (command: string, route: string[]) => host.help(command, route), describe: (command: string) => host.describe(command) }) : new variant.discovery!.Discovery();
-      const transport = async (body: any, signal: AbortSignal) => {
-        requests++; bytes += Buffer.byteLength(JSON.stringify(body));
-        await delay(rtt / 2);
-        const start = performance.now();
-        const result = body.kind === 'context' ? await facts.context(body.known, body.paths !== false) : await facts.read(body.key, body.operations, signal);
-        hostMs += performance.now() - start;
-        const wire = JSON.stringify(result); bytes += Buffer.byteLength(wire);
-        await delay(rtt / 2); return JSON.parse(wire);
-      };
-      const times: number[] = [], counts: number[] = [], sizes: number[] = [], hostTimes: number[] = [], idleBytes: number[] = [], idleTimes: number[] = [];
-      const nativeEngineTimes: number[] = [];
-      let nativeDelegated = false;
-      try {
-        for (let i = 0; i <= warmRepeats; i++) {
-          // Model an already delivered periodic idle push for warm optimized-client trials.
-          // Both its host time and wire bytes are recorded outside the foreground interval.
-          if (i && variant.client && variant.optimized) {
-            const start = performance.now();
-            const context = await facts.context(pushKey, false); pushKey = context.catalogKey;
-            const snapshot = rust ? await rust.directory(cwd) : await m.directorySnapshot(cwd, 10000);
-            const prefetch = snapshot.version === pushDirectoryVersion ? [] : [{ path: cwd, snapshot }]; pushDirectoryVersion = snapshot.version;
-            const wire = JSON.stringify({ context, directories: prefetch });
-            idleBytes.push(Buffer.byteLength(wire));
-            const pushed = JSON.parse(wire); cache.accept(pushed.context);
-            for (const entry of pushed.directories) directories.remember(entry.path, entry.snapshot);
-            idleTimes.push(performance.now() - start);
-          }
-          requests = bytes = hostMs = 0;
-          const begin = performance.now(), signal = AbortSignal.timeout(5000);
-          let actual;
-          if (!variant.client) {
-            requests = 1; await delay(rtt / 2);
-            const start = performance.now();
-            if (rust) {
-              const reply = await rust.native(text, signal); actual = reply.candidates; nativeEngineTimes.push(reply.elapsedMs);
-            } else actual = await variant.engine!.suggest(text, catalog, env, discovery, undefined, signal);
-            hostMs = performance.now() - start;
-            bytes = Buffer.byteLength(JSON.stringify({ text })) + Buffer.byteLength(JSON.stringify({ candidates: actual }));
-            await delay(rtt / 2);
-          } else {
-            const includePaths = !(rust && compoundRepairRecommended(text, { compoundRepair: true } as any)) && (!variant.optimized || !(rust ? rust.directoryInput(text) : m.directoryInput(text)));
-            const snapshot = await cache.get(transport, signal, includePaths, variant.optimized ? 1 : undefined);
-            if (rust && compoundRepairRecommended(text, snapshot)) {
-              nativeDelegated = true;
-              requests++; bytes += Buffer.byteLength(JSON.stringify({ kind: 'repair', key: snapshot.key, catalogKey: snapshot.catalogKey, text }));
-              await delay(rtt / 2); const start = performance.now();
-              actual = await rust.repair(text,snapshot,signal); hostMs += performance.now()-start;
-              bytes += Buffer.byteLength(JSON.stringify(actual)); await delay(rtt / 2);
-            } else for (let attempt = 0; ; attempt++) {
-              host = new m.RemoteHost(transport, snapshot, signal, syntax, directories);
-              try {
-                const requestHost = host;
-                const metadata = (discovery as any).forHost ? (discovery as any).forHost({ help: (command: string, route: string[]) => requestHost.help(command, route), describe: (command: string) => requestHost.describe(command) }) : discovery;
-                actual = rust ? await rust.suggest(text, snapshot, host, signal) : await variant.engine!.suggest(text, snapshot.catalog, { HOME: snapshot.home, HOST_CONTEXT: snapshot.discoveryKey }, metadata, host, undefined, signal);
-                if (variant.optimized) await host.verify();
-                break;
-              } catch (error) { if (!variant.optimized || !(error instanceof m.DirectoryChanged) || attempt >= 2) throw error; }
+      const coldTimes: number[] = [], coldCounts: number[] = [], coldSizes: number[] = [];
+      // Recreate application caches for each cold trial; report the first call separately.
+      for (let coldTrial = 0; coldTrial < coldRepeats; coldTrial++) {
+        const m = variant.modules;
+        const rust = (variant as typeof variant & { adapter?: Awaited<ReturnType<typeof rustArchitectureAdapter>> }).adapter;
+        await rust?.reset();
+        const help = variant.client && !rust ? new m.HelpProvider() : undefined;
+        const source = { state: { cwd, prompt: 1, ready: true, exited: false }, catalog: async (includePaths = true) => includePaths ? catalog : { ...catalog, paths: [] }, environment: async () => env, help };
+        const facts = variant.client ? rust || new m.Facts(source) : undefined;
+        const cache = variant.client ? new m.ContextCache() : undefined;
+        const syntax = new Map<string, boolean>(), directories = variant.client && variant.optimized ? new m.DirectoryCache() : undefined;
+        let host: any, requests = 0, bytes = 0, hostMs = 0, pushKey: string | undefined, pushDirectoryVersion: string | undefined;
+        const discovery = rust ? { dispose() {} } : variant.client ? new variant.discovery!.Discovery({ help: (command: string, route: string[]) => host.help(command, route), describe: (command: string) => host.describe(command) }) : new variant.discovery!.Discovery();
+        const transport = async (body: any, signal: AbortSignal) => {
+          requests++; bytes += Buffer.byteLength(JSON.stringify(body));
+          await delay(rtt / 2);
+          const start = performance.now();
+          const result = body.kind === 'context' ? await facts.context(body.known, body.paths !== false) : await facts.read(body.key, body.operations, signal);
+          hostMs += performance.now() - start;
+          const wire = JSON.stringify(result); bytes += Buffer.byteLength(wire);
+          await delay(rtt / 2); return JSON.parse(wire);
+        };
+        const times: number[] = [], counts: number[] = [], sizes: number[] = [], hostTimes: number[] = [], idleBytes: number[] = [], idleTimes: number[] = [];
+        const nativeEngineTimes: number[] = [];
+        let nativeDelegated = false;
+        try {
+          for (let i = 0; i <= (coldTrial === coldRepeats - 1 ? warmRepeats : 0); i++) {
+            // Model an already delivered periodic idle push for warm optimized-client trials.
+            // Both its host time and wire bytes are recorded outside the foreground interval.
+            if (i && variant.client && variant.optimized) {
+              const start = performance.now();
+              const context = await facts.context(pushKey, false); pushKey = context.catalogKey;
+              const snapshot = rust ? await rust.directory(cwd) : await m.directorySnapshot(cwd, 10000);
+              const prefetch = snapshot.version === pushDirectoryVersion ? [] : [{ path: cwd, snapshot }]; pushDirectoryVersion = snapshot.version;
+              const wire = JSON.stringify({ context, directories: prefetch });
+              idleBytes.push(Buffer.byteLength(wire));
+              const pushed = JSON.parse(wire); cache.accept(pushed.context);
+              for (const entry of pushed.directories) directories.remember(entry.path, entry.snapshot);
+              idleTimes.push(performance.now() - start);
             }
+            requests = bytes = hostMs = 0;
+            const begin = performance.now(), signal = AbortSignal.timeout(5000);
+            let actual;
+            if (!variant.client) {
+              requests = 1; await delay(rtt / 2);
+              const start = performance.now();
+              if (rust) {
+                const reply = await rust.native(text, signal); actual = reply.candidates; nativeEngineTimes.push(reply.elapsedMs);
+              } else actual = await variant.engine!.suggest(text, catalog, env, discovery, undefined, signal);
+              hostMs = performance.now() - start;
+              bytes = Buffer.byteLength(JSON.stringify({ text })) + Buffer.byteLength(JSON.stringify({ candidates: actual }));
+              await delay(rtt / 2);
+            } else {
+              const includePaths = !(rust && compoundRepairRecommended(text, { compoundRepair: true } as any)) && (!variant.optimized || !(rust ? rust.directoryInput(text) : m.directoryInput(text)));
+              const snapshot = await cache.get(transport, signal, includePaths, variant.optimized ? 1 : undefined);
+              if (rust && compoundRepairRecommended(text, snapshot)) {
+                nativeDelegated = true;
+                requests++; bytes += Buffer.byteLength(JSON.stringify({ kind: 'repair', key: snapshot.key, catalogKey: snapshot.catalogKey, text }));
+                await delay(rtt / 2); const start = performance.now();
+                actual = await rust.repair(text,snapshot,signal); hostMs += performance.now()-start;
+                bytes += Buffer.byteLength(JSON.stringify(actual)); await delay(rtt / 2);
+              } else for (let attempt = 0; ; attempt++) {
+                host = new m.RemoteHost(transport, snapshot, signal, syntax, directories);
+                try {
+                  const requestHost = host;
+                  const metadata = (discovery as any).forHost ? (discovery as any).forHost({ help: (command: string, route: string[]) => requestHost.help(command, route), describe: (command: string) => requestHost.describe(command) }) : discovery;
+                  actual = rust ? await rust.suggest(text, snapshot, host, signal) : await variant.engine!.suggest(text, snapshot.catalog, { HOME: snapshot.home, HOST_CONTEXT: snapshot.discoveryKey }, metadata, host, undefined, signal);
+                  if (variant.optimized) await host.verify();
+                  break;
+                } catch (error) { if (!variant.optimized || !(error instanceof m.DirectoryChanged) || attempt >= 2) throw error; }
+              }
+            }
+            times.push(performance.now() - begin); counts.push(requests); sizes.push(bytes); hostTimes.push(hostMs);
+            if (expected === undefined) expected = actual;
+            assert.deepEqual(actual, expected, `${variant.name}: ${name}, RTT=${rtt}, iteration=${i}`); comparisons++;
           }
-          times.push(performance.now() - begin); counts.push(requests); sizes.push(bytes); hostTimes.push(hostMs);
-          if (expected === undefined) expected = actual;
-          assert.deepEqual(actual, expected, `${variant.name}: ${name}, RTT=${rtt}, iteration=${i}`); comparisons++;
-        }
-        const row = { variant: variant.name, case: name, rtt, coldMs: rounded(times[0]), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: counts[0], warmRequests: median(counts.slice(1)), coldBytes: sizes[0], warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), engine: rust ? variant.client ? nativeDelegated ? 'rust-client-native' : 'rust-wasm' : 'rust-native' : 'typescript', initializationMs: rust?.initializationMs || 0, idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
-        const warm = latencyStatistics(times.slice(1));
-        measurements.set(row, { cold: times[0], warm });
-        Object.assign(row, { warmRepeats, warmP95Ms: rounded(warm.p95), ...(warm.lower95 !== undefined ? { warmMedian95Ms: [rounded(warm.lower95), rounded(warm.upper95!)] } : {}), ...(nativeEngineTimes.length ? { nativeEngineWarmMs: rounded(median(nativeEngineTimes.slice(1))), nativeEngineWarmP95Ms: rounded(latencyStatistics(nativeEngineTimes.slice(1)).p95) } : {}) });
-        rows.push(row); console.log(JSON.stringify(row));
-      } finally { discovery.dispose(); help?.dispose(); }
+          coldTimes.push(times[0]); coldCounts.push(counts[0]); coldSizes.push(sizes[0]);
+          if (coldTrial < coldRepeats - 1) continue;
+          const row = { variant: variant.name, case: name, rtt, coldMs: rounded(median(coldTimes)), firstColdMs: rounded(coldTimes[0]), coldSamplesMs: coldTimes.map(rounded), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: Math.max(...coldCounts), warmRequests: median(counts.slice(1)), coldBytes: median(coldSizes), warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), engine: rust ? variant.client ? nativeDelegated ? 'rust-client-native' : 'rust-wasm' : 'rust-native' : 'typescript', initializationMs: rust?.initializationMs || 0, idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
+          const warm = latencyStatistics(times.slice(1));
+          measurements.set(row, { cold: median(coldTimes), warm });
+          Object.assign(row, { warmRepeats, warmP95Ms: rounded(warm.p95), ...(warm.lower95 !== undefined ? { warmMedian95Ms: [rounded(warm.lower95), rounded(warm.upper95!)] } : {}), ...(nativeEngineTimes.length ? { nativeEngineWarmMs: rounded(median(nativeEngineTimes.slice(1))), nativeEngineWarmP95Ms: rounded(latencyStatistics(nativeEngineTimes.slice(1)).p95) } : {}) });
+          rows.push(row); console.log(JSON.stringify(row));
+        } finally { discovery.dispose(); help?.dispose(); }
+      }
     }
   }
+  await mkdir(new URL('../.test-artifacts/', import.meta.url), { recursive: true });
+  const output = process.env.BENCH_OUTPUT || new URL('../.test-artifacts/architecture-benchmark.json', import.meta.url);
+  await writeFile(output, JSON.stringify({ revisions: loaded.map(({ name, revision }) => ({ name, revision })), repeats, cpuRepeats, coldRepeats, comparisons, runtime: process.version, platform: `${process.platform}/${process.arch}`, rows }, null, 2));
   if (shared) for (const mode of ['master', 'experiment']) for (const after of rows.filter(row => row.variant === mode + ' after')) {
     const before = rows.find(row => row.variant === mode + ' before' && row.case === after.case && row.rtt === after.rtt)!;
     assert.ok(after.coldRequests <= before.coldRequests, `${mode}: ${after.case} gained cold requests`);
@@ -179,7 +190,4 @@ esac
       assert.ok(!latencyRegressed(a.warm, b.warm, 0.15), `${mode}: ${after.case} RTT=${after.rtt} confirmed warm median regression (${before.warmMs} -> ${after.warmMs})`);
     }
   }
-  await mkdir(new URL('../.test-artifacts/', import.meta.url), { recursive: true });
-  const output = process.env.BENCH_OUTPUT || new URL('../.test-artifacts/architecture-benchmark.json', import.meta.url);
-  await writeFile(output, JSON.stringify({ revisions: loaded.map(({ name, revision }) => ({ name, revision })), repeats, cpuRepeats, comparisons, runtime: process.version, platform: `${process.platform}/${process.arch}`, rows }, null, 2));
 } finally { await Promise.all(rustPeers.map(peer => peer?.dispose())); await rm(temp, { recursive: true, force: true }); }

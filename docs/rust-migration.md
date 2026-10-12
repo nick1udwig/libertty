@@ -189,11 +189,13 @@ Linux ARM64 and macOS Apple Silicon run the same checks on their own runners, an
 The architecture baseline uses `BENCH_SUITE=shared`, both before references set to `.`, the after reference set to `.`, and RTTs of 0, 50, and 150 milliseconds.
 Rust comparisons use at least 31 warm CPU repetitions through `BENCH_CPU_REPEATS` and three warm network repetitions through `BENCH_REPEATS`.
 The benchmark records cold and warm latency, warm p95 latency, foreground request counts, bytes, host time, and separate idle push costs for every case.
+Cold latency is the median of fresh application-cache trials, controlled by `BENCH_COLD_REPEATS` and defaulting to `BENCH_REPEATS`, with the first call and every cold sample retained separately.
 Native measurements additionally report engine latency separately from peer-process IPC.
 Native and Wasm candidate results must match the reference exactly, and cold and warm foreground request counts must not increase in either mode.
 Median warm latency must stay within the larger of 20 percent or 0.15 milliseconds of the corresponding reference measurement on the same runner.
 For sufficiently sampled CPU cases, a warm regression fails only when the 95 percent median intervals confirm it exceeds that allowance, and raw medians and intervals remain in the report.
 Cold latency retains the larger of 20 percent or 10 milliseconds as its allowance for subprocess startup variation.
+The benchmark writes its measurements before evaluating latency gates so a failing CI run retains the evidence.
 Use at least 31 warm CPU samples and rerun a noisy failed latency measurement before declaring a regression, while candidate or request-count failures always fail immediately.
 Cold browser initialization and Wasm download time must be measured separately and included in the browser performance report.
 
