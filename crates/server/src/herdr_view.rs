@@ -14,12 +14,20 @@ struct Inner {
     dictation: Option<Recording>,
     dictation_id: String,
 }
+struct Input {
+    text: String,
+    paste: bool,
+    guard: Option<(u64, String)>,
+    command: Option<String>,
+    complete: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
 pub struct View {
     target: Target,
     agent: Value,
     inner: Mutex<Inner>,
-    input: tokio::sync::Mutex<()>,
     capacity: Arc<Semaphore>,
+    pending_input: mpsc::Sender<Input>,
     send: crate::viewer_queue::Sender,
     terminal: Subscription,
     history: crate::herdr_history::Hub,
@@ -61,6 +69,7 @@ impl View {
         let subscription = history.subscribe(target.clone(), agent["paneId"].clone())?;
         let (active, _) = tokio::sync::watch::channel(true);
         let (layout, _) = tokio::sync::watch::channel(0);
+        let (pending_input, mut inputs) = mpsc::channel::<Input>(128);
         let view = Arc::new(Self {
             target,
             agent,
@@ -69,8 +78,8 @@ impl View {
                 dictation: None,
                 dictation_id: String::new(),
             }),
-            input: tokio::sync::Mutex::new(()),
             capacity: Arc::new(Semaphore::new(128)),
+            pending_input,
             send,
             terminal,
             history: history.clone(),
@@ -88,6 +97,26 @@ impl View {
             );
         }
         view.send(json!({"type":"state","state":{"cwd":view.agent["cwd"],"ready":false,"inputTarget":"program","terminalScroll":true,"exited":false,"prompt":1,"promptRevision":0,"inputRevision":0}}));
+        let weak = Arc::downgrade(&view);
+        let lifetime = view.cancel.clone();
+        // One worker preserves receive order across typing, commands and dictation.
+        tokio::spawn(async move {
+            loop {
+                let input = tokio::select! {biased;_=lifetime.cancelled()=>break,input=inputs.recv()=>input};
+                let Some(input) = input else { break };
+                let Some(view) = weak.upgrade() else { break };
+                let guard = input
+                    .guard
+                    .as_ref()
+                    .map(|(revision, id)| (*revision, id.as_str()));
+                let result = view.input_serial(&input.text, input.paste, guard).await;
+                if let Some(complete) = input.complete {
+                    let _ = complete.send(result);
+                } else {
+                    view.input_complete(input.command.as_deref(), result);
+                }
+            }
+        });
         let weak = Arc::downgrade(&view);
         let lifetime = view.cancel.clone();
         let slow = view.terminal.slow.clone();
@@ -212,12 +241,69 @@ impl View {
         if text.encode_utf16().count() > 16000 {
             return Err("Terminal input exceeded its limit.".into());
         }
-        let _permit = self
+        let permit = self
             .capacity
             .clone()
             .try_acquire_owned()
             .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
-        let _serial = tokio::select! {biased;_=self.cancel.cancelled()=>return Err("The agent view changed. No input was sent.".into()),serial=self.input.lock()=>serial};
+        let (complete, result) = tokio::sync::oneshot::channel();
+        self.pending_input
+            .try_send(Input {
+                text: text.into(),
+                paste,
+                guard: guard.map(|(revision, id)| (revision, id.into())),
+                command: None,
+                complete: Some(complete),
+                _permit: permit,
+            })
+            .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
+        tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=result=>result.map_err(|_| "The agent view changed. No input was sent.".to_owned())?}
+    }
+    fn queue_input(&self, text: String, command: Option<String>) {
+        let permit = match self.capacity.clone().try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(_) => {
+                self.input_complete(
+                    command.as_deref(),
+                    Err("Terminal input exceeded its limit.".into()),
+                );
+                return;
+            }
+        };
+        if let Err(error) = self.pending_input.try_send(Input {
+            text,
+            paste: false,
+            guard: None,
+            command,
+            complete: None,
+            _permit: permit,
+        }) {
+            self.input_complete(
+                error.into_inner().command.as_deref(),
+                Err("Terminal input exceeded its limit.".into()),
+            );
+        }
+    }
+    fn input_complete(&self, command: Option<&str>, result: Result<(), String>) {
+        if let Some(id) = command {
+            let mut reply = json!({"type":"result","id":id,"accepted":result.is_ok()});
+            if let Err(error) = result {
+                reply["message"] = json!(error);
+            }
+            self.send(reply);
+        } else if let Err(message) = result {
+            self.send(json!({"type":"reading-error","message":message}));
+        }
+    }
+    async fn input_serial(
+        &self,
+        text: &str,
+        paste: bool,
+        guard: Option<(u64, &str)>,
+    ) -> Result<(), String> {
+        if text.encode_utf16().count() > 16000 {
+            return Err("Terminal input exceeded its limit.".into());
+        }
         let work = async {
             if self.cancel.is_cancelled() {
                 return Err("The agent view changed. No input was sent.".into());
@@ -401,12 +487,7 @@ impl View {
                     .ok_or("Invalid input")?
                     .to_owned();
                 self.inner.lock().unwrap().revision += 1;
-                let view = self.clone();
-                tokio::spawn(async move {
-                    if let Err(message) = view.input(&text, false, None).await {
-                        view.send(json!({"type":"reading-error","message":message}));
-                    }
-                });
+                self.queue_input(text, None);
                 Ok(())
             }
             "command" => {
@@ -423,15 +504,7 @@ impl View {
                     .ok_or("Invalid command")?
                     .to_owned();
                 self.inner.lock().unwrap().revision += 1;
-                let view = self.clone();
-                tokio::spawn(async move {
-                    let result = view.input(&(command + "\r"), false, None).await;
-                    let mut reply = json!({"type":"result","id":id,"accepted":result.is_ok()});
-                    if let Err(error) = result {
-                        reply["message"] = json!(error);
-                    }
-                    view.send(reply);
-                });
+                self.queue_input(command + "\r", Some(id));
                 Ok(())
             }
             "dictation" => {
