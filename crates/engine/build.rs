@@ -29,12 +29,13 @@ fn main() {
         }
     }
     let output = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("patterns.rs");
-    std::fs::write(
-        output,
-        format!(
-            "pub const PATTERNS: &[&str] = &{:?};",
-            patterns.0.into_iter().collect::<Vec<_>>()
-        ),
-    )
-    .unwrap();
+    let patterns = patterns.0.into_iter().collect::<Vec<_>>();
+    let mut source = format!(
+        "pub const PATTERNS: &[&str] = &{patterns:?};\n#[inline(always)]\npub fn compiled(pattern: &str) -> Option<&'static std::sync::Arc<regex::Regex>> {{ match pattern {{\n"
+    );
+    for pattern in patterns {
+        source.push_str(&format!("{pattern:?} => {{ static CACHE: std::sync::OnceLock<std::sync::Arc<regex::Regex>> = std::sync::OnceLock::new(); Some(CACHE.get_or_init(|| std::sync::Arc::new(super::compile({pattern:?})))) }},\n"));
+    }
+    source.push_str("_ => None, } }\n");
+    std::fs::write(output, source).unwrap();
 }

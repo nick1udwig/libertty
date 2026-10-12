@@ -85,32 +85,49 @@ fn array_hash(values: &[String]) -> u64 {
     hash.finish()
 }
 
+pub(crate) mod patterns {
+    include!(concat!(env!("OUT_DIR"), "/patterns.rs"));
+}
+fn compile(pattern: &str) -> Regex {
+    // Match ECMAScript expressions without the Unicode flag.
+    let javascript = pattern
+        .replace(r"\b", r"(?-u:\b)")
+        .replace(r"\w", "[a-zA-Z0-9_]")
+        .replace(r"\W", "[^a-zA-Z0-9_]")
+        .replace(r"\s", r"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]");
+    Regex::new(&javascript).expect("static engine regex")
+}
+#[inline]
 pub fn regex(pattern: &str) -> Arc<Regex> {
+    if let Some(regex) = patterns::compiled(pattern) {
+        return regex.clone();
+    }
+    // Nonliteral patterns retain a bounded fallback cache.
     static CACHE: OnceLock<Mutex<HashMap<String, Arc<Regex>>>> = OnceLock::new();
     let mut cache = CACHE
         .get_or_init(Default::default)
         .lock()
         .expect("regex cache poisoned");
-    cache
-        .entry(pattern.into())
-        .or_insert_with(|| {
-            // The reference uses ECMAScript regexes without the Unicode flag.
-            // Its word boundaries are ASCII, and its whitespace includes the BOM.
-            let javascript = pattern
-                .replace(r"\b", r"(?-u:\b)")
-                .replace(r"\w", "[a-zA-Z0-9_]")
-                .replace(r"\W", "[^a-zA-Z0-9_]")
-                .replace(r"\s", r"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]");
-            Arc::new(Regex::new(&javascript).expect("static engine regex"))
-        })
-        .clone()
+    if let Some(regex) = cache.get(pattern) {
+        return regex.clone();
+    }
+    let regex = Arc::new(compile(pattern));
+    if cache.len() >= 256 {
+        let key = cache.keys().next().unwrap().clone();
+        cache.remove(&key);
+    }
+    cache.insert(pattern.into(), regex.clone());
+    regex
 }
+#[inline]
 pub fn test(pattern: &str, text: &str) -> bool {
     regex(pattern).is_match(text)
 }
+#[inline]
 pub fn replace(pattern: &str, text: &str, replacement: &str) -> String {
     regex(pattern).replace_all(text, replacement).into_owned()
 }
+
 pub fn utf16_len(text: &str) -> usize {
     text.encode_utf16().count()
 }
@@ -167,4 +184,33 @@ pub fn locale_cmp(left: &str, right: &str) -> Ordering {
                 .expect("compiled Unicode collation data")
         })
         .compare(left, right)
+}
+
+#[cfg(test)]
+mod regex_tests {
+    use super::*;
+    #[test]
+    fn literal_regexes_share_one_compilation_across_threads_and_keep_js_semantics() {
+        let pattern = r"\bcat\b";
+        let first = regex(pattern);
+        let threads: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(move || {
+                    let compiled = regex(pattern);
+                    assert!(compiled.is_match("écaté"));
+                    assert!(!compiled.is_match("scatter"));
+                    compiled
+                })
+            })
+            .collect();
+        for thread in threads {
+            assert!(Arc::ptr_eq(&first, &thread.join().unwrap()));
+        }
+        let first = regex("^[a-zA-Z0-9_@%+=:,./~-]+$");
+        assert!(Arc::ptr_eq(
+            &first,
+            patterns::compiled("^[a-zA-Z0-9_@%+=:,./~-]+$").unwrap()
+        ));
+        assert!(test(r"^\s$", "\u{feff}"));
+    }
 }

@@ -28,11 +28,8 @@ pub const INPUT_LIMIT: usize = 64 * 1024 * 1024;
 /// Prepare immutable language resources before accepting requests.
 /// This performs no host callbacks and does not populate catalog or fact caches.
 pub fn initialize() {
-    mod patterns {
-        include!(concat!(env!("OUT_DIR"), "/patterns.rs"));
-    }
     command_policy::vocabulary();
-    for pattern in patterns::PATTERNS {
+    for pattern in util::patterns::PATTERNS {
         util::regex(pattern);
     }
     util::locale_cmp("", "");

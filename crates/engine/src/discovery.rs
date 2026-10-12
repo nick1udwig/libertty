@@ -19,6 +19,7 @@ struct Snapshot {
 pub struct Discovery {
     snapshots: RefCell<VecDeque<Snapshot>>,
     warmed: RefCell<VecDeque<(String, f64)>>,
+    context: RefCell<Option<(String, Environment, String)>>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,12 +97,25 @@ fn record(
     }
 }
 impl Discovery {
+    fn context(&self, catalog: &Catalog, env: &Environment) -> String {
+        let mut cached = self.context.borrow_mut();
+        if let Some((cwd, environment, key)) = cached.as_ref()
+            && *cwd == catalog.cwd
+            && environment == env
+        {
+            return key.clone();
+        }
+        let key = context(catalog, env);
+        *cached = Some((catalog.cwd.clone(), env.clone(), key.clone()));
+        key
+    }
     pub fn seed(&self, metadata: &CommandMetadata, catalog: &Catalog, env: &Environment, now: f64) {
         self.remember(metadata, catalog, env, now);
     }
     pub fn clear(&self) {
         self.snapshots.borrow_mut().clear();
         self.warmed.borrow_mut().clear();
+        self.context.borrow_mut().take();
     }
     pub fn prewarm_targets(&self, catalog: &Catalog, env: &Environment, now: f64) -> Vec<String> {
         let common = [
@@ -138,7 +152,7 @@ impl Discovery {
                 break;
             }
         }
-        let key = context(catalog, env);
+        let key = self.context(catalog, env);
         let warmed = self.warmed.borrow();
         let mut targets = vec![];
         for target in std::iter::once(common[0].to_owned())
@@ -162,7 +176,7 @@ impl Discovery {
         targets
     }
     pub fn mark_warmed(&self, target: &str, catalog: &Catalog, env: &Environment, now: f64) {
-        let key = format!("{}{target}", context(catalog, env));
+        let key = format!("{}{target}", self.context(catalog, env));
         let mut warmed = self.warmed.borrow_mut();
         if let Some((_, until)) = warmed.iter_mut().find(|(entry, _)| *entry == key) {
             *until = now + 600000.0;
@@ -174,7 +188,7 @@ impl Discovery {
         }
     }
     pub fn cached(&self, catalog: &Catalog, env: &Environment, now: f64) -> CommandMetadata {
-        let key = context(catalog, env);
+        let key = self.context(catalog, env);
         self.snapshots
             .borrow()
             .iter()
@@ -183,7 +197,7 @@ impl Discovery {
             .unwrap_or_else(CommandMetadata::empty)
     }
     fn remember(&self, metadata: &CommandMetadata, catalog: &Catalog, env: &Environment, now: f64) {
-        let key = context(catalog, env);
+        let key = self.context(catalog, env);
         let mut snapshots = self.snapshots.borrow_mut();
         if let Some(entry) = snapshots
             .iter_mut()
