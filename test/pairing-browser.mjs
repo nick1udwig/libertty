@@ -32,6 +32,7 @@ try {
   assert.equal(await deniedUpgrade({ Origin: origin }), 403, 'unpaired Vite upgrades must fail');
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
   const page = await browser.newPage(); const errors = []; const hmr = [];
+  await page.context().route(url => url.pathname.endsWith('/api/dictation'), route => route.fulfill({ json: { installed: true, available: true } }));
   page.on('pageerror', e => errors.push(e.message)); page.on('console', m => { if (m.text().includes('[vite]')) hmr.push(m.text()); });
   await page.goto(base);
   const input = page.locator('#token'), submit = page.locator('#login-form button[type=submit]');
@@ -42,7 +43,9 @@ try {
   const frame = await (await page.locator('#terminal-stack iframe').elementHandle()).contentFrame();
   await frame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected');
   await frame.waitForFunction(() => document.querySelector('#shell-status')?.textContent === 'At prompt');
-  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('printf dev-paired > checked.txt'); await page.keyboard.press('Enter');
+  await frame.locator('#terminal canvas').click();
+  assert.equal(await frame.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Clicking the terminal must enable input');
+  await page.keyboard.type('printf dev-paired > checked.txt'); await page.keyboard.press('Enter');
   for (let i = 0; await readFile(directory + '/checked.txt', 'utf8').catch(() => '') !== 'dev-paired'; i++) {
     assert.ok(i < 100, 'paired terminal must execute the command'); await new Promise(resolve => setTimeout(resolve, 50));
   }
