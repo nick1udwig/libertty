@@ -220,18 +220,28 @@ async fn incremental_join_refresh_preserves_controller_and_observers_cannot_repa
     tokio::time::sleep(Duration::from_millis(30)).await;
     assert!(second_frames.try_recv().is_err());
     second.resize(Some(Size { cols: 40, rows: 30 })).unwrap();
+    frame(&mut second_frames, 40, true).await;
     second.refresh();
     frame(&mut second_frames, 40, true).await;
     assert_eq!(fixture.events("open").len(), 1);
     first.resize(Some(Size { cols: 55, rows: 25 })).unwrap();
     frame(&mut first_frames, 55, true).await;
+    frame(&mut second_frames, 55, true).await;
     second.refresh();
     frame(&mut second_frames, 55, true).await;
-    until(|| fixture.events("command").len() == 3).await;
+    until(|| fixture.events("command").len() == 4).await;
     let commands = fixture.events("command");
     assert_eq!(
-        commands.last().unwrap()["message"],
-        json!({"type":"terminal.resize","cols":55,"rows":25})
+        commands
+            .iter()
+            .map(|command| command["message"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            json!({"type":"terminal.resize","cols":40,"rows":30}),
+            json!({"type":"terminal.resize","cols":40,"rows":30}),
+            json!({"type":"terminal.resize","cols":55,"rows":25}),
+            json!({"type":"terminal.resize","cols":55,"rows":25}),
+        ]
     );
     let (send, _) = mpsc::channel(128);
     let observer = hub
