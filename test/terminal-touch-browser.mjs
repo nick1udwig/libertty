@@ -30,6 +30,11 @@ try {
     await installWireObserver(context);
   await context.addInitScript(({ accessToken }) => {
       window.__copies = []; window.__inputs = []; window.__opened = [];
+      window.__nativeTouches = [];
+      for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel']) document.addEventListener(type, event => {
+        if (event.isTrusted) window.__nativeTouches.push({ type, at: event.timeStamp, target: event.target?.tagName, x: event.clientX, y: event.clientY,
+          touches: event.changedTouches && [...event.changedTouches].map(touch => ({ id: touch.identifier, x: touch.clientX, y: touch.clientY })) });
+      }, { capture: true });
       Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.__copies.push(text); } } });
       window.open = (...args) => { window.__opened.push(args); return null; };
       const Original = WebSocket;
@@ -99,16 +104,22 @@ try {
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta gamma');
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
     for (const [needle, expected] of [['https://example.com/touch', 'https://example.com/touch'], ['Open help', 'https://example.com/help']]) {
-      const point = await frame.evaluate(needle => {
+      const linkPoint = () => frame.evaluate(needle => {
         const t = window.__testTerminal, b = t.buffer.active, r = document.querySelector('#terminal canvas').getBoundingClientRect(), top = b.length - t.rows;
         for (let row = 0; row < t.rows; row++) { const col = b.getLine(top + row)?.translateToString(true).indexOf(needle) ?? -1; if (col >= 0) return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; } throw new Error('Missing link');
       }, needle);
+      const point = await linkPoint();
       await touch('touchstart', point); await touch('touchend', point);
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected, 'Touch-only taps activate terminal links');
       const count = await frame.evaluate(() => window.__opened.length);
       await frame.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-      await page.touchscreen.tap(point.x, point.y);
-      await frame.waitForFunction(count => window.__opened.length >= count + 1, count);
+      const nativePoint = await linkPoint(), frameBounds = await page.locator('iframe').boundingBox();
+      await page.touchscreen.tap(frameBounds.x + nativePoint.x, frameBounds.y + nativePoint.y);
+      await frame.waitForFunction(count => window.__opened.length >= count + 1, count).catch(async error => {
+        console.error('Native link tap:', { herdr, needle, nativePoint, frameBounds, observed: await frame.evaluate(() => ({ opened: window.__opened, events: window.__nativeTouches,
+          viewport: { width: innerWidth, height: innerHeight, scale: visualViewport?.scale }, rows: window.__testTerminal.rows, cols: window.__testTerminal.cols, scroll: window.__testTerminal.getViewportY() })) });
+        throw error;
+      });
       assert.equal(await frame.evaluate(() => window.__opened.length), count + 1, 'Native pointer/touch delivery opens a link exactly once');
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected);
     }
