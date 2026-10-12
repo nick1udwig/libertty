@@ -173,7 +173,9 @@ try {
       try { await locator.scrollIntoViewIfNeeded(); rect = await locator.boundingBox(); return !!rect; }
       catch (error) { if (!error.message.includes('not attached')) throw error; return false; }
     }, 'attached tab for long press');
-    await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd');
+    await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.waitForFunction(() => [...document.querySelectorAll('.herdr-tab-menu, .host-terminal-menu')].some(menu => menu.checkVisibility({ checkVisibilityCSS: true })));
+    await touch('touchEnd');
   };
   const swipeStrip = async mode => {
     const style = await page.addStyleTag({ content: '.herdr-agent-strip .herdr-agent-tab { min-width: 260px; }' });
@@ -277,8 +279,13 @@ try {
   await page.setViewportSize({ width: 1100, height: 900 });
   await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#font-size').fill('24'); await page.locator('#page-back').click();
   await until(async () => await terminal.evaluate(() => window.__testTerminal.cols === 80), 'Desktop full-width layout retains the native column count after releasing mobile geometry');
+  await terminal.waitForFunction(() => {
+    const viewport = document.querySelector('#terminal-viewport');
+    return window.__testTerminal.options.fontSize === 32 && viewport.classList.contains('full-width') && viewport.scrollWidth > viewport.clientWidth + 160;
+  });
   const wideBounds = await terminal.locator('#terminal-viewport').boundingBox();
   await touch('touchStart', wideBounds.x + 250, wideBounds.y + 200); await delay(30); await touch('touchMove', wideBounds.x + 90, wideBounds.y + 200); await touch('touchEnd');
+  await terminal.waitForFunction(() => document.querySelector('#terminal-viewport').scrollLeft > 100);
   assert.ok(await terminal.locator('#terminal-viewport').evaluate(el => el.scrollLeft > 100), 'Full-width terminal pans sideways with the shared gesture code');
   assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Panning leaves the keyboard closed');
   await terminal.locator('#terminal-viewport').evaluate(el => el.scrollLeft = 0); await terminal.evaluate(() => window.__testTerminal.scrollToBottom());
