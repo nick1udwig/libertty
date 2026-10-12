@@ -1338,6 +1338,17 @@ async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body
                 session
                     .context(input["known"].as_str(), input["paths"] != false)
                     .await
+            } else if input["kind"] == "repair" {
+                session
+                    .repair(
+                        input["key"].as_str().ok_or("Expected a context key.")?,
+                        input["catalogKey"]
+                            .as_str()
+                            .ok_or("Expected a catalog key.")?,
+                        input["text"].as_str().ok_or("Expected command text.")?,
+                        cancel,
+                    )
+                    .await
             } else if let Some(key) = input["key"].as_str() {
                 session.read_facts(key, &input["operations"], cancel).await
             } else {

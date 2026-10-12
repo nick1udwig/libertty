@@ -7,6 +7,7 @@ export function rustArchitectureAdapter(catalog: Catalog, environment: Record<st
   read(key: string, operations: any[], signal?: AbortSignal): Promise<any>;
   directory(directory: string): Promise<any>;
   native(text: string, signal?: AbortSignal): Promise<{ candidates: Candidate[]; elapsedMs: number }>;
+  repair(text: string, snapshot: any, signal?: AbortSignal): Promise<Candidate[]>;
   suggest(text: string, snapshot: any, host: any, signal: AbortSignal): Promise<Candidate[]>;
   dispose(): Promise<void>;
 }>;

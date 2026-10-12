@@ -132,6 +132,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .await?
                 ));
             }
+            if request.operation == "benchRepair" {
+                let key = request.args[0].as_str().ok_or("Invalid context key.")?;
+                if key != facts::context_key(1, &host.catalog, &host.environment) {
+                    return Err("Shell context changed. Try again.".into());
+                }
+                let catalog = facts
+                    .repair_catalog(key, request.args[1].as_str().ok_or("Invalid catalog key.")?)
+                    .ok_or("Missing repair catalog.")?;
+                let mut prepared = host.clone();
+                prepared.catalog = catalog;
+                if prepared.catalog.paths.is_empty()
+                    && termai_engine::path_repair::directory_input(
+                        request.args[2].as_str().ok_or("Invalid text.")?,
+                    )
+                    .is_none()
+                {
+                    prepared.catalog.paths = host.catalog.paths.clone();
+                }
+                for _ in 0..3 {
+                    prepared.verify_listings();
+                    let result = engine
+                        .suggest(
+                            request.args[2].as_str().ok_or("Invalid text.")?,
+                            &prepared,
+                            &cancel,
+                        )
+                        .await?;
+                    if prepared.listings_unchanged(&cancel).await? {
+                        return Ok(result);
+                    }
+                }
+                return Err("Directory changed. Try again.".into());
+            }
             if request.operation == "benchFacts" {
                 if request.args[0].as_str()
                     != Some(&facts::context_key(1, &host.catalog, &host.environment))

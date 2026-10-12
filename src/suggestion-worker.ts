@@ -4,6 +4,7 @@ import { WasmEngine, type HostProvider } from './engine/wasm.ts';
 import engineUrl from './engine/termai-engine.wasm?url';
 import type { Candidate } from './protocol.ts';
 import { ContextCache, RemoteHost, type FactTransport } from './remote-host.ts';
+import { compoundRepairRecommended } from './compound-repair.ts';
 
 let context = new ContextCache();
 let directories = new DirectoryCache();
@@ -41,6 +42,9 @@ self.onmessage = async (event: MessageEvent<{ id: number; text?: string; endpoin
   };
   try {
     const search = async (snapshot: Awaited<ReturnType<ContextCache['get']>>) => {
+      if (compoundRepairRecommended(text, snapshot)) {
+        return transport<Candidate[]>({ kind: 'repair', key: snapshot.key, catalogKey: snapshot.catalogKey, text }, signal);
+      }
       const engine = await rust(); signal.throwIfAborted();
       for (let attempt = 0; ; attempt++) {
         const host = new RemoteHost(transport, snapshot, signal, syntaxCache, directories);

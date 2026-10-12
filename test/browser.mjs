@@ -375,7 +375,10 @@ try {
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'cd ~/git/pebble-agent');
   context.off('request', captureDirectoryRequest);
   assert.equal(directoryRequests.length, 1, JSON.stringify(directoryRequests));
-  if (engine === 'client') assert.ok(directoryRequests[0].operations.some(operation => operation.kind === 'directory'));
+  if (engine === 'client') {
+    if (rustBackend) { assert.equal(directoryRequests[0].kind, 'repair'); assert.ok(directoryRequests[0].catalogKey); }
+    else assert.ok(directoryRequests[0].operations.some(operation => operation.kind === 'directory'));
+  }
   else {
     assert.equal(workers.length, 0, 'Server mode must not start a repair worker');
     assert.ok(!requests.some(url => url.endsWith('/api/facts')), 'Server mode must not fetch host facts');

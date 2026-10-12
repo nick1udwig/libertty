@@ -30,6 +30,15 @@ pub fn context_key(
     digest(&json!([prompt, catalog.cwd, environment]))
 }
 impl Facts {
+    pub fn repair_catalog(&self, context: &str, catalog: &str) -> Option<Catalog> {
+        if self.context.as_ref()?.2 != context {
+            return None;
+        }
+        self.catalogs
+            .iter()
+            .find(|entry| entry.key == catalog)
+            .map(|entry| entry.catalog.clone())
+    }
     pub fn context(
         &mut self,
         prompt: u64,
@@ -86,7 +95,7 @@ impl Facts {
             .iter()
             .find(|old| old.catalog == catalog)
             .unwrap();
-        let mut reply = json!({"key":key,"catalogKey":prepared.key,"prompt":prompt,"pathsIncluded":include_paths,"home":environment.get("HOME").cloned().unwrap_or_default(),"discoveryKey":self.environment.as_ref().unwrap().1});
+        let mut reply = json!({"key":key,"catalogKey":prepared.key,"prompt":prompt,"pathsIncluded":include_paths,"home":environment.get("HOME").cloned().unwrap_or_default(),"discoveryKey":self.environment.as_ref().unwrap().1,"compoundRepair":true});
         if known != Some(prepared.key.as_str()) {
             if let Some(old) = self
                 .catalogs

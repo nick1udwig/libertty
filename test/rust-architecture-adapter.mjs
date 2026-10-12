@@ -44,6 +44,7 @@ export async function rustArchitectureAdapter(catalog, environment, client, brid
     read: (key, operations, signal) => call('benchFacts', [key, operations], signal),
     directory: directory => call('benchDirectory', [directory]),
     native: (text, signal) => call('benchSuggest', [text], signal),
+    repair: (text, snapshot, signal) => call('benchRepair', [snapshot.key, snapshot.catalogKey, text], signal),
     async suggest(text, snapshot, host, signal) {
       let changed;
       const provide = async (callback, abort) => ({ results: await Promise.all(callback.operations.map(async operation => {

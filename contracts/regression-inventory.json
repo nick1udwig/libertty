@@ -424,7 +424,7 @@
     },
     {
       "source": "src/engine/wasm.ts",
-      "lines": 217,
+      "lines": 248,
       "destination": "src/engine/wasm.ts",
       "status": "frontend-adapter",
       "coverage": "The production worker owns Wasm memory, host callbacks, cancellation, reset and request lifetimes; actual mounted browser checks pass."
@@ -440,6 +440,7 @@
         "node:path",
         "node:url",
         "node:assert/strict",
+        "../src/compound-repair.ts",
         "./rust-architecture-adapter.mjs",
         "./architecture-stats.ts",
         "../src/protocol.ts"
@@ -742,6 +743,30 @@
             "test/browser.mjs"
           ],
           "justification": "The named native tests preserve these assertions; reference corpora compare complete values and recorded host operations in native Rust and Chromium Wasm."
+        }
+      ]
+    },
+    {
+      "source": "test/compound-repair.test.ts",
+      "imports": [
+        "node:test",
+        "node:assert/strict",
+        "../src/compound-repair.ts",
+        "../src/facts.ts"
+      ],
+      "assertions": [
+        "dependent repairs require advertised capability and keep simple inputs local"
+      ],
+      "classification": "frontend",
+      "equivalent": "test/compound-repair.test.ts",
+      "status": "retained",
+      "justification": "Frontend behavior remains TypeScript and retains its existing unit harness.",
+      "coverage": [
+        {
+          "assertion": "dependent repairs require advertised capability and keep simple inputs local",
+          "status": "retained",
+          "equivalent": "test/compound-repair.test.ts",
+          "justification": "Frontend behavior remains TypeScript and retains its existing unit harness."
         }
       ]
     },

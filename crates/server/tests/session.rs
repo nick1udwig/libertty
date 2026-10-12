@@ -144,6 +144,71 @@ async fn light_catalog_does_not_poison_full_paths_and_nested_changes_refresh() {
     session.dispose().await;
 }
 
+#[tokio::test]
+async fn compound_repairs_bind_saved_catalogs_to_the_live_session_context() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir(root.path().join("Workspace")).unwrap();
+    std::fs::write(
+        root.path().join("hello_world.py"),
+        "import argparse\np=argparse.ArgumentParser()\np.add_argument('--myarg')\n",
+    )
+    .unwrap();
+    let session = Session::start(
+        root.path().to_str().unwrap().into(),
+        vec!["cd".into(), "python3".into()],
+        "client".into(),
+        true,
+        HostServices::new(),
+    )
+    .await
+    .unwrap();
+    let context = session.context(None, false).await.unwrap();
+    let key = context["key"].as_str().unwrap();
+    let catalog = context["catalogKey"].as_str().unwrap();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let candidates = session
+        .repair(key, catalog, "cd work space", &cancel)
+        .await
+        .unwrap();
+    assert_eq!(candidates[0]["command"], "cd Workspace");
+    let python = session
+        .repair(
+            key,
+            catalog,
+            "Python three hello world dot py myarg food",
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(python[0]["command"], "python3 hello_world.py --myarg food");
+    assert!(
+        session
+            .repair("stale", catalog, "cd work space", &cancel)
+            .await
+            .is_err()
+    );
+    assert!(
+        session
+            .repair(key, "unknown", "cd work space", &cancel)
+            .await
+            .is_err()
+    );
+    assert!(
+        session
+            .repair(key, catalog, &"🌍".repeat(1001), &cancel)
+            .await
+            .is_err()
+    );
+    cancel.cancel();
+    assert!(
+        session
+            .repair(key, catalog, "cd work space", &cancel)
+            .await
+            .is_err()
+    );
+    session.dispose().await;
+}
+
 #[test]
 fn large_readline_and_private_utilities_run_in_isolated_home() {
     let root = tempfile::tempdir().unwrap();

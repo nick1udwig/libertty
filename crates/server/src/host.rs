@@ -37,6 +37,7 @@ impl HostServices {
         }
     }
 }
+type ListingVersions = Arc<std::sync::Mutex<BTreeMap<(String, usize), String>>>;
 #[derive(Clone)]
 pub struct NativeHost {
     pub services: HostServices,
@@ -44,8 +45,71 @@ pub struct NativeHost {
     pub catalog: Catalog,
     pub environment: Arc<BTreeMap<String, String>>,
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
+    verification: Option<ListingVersions>,
 }
 impl NativeHost {
+    pub fn verify_listings(&mut self) {
+        self.verification = Some(Default::default());
+    }
+    fn remember_listing(
+        &self,
+        path: &str,
+        limit: usize,
+        snapshot: &termai_engine::types::DirectorySnapshot,
+    ) {
+        if let Some(versions) = &self.verification {
+            versions
+                .lock()
+                .unwrap()
+                .insert((path.into(), limit), snapshot.version.clone());
+        }
+    }
+    pub async fn listings_unchanged(&self, cancel: &CancellationToken) -> Result<bool, String> {
+        let versions = self
+            .verification
+            .as_ref()
+            .map(|versions| versions.lock().unwrap().clone())
+            .unwrap_or_default();
+        let checked = futures::future::join_all(versions.into_iter().map(
+            |((path, limit), version)| async move {
+                Ok(self.snapshot(&path, limit, cancel).await?.version == version)
+            },
+        ))
+        .await;
+        Ok(checked
+            .into_iter()
+            .collect::<Result<Vec<_>, String>>()?
+            .into_iter()
+            .all(|same| same))
+    }
+    fn remember_lookup(
+        &self,
+        operation: &termai_engine::host::HostOperation,
+        value: &termai_engine::host::FactValue,
+    ) {
+        use termai_engine::host::{FactValue, HostOperation};
+        if let HostOperation::Lookup { path } = operation {
+            let listing = match value {
+                FactValue::Lookup(value) => value.listing.clone(),
+                FactValue::Json(value) => serde_json::from_value::<
+                    termai_engine::types::DirectoryLookup,
+                >(value.as_ref().clone())
+                .ok()
+                .and_then(|value| value.listing),
+                _ => None,
+            };
+            if let Some(listing) = listing {
+                self.remember_listing(
+                    std::path::Path::new(path)
+                        .parent()
+                        .and_then(|path| path.to_str())
+                        .unwrap_or("."),
+                    10000,
+                    &listing,
+                );
+            }
+        }
+    }
     pub async fn engine_operations(
         &self,
         operations: &[termai_engine::host::HostOperation],
@@ -117,14 +181,23 @@ impl NativeHost {
         cancel: &CancellationToken,
     ) -> Result<termai_engine::host::FactValue, String> {
         use termai_engine::host::{FactValue, HostOperation};
+        if self.verification.is_some()
+            && let HostOperation::Entries { path, limit } = operation
+        {
+            let listing = self.snapshot(path, *limit, cancel).await?;
+            self.remember_listing(path, *limit, &listing);
+            return Ok(FactValue::Entries(listing.entries));
+        }
         if self.remote.is_some() {
-            return self
+            let result = self
                 .fact(
                     &serde_json::to_value(operation).map_err(|e| e.to_string())?,
                     cancel,
                 )
                 .await
-                .map(Into::into);
+                .map(Into::into)?;
+            self.remember_lookup(operation, &result);
+            return Ok(result);
         }
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
@@ -168,6 +241,7 @@ impl NativeHost {
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }
+        self.remember_lookup(operation, &value);
         Ok(value)
     }
     async fn complete(
@@ -222,6 +296,7 @@ impl NativeHost {
             environment: environment.into(),
             help,
             remote: None,
+            verification: None,
         }
     }
     pub async fn fact(

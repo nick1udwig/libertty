@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
+import { compoundRepairRecommended } from '../src/compound-repair.ts';
 import { rustArchitectureAdapter } from './rust-architecture-adapter.mjs';
 import { latencyStatistics, latencyRegressed, type LatencyStatistics } from './architecture-stats.ts';
 import type { Catalog } from '../src/protocol.ts';
@@ -111,6 +112,7 @@ esac
       };
       const times: number[] = [], counts: number[] = [], sizes: number[] = [], hostTimes: number[] = [], idleBytes: number[] = [], idleTimes: number[] = [];
       const nativeEngineTimes: number[] = [];
+      let nativeDelegated = false;
       try {
         for (let i = 0; i <= warmRepeats; i++) {
           // Model an already delivered periodic idle push for warm optimized-client trials.
@@ -139,9 +141,15 @@ esac
             bytes = Buffer.byteLength(JSON.stringify({ text })) + Buffer.byteLength(JSON.stringify({ candidates: actual }));
             await delay(rtt / 2);
           } else {
-            const includePaths = !variant.optimized || !m.directoryInput(text);
+            const includePaths = !(rust && compoundRepairRecommended(text, { compoundRepair: true } as any)) && (!variant.optimized || !m.directoryInput(text));
             const snapshot = await cache.get(transport, signal, includePaths, variant.optimized ? 1 : undefined);
-            for (let attempt = 0; ; attempt++) {
+            if (rust && compoundRepairRecommended(text, snapshot)) {
+              nativeDelegated = true;
+              requests++; bytes += Buffer.byteLength(JSON.stringify({ kind: 'repair', key: snapshot.key, catalogKey: snapshot.catalogKey, text }));
+              await delay(rtt / 2); const start = performance.now();
+              actual = await rust.repair(text,snapshot,signal); hostMs += performance.now()-start;
+              bytes += Buffer.byteLength(JSON.stringify(actual)); await delay(rtt / 2);
+            } else for (let attempt = 0; ; attempt++) {
               host = new m.RemoteHost(transport, snapshot, signal, syntax, directories);
               try {
                 const requestHost = host;
@@ -156,7 +164,7 @@ esac
           if (expected === undefined) expected = actual;
           assert.deepEqual(actual, expected, `${variant.name}: ${name}, RTT=${rtt}, iteration=${i}`); comparisons++;
         }
-        const row = { variant: variant.name, case: name, rtt, coldMs: rounded(times[0]), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: counts[0], warmRequests: median(counts.slice(1)), coldBytes: sizes[0], warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), engine: rust ? variant.client ? 'rust-wasm' : 'rust-native' : 'typescript', initializationMs: rust?.initializationMs || 0, idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
+        const row = { variant: variant.name, case: name, rtt, coldMs: rounded(times[0]), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: counts[0], warmRequests: median(counts.slice(1)), coldBytes: sizes[0], warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), engine: rust ? variant.client ? nativeDelegated ? 'rust-client-native' : 'rust-wasm' : 'rust-native' : 'typescript', initializationMs: rust?.initializationMs || 0, idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
         const warm = latencyStatistics(times.slice(1));
         measurements.set(row, { cold: times[0], warm });
         Object.assign(row, { warmRepeats, warmP95Ms: rounded(warm.p95), ...(warm.lower95 !== undefined ? { warmMedian95Ms: [rounded(warm.lower95), rounded(warm.upper95!)] } : {}), ...(nativeEngineTimes.length ? { nativeEngineWarmMs: rounded(median(nativeEngineTimes.slice(1))), nativeEngineWarmP95Ms: rounded(latencyStatistics(nativeEngineTimes.slice(1)).p95) } : {}) });

@@ -1076,6 +1076,18 @@
         },
         "discoveryKey": {
           "type": "string"
+        },
+        "compoundRepair": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "const": true,
+              "type": "boolean"
+            }
+          ]
         }
       },
       "required": [
@@ -1156,6 +1168,18 @@
         },
         "discoveryKey": {
           "type": "string"
+        },
+        "compoundRepair": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "const": true,
+              "type": "boolean"
+            }
+          ]
         }
       },
       "required": [

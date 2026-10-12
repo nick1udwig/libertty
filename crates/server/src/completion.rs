@@ -71,10 +71,20 @@ async fn prepared_framework(env: &BTreeMap<String, String>) -> Option<Framework>
                 .map(|dir| format!("{dir}/bash-completion/startup")),
         );
         custom.extend(["/usr/share/bash-completion/startup".into()]);
-        if custom
-            .iter()
-            .any(|path| std::fs::symlink_metadata(path).is_ok())
-        {
+        if custom.iter().any(|path| {
+            if path.ends_with("/startup") {
+                std::fs::read_dir(path).is_ok_and(|entries| {
+                    entries.filter_map(Result::ok).any(|entry| {
+                        entry
+                            .path()
+                            .extension()
+                            .is_some_and(|extension| extension == "bash")
+                    })
+                })
+            } else {
+                std::fs::symlink_metadata(path).is_ok()
+            }
+        }) {
             return None;
         }
         let file = "/usr/share/bash-completion/bash_completion";

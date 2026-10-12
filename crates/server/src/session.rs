@@ -1396,6 +1396,61 @@ impl Session {
             json!({"candidates":candidates,"source":"Commands, paths, history & syntax checks","cwd":catalog.cwd}),
         )
     }
+    pub async fn repair(
+        &self,
+        key: &str,
+        catalog_key: &str,
+        text: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Value, String> {
+        if text.encode_utf16().count() > 2000 {
+            return Err("Keep a command under 2,000 characters.".into());
+        }
+        let (current, env, prompt) = self.snapshot(false).await?;
+        if facts::context_key(prompt, &current, &env) != key {
+            return Err("Shell context changed. Try again.".into());
+        }
+        let mut catalog = self
+            .inner
+            .lock()
+            .unwrap()
+            .facts
+            .repair_catalog(key, catalog_key)
+            .ok_or("Shell context changed. Try again.")?;
+        if catalog.paths.is_empty() && directory_input(text).is_none() {
+            let (rich, rich_env, rich_prompt) = self.snapshot(true).await?;
+            if rich_prompt != prompt || facts::context_key(rich_prompt, &rich, &rich_env) != key {
+                return Err("Shell context changed. Try again.".into());
+            }
+            catalog.paths = rich.paths;
+        }
+        let mut host = NativeHost::new(
+            self.services.clone(),
+            catalog.clone(),
+            env.clone(),
+            self.help.clone(),
+        );
+        host.remote = self.remote.clone();
+        let mut candidates = None;
+        for _ in 0..3 {
+            host.verify_listings();
+            let value = self.engine.suggest(text, &host, cancel).await?;
+            if host.listings_unchanged(cancel).await? {
+                candidates = Some(value);
+                break;
+            }
+        }
+        let candidates = candidates.ok_or("Directory changed. Try again.")?;
+        let (latest, latest_env, latest_prompt) = self.snapshot(false).await?;
+        if latest_prompt != prompt
+            || latest.cwd != catalog.cwd
+            || self.state().exited
+            || facts::context_key(latest_prompt, &latest, &latest_env) != key
+        {
+            return Err("Shell context changed. Try again.".into());
+        }
+        Ok(candidates)
+    }
     fn schedule_context(self: &Arc<Self>) {
         if self.engine_mode != "client" {
             return;

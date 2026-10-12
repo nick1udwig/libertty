@@ -245,6 +245,23 @@ Wasm history repair measures 0.885 ms against TypeScript's 2.18 ms, and Wasm sch
 The remaining Wasm median gaps are directory repair at 1.10 versus 1.00 ms and large-directory repair at 0.575 versus 0.535 ms.
 These timings retain native peer-process IPC and measure Wasm in Node, so they do not establish equivalent mobile, startup or memory performance.
 Detailed measurements are retained in `.test-artifacts/speed-six-optimizations.json` and its forward and reverse run files.
+
+## Further optimization round
+
+Standard Bash completion frameworks are prepared once when no custom startup scripts are present, and their file versions are checked before each reuse.
+Custom startup scripts retain fresh sourcing, command-specific loaders remain isolated in child processes, and successful request-owned completion results can be shared across timeout budgets.
+Symbol matching precomputes vocabulary keys and phonetic forms, limits edit distance to three reusable rows, and shares bounded deterministic text parsing caches.
+Candidate search shares parent-linked argument and change trails, borrows flag definitions, and uses indexed command and history-frequency lookups.
+Native callbacks use typed operations throughout the executor, while prepared Wasm calls send text directly and reuse validated input buffers.
+Directory matching shares prepared names across immutable listing snapshots, and native candidate stat operations share one blocking-pool submission.
+The Rust backend advertises compound repairs through context replies so dependent client repairs can execute near their host facts in one browser request.
+Compound repairs bind the saved catalog to the current session context, collect missing path facts, revalidate used listings with bounded retries, and reject context changes before returning results.
+Older servers retain the ordinary Wasm callback path because they do not advertise the capability.
+The `.test-artifacts/architecture-second-six.json` comparison passes 1,440 complete candidate-array comparisons across 108 rows at 0, 50 and 150 ms RTT.
+At 150 ms RTT, warm client Python repair measures 190.17 ms against 1,471.06 ms for TypeScript, nested help measures 163.76 against 481.07 ms, and referenced-file repair measures 153.01 against 759.37 ms.
+Those cases reduce their foreground request counts from nine, three and five respectively to one.
+Client rows identify native delegation explicitly rather than presenting those measurements as Wasm CPU performance.
+This round does not meet the tenfold target in every case, and native peer IPC, injected RTT and Node-hosted Wasm retain their existing measurement limitations.
 Local validation passes 102 Rust tests, 234 frontend and reference tests with one existing skip, and Chromium parity for 16,560 pure fixtures, 469 asynchronous fixtures and 48 prewarm steps.
 Both mounted browser engine modes pass with the Rust backend, and native and Wasm Clippy checks pass with warnings denied.
 The full architecture gate passes 1,440 exact candidate-array comparisons across 108 rows at 0, 50 and 150 ms RTT, with 31 warm CPU samples and three warm network samples per case and variant.
