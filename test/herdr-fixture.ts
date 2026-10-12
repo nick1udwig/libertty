@@ -9,6 +9,7 @@ export async function herdrFixture() {
   const actions: any[] = [];
   let closeError = '';
   let createdSpaces = 0;
+  let frameSequence = 0;
   const remove = <T>(items: T[], matches: (item: T) => boolean) => { for (let i = items.length - 1; i >= 0; i--) if (matches(items[i])) items.splice(i, 1); };
   const snapshot = { version: 'test', protocol: 22,
     workspaces: [{ workspace_id: 'w1', label: 'Termai', active_tab_id: 't1' }] as any[],
@@ -37,7 +38,8 @@ export async function herdrFixture() {
     if (cursor) cursors.set(paneId, cursor);
     const point = cursors.get(paneId) || { x: Math.min(width - 1, rows.at(-1)?.length || 0), y: Math.max(0, rows.length - 1), visible: true };
     const bytes = '\x1b[2J' + rows.map((row, i) => '\x1b[' + (i + 1) + ';1H' + row).join('') + '\x1b[' + (point.y + 1) + ';' + (point.x + 1) + 'H\x1b[?25' + (point.visible === false ? 'l' : 'h');
-    await writeFile(directory + '/' + pane.terminal_id + '.json', JSON.stringify({ type: 'terminal.frame', encoding: 'ansi', width, height, full: true, bytes: Buffer.from(bytes).toString('base64') }) + '\n');
+    // Native Herdr sends a fresh sequenced baseline even if resize keeps the size.
+    await writeFile(directory + '/' + pane.terminal_id + '.json', JSON.stringify({ type: 'terminal.frame', seq: ++frameSequence, encoding: 'ansi', width, height, full: true, bytes: Buffer.from(bytes).toString('base64') }) + '\n');
   };
   const addTerminal = (workspaceId: string, name: string, isAgent = true) => {
     const i = snapshot.panes.length, pane = { pane_id: workspaceId + ':p' + i, terminal_id: 'term_' + i, workspace_id: workspaceId, tab_id: 't' + (i + 1), focused: true, label: name, cwd: '/workspace' };

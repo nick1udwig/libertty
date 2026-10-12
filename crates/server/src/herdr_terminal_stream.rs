@@ -37,6 +37,7 @@ enum Command {
     Remove(u64),
     Resize(u64, Option<Size>),
     Refresh(u64),
+    Claim(u64),
     Scroll(
         u64,
         i32,
@@ -114,6 +115,9 @@ impl Subscription {
             .send
             .try_send(Command::Resize(self.id, size))
             .map_err(|_| "Terminal input exceeded its limit.".into())
+    }
+    pub fn claim(&self) {
+        let _ = self.handle.send.try_send(Command::Claim(self.id));
     }
     pub fn refresh(&self) {
         let _ = self.handle.send.try_send(Command::Refresh(self.id));
@@ -375,6 +379,16 @@ async fn run(
                     sequence += 1;
                     viewer.order = sequence;
                     viewer.size = size;
+                }
+            }
+            Command::Claim(id) => {
+                if let Some(viewer) = viewers
+                    .iter_mut()
+                    .find(|viewer| viewer.id == id && viewer.size.is_some())
+                {
+                    sequence += 1;
+                    viewer.order = sequence;
+                    refresh = true;
                 }
             }
             Command::Refresh(id) => {

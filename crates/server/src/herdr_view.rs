@@ -22,7 +22,13 @@ pub struct View {
     capacity: Arc<Semaphore>,
     send: crate::viewer_queue::Sender,
     terminal: Subscription,
-    history_refresh: Arc<tokio::sync::Notify>,
+    history: crate::herdr_history::Hub,
+    active: tokio::sync::watch::Sender<bool>,
+    size: Mutex<Option<Size>>,
+    layout: tokio::sync::watch::Sender<u64>,
+    redraw_before: Mutex<Option<u64>>,
+    baseline: Mutex<Option<Size>>,
+    frame_ready: tokio::sync::Notify,
     cancel: CancellationToken,
 }
 fn integer(value: &Value) -> Option<f64> {
@@ -39,10 +45,12 @@ impl View {
         agent: Value,
         hub: &Hub,
         history: &crate::herdr_history::Hub,
-        initial_size: Option<Size>,
+        initial: Option<(Size, Option<u64>)>,
         send: crate::viewer_queue::Sender,
         cancel: CancellationToken,
     ) -> Result<Arc<Self>, String> {
+        let initial_size = initial.map(|(size, _)| size);
+        let revision = initial.and_then(|(_, revision)| revision);
         let (frames, mut receive) = mpsc::channel(16);
         let terminal = hub.subscribe_sized(
             target.clone(),
@@ -50,7 +58,9 @@ impl View {
             frames,
             initial_size,
         )?;
-        let mut history = history.subscribe(target.clone(), agent["paneId"].clone())?;
+        let subscription = history.subscribe(target.clone(), agent["paneId"].clone())?;
+        let (active, _) = tokio::sync::watch::channel(true);
+        let (layout, _) = tokio::sync::watch::channel(0);
         let view = Arc::new(Self {
             target,
             agent,
@@ -63,9 +73,20 @@ impl View {
             capacity: Arc::new(Semaphore::new(128)),
             send,
             terminal,
-            history_refresh: history.refresh.clone(),
+            history: history.clone(),
+            active,
+            size: Mutex::new(initial_size),
+            layout,
+            redraw_before: Mutex::new(revision),
+            baseline: Mutex::new(None),
+            frame_ready: tokio::sync::Notify::new(),
             cancel,
         });
+        if let Some(size) = initial_size {
+            view.send(
+                json!({"type":"herdr-layout","cols":size.cols,"rows":size.rows,"ready":false}),
+            );
+        }
         view.send(json!({"type":"state","state":{"cwd":view.agent["cwd"],"ready":false,"inputTarget":"program","terminalScroll":true,"exited":false,"prompt":1,"promptRevision":0,"inputRevision":0}}));
         let weak = Arc::downgrade(&view);
         let lifetime = view.cancel.clone();
@@ -75,6 +96,21 @@ impl View {
                 let frame = tokio::select! {biased;_=lifetime.cancelled()=>break, _=slow.cancelled()=>{if let Some(view)=weak.upgrade(){view.send.too_slow();}break;}, frame=receive.recv()=>frame};
                 let Some(frame) = frame else { break };
                 let Some(view) = weak.upgrade() else { break };
+                if frame["full"] == true {
+                    let size = frame["width"].as_u64().zip(frame["height"].as_u64()).map(
+                        |(cols, rows)| Size {
+                            cols: cols as u16,
+                            rows: rows as u16,
+                        },
+                    );
+                    if size.is_some() && size == *view.size.lock().unwrap() {
+                        *view.baseline.lock().unwrap() = size;
+                        view.frame_ready.notify_waiters();
+                    }
+                }
+                if !*view.active.borrow() {
+                    continue;
+                }
                 if !view.send.send(Transport::Message(frame)) {
                     break;
                 }
@@ -82,25 +118,77 @@ impl View {
         });
         let weak = Arc::downgrade(&view);
         let lifetime = view.cancel.clone();
+        let mut active = view.active.subscribe();
         tokio::spawn(async move {
+            let mut history = Some(subscription);
             loop {
-                let message = history.receive.borrow_and_update().clone();
-                if let Some(message) = message {
+                if !*active.borrow_and_update() {
+                    history = None;
+                } else if history.is_none() {
                     let Some(view) = weak.upgrade() else { break };
-                    match message {
-                        Ok(message) => view.send(message.as_ref().clone()),
-                        Err(message) => {
-                            view.send(json!({"type":"reading-error","message":message.as_ref()}));
-                            view.send
-                                .send(Transport::Close(1011, "Herdr terminal unavailable".into()));
-                            break;
+                    history = view
+                        .history
+                        .subscribe(view.target.clone(), view.agent["paneId"].clone())
+                        .ok();
+                }
+                if let Some(history) = &mut history {
+                    let message = history.receive.borrow_and_update().clone();
+                    if let Some(message) = message {
+                        let Some(view) = weak.upgrade() else { break };
+                        match message {
+                            Ok(message) => view.send(message.as_ref().clone()),
+                            Err(message) => {
+                                view.send(
+                                    json!({"type":"reading-error","message":message.as_ref()}),
+                                );
+                                view.send.send(Transport::Close(
+                                    1011,
+                                    "Herdr terminal unavailable".into(),
+                                ));
+                                break;
+                            }
                         }
                     }
                 }
-                tokio::select! { biased; _=lifetime.cancelled()=>break, changed=history.receive.changed()=>if changed.is_err(){break;} }
+                tokio::select! { biased; _=lifetime.cancelled()=>break, changed=active.changed()=>if changed.is_err(){break;}, changed=async { match &mut history {Some(history)=>history.receive.changed().await, None=>std::future::pending().await} }=>if changed.is_err(){break;} }
             }
         });
+        if let Some(size) = initial_size {
+            view.confirm_layout(size, revision, view.begin_layout());
+        }
         Ok(view)
+    }
+    fn begin_layout(&self) -> u64 {
+        self.layout.send_modify(|epoch| *epoch += 1);
+        *self.layout.borrow()
+    }
+    fn confirm_layout(self: &Arc<Self>, size: Size, before: Option<u64>, epoch: u64) {
+        let weak = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let Some(view) = weak.upgrade() else { return };
+            let mut layout = view.layout.subscribe();
+            if *layout.borrow_and_update() != epoch {
+                return;
+            }
+            loop {
+                let ready = view.frame_ready.notified();
+                tokio::pin!(ready);
+                ready.as_mut().enable();
+                if *view.baseline.lock().unwrap() == Some(size) {
+                    break;
+                }
+                tokio::select! { biased; _=view.cancel.cancelled()=>return, _=layout.changed()=>return, _=&mut ready=>{} }
+            }
+            let redrawn = tokio::select! { biased; _=layout.changed()=>false, result=crate::herdr_redraw::wait(&view.target, &view.agent["paneId"], before, &view.cancel)=>result };
+            if redrawn && *view.layout.borrow() == epoch && *view.size.lock().unwrap() == Some(size)
+            {
+                *view.redraw_before.lock().unwrap() = None;
+                view.send(
+                    json!({"type":"herdr-layout","cols":size.cols,"rows":size.rows,"ready":true}),
+                );
+                view.terminal.refresh();
+            }
+        });
     }
     fn send(&self, message: Value) {
         if !self.cancel.is_cancelled() {
@@ -172,7 +260,59 @@ impl View {
             "ack" => Ok(()),
             "herdr-frame-request" => {
                 self.terminal.refresh();
-                self.history_refresh.notify_one();
+                // Subscribe briefly to refresh the shared active resource.
+                if let Ok(history) = self
+                    .history
+                    .subscribe(self.target.clone(), self.agent["paneId"].clone())
+                {
+                    history.refresh.notify_one();
+                }
+                Ok(())
+            }
+            "herdr-active" => {
+                let active = message["active"].as_bool().ok_or("Invalid viewer state")?;
+                let changed = self.active.send_replace(active) != active;
+                let epoch = if changed {
+                    self.begin_layout()
+                } else {
+                    *self.layout.borrow()
+                };
+                if active && changed {
+                    let size = *self.size.lock().unwrap();
+                    if let Some(size) = size {
+                        *self.baseline.lock().unwrap() = None;
+                        self.send(json!({"type":"herdr-layout","cols":size.cols,"rows":size.rows,"ready":false}));
+                        let weak = Arc::downgrade(self);
+                        tokio::spawn(async move {
+                            let Some(view) = weak.upgrade() else { return };
+                            // Preserve an unfinished resize fence across rapid switches.
+                            let pending = *view.redraw_before.lock().unwrap();
+                            let revision = match pending {
+                                Some(_) => pending,
+                                None => {
+                                    crate::herdr_redraw::revision(
+                                        &view.target,
+                                        &view.agent["paneId"],
+                                        &view.cancel,
+                                    )
+                                    .await
+                                }
+                            };
+                            if view.cancel.is_cancelled()
+                                || !*view.active.borrow()
+                                || *view.layout.borrow() != epoch
+                                || *view.size.lock().unwrap() != Some(size)
+                            {
+                                return;
+                            }
+                            *view.redraw_before.lock().unwrap() = revision;
+                            view.terminal.claim();
+                            view.confirm_layout(size, revision, epoch);
+                        });
+                    } else {
+                        self.terminal.refresh();
+                    }
+                }
                 Ok(())
             }
             "resize" => {
@@ -184,14 +324,52 @@ impl View {
                 {
                     return Err("Invalid terminal size".into());
                 }
-                self.terminal.resize(if message["mobile"] == true {
+                let size = if message["mobile"] == true {
                     Some(Size {
                         cols: cols.unwrap() as u16,
                         rows: rows.unwrap() as u16,
                     })
                 } else {
                     None
-                })
+                };
+                let changed = {
+                    let mut current = self.size.lock().unwrap();
+                    let changed = *current != size;
+                    *current = size;
+                    changed
+                };
+                let epoch = if changed {
+                    self.begin_layout()
+                } else {
+                    *self.layout.borrow()
+                };
+                if changed && let Some(size) = size {
+                    *self.baseline.lock().unwrap() = None;
+                    self.send(json!({"type":"herdr-layout","cols":size.cols,"rows":size.rows,"ready":false}));
+                    let weak = Arc::downgrade(self);
+                    tokio::spawn(async move {
+                        let Some(view) = weak.upgrade() else { return };
+                        let revision = crate::herdr_redraw::revision(
+                            &view.target,
+                            &view.agent["paneId"],
+                            &view.cancel,
+                        )
+                        .await;
+                        if view.cancel.is_cancelled()
+                            || *view.layout.borrow() != epoch
+                            || *view.size.lock().unwrap() != Some(size)
+                        {
+                            return;
+                        }
+                        *view.redraw_before.lock().unwrap() = revision;
+                        if view.terminal.resize(Some(size)).is_ok() {
+                            view.confirm_layout(size, revision, epoch);
+                        }
+                    });
+                    Ok(())
+                } else {
+                    self.terminal.resize(size)
+                }
             }
             "terminal-scroll" => {
                 let lines = integer(&message["lines"]).filter(|n| *n != 0.0 && n.abs() <= 100.0);

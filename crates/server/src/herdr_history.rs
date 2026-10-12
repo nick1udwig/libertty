@@ -16,9 +16,9 @@ struct Resource {
     cancel: CancellationToken,
     refresh: Arc<tokio::sync::Notify>,
 }
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Hub {
-    resources: Mutex<HashMap<String, Arc<Resource>>>,
+    resources: Arc<Mutex<HashMap<String, Arc<Resource>>>>,
 }
 pub struct Subscription {
     pub receive: watch::Receiver<Update>,

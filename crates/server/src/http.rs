@@ -1678,7 +1678,7 @@ async fn herdr_request(
             },
         );
         return ok(
-            json!({"ticket":ticket,"initialGeometry":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
+            json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
         );
     }
     Err((StatusCode::NOT_FOUND, "Not found".into()))
@@ -1792,12 +1792,17 @@ async fn herdr_socket_session(
                 .await;
             return;
         };
+        let revision = if ticket.size.is_some() {
+            crate::herdr_redraw::revision(&ticket.target, &agent["paneId"], &cancel).await
+        } else {
+            None
+        };
         match herdr_view::View::open(
             ticket.target,
             agent,
             &app.herdr_terminals,
             &app.herdr_history,
-            ticket.size,
+            ticket.size.map(|size| (size, revision)),
             send,
             cancel.clone(),
         ) {

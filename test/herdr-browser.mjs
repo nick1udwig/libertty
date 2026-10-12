@@ -112,7 +112,7 @@ try {
   assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('termai.hosts'))).some(host => host.kind === 'herdr'), 'Typing herdr saves its host automatically');
   const agentFrame = async () => {
     const element = await page.locator('.herdr-terminal').elementHandle(), frame = await element.contentFrame();
-    await frame.waitForFunction(() => window.__testTerminal && window.__state?.inputTarget === 'program' && document.querySelector('#connection-label').textContent === 'Connected');
+    await frame.waitForFunction(() => window.__testTerminal && window.__state?.inputTarget === 'program' && document.querySelector('#connection-label').textContent === 'Connected' && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && frameElement.checkVisibility({checkVisibilityCSS:true}));
     return frame;
   };
   const tab = id => page.locator('.herdr-agent-tab[data-terminal="term_' + id + '"]');
@@ -164,6 +164,7 @@ try {
   await until(async () => await desktop.evaluate(cols => window.__testProjection.nativeColumns === cols, nativeSize.cols), 'Desktop sees the shared mobile PTY geometry');
   assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.resize' && a.params.cols === nativeSize.cols), 'Mobile screen changes resize the real terminal');
   await desktop.close(); await page.bringToFront(); await page.setViewportSize({ width: 390, height: 844 });
+  await terminal.waitForFunction(cols => window.__testTerminal.cols === cols && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && getComputedStyle(frameElement).visibility !== 'hidden', mobileSize.cols);
   const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
   const hold = async locator => {
     let rect;
@@ -486,13 +487,13 @@ try {
   await page.evaluate(() => { window.__focused = true; window.dispatchEvent(new Event('focus')); });
   const notificationTab = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.mode === 'herdr').id);
   await page.evaluate(tabId => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'herdr-notification', tabId, terminalId: 'term_1' } })), notificationTab);
-  await until(async () => await page.locator('.herdr-view:visible iframe').getAttribute('data-terminal') === 'term_1');
+  await until(async () => await page.locator('.herdr-view:visible .herdr-terminal').getAttribute('data-terminal') === 'term_1');
   await page.goto(base + '/?notificationTab=' + notificationTab + '&notificationTerminal=term_2');
-  await until(async () => await page.locator('.herdr-view:visible iframe').getAttribute('data-terminal') === 'term_2');
+  await until(async () => await page.locator('.herdr-view:visible .herdr-terminal').getAttribute('data-terminal') === 'term_2');
   assert.equal(new URL(page.url()).search, '', 'Cold notification routing consumes its parameters');
   await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#herdr-notifications button').first().click();
   await until(async () => !(await page.evaluate(() => localStorage.getItem('termai.notifications.primary'))));
   assert.ok(notificationRequests.some(request => request.url.endsWith('/unsubscribe')));
   assert.deepEqual(errors, []); console.log('Herdr browser checks passed: automatic discovery, shared direct input/shortcuts/touch scroll/copy, live-output selection and wrapped/labeled link taps, native mobile sizing/release, desktop reflow/full-width layouts and panning, PWA enable/disable/scoped workers/focus/click routing, session labels, hold menus, ordering, persistence, server pane/space close, sounds and scoped tickets.');
-} catch (error) { await page?.screenshot({ path: '/tmp/termai-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all(page.frames().map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('.selection-notice')?.textContent, rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: window.__herdrMessages?.filter(m => m.type === 'herdr-frame').slice(-2), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('termai.hosts'), tabs: localStorage.getItem('termai.tabs') })).catch(() => ({}))); throw error; }
+} catch (error) { await page?.screenshot({ path: '/tmp/termai-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all(page.frames().map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('.selection-notice')?.textContent, pending: document.querySelector('#terminal-viewport')?.className, parentVisible: frameElement && getComputedStyle(frameElement).visibility, layout: window.__herdrMessages?.filter(m => m.type === 'herdr-layout'), rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: JSON.stringify(window.__herdrMessages?.filter(m => m.type === 'herdr-frame').map(m => ({width:m.width,height:m.height,full:m.full}))), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('termai.hosts'), tabs: localStorage.getItem('termai.tabs') })).catch(() => ({}))); throw error; }
 finally { clearInterval(liveOutput); await browser?.close(); backend.kill('SIGTERM'); await exited; sshd?.kill('SIGTERM'); for (const socket of daemon.clients) socket.terminate(); await new Promise(resolve => daemon.close(resolve)); await fixture.close(); }

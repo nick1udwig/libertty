@@ -392,6 +392,35 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "herdr-layout",
+              "type": "string"
+            },
+            "cols": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "rows": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "ready": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "cols",
+            "rows",
+            "ready"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "herdr-frame",
               "type": "string"
             },
@@ -798,6 +827,23 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "herdr-active",
+              "type": "string"
+            },
+            "active": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "active"
           ],
           "additionalProperties": true
         },
@@ -7230,6 +7276,23 @@
           },
           "required": [
             "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "herdr-active",
+              "type": "string"
+            },
+            "active": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "type",
+            "active"
           ],
           "additionalProperties": true
         },

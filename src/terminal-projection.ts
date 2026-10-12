@@ -90,6 +90,10 @@ export class TerminalProjection {
     this.cursor(this.nativePosition());
     return false;
   }
+  /** Paint the certified native baseline before exposing a previously hidden canvas. */
+  paintBaseline() {
+    if (this.native && this.live && this.canRenderLive()) this.term.renderer?.render(this.native, true, 0, this.term);
+  }
   private canRenderLive() {
     return this.mobile && this.complete && this.native?.cols === this.term.cols && this.native.rows === this.term.rows
       && (!this.initialized || this.history?.getScrollbackLength() === 0);

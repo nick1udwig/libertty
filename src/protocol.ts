@@ -29,6 +29,7 @@ export type ServerMessage =
   | { type: 'ssh-released'; id: string }
   | { type: 'output'; seq: number; data: string }
   | { type: 'screen'; text: string }
+  | { type: 'herdr-layout'; cols: number; rows: number; ready: boolean }
   | { type: 'herdr-frame'; width: number; height: number; full: boolean; bytes: string }
   | { type: 'state'; state: ShellState }
   | { type: 'context'; context: ContextReply; directories: { path: string; snapshot: DirectorySnapshot }[] }
@@ -44,4 +45,5 @@ export type ClientMessage =
   | { type: 'resize'; cols: number; rows: number; mobile?: boolean }
   | { type: 'terminal-scroll'; lines: number; column: number; row: number }
   | { type: 'herdr-frame-request' }
+  | { type: 'herdr-active'; active: boolean }
   | { type: 'ack'; seq: number };

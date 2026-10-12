@@ -12,6 +12,7 @@ pub mod filesystem;
 pub mod help;
 pub mod herdr;
 pub mod herdr_history;
+pub mod herdr_redraw;
 pub mod herdr_state;
 pub mod herdr_terminal_stream;
 pub mod herdr_view;

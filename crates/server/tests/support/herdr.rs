@@ -1,5 +1,8 @@
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 use termai_server::herdr::{Target, read_line};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -15,6 +18,7 @@ pub struct Fixture {
     pub snapshot: Arc<Mutex<Value>>,
     pub actions: Arc<Mutex<Vec<Value>>>,
     pub screen: Arc<Mutex<String>>,
+    pub content_revision: Arc<AtomicU64>,
     pub close_error: Arc<Mutex<String>>,
     events: tokio::sync::broadcast::Sender<()>,
     cancel: CancellationToken,
@@ -32,6 +36,7 @@ impl Fixture {
         })));
         let actions = Arc::new(Mutex::new(Vec::new()));
         let screen = Arc::new(Mutex::new("Live Herdr terminal".into()));
+        let content_revision = Arc::new(AtomicU64::new(6));
         let close_error = Arc::new(Mutex::new(String::new()));
         let (events, _) = tokio::sync::broadcast::channel(64);
         let cancel = CancellationToken::new();
@@ -47,6 +52,7 @@ impl Fixture {
             snapshot: snapshot.clone(),
             actions: actions.clone(),
             screen: screen.clone(),
+            content_revision: content_revision.clone(),
             close_error: close_error.clone(),
             events: events.clone(),
             cancel: cancel.clone(),
@@ -57,6 +63,7 @@ impl Fixture {
                 let snapshot = snapshot.clone();
                 let actions = actions.clone();
                 let screen = screen.clone();
+                let content_revision = content_revision.clone();
                 let events = events.clone();
                 let cancel = cancel.clone();
                 let close_error = close_error.clone();
@@ -91,6 +98,9 @@ impl Fixture {
                                     }
                                 }
                                 break;
+                            }
+                            "pane.copy_motion" => {
+                                json!({"content_revision":content_revision.load(Ordering::Relaxed),"cursor":{"row":0,"col":0}})
                             }
                             "pane.read" => {
                                 actions.lock().unwrap().push(request.clone());

@@ -126,17 +126,47 @@ New mobile subscribers reject a cached baseline from a different geometry, and j
 Geometry retains the existing 1–1,000 column and row bounds, owner-scoped tickets and desktop observer behavior.
 Older servers without `initialGeometry` retain their existing client path.
 
-Resizing alone still exposed stale desktop history in the real browser, and a matching grid could arrive one animation frame before the PTY application redraw.
-Those failed trials are retained under [docs/benchmarks/herdr](benchmarks/herdr).
-The mobile viewport now waits for a complete matching frame, paints its baseline while hidden, and becomes visible at the following animation-frame boundary.
-History received during this transition is ignored, and the existing full-frame request also refreshes shared history after the viewport is ready.
-Replaced connections and mismatched geometry cancel a pending reveal.
-The gate follows browser paint boundaries without a fixed millisecond sleep.
+The first fix waited two animation frames after a matching grid, but a correctly sized grid can still contain the application's desktop content.
+A responsive application delaying its SIGWINCH redraw by 200 ms reproduced approximately 166 ms of visible desktop content with that fix.
+The original animation-frame assertions inspected terminal buffers and missed some composited pixels and parent-iframe visibility transitions.
+The failed slow-redraw trial is retained under [docs/benchmarks/herdr](benchmarks/herdr).
 
-Thirty real mobile space switches passed visible-layout assertions across normal and constrained gzip transport, including ten switches with Chromium script CPU throttled sixfold.
-The native test samples terminal content on every animation frame and rejects an inherited desktop title or clipped desktop border when the viewport is visible.
-The constrained run's first visible mobile paint was 392 ms median and 581 ms p95, including iframe creation, asset loading, terminal initialization, authorization and the controller connection.
-The sixfold CPU-throttled verification passed at 634 ms median and 639 ms p95 for the first visible mobile paint.
+The new layout barrier records Herdr's native content revision before acquiring or changing mobile geometry.
+Herdr 0.9.3 [advances that revision twice for a resize and twice for each processed PTY read](https://github.com/herdrdev/herdr/blob/v0.9.3/src/pane.rs), so a geometry-only revision cannot certify application output.
+The barrier waits for a complete matching grid and subsequent PTY output, requests a fresh full frame, and paints the native baseline before revealing the viewport.
+An unchanged revision accepts an already matching grid without waiting for a resize that did not occur.
+Rapid switches preserve an unfinished redraw check, while newer geometry and parked views cancel superseded checks.
+Revision probes are sequential, cancellable and spaced by 20 ms rather than delaying every reveal by a fixed interval.
+Herdr does not expose an application-level redraw-completion acknowledgement, so static applications have a two-second fallback and older Herdr versions without the revision API retain a compatibility fallback.
+The revision is obtained through the read-only `pane.copy_motion` operation rather than `pane.read`, whose current exported revision does not track terminal content.
+
+Mobile space switches retain up to four authenticated terminal iframes in least-recently-used order.
+Parked views keep their native mobile geometry while consuming and discarding stream frames on the backend, and they pause browser output and shared history polling.
+A warm switch at unchanged dimensions shows its last certified mobile image immediately while reacquiring controller priority and fresh state.
+Uncertified incoming frames cannot overwrite that retained image.
+Cold views and changed dimensions stay hidden until the new layout barrier completes.
+Eviction, removal, disposal, leaving the top-level Herdr tab and changing to a desktop layout release the relevant mobile controllers.
+Returning to the top-level tab opens fresh connections and waits for mobile sizing again.
+Older backends without the advertised parking capability retain the single-iframe lifecycle.
+
+The expanded real-Herdr regression captures Chromium's composited PNG frames and checks for the fixture's red desktop pixels in addition to inspecting every visible terminal buffer.
+Its green mobile caption and complete border must agree with the current grid on every visible sample.
+It verifies cold opens, warm switches, top-level leave and return, bounded cache eviction and desktop release.
+Delayed redraws of 200 ms and 600 ms, constrained gzip transport and sixfold script CPU throttling are included.
+The fixtures use an isolated Herdr server and a 150-by-45 desktop client, with a browser viewport of 390 by 844 pixels.
 These are browser-emulated mobile measurements rather than physical-device measurements.
-Native resize, multiple-viewer release, keyboard geometry, live scrolling, selection, links and full Herdr lifecycle regressions also passed.
-Run `npm run test:herdr-flash`, `npm run test:herdr-resize` and `npm run test:herdr-scroll` with the pinned test Herdr binary to reproduce them.
+
+The isolated normal run measured nine warm switches at 52.7 ms median and 54.5 ms p95, while its single cold switch took 405.4 ms.
+The previous implementation recreated each iframe and measured 392 ms median in its gzip run, so warm reuse improves that observed switch latency by approximately 7.4 times.
+These figures compare the old cold lifecycle with the new warm lifecycle rather than claiming faster cold initialization.
+With a 200 ms application redraw delay, warm switching remained 52.6 ms median and 54.2 ms p95, while the single cold switch took 505 ms.
+The normal run's three top-level returns took 193.9–404.4 ms, with a median of 244.4 ms.
+With a 600 ms redraw delay, gzip and sixfold CPU throttling, nine warm switches measured 142.3 ms median and 180.6 ms p95, the cold switch took 1,460.3 ms, and three top-level returns had a 1,058 ms median.
+Delayed returns wait for the application to redraw instead of exposing desktop content during that interval.
+Across these four final runs, 36 space switches and 10 top-level returns passed, and none of the 550 captured composited frames contained desktop pixels while the mobile view was active.
+The normal, delayed, throttled and six-space eviction samples are retained as `space-flash-final-*.json` under [docs/benchmarks/herdr](benchmarks/herdr), alongside a representative composited mobile image.
+
+Run `npm run test:herdr-flash` for the default case, and use `TEST_REDRAW_DELAY=600 TEST_CPU=6 TEST_WIRE=gzip` for the slow-redraw case.
+Use `TEST_SPACES=6 TEST_SWITCHES=6 TEST_RETURNS=1 TEST_REDRAW_DELAY=200` to verify cache eviction and controller release.
+Run `npm run test:herdr-resize`, `npm run test:herdr-scroll` and `npm run test:herdr` for keyboard geometry, multiple viewers, live scrolling, selection, links and the wider Herdr lifecycle.
+Set `TEST_BACKEND=node` on the lifecycle test to verify legacy-backend compatibility.

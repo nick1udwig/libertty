@@ -1,0 +1,589 @@
+{
+  "viewport": {
+    "width": 390,
+    "height": 844
+  },
+  "desktop": {
+    "cols": 150,
+    "rows": 45
+  },
+  "cpu": 1,
+  "wire": "binary",
+  "redrawDelay": 200,
+  "initialPaints": [
+    {
+      "type": "test-layout-paint",
+      "title": "FLASH_BETA:MOBILE",
+      "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+      "cols": 45,
+      "rows": 47,
+      "time": 1791821850229.0999,
+      "terminal": "term_65da708b044e42"
+    }
+  ],
+  "pixels": [
+    {
+      "time": 1791821849139.132,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849174.313,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849195.8179,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849224.675,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849266.06,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849292.4622,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849298.859,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849353.7952,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849416.392,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821849431.596,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850233.8582,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850249.1492,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850265.655,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850287.814,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850298.954,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850316.417,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850803.678,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850815.623,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850832.0151,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850848.4832,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850865.384,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850882.04,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850898.772,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850915.035,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850932.6,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850950.738,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850966.045,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850982.467,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821850998.971,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851019.5142,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851031.977,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851048.534,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851071.991,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851082.244,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851102.4448,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851123.914,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851655.604,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851667.293,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851681.876,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851698.6238,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851714.996,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851731.606,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851749.1382,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851765.744,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851782.9521,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851803.604,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821851824.743,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852451.225,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852466.021,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852486.0598,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852498.3088,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852514.648,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852532.337,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852548.9832,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852565.55,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852581.99,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852599.53,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821852623.734,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853050.3472,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853065.623,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853089.8472,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853098.554,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853115.526,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853131.854,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853149.221,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853165.7031,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853182.888,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853198.642,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853224.5532,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853655.8398,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853666.007,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853682.49,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853699.561,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853715.809,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853732.698,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853757.082,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853765.958,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853782.0798,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853799.02,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853840.31,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821853884.424,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821854116.842,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821854599.6,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821854614.98,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821854631.9832,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821854653.1438,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821854665.025,
+      "desktopPixels": 0
+    },
+    {
+      "time": 1791821854682.024,
+      "desktopPixels": 0
+    }
+  ],
+  "timings": [
+    {
+      "name": "ALPHA",
+      "warm": false,
+      "ms": 552.300048828125,
+      "frames": 2,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ALPHA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821850795.3,
+          "terminal": "term_65da708a9bcfd1"
+        }
+      ]
+    },
+    {
+      "name": "BETA",
+      "warm": true,
+      "ms": 58.5,
+      "frames": 2,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821850945.5,
+          "terminal": "term_65da708b044e42"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821850962.2,
+          "terminal": "term_65da708b044e42"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821850978.9,
+          "terminal": "term_65da708b044e42"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821850995.2998,
+          "terminal": "term_65da708b044e42"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821851011.9,
+          "terminal": "term_65da708b044e42"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_BETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821851028.7998,
+          "terminal": "term_65da708b044e42"
+        }
+      ]
+    },
+    {
+      "name": "GAMMA",
+      "warm": false,
+      "ms": 604.800048828125,
+      "frames": 3,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_GAMMA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821851645.8,
+          "terminal": "term_65da708b591dd3"
+        }
+      ]
+    },
+    {
+      "name": "DELTA",
+      "warm": false,
+      "ms": 707,
+      "frames": 4,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_DELTA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821852446,
+          "terminal": "term_65da708bc167b4"
+        }
+      ]
+    },
+    {
+      "name": "EPSILON",
+      "warm": false,
+      "ms": 505.800048828125,
+      "frames": 4,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_EPSILON:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821853045.8,
+          "terminal": "term_65da708c3c9575"
+        }
+      ]
+    },
+    {
+      "name": "ZETA",
+      "warm": false,
+      "ms": 506.89990234375,
+      "frames": 4,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ZETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821853645.9,
+          "terminal": "term_65da708c8c4b16"
+        }
+      ]
+    }
+  ],
+  "returns": [
+    {
+      "name": "ZETA",
+      "ms": 538.39990234375,
+      "paints": [
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ZETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821854595.4,
+          "terminal": "term_65da708c8c4b16"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ZETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821854612.0999,
+          "terminal": "term_65da708c8c4b16"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ZETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821854628.7998,
+          "terminal": "term_65da708c8c4b16"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ZETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821854645.5,
+          "terminal": "term_65da708c8c4b16"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ZETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821854662,
+          "terminal": "term_65da708c8c4b16"
+        },
+        {
+          "type": "test-layout-paint",
+          "title": "FLASH_ZETA:MOBILE",
+          "border": "\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e",
+          "cols": 45,
+          "rows": 47,
+          "time": 1791821854678.7998,
+          "terminal": "term_65da708c8c4b16"
+        }
+      ]
+    }
+  ]
+}
