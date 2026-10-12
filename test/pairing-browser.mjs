@@ -40,6 +40,7 @@ try {
   await page.locator('#terminal-stack iframe').waitFor();
   const frame = await (await page.locator('#terminal-stack iframe').elementHandle()).contentFrame();
   await frame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected');
+  await frame.waitForFunction(() => document.querySelector('#shell-status')?.textContent === 'At prompt');
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type('printf dev-paired > checked.txt'); await page.keyboard.press('Enter');
   for (let i = 0; await readFile(directory + '/checked.txt', 'utf8').catch(() => '') !== 'dev-paired'; i++) {
     assert.ok(i < 100, 'paired terminal must execute the command'); await new Promise(resolve => setTimeout(resolve, 50));
