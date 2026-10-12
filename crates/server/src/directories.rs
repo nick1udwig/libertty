@@ -64,6 +64,39 @@ pub async fn directory_version(dir: &str) -> String {
         .unwrap_or_default()
 }
 impl Directories {
+    pub async fn stat_many(
+        &self,
+        files: Vec<(String, bool)>,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<Option<FileInfo>>, String> {
+        check(cancel)?;
+        if cfg!(target_os = "macos") {
+            return futures::future::join_all(
+                files
+                    .iter()
+                    .map(|(file, executable)| self.stat(file, *executable, cancel)),
+            )
+            .await
+            .into_iter()
+            .collect();
+        }
+        let stop = cancel.clone();
+        let work = tokio::task::spawn_blocking(move || {
+            files
+                .into_iter()
+                .map(|(file, is_executable)| {
+                    check(&stop)?;
+                    Ok(std::fs::metadata(&file).ok().map(|info| FileInfo {
+                        file: info.is_file(),
+                        directory: info.is_dir(),
+                        executable: is_executable && info.is_file() && executable(&file),
+                        spelling: None,
+                    }))
+                })
+                .collect::<Result<Vec<_>, String>>()
+        });
+        tokio::select! { biased; _ = cancel.cancelled() => Err(ABORTED.into()), result = work => { check(cancel)?; result.map_err(|e|e.to_string())? } }
+    }
     pub async fn snapshot(
         &self,
         dir: &str,

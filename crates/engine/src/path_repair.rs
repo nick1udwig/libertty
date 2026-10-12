@@ -1,8 +1,8 @@
 use crate::{
     host::{self, Host},
     path,
-    repair::{completion_score, shell_quote, similarity},
-    types::{Candidate, Catalog, DirectoryEntry},
+    repair::{directory_scores, shell_quote},
+    types::{Candidate, Catalog, DirectoryEntry, SharedList},
     util::locale_cmp,
 };
 use crate::{
@@ -20,45 +20,10 @@ struct Branch {
 }
 fn components<'a>(
     spoken: &str,
-    entries: &'a [DirectoryEntry],
+    entries: &'a SharedList<DirectoryEntry>,
     complete: bool,
 ) -> Vec<(&'a DirectoryEntry, f64)> {
-    let entries: Vec<_> = entries
-        .iter()
-        .filter(|entry| entry.directory || entry.symlink)
-        .collect();
-    let scores: Vec<_> = entries
-        .iter()
-        .map(|entry| similarity(spoken, &entry.name))
-        .collect();
-    let completion = complete && scores.iter().all(|score| *score == 0.0);
-    let folded: Vec<_> = spoken.to_lowercase().encode_utf16().collect();
-    entries
-        .into_iter()
-        .zip(scores)
-        .map(|(entry, score)| {
-            let mut score = if completion {
-                completion_score(spoken, &entry.name)
-            } else {
-                score
-            };
-            if score == 0.0 && folded.len() >= 3 {
-                let name = entry.name.to_lowercase();
-                if folded.len() == name.encode_utf16().count()
-                    && folded
-                        .iter()
-                        .copied()
-                        .zip(name.encode_utf16())
-                        .filter(|(a, b)| a != b)
-                        .count()
-                        == 1
-                {
-                    score = 62.0;
-                }
-            }
-            (entry, score)
-        })
-        .collect()
+    directory_scores(spoken, entries, true, complete, true)
 }
 fn make_candidate(request: &DirectoryInput, branch: Branch) -> Candidate {
     let rendered = if branch.rendered == "/" {
@@ -184,7 +149,11 @@ pub async fn repair_directory(
                     .unwrap_or_default();
                 let exact = entries.iter().find(|entry| entry.name == *part);
                 let mut matches = if let Some(exact) = exact {
-                    components(part, std::slice::from_ref(exact), false)
+                    if exact.directory || exact.symlink {
+                        vec![(exact, 100.0)]
+                    } else {
+                        vec![]
+                    }
                 } else if request.quoted {
                     vec![]
                 } else {

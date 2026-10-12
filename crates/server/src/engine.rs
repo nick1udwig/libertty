@@ -122,17 +122,10 @@ impl NativeEngine {
                                                     let replies = futures::future::join_all(
                                                         callbacks.into_iter().map(
                                                             |callback| async move {
-                                                                let results =
-                                                                    futures::future::join_all(
-                                                                        callback
-                                                                            .operations
-                                                                            .iter()
-                                                                            .map(|operation| {
-                                                                                host.engine_operation(
-                                                                                    operation,
-                                                                                    cancel,
-                                                                                )
-                                                                            }),
+                                                                let results = host
+                                                                    .engine_operations(
+                                                                        &callback.operations,
+                                                                        cancel,
                                                                     )
                                                                     .await;
                                                                 Reply::Native {

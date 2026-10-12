@@ -6,6 +6,32 @@ use termai_server::{catalog::CatalogHost, directories::Directories, probes::Prob
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
+async fn batched_stats_preserve_order_symlink_targets_missing_paths_and_cancellation() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("data"), "").unwrap();
+    std::fs::create_dir(root.path().join("folder")).unwrap();
+    symlink("folder", root.path().join("linked")).unwrap();
+    let files = ["data", "absent", "folder", "linked"]
+        .into_iter()
+        .map(|name| (root.path().join(name).to_string_lossy().into_owned(), true))
+        .collect::<Vec<_>>();
+    let host = Directories::default();
+    let cancel = CancellationToken::new();
+    let batch = host.stat_many(files.clone(), &cancel).await.unwrap();
+    for ((file, executable), actual) in files.iter().zip(&batch) {
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(host.stat(file, *executable, &cancel).await.unwrap()).unwrap()
+        );
+    }
+    assert!(batch[0].as_ref().unwrap().file);
+    assert!(batch[1].is_none());
+    assert!(batch[3].as_ref().unwrap().directory);
+    cancel.cancel();
+    assert!(host.stat_many(files, &cancel).await.is_err());
+}
+
+#[tokio::test]
 async fn spelling_indexes_preserve_exact_and_unicode_matches_and_refresh_after_rename() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("Café")).unwrap();

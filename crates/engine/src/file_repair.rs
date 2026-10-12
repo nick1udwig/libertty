@@ -1,7 +1,7 @@
 use crate::{
     host::{self, Host},
     path,
-    repair::{completion_score, shell_quote, similarity},
+    repair::{directory_scores, shell_quote},
     speech::expand_symbols,
     types::{Candidate, Catalog},
     util::{regex, replace, test, utf16_len},
@@ -171,25 +171,10 @@ pub async fn repair_input_file(
                     return Ok(vec![]);
                 }
                 let listing = lookup.listing.map(|l| l.entries).unwrap_or_default();
-                let entries: Vec<_> = listing
-                    .iter()
-                    .filter(|e| {
-                        if last {
-                            !e.directory || e.symlink
-                        } else {
-                            e.directory || e.symlink
-                        }
-                    })
+                let mut candidates: Vec<_> = directory_scores(part, &listing, !last, last, false)
+                    .into_iter()
+                    .map(|(entry, score)| (&entry.name, score))
                     .collect();
-                let mut candidates: Vec<_> = entries
-                    .iter()
-                    .map(|e| (&e.name, similarity(part, &e.name)))
-                    .collect();
-                if last && candidates.iter().all(|(_, score)| *score == 0.0) {
-                    for (name, score) in &mut candidates {
-                        *score = completion_score(part, name);
-                    }
-                }
                 candidates.retain(|(_, score)| *score >= 55.0);
                 candidates.sort_by(|(_, a), (_, b)| b.total_cmp(a));
                 candidates.truncate(4);

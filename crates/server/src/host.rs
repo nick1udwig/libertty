@@ -46,6 +46,60 @@ pub struct NativeHost {
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
 }
 impl NativeHost {
+    pub async fn engine_operations(
+        &self,
+        operations: &[termai_engine::host::HostOperation],
+        cancel: &CancellationToken,
+    ) -> Vec<Result<termai_engine::host::FactValue, String>> {
+        use termai_engine::host::{FactValue, HostOperation};
+        let stats: Vec<_> = operations
+            .iter()
+            .enumerate()
+            .filter_map(|(i, op)| match op {
+                HostOperation::Stat { path, executable } if self.remote.is_none() => {
+                    Some((i, (path.clone(), *executable)))
+                }
+                _ => None,
+            })
+            .collect();
+        if stats.len() < 2 {
+            return futures::future::join_all(
+                operations
+                    .iter()
+                    .map(|op| self.engine_operation(op, cancel)),
+            )
+            .await;
+        }
+        let (stat_results, others) = futures::join!(
+            self.services
+                .directories
+                .stat_many(stats.iter().map(|(_, file)| file.clone()).collect(), cancel),
+            futures::future::join_all(
+                operations
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !stats.iter().any(|(at, _)| at == i))
+                    .map(|(i, op)| async move { (i, self.engine_operation(op, cancel).await) })
+            )
+        );
+        let mut results = vec![Err(ABORTED.into()); operations.len()];
+        for (i, value) in others {
+            results[i] = value;
+        }
+        match stat_results {
+            Ok(values) => {
+                for ((i, _), value) in stats.into_iter().zip(values) {
+                    results[i] = Ok(FactValue::Stat(value));
+                }
+            }
+            Err(error) => {
+                for (i, _) in stats {
+                    results[i] = Err(error.clone());
+                }
+            }
+        }
+        results
+    }
     pub async fn engine_fact(
         &self,
         operation: &Value,

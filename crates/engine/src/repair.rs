@@ -345,6 +345,132 @@ fn prepared_completion_score(spoken: &Prepared, exact: &Prepared) -> f64 {
 pub fn completion_score(spoken: &str, exact: &str) -> f64 {
     prepared_completion_score(&Prepared::new(spoken), &Prepared::new(exact))
 }
+struct DirectoryIndex {
+    entries: SharedList<DirectoryEntry>,
+    directories: Vec<(usize, Prepared)>,
+    files: Vec<(usize, Prepared)>,
+}
+#[cfg(test)]
+mod directory_index_tests {
+    use super::*;
+    #[test]
+    fn cached_names_follow_snapshot_identity_and_keep_unicode_and_type_filtering() {
+        let original: SharedList<DirectoryEntry> = vec![
+            DirectoryEntry {
+                name: "Workspace".into(),
+                directory: true,
+                symlink: false,
+            },
+            DirectoryEntry {
+                name: "Café".into(),
+                directory: false,
+                symlink: false,
+            },
+        ]
+        .into();
+        assert_eq!(
+            directory_scores("work space", &original, true, false, true)[0].1,
+            94.0
+        );
+        assert_eq!(
+            directory_scores("CAFÉ", &original, false, false, false)[0].1,
+            98.0
+        );
+        let mut changed = original.clone();
+        changed[0].name = "Other".into();
+        assert_eq!(
+            directory_scores("work space", &changed, true, false, true)[0].1,
+            0.0
+        );
+        assert_eq!(
+            directory_scores("work space", &original, true, false, true)[0].1,
+            94.0
+        );
+        assert_eq!(
+            directory_scores("work", &original, true, true, true)[0].1,
+            56.0
+        );
+    }
+}
+thread_local! { static DIRECTORIES: RefCell<std::collections::VecDeque<Arc<DirectoryIndex>>> = RefCell::new(Default::default()); }
+pub(crate) fn directory_scores<'a>(
+    spoken: &str,
+    entries: &'a SharedList<DirectoryEntry>,
+    directory: bool,
+    complete: bool,
+    spelling: bool,
+) -> Vec<(&'a DirectoryEntry, f64)> {
+    let cached = DIRECTORIES.with(|cache| {
+        cache
+            .borrow()
+            .iter()
+            .find(|index| index.entries.shares_storage(entries))
+            .cloned()
+    });
+    let index = cached.unwrap_or_else(|| {
+        let mut index = DirectoryIndex {
+            entries: entries.clone(),
+            directories: vec![],
+            files: vec![],
+        };
+        for (at, entry) in entries.iter().enumerate() {
+            if entry.directory || entry.symlink {
+                index.directories.push((at, Prepared::new(&entry.name)));
+            }
+            if !entry.directory || entry.symlink {
+                index.files.push((at, Prepared::new(&entry.name)));
+            }
+        }
+        let index = Arc::new(index);
+        if entries.len() <= 30000 {
+            DIRECTORIES.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                cache.push_back(index.clone());
+                while cache.len() > 32
+                    || cache.iter().map(|index| index.entries.len()).sum::<usize>() > 30000
+                {
+                    cache.pop_front();
+                }
+            });
+        }
+        index
+    });
+    let spoken = Prepared::new(spoken);
+    let candidates = if directory {
+        &index.directories
+    } else {
+        &index.files
+    };
+    let mut values: Vec<_> = candidates
+        .iter()
+        .map(|(at, name)| (*at, score(&spoken, name)))
+        .collect();
+    let completion = complete && values.iter().all(|(_, score)| *score == 0.0);
+    let folded: Vec<_> = spoken.lower.encode_utf16().collect();
+    for ((_, value), (_, name)) in values.iter_mut().zip(candidates) {
+        if completion {
+            *value = prepared_completion_score(&spoken, name);
+        }
+        if spelling
+            && *value == 0.0
+            && folded.len() >= 3
+            && folded.len() == name.lower.encode_utf16().count()
+            && folded
+                .iter()
+                .copied()
+                .zip(name.lower.encode_utf16())
+                .filter(|(a, b)| a != b)
+                .count()
+                == 1
+        {
+            *value = 62.0;
+        }
+    }
+    values
+        .into_iter()
+        .map(|(at, score)| (&entries[at], score))
+        .collect()
+}
 fn sort_matches(found: &mut [Match]) {
     found.sort_by(|a, b| {
         b.score
