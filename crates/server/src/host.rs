@@ -1,6 +1,6 @@
 use crate::{
     catalog::CatalogHost,
-    completion::shell_complete,
+    completion::CompletionProvider,
     directories::Directories,
     help::HelpProvider,
     probes::{ABORTED, ProbePool},
@@ -17,6 +17,7 @@ pub struct HostServices {
     pub directories: Directories,
     pub syntax: Syntax,
     pub catalog: CatalogHost,
+    pub completion: CompletionProvider,
 }
 impl Default for HostServices {
     fn default() -> Self {
@@ -30,6 +31,7 @@ impl HostServices {
         Self {
             syntax: Syntax::new(pool.clone()),
             catalog: CatalogHost::new(directories.clone(), pool.clone()),
+            completion: CompletionProvider::default(),
             pool,
             directories,
         }
@@ -170,7 +172,7 @@ impl NativeHost {
                 json!(
                     tokio::time::timeout(
                         Duration::from_secs_f64(timeout.min(1500.0) / 1000.0),
-                        shell_complete(
+                        self.services.completion.complete(
                             &self.services.pool,
                             &words,
                             &self.catalog.cwd,

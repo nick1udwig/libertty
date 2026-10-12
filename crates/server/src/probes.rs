@@ -81,7 +81,7 @@ pub struct ProbeOutput {
     pub stderr: Vec<u8>,
     pub success: bool,
 }
-struct ProcessGroup(Option<u32>);
+pub(crate) struct ProcessGroup(pub(crate) Option<u32>);
 impl Drop for ProcessGroup {
     fn drop(&mut self) {
         if let Some(pid) = self.0 {
