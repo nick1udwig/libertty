@@ -116,6 +116,46 @@ async fn learned_schema_is_replaced_when_the_executable_changes() {
 }
 
 #[tokio::test]
+async fn reader_count_flags_repair_paths_without_gnu_help() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    std::fs::create_dir(root.path().join("docs")).unwrap();
+    std::fs::write(root.path().join("docs/My Notes.txt"), "notes").unwrap();
+    executable(
+        &root.path().join("head"),
+        "#!/bin/sh\nprintf 'usage: head [-n lines | -c bytes] [file ...]\\n' >&2\nexit 1\n",
+    );
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(cwd, &["head"]),
+        BTreeMap::from([
+            ("HOME".into(), cwd.into()),
+            ("PATH".into(), format!("{cwd}:/usr/bin:/bin")),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    for option in ["-n", "-c"] {
+        let result = engine
+            .suggest(
+                &format!("head {option} 1 docs slash My Notes dot txt"),
+                &host,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            result.as_array().unwrap().iter().any(|candidate| {
+                candidate["command"] == format!("head {option} 1 'docs/My Notes.txt'")
+                    && candidate["literal"] != true
+            }),
+            "{option}: {result}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();

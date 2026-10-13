@@ -525,6 +525,7 @@
       "assertions": [
         "fact_deadlines_preserve_fast_results_when_an_optional_probe_is_slow",
         "learned_schema_is_replaced_when_the_executable_changes",
+        "reader_count_flags_repair_paths_without_gnu_help",
         "shared_paths_and_option_schemas_preserve_types_choices_and_arity",
         "compound_commands_repair_each_node_and_preserve_shell_expressions",
         "history_and_validation_do_not_discard_live_filename_alternatives",

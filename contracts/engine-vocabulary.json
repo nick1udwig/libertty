@@ -465,6 +465,16 @@
         "takesValue": false
       }
     ],
+    "head": [
+      {
+        "name": "-n",
+        "takesValue": true
+      },
+      {
+        "name": "-c",
+        "takesValue": true
+      }
+    ],
     "less": [
       {
         "name": "-N",
