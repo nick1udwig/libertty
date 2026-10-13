@@ -29,6 +29,10 @@ try {
   const local = await (await request(base, 'api/sessions', owner, { name: 'Local terminal' })).json();
   assert.equal((await request(base, 'api/files/list?session=' + local.id, other)).status, 404);
   assert.equal((await request(base, 'api/files/list?session=' + local.id)).status, 401);
+  for (const bearer of [undefined, other]) {
+    const response = await fetch(base + 'api/images/upload?session=' + local.id + '&name=photo.png', { method: 'POST', headers: { Origin: origin, ...(bearer ? { Authorization: 'Bearer ' + bearer } : {}) }, body: bytes });
+    assert.equal(response.status, bearer ? 404 : 401);
+  }
 
   assert.equal((await fetch(base + 'api/files/upload?session=' + local.id, { method: 'POST', headers: { Origin: 'http://untrusted.invalid', Authorization: 'Bearer ' + owner }, body: 'x' })).status, 403);
   const ssh = { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, privateKey: key.private, passphrase: 'test-passphrase-123' };
@@ -47,6 +51,17 @@ try {
   for (const [session, dir] of [[local.id, 'local'], [remote.id, 'remote']]) {
     console.log('Testing utilities', dir);
     await page.goto(base + 'terminal.html?session=' + session); await page.waitForFunction(() => window.__state?.ready && document.querySelector('#connection-label')?.textContent === 'Connected');
+    const imageResponse = page.waitForResponse(response => response.url().includes('/api/images/upload'));
+    const chooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: 'Attach images', exact: true }).click();
+    const picker = await chooser; assert.equal(await picker.element().getAttribute('accept'), 'image/png,image/jpeg,image/webp,image/gif');
+    await picker.setFiles({ name: 'screen shot.png', mimeType: 'image/png', buffer: bytes });
+    const uploaded = await imageResponse; assert.equal(uploaded.status(), 200);
+    const imagePath = (await uploaded.json()).path;
+    assert.deepEqual(await readFile(imagePath), bytes, 'Image reaches the selected local or SSH host');
+    await page.waitForFunction(path => window.__output?.includes(path), imagePath);
+    await page.getByRole('button', { name: 'Attach images', exact: true }).waitFor({ state: 'visible' });
+    await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+u');
+    await rm(imagePath);
     await page.locator('#terminal canvas').click();
     await page.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertReplacementText', data: 'Ls pipe through Grepp hello_world', bubbles: true, cancelable: true })));
     await page.locator('.alternative-choice .choice-command').filter({ hasText: /^ls \| grep hello_world$/ }).waitFor();

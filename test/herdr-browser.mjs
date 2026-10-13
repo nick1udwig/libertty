@@ -145,6 +145,16 @@ try {
   assert.equal(await page.locator('.herdr-message').count(), 0);
   const text = () => terminal.evaluate(() => { const b = window.__testTerminal.buffer.active; return Array.from({ length: b.length }, (_, i) => b.getLine(i)?.translateToString(true)).join('\n'); });
   await until(async () => (await text()).includes('Live Herdr terminal'), 'rendered ANSI frame');
+  const imageResponse = page.waitForResponse(response => response.url().includes('/api/herdr/images/upload'));
+  const imageChooser = page.waitForEvent('filechooser'); await page.getByRole('button', { name: 'Attach images', exact: true }).click();
+  const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+  await (await imageChooser).setFiles({ name: 'screenshot.png', mimeType: 'image/png', buffer: imageBytes });
+  const uploadedImage = await imageResponse; assert.equal(uploadedImage.status(), 200);
+  const imagePath = (await uploadedImage.json()).path; assert.deepEqual(await readFile(imagePath), imageBytes);
+  await until(() => fixture.actions.some(action => action.method === 'pane.send_input' && action.params.text === imagePath), 'image path pasted into the selected Herdr terminal');
+  assert.equal(fixture.actions.find(action => action.method === 'pane.send_input' && action.params.text === imagePath).params.pane_id, 'w1:p0');
+  await (await import('node:fs/promises')).rm(imagePath);
+  fixture.actions.splice(0, fixture.actions.length);
   fixture.setScreen(0, 'Codex\n╭────────────────────╮\n│ › type here        │\n╰────────────────────╯\nfooter\n', { x: 4, y: 2 });
   await until(async () => await terminal.evaluate(() => { const t = window.__testTerminal; return t.buffer.active.cursorY === 2 && t.buffer.active.cursorX === 4 && t.buffer.active.getLine(2)?.translateToString(true).includes('type here'); }), 'cursor inside Codex input box');
   fixture.setScreen(0, '0123456789'.repeat(12) + '\nfooter\n', { x: 10, y: 1 });

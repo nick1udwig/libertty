@@ -4,6 +4,53 @@ use std::os::unix::fs::{PermissionsExt, symlink};
 use termai_server::{files, markers::Event, reading, transfers::Transfers};
 
 #[tokio::test]
+async fn images_get_unique_private_paths_and_enforce_type_and_size_limits() {
+    let fs = termai_server::filesystem::FileSystem::default();
+    let bytes = b"\x89PNG\r\n\x1a\nfixture";
+    let mut paths = vec![];
+    for _ in 0..2 {
+        let result = files::upload_image_on(&fs, "screen shot.PNG", Body::from(bytes.as_slice()))
+            .await
+            .unwrap();
+        let path = result["path"].as_str().unwrap().to_owned();
+        assert!(path.starts_with("/tmp/termai-image-") && path.ends_with(".png"));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        paths.push(path);
+    }
+    assert_ne!(paths[0], paths[1]);
+    for path in paths {
+        std::fs::remove_file(path).unwrap();
+    }
+    for name in ["../escape.png", "photo.txt", "photo"] {
+        assert_eq!(
+            files::upload_image_on(&fs, name, Body::from("x"))
+                .await
+                .unwrap_err()
+                .status,
+            400
+        );
+    }
+    assert_eq!(
+        files::upload_image_on(&fs, "empty.png", Body::empty())
+            .await
+            .unwrap_err()
+            .status,
+        400
+    );
+    assert_eq!(
+        files::upload_image_on(&fs, "large.png", Body::from(vec![0; files::MAX_IMAGE + 1]))
+            .await
+            .unwrap_err()
+            .status,
+        413
+    );
+}
+
+#[tokio::test]
 async fn uploads_are_exclusive_accept_empty_files_and_remove_cancelled_writes() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();

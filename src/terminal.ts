@@ -1,6 +1,7 @@
 import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
 import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
+import { imagePicker, uploadImage } from './image-upload.ts';
 import { Ghostty, Terminal, FitAddon } from 'ghostty-web';
 import type { ClientMessage, ServerMessage, ShellState } from './protocol.ts';
 import './style.css';
@@ -61,6 +62,7 @@ function persist(key: string, value: unknown) {
 const transfersSeen = new Set<string>();
 let ctrl = false;
 let shortcutState = '';
+let uploadingImage = false;
 let toastTimer: ReturnType<typeof setTimeout>;
 const queue = new Queue<Extract<ServerMessage, { type: 'output' }>>();
 let frameQueued = false;
@@ -81,11 +83,12 @@ function updateRun() {
   const available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand;
   $('shell-status').textContent = state.exited ? 'Exited' : state.ready ? 'At prompt' : 'Running';
   for (const button of document.querySelectorAll<HTMLButtonElement>('.command-shortcut')) button.disabled = !available;
+  for (const button of document.querySelectorAll<HTMLButtonElement>('.image-upload')) button.disabled = !canUploadImage();
   publishShortcuts(available);
 }
 function publishShortcuts(available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand) {
   if (!embedded) return;
-  const snapshot = { shortcuts, ctrl, available }, serialized = JSON.stringify(snapshot);
+  const snapshot = { shortcuts, ctrl, available, imageAvailable: canUploadImage() }, serialized = JSON.stringify(snapshot);
   if (serialized === shortcutState) return;
   shortcutState = serialized; notify('terminal-shortcuts', snapshot);
 }
@@ -230,6 +233,26 @@ function showReading(request: { path: string } | { capture: string; name: string
 }
 term.onData(rawInput);
 function setCtrl(value: boolean) { ctrl = value; for (const button of document.querySelectorAll('[data-modifier]')) button.setAttribute('aria-pressed', String(value)); publishShortcuts(); }
+function canUploadImage() { return !uploadingImage && !capturedConnection && !state.exited && (!herdrTerminal || herdrReady) && transport.socket?.readyState === WebSocket.OPEN; }
+const images = imagePicker(files => void attachImages(files)); document.body.append(images);
+async function attachImages(files: File[]) {
+  if (!canUploadImage()) { toast('Connect to the terminal before attaching an image.'); return; }
+  const socket = transport.socket!, abort = new AbortController();
+  socket.addEventListener('close', () => abort.abort(), { once: true, signal: abort.signal });
+  uploadingImage = true; updateRun();
+  try {
+    for (const file of files) {
+      toast('Uploading ' + file.name + '…');
+      const path = await uploadImage(herdrTerminal ? herdrEndpoint('api/herdr/images/upload') : endpoint('api/images/upload'), accessToken, file, abort.signal);
+      if (transport.socket !== socket || socket.readyState !== WebSocket.OPEN) throw new Error('The terminal disconnected. Attach the image again after reconnecting.');
+      inline.prepareExternalPaste();
+      if (herdrTerminal) { send({ type: 'paste', text: path }); state.inputRevision++; }
+      else term.paste(path);
+    }
+    toast(`${files.length} image${files.length === 1 ? '' : 's'} attached.`); term.focus();
+  } catch (error: any) { toast(abort.signal.aborted ? 'The terminal disconnected. Attach the image again after reconnecting.' : error.message); }
+  finally { abort.abort(); uploadingImage = false; updateRun(); }
+}
 function renderShortcuts() {
   $('shortcut-buttons').replaceChildren();
   for (const shortcut of shortcuts) {
@@ -245,6 +268,7 @@ function renderShortcuts() {
     };
     $('shortcut-buttons').append(button);
   }
+  const image = document.createElement('button'); image.type = 'button'; image.className = 'image-upload'; image.textContent = 'Image'; image.setAttribute('aria-label', 'Attach images'); image.onclick = () => images.click(); $('shortcut-buttons').append(image);
   updateRun();
 }
 const prepareEditor = shortcutEditor(() => shortcuts, value => { shortcuts = value; persist('shortcuts', shortcuts); setCtrl(false); renderShortcuts(); }, () => $<HTMLDialogElement>('shortcuts-dialog').close());
@@ -524,6 +548,7 @@ if (embedded) {
       const index = event.data.index, shortcut = shortcuts[index];
       if (Number.isInteger(index) && shortcut && shortcut.kind === event.data.kind && shortcut.value === event.data.value) $('shortcut-buttons').querySelectorAll<HTMLButtonElement>('button')[index]?.click();
     }
+    if (event.data?.type === 'terminal-images' && tabVisible && !herdrParked && Array.isArray(event.data.files) && event.data.files.every((file: unknown) => file instanceof File)) void attachImages(event.data.files);
     if (event.data?.type === 'herdr-present' && herdrTerminal && typeof event.data.presentation === 'string') {
       herdrPresentation = event.data.presentation; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0;
       notifyHerdrSizing();

@@ -12,6 +12,27 @@ use std::{
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const MAX_UPLOAD: u64 = 1024 * 1024 * 1024;
+pub const MAX_IMAGE: usize = 20 * 1024 * 1024;
+
+pub async fn upload_image_on(fs: &FileSystem, name: &str, body: Body) -> Result<Value> {
+    let extension = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if !valid_name(name) || !matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "webp" | "gif") {
+        return Err(Error::new("Choose a PNG, JPEG, WebP or GIF image.", 400));
+    }
+    let bytes = axum::body::to_bytes(body, MAX_IMAGE)
+        .await
+        .map_err(|_| Error::new("Images are limited to 20 MB per file.", 413))?;
+    if bytes.is_empty() {
+        return Err(Error::new("Choose a nonempty image.", 400));
+    }
+    let name = format!(
+        "termai-image-{}.{}",
+        crate::storage::random_hex(16),
+        extension
+    );
+    upload_on(fs, "/tmp", "/tmp", "/tmp", &name, Body::from(bytes), None).await?;
+    Ok(json!({"path":format!("/tmp/{name}")}))
+}
 #[derive(Debug)]
 pub struct Error {
     pub status: u16,

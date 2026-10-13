@@ -7314,8 +7314,41 @@
             "seq"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "paste",
+              "type": "string"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "x-utf16MaxLength": 16000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "additionalProperties": true
         }
       ]
+    },
+    "ImageUploadReply": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^/tmp/termai-image-[a-f0-9]+\\.(png|jpg|jpeg|webp|gif)$"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": true
     }
   }
 }

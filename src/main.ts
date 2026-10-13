@@ -5,6 +5,7 @@ import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './bac
 import { BrowserVault } from './browser-vault.ts';
 import type { BrowserKeyInfo } from './browser-key.ts';
 import { defaults, validateShortcuts, type Shortcut } from './shortcuts.ts';
+import { imagePicker } from './image-upload.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { readingPhrases, defaultReadingPhrases } from './reading-request.ts';
 import { readingMessage } from './reading-view.ts';
@@ -45,7 +46,7 @@ try {
   }
 } catch { /* A corrupt plugin inventory cannot prevent terminal startup. */ }
 const herdrViews = new Map<string, HerdrView>(), herdrAttention = new Map<string, number>();
-const terminalShortcuts = new WeakMap<Window, { shortcuts: Shortcut[]; ctrl: boolean; available: boolean }>();
+const terminalShortcuts = new WeakMap<Window, { shortcuts: Shortcut[]; ctrl: boolean; available: boolean; imageAvailable: boolean }>();
 let shortcutPresentation = '';
 let shortcutWindow: Window | null | undefined;
 const herdrSounds = new HerdrSounds();
@@ -328,6 +329,11 @@ function updateViewVisibility() {
   renderWorkspaceShortcuts();
 }
 function shortcutFrame() { return frames.get(active) || herdrViews.get(active)?.terminalFrame; }
+let imageTarget: Window | null | undefined;
+const images = imagePicker(files => {
+  if (imageTarget && shortcutFrame()?.contentWindow === imageTarget) imageTarget.postMessage({ type: 'terminal-images', files }, location.origin);
+  else notice('Select the original terminal and attach the image again.');
+}); document.body.append(images);
 function renderWorkspaceShortcuts() {
   const frame = shortcutFrame(), source = frame?.contentWindow, state = source && terminalShortcuts.get(source);
   $('workspace-shortcuts').hidden = page !== 'terminal' || !state;
@@ -345,6 +351,7 @@ function renderWorkspaceShortcuts() {
     if (shortcut.kind === 'keys' && shortcut.value === 'Ctrl') { control.dataset.modifier = ''; control.setAttribute('aria-pressed', String(state.ctrl)); }
     control.addEventListener('pointerdown', event => event.preventDefault()); buttons.append(control);
   });
+  const image = button('Image', () => { imageTarget = source; images.click(); }, 'image-upload'); image.setAttribute('aria-label', 'Attach images'); image.disabled = !state.imageAvailable; buttons.append(image);
   buttons.scrollLeft = scroll;
 }
 function showTerminalLoading(id: string, waitForPrompt = false) { terminalLoading = { id, waitForPrompt }; updateTerminalLoading(); }
@@ -463,7 +470,7 @@ window.addEventListener('message', event => {
     const source = event.source as Window;
     const known = [...frames.values()].some(frame => frame.contentWindow === source) || [...herdrViews.values()].some(view => [...view.element.querySelectorAll('iframe')].some(frame => frame.contentWindow === source));
     if (known) {
-      try { terminalShortcuts.set(source, { shortcuts: validateShortcuts(event.data.shortcuts), ctrl: event.data.ctrl === true, available: event.data.available === true }); renderWorkspaceShortcuts(); } catch { /* Ignore malformed state from a stale terminal. */ }
+      try { terminalShortcuts.set(source, { shortcuts: validateShortcuts(event.data.shortcuts), ctrl: event.data.ctrl === true, available: event.data.available === true, imageAvailable: event.data.imageAvailable === true }); renderWorkspaceShortcuts(); } catch { /* Ignore malformed state from a stale terminal. */ }
     }
     return;
   }

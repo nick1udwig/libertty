@@ -259,7 +259,7 @@ impl View {
             .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
         tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=result=>result.map_err(|_| "The agent view changed. No input was sent.".to_owned())?}
     }
-    fn queue_input(&self, text: String, command: Option<String>) {
+    fn queue_input(&self, text: String, command: Option<String>, paste: bool) {
         let permit = match self.capacity.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
@@ -272,7 +272,7 @@ impl View {
         };
         if let Err(error) = self.pending_input.try_send(Input {
             text,
-            paste: false,
+            paste,
             guard: None,
             command,
             complete: None,
@@ -487,7 +487,19 @@ impl View {
                     .ok_or("Invalid input")?
                     .to_owned();
                 self.inner.lock().unwrap().revision += 1;
-                self.queue_input(text, None);
+                self.queue_input(text, None, false);
+                Ok(())
+            }
+            "paste" => {
+                let text = message["text"]
+                    .as_str()
+                    .filter(|text| {
+                        !text.is_empty() && text.encode_utf16().count() <= 16000 && !controls(text)
+                    })
+                    .ok_or("Invalid paste")?
+                    .to_owned();
+                self.inner.lock().unwrap().revision += 1;
+                self.queue_input(text, None, true);
                 Ok(())
             }
             "command" => {
@@ -504,7 +516,7 @@ impl View {
                     .ok_or("Invalid command")?
                     .to_owned();
                 self.inner.lock().unwrap().revision += 1;
-                self.queue_input(command + "\r", Some(id));
+                self.queue_input(command + "\r", Some(id), false);
                 Ok(())
             }
             "dictation" => {

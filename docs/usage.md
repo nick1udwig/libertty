@@ -317,6 +317,10 @@ Audio accuracy and Android accessibility behavior still need verification on a r
 
 ## Files and transfers
 
+Tap **Image** beside the terminal shortcuts to select PNG, JPEG, WebP or GIF images with the device’s file picker.
+Each image is limited to 20 MB and saved under a unique private filename in `/tmp` on the terminal’s host, including SSH and Herdr connections.
+Termai pastes each uploaded path into the active application without submitting the prompt, allowing applications such as Codex to attach the image.
+
 Open a saved host’s small menu and choose **Connect SFTP / Files**.
 The main host button still opens a terminal.
 Files tabs use the same browser for local backend files and SSH/SFTP files without starting a shell.

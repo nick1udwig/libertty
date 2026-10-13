@@ -1195,6 +1195,16 @@ async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body
             .await
             .map_err(file_failure)?);
     }
+    if pathname == "/api/images/upload" && *req.method() == Method::POST {
+        let payload = std::mem::take(req.body_mut());
+        return ok(files::upload_image_on(
+            &session.filesystem(),
+            query.get("name").map(String::as_str).unwrap_or(""),
+            payload,
+        )
+        .await
+        .map_err(file_failure)?);
+    }
     if pathname == "/api/files/upload" && *req.method() == Method::POST {
         let length = req
             .headers()
@@ -1615,6 +1625,26 @@ async fn herdr_request(
     }
     if path == "/api/herdr/snapshot" && get {
         return ok(target.snapshot().await.map_err(fail)?);
+    }
+    if path == "/api/herdr/images/upload" && *req.method() == Method::POST {
+        let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
+        if !target.snapshot().await.map_err(fail)?["terminals"]
+            .as_array()
+            .is_some_and(|items| items.iter().any(|item| item["terminalId"] == terminal))
+        {
+            return Err(fail("This terminal has ended."));
+        }
+        let fs = crate::filesystem::FileSystem {
+            remote: target.remote.clone(),
+        };
+        let payload = std::mem::take(req.body_mut());
+        return ok(files::upload_image_on(
+            &fs,
+            query.get("name").map(String::as_str).unwrap_or(""),
+            payload,
+        )
+        .await
+        .map_err(file_failure)?);
     }
     if path == "/api/herdr/options" && get {
         return ok(target.options().await.map_err(fail)?);

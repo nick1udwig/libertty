@@ -1070,6 +1070,56 @@
         403,
         404
       ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/images/upload",
+      "authentication": "paired-client",
+      "origin": "required",
+      "scope": "session",
+      "request": null,
+      "response": {
+        "$ref": "#/$defs/ImageUploadReply"
+      },
+      "requestEncoding": "application/octet-stream",
+      "responseEncoding": "application/json",
+      "bodyLimitBytes": 20971520,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404,
+        413
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/herdr/images/upload",
+      "authentication": "paired-client",
+      "origin": "required",
+      "scope": "herdr",
+      "request": null,
+      "response": {
+        "$ref": "#/$defs/ImageUploadReply"
+      },
+      "requestEncoding": "application/octet-stream",
+      "responseEncoding": "application/json",
+      "bodyLimitBytes": 20971520,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404,
+        413
+      ]
     }
   ],
   "sockets": [
