@@ -32,6 +32,57 @@ fn executable(file: &std::path::Path, content: &str) {
 }
 
 #[tokio::test]
+async fn history_and_validation_do_not_discard_live_filename_alternatives() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    for name in ["my-notes", "my_notes", "not.es"] {
+        std::fs::write(root.path().join(name), "notes").unwrap();
+    }
+    let services = HostServices::new();
+    let mut catalog = catalog(cwd, &["cat"]);
+    catalog.paths = vec!["my-notes".into(), "my_notes".into()].into();
+    catalog.history = vec!["cat my-notes".into()].into();
+    let mut host = NativeHost::new(
+        services.clone(),
+        catalog,
+        BTreeMap::from([
+            ("HOME".into(), cwd.into()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    let result = engine
+        .suggest("cat my notes", &host, &CancellationToken::new())
+        .await
+        .unwrap();
+    for command in ["cat my-notes", "cat my_notes"] {
+        assert!(
+            result
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["command"] == command && c["literal"] != true),
+            "{result}"
+        );
+    }
+    host.catalog.paths = vec![
+        "not-es".into(),
+        "not_es".into(),
+        "not.es".into(),
+        "no_tes".into(),
+    ]
+    .into();
+    host.catalog.history.clear();
+    let result = engine
+        .suggest("cat notes", &host, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result[0]["command"], "cat not.es");
+    assert_eq!(result.as_array().unwrap().last().unwrap()["literal"], true);
+}
+
+#[tokio::test]
 async fn script_options_keep_their_scope_after_interpreter_options_and_multiple_values() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();

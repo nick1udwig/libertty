@@ -1,7 +1,7 @@
 use crate::{
     command_policy::{child_scope, flags_for, is_path_position, option_arity, subcommands_for},
     host::{self, Host},
-    repair::{repair, tokens},
+    repair::{repair_candidates as repair, tokens},
     types::{Candidate, Catalog, CommandMetadata, Flag},
     util::{test, utf16_len},
     validation::simple_words,

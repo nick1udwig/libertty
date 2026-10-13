@@ -11,7 +11,7 @@ use crate::{
     path,
     path_repair::repair_directory,
     pipeline::pipeline_parts,
-    repair::{discovery_target, discovery_targets, repair, tokens},
+    repair::{discovery_target, discovery_targets, repair_candidates as repair, tokens},
     speech::{expand_symbols, symbol_alternatives},
     transfer_command::download_pipeline,
     types::{Candidate, Catalog, CommandMetadata, Flag},
@@ -75,9 +75,7 @@ async fn check(
     let mut candidates: Vec<_> = candidates.into_iter().filter(|c| !c.is_literal()).collect();
     sort(&mut candidates);
     let mut ranked = unique(candidates);
-    ranked.truncate(8);
-    let top = ranked.first().map_or(0.0, |c| c.score);
-    ranked.retain(|c| c.score >= top - 18.0);
+    ranked.truncate(16);
     let valid = join_all(
         ranked
             .iter()
@@ -86,10 +84,15 @@ async fn check(
     .await
     .into_iter()
     .collect::<Result<Vec<_>, String>>()?;
-    Ok(ranked
+    let valid: Vec<_> = ranked
         .into_iter()
         .zip(valid)
         .filter_map(|(c, valid)| valid.then_some(c))
+        .collect();
+    let top = valid.first().map_or(0.0, |c| c.score);
+    Ok(valid
+        .into_iter()
+        .filter(|c| c.score >= top - 18.0)
         .take(3)
         .collect())
 }
@@ -437,25 +440,6 @@ async fn suggest_one(
         return Ok(files);
     }
     let historic = history_candidates(input, catalog);
-    let mut from_history = check(
-        input,
-        historic
-            .iter()
-            .filter(|c| c.score >= 102.0)
-            .cloned()
-            .collect(),
-        catalog,
-        env,
-        &metadata,
-        host,
-        None,
-    )
-    .await?;
-    if !from_history.is_empty() {
-        *stage.borrow_mut() = Some("history".into());
-        from_history.push(literal);
-        return Ok(from_history);
-    }
     if let Some(directories) = repair_directory(input, catalog, home, host).await? {
         *stage.borrow_mut() = Some("directory".into());
         let mut valid = check(input, directories, catalog, env, &metadata, host, None).await?;
@@ -467,6 +451,28 @@ async fn suggest_one(
         .into_iter()
         .filter(|c| !c.is_literal())
         .collect();
+    if historic.iter().any(|c| c.score >= 102.0) {
+        let mut from_history = check(
+            input,
+            historic
+                .iter()
+                .filter(|c| c.score >= 102.0)
+                .cloned()
+                .chain(cheap.iter().cloned())
+                .collect(),
+            &catalog,
+            env,
+            &metadata,
+            host,
+            None,
+        )
+        .await?;
+        if !from_history.is_empty() {
+            *stage.borrow_mut() = Some("history".into());
+            from_history.push(literal);
+            return Ok(from_history);
+        }
+    }
     let fast = check(
         input,
         cheap

@@ -757,6 +757,26 @@ pub fn repair(
     script_flags: Option<&[Flag]>,
     metadata: &CommandMetadata,
 ) -> Vec<Candidate> {
+    let candidates = repair_candidates(input, catalog, script_flags, metadata);
+    let literal = candidates.iter().find(|c| c.is_literal()).cloned();
+    let mut selected: Vec<_> = candidates
+        .into_iter()
+        .filter(|c| !c.is_literal())
+        .take(3)
+        .collect();
+    if let Some(literal) = literal {
+        selected.push(literal);
+    }
+    selected
+}
+
+/// Keep the bounded search frontier separate from the user-visible choice limit.
+pub(crate) fn repair_candidates(
+    input: &str,
+    catalog: &Catalog,
+    script_flags: Option<&[Flag]>,
+    metadata: &CommandMetadata,
+) -> Vec<Candidate> {
     let mut catalog = catalog.clone();
     if catalog
         .functions
@@ -771,7 +791,7 @@ pub fn repair(
             .last()
             .map_or(String::new(), |word| word.value.clone());
         if !catalog.paths.contains(&last) && !test(r#"["'|&;<>()`$\\]"#, input) {
-            let clean: Vec<_> = repair(&sentence[1], &catalog, script_flags, metadata)
+            let clean: Vec<_> = repair_candidates(&sentence[1], &catalog, script_flags, metadata)
                 .into_iter()
                 .filter(|candidate| !candidate.is_literal())
                 .collect();
@@ -826,7 +846,7 @@ pub fn repair(
             Candidate::literal(input),
         ];
     }
-    result.truncate(3);
+    result.truncate(16);
     result.push(Candidate::literal(input));
     result
 }
@@ -902,8 +922,8 @@ fn repair_normalized(
     candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
     let mut seen = HashSet::new();
     candidates.retain(|candidate| seen.insert(candidate.command.clone()));
-    candidates.truncate(3);
-    if candidates.len() < 3 {
+    candidates.truncate(16);
+    if candidates.len() < 16 {
         candidates.push(Candidate::literal(input));
     }
     candidates
@@ -1338,7 +1358,7 @@ fn repair_one(
             }
         }
         next.sort_by(|a, b| b.score.total_cmp(&a.score));
-        next.truncate(8);
+        next.truncate(16);
         states = next;
     }
     let mut unique = Vec::new();
@@ -1381,8 +1401,8 @@ fn repair_one(
         }
     }
     unique.sort_by(|a, b| b.score.total_cmp(&a.score));
-    unique.truncate(3);
-    if unique.len() < 3
+    unique.truncate(16);
+    if unique.len() < 16
         && !unique
             .iter()
             .any(|candidate| candidate.command == literal.command)

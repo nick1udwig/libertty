@@ -6,7 +6,8 @@ Retain the shared Rust engine, original transcript choices, non-executing valida
 - [x] Preserve script option scope and interpreter invocation boundaries.
   Native engine and catalog tests pass, including multiple script options, interpreter options, and module exclusion.
   Canonical vocabulary contract checks pass.
-- [ ] Retain candidates through validation and combine history with relevant alternatives.
+- [x] Retain candidates through validation and combine history with relevant alternatives.
+  Engine and native regression suites pass, including stale catalog refill and history ambiguity.
 - [ ] Batch independent facts and reduce redundant filesystem and completion work.
 - [ ] Use coarse backend repair for network-dependent work and retain Herdr metadata.
 - [ ] Compose repair over shared shell structure, preserving opaque quoted syntax and supporting command lists and wrappers.
