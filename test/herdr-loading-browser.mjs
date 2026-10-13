@@ -31,19 +31,31 @@ try {
       localStorage.setItem('termai.hosts', JSON.stringify([{id:'herdr',name:'Herdr',kind:'herdr',backendId:'primary'}]));
       localStorage.setItem('termai.tabs', JSON.stringify([first,second].map((id,i)=>({id,session:'default',name:'Herdr '+(i+1),mode:'herdr',backendId:'primary',hostId:'herdr'}))));
       localStorage.setItem('termai.activeTab', JSON.stringify(first));
+      localStorage.setItem('termai.shortcuts', JSON.stringify([{label:'Stop',kind:'keys',value:'Escape'},{label:'Ctrl',kind:'keys',value:'Ctrl'},{label:'Status',kind:'command',value:'pwd'}]));
       window.__holdRendered = []; window.__holdAllRendered = true; window.__visibleScreens = [];
+      window.__holdShortcuts = []; window.__holdAllShortcuts = true; window.__bottomLayouts = [];
+      window.__bottomLayout = () => {
+        const strips = [...document.querySelectorAll('.herdr-agent-strip')];
+        const strip = strips.find(element => element.checkVisibility({checkVisibilityCSS:true})) || strips.find(element => element.getClientRects().length);
+        return [...document.querySelectorAll('#terminal-header, #workspace-shortcuts'), ...(strip ? [strip] : [])].map(element => {
+          const {y,height} = element.getBoundingClientRect(); return {bar:element.id || element.className,y,height};
+        });
+      };
       const inspect = () => {
         const screens = [...document.querySelectorAll('.herdr-screen iframe')].filter(frame => frame.checkVisibility({checkVisibilityCSS:true}) && getComputedStyle(frame.contentDocument.querySelector('#terminal-viewport')).visibility !== 'hidden').map(frame => {
           const t = frame.contentWindow.__terminal, b = t?.buffer.active; return b?.getLine(b.viewportY)?.translateToString(true);
         }).filter(Boolean);
-        window.__visibleScreens.push(screens); requestAnimationFrame(inspect);
+        window.__visibleScreens.push(screens);
+        if (window.__captureBottomLayout) window.__bottomLayouts.push(window.__bottomLayout());
+        requestAnimationFrame(inspect);
       }; requestAnimationFrame(inspect);
       return;
     }
-    window.__blockedRendered = [];
+    window.__blockedRendered = []; window.__blockedShortcuts = [];
     window.__postToParent = (message, origin) => {
       const terminal = new URLSearchParams(location.search).get('herdrTerminal');
       if (message.type === 'terminal-rendered' && (parent.__holdAllRendered || parent.__holdRendered?.includes(terminal))) window.__blockedRendered.push(message);
+      else if (message.type === 'terminal-shortcuts' && (parent.__holdAllShortcuts || parent.__holdShortcuts?.includes(terminal))) window.__blockedShortcuts.push(message);
       else parent.postMessage(message, origin);
     };
   }, {first,second});
@@ -59,23 +71,47 @@ try {
   const frame = async locator => (await locator.elementHandle()).contentFrame();
   const assertVisible = async (locator, visible) => { if (!visible && !await locator.count()) return; assert.equal(await locator.evaluate(element => element.checkVisibility({checkVisibilityCSS:true})), visible); };
   const release = async child => child.evaluate(() => { for(const message of window.__blockedRendered.splice(0)) parent.postMessage(message, location.origin); });
+  const releaseShortcuts = async child => child.evaluate(() => { for(const message of window.__blockedShortcuts.splice(0)) parent.postMessage(message, location.origin); });
+  const hotkeys = page.locator('#workspace-shortcut-buttons button');
+  const captureBottomLayout = () => page.evaluate(() => { window.__bottomLayouts=[]; window.__captureBottomLayout=true; return window.__bottomLayout(); });
+  const assertBottomLayout = async expected => {
+    const layouts = await page.evaluate(() => { window.__captureBottomLayout=false; return window.__bottomLayouts; });
+    assert.ok(layouts.length > 0, 'Inspect bottom bars on animation frames during loading');
+    for (const layout of layouts) assert.deepEqual(layout, expected, 'Loading must never hide the hotkeys or move the other bottom bars');
+    assert.deepEqual(await page.evaluate(() => window.__bottomLayout()), expected);
+  };
   const initial = await frame(pane(first,'term_0'));
-  await wait(async () => await initial.evaluate(() => window.__blockedRendered.length > 0), 'cold pane ready behind the loading screen');
+  await wait(async () => await initial.evaluate(() => window.__blockedRendered.length > 0 && window.__blockedShortcuts.length > 0), 'cold pane ready behind the loading screen');
   await assertVisible(pane(first,'term_0'),false); assert.equal(await page.locator('#terminal-loading').isVisible(),true);
   assert.equal(await page.locator('#terminal-loading').evaluate(element => element.classList.contains('has-previous')),false);
+  assert.equal(await page.locator('#workspace-shortcuts').isVisible(),true,'The bar is present before the first terminal publishes shortcuts');
+  assert.deepEqual(await hotkeys.allTextContents(),['Stop','Ctrl','Status','Image'],'Saved shortcuts are shown during loading');
+  assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true);
+  const coldLayout = await captureBottomLayout();
+  await page.evaluate(() => { window.__holdAllShortcuts=false; }); await releaseShortcuts(initial);
+  await delay(100); assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true,'A painted acknowledgement is required before enabling input');
   await page.screenshot({path:root+'.test-artifacts/herdr-loading-initial.png'});
   await page.evaluate(() => { window.__holdAllRendered=false; }); await release(initial);
   await wait(async () => await pane(first,'term_0').count() && await pane(first,'term_0').evaluate(element => element.checkVisibility({checkVisibilityCSS:true})), 'initial ready Alpha');
+  await wait(async () => !(await hotkeys.first().isDisabled()),'initial shortcuts enabled');
+  await assertBottomLayout(coldLayout);
   assert.equal(await page.locator('#terminal-loading').isVisible(), false);
-  await page.evaluate(() => { window.__holdRendered=['term_1']; window.__visibleScreens=[]; });
+  const paneLayout = await captureBottomLayout();
+  await page.evaluate(() => { window.__holdRendered=['term_1']; window.__holdShortcuts=['term_1']; window.__visibleScreens=[]; });
   await page.locator('#herdr-'+first+' .herdr-agent-tab[data-terminal="term_1"]').click();
   const beta = await frame(pane(first,'term_1'));
-  await wait(async () => await beta.evaluate(() => window.__blockedRendered.length > 0), 'new pane painted behind the old view');
+  await wait(async () => await beta.evaluate(() => window.__blockedRendered.length > 0 && window.__blockedShortcuts.length > 0), 'new pane painted behind the old view');
   await assertVisible(pane(first,'term_0'),true); await assertVisible(pane(first,'term_1'),false);
   assert.equal(await pane(first,'term_0').evaluate(element => element.inert),true);
   assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),true);
+  assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true,'Pending shortcuts cannot send input to the previous pane');
+  assert.deepEqual(await hotkeys.allTextContents(),['Stop','Ctrl','Status','Image']);
+  const pendingActions = fixture.actions.length;
+  await hotkeys.evaluateAll(buttons => buttons.forEach(button => button.click()));
+  await delay(100); assert.equal(fixture.actions.slice(pendingActions).some(action => action.method === 'pane.send_text'),false);
   await beta.evaluate(() => parent.postMessage({type:'terminal-rendered',session:new URLSearchParams(location.search).get('session'),presentation:'superseded'},location.origin));
   await delay(100); await assertVisible(pane(first,'term_1'),false);
+  await assertBottomLayout(paneLayout);
   const oldCols=await beta.evaluate(() => window.__terminal.cols);
   await page.setViewportSize({width:360,height:800});
   await wait(async () => await beta.evaluate(oldCols => window.__terminal.cols < oldCols && window.__blockedRendered.some(message => message.cols === window.__terminal.cols),oldCols),'new geometry painted while the switch is pending');
@@ -83,9 +119,18 @@ try {
   await delay(100); await assertVisible(pane(first,'term_1'),false);
   await page.screenshot({path:root+'.test-artifacts/herdr-loading-previous.png'});
   assert.ok((await page.evaluate(() => window.__visibleScreens)).every(screens => screens.includes('SCREEN_ALPHA') && !screens.includes('SCREEN_BETA')), 'Every loading frame keeps Alpha until Beta is ready');
+  const resizedLayout = await captureBottomLayout();
   await page.evaluate(() => { window.__holdRendered=[]; }); await release(beta);
   await wait(async () => await pane(first,'term_1').evaluate(element => element.checkVisibility({checkVisibilityCSS:true})), 'atomic handoff to Beta');
   await assertVisible(pane(first,'term_0'),false); assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),false);
+  assert.equal(await hotkeys.first().isDisabled(),true,'The bar stays visible when paint precedes shortcut state');
+  await page.evaluate(() => { window.__holdShortcuts=[]; }); await releaseShortcuts(beta);
+  await wait(async () => !(await hotkeys.first().isDisabled()),'incoming shortcuts enabled');
+  await assertBottomLayout(resizedLayout);
+  const hotkeyActions = fixture.actions.length;
+  await hotkeys.filter({hasText:'Stop'}).click();
+  await wait(() => fixture.actions.slice(hotkeyActions).some(action => action.method === 'pane.send_text' && action.params.pane_id === 'w1:p1' && action.params.text === '\x1b'),'hotkey reaches only the newly selected pane');
+  assert.equal(fixture.actions.slice(hotkeyActions).some(action => action.method === 'pane.send_text' && action.params.pane_id === 'w1:p0'),false);
   const size=await beta.evaluate(() => ({width:window.__terminal.cols,height:window.__terminal.rows}));
   fixture.setScreen(1,'\x1b[48;2;20;200;240mSCREEN_BETA\x1b[0m\nNewly loaded\n',undefined,size);
   await wait(async () => {
@@ -110,20 +155,24 @@ try {
   await assertVisible(pane(first,'term_1'),true); await assertVisible(pane(first,'term_0'),false);
 
   // A top-level Herdr tab prepares offscreen while the prior tab remains visible.
-  await page.evaluate(() => { window.__holdAllRendered=true; window.__visibleScreens=[]; });
+  const tabLayout = await captureBottomLayout();
+  await page.evaluate(() => { window.__holdAllRendered=true; window.__holdAllShortcuts=true; window.__visibleScreens=[]; });
   await page.locator('#tabs .tab').filter({hasText:'Herdr 2'}).click();
   const secondPane = page.locator('#herdr-'+second+' .herdr-terminal'), incoming = await frame(secondPane);
-  await wait(async () => await incoming.evaluate(() => window.__blockedRendered.length > 0), 'top-level tab ready behind the previous tab');
+  await wait(async () => await incoming.evaluate(() => window.__blockedRendered.length > 0 && window.__blockedShortcuts.length > 0), 'top-level tab ready behind the previous tab');
   await assertVisible(page.locator('#herdr-'+first),true); await assertVisible(page.locator('#herdr-'+second),false);
   assert.equal(await page.locator('#terminal-loading').isVisible(),true);
   assert.equal(await page.locator('#terminal-loading-label').textContent(),'Loading Herdr…');
   assert.equal(await page.locator('#herdr-'+first).evaluate(element => element.inert),true);
+  assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true);
+  await assertBottomLayout(tabLayout);
   const incomingCols=await incoming.evaluate(() => window.__terminal.cols);
   await page.evaluate(() => { window.__visibleScreens=[]; }); await page.setViewportSize({width:390,height:844});
   await wait(async () => await incoming.evaluate(cols => window.__terminal.cols > cols && window.__blockedRendered.some(message => message.cols === window.__terminal.cols),incomingCols),'resized top-level tab ready behind the held view');
   assert.ok((await page.evaluate(() => window.__visibleScreens)).every(screens => screens.includes('SCREEN_BETA') && !screens.includes('SCREEN_ALPHA')), 'Resizing a pending top-level switch keeps the prior pane visible');
   await page.screenshot({path:root+'.test-artifacts/herdr-loading-top-level.png'});
   await page.locator('#tabs .tab').filter({hasText:'Herdr 1'}).click(); await page.evaluate(() => { window.__holdAllRendered=false; }); await release(incoming);
+  await page.evaluate(() => { window.__holdAllShortcuts=false; }); await releaseShortcuts(incoming);
   await delay(100); await assertVisible(page.locator('#herdr-'+first),true); await assertVisible(page.locator('#herdr-'+second),false);
   assert.equal(await page.locator('#terminal-loading').isVisible(),false);
   await page.locator('#tabs .tab').filter({hasText:'Herdr 2'}).click();
@@ -151,6 +200,6 @@ try {
   await page.touchscreen.tap(restoredCanvas.x+restoredCanvas.width*.5,restoredCanvas.y+restoredCanvas.height*.3);
   assert.equal(await input.evaluate(element => element === document.activeElement && !element.readOnly),true,'A fresh tap reopens Herdr input after dismissal');
   assert.deepEqual(errors,[]);
-  console.log('PASS: Herdr handoffs keep the old mobile view until a fresh painted presentation, reject stale/resized/cancelled switches, and preserve tapped input through keyboard opening while disarming it on dismissal.');
+  console.log('PASS: Herdr handoffs keep configured hotkeys and bottom bars stationary through delayed shortcut/paint messages, route input only to ready panes, reject stale/resized/cancelled switches, and preserve input through keyboard opening.');
 } catch(error) { console.error(logs); throw error; }
 finally { await browser?.close(); backend.kill(); await exited; await fixture.close(); }

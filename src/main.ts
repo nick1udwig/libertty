@@ -337,22 +337,25 @@ const images = imagePicker(files => {
 }); document.body.append(images);
 function renderWorkspaceShortcuts() {
   const frame = shortcutFrame(), source = frame?.contentWindow, state = source && terminalShortcuts.get(source);
-  $('workspace-shortcuts').hidden = page !== 'terminal' || !state;
-  const presentation = JSON.stringify(state);
+  const tab = tabs.find(tab => tab.id === active), herdr = herdrViews.get(active);
+  $('workspace-shortcuts').hidden = page !== 'terminal' || !(state || tab && ['terminal', 'herdr'].includes(tabPluginId(tab)));
+  const ready = !!state && !frame?.inert && (!herdr || herdr.ready);
+  // Reserve the configured controls before the incoming terminal publishes its state.
+  const shortcuts = state?.shortcuts || currentShortcuts();
+  const presentation = JSON.stringify({ shortcuts, ctrl: ready && state?.ctrl, available: state?.available, imageAvailable: state?.imageAvailable, ready });
   if (source === shortcutWindow && presentation === shortcutPresentation) return;
   shortcutWindow = source; shortcutPresentation = presentation || '';
   const buttons = $('workspace-shortcut-buttons'), scroll = buttons.scrollLeft; buttons.replaceChildren();
-  if (!state) return;
-  state.shortcuts.forEach((shortcut, index) => {
+  shortcuts.forEach((shortcut, index) => {
     const control = button(shortcut.label, () => {
-      if (shortcutFrame()?.contentWindow !== source) return;
+      if (!ready || shortcutFrame()?.contentWindow !== source) return;
       source!.postMessage({ type: 'terminal-shortcut', index, kind: shortcut.kind, value: shortcut.value }, location.origin);
     }, shortcut.kind === 'command' ? 'command-shortcut' : '');
-    control.title = shortcut.value; control.disabled = shortcut.kind === 'command' && !state.available;
-    if (shortcut.kind === 'keys' && shortcut.value === 'Ctrl') { control.dataset.modifier = ''; control.setAttribute('aria-pressed', String(state.ctrl)); }
+    control.title = shortcut.value; control.disabled = !ready || shortcut.kind === 'command' && !state?.available;
+    if (shortcut.kind === 'keys' && shortcut.value === 'Ctrl') { control.dataset.modifier = ''; control.setAttribute('aria-pressed', String(ready && state?.ctrl)); }
     control.addEventListener('pointerdown', event => event.preventDefault()); buttons.append(control);
   });
-  const image = button('Image', () => { imageTarget = source; images.click(); }, 'image-upload'); image.setAttribute('aria-label', 'Attach images'); image.disabled = !state.imageAvailable; buttons.append(image);
+  const image = button('Image', () => { if (!ready || shortcutFrame()?.contentWindow !== source) return; imageTarget = source; images.click(); }, 'image-upload'); image.setAttribute('aria-label', 'Attach images'); image.disabled = !ready || !state?.imageAvailable; buttons.append(image);
   buttons.scrollLeft = scroll;
 }
 function showTerminalLoading(id: string, waitForPrompt = false) { terminalLoading = { id, waitForPrompt }; updateTerminalLoading(); }
