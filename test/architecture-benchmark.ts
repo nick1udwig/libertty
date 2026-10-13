@@ -185,7 +185,12 @@ esac
     assert.ok(after.warmRequests <= before.warmRequests, `${mode}: ${after.case} gained warm requests`);
     {
       const a = measurements.get(after)!, b = measurements.get(before)!;
-      assert.ok(a.cold <= b.cold + Math.max(10, b.cold * 0.2), `${mode}: ${after.case} RTT=${after.rtt} coldMs regressed (${before.coldMs} -> ${after.coldMs})`);
+      if (a.cold > b.cold + Math.max(10, b.cold * 0.2)) {
+        const message = `${mode}: ${after.case} RTT=${after.rtt} coldMs regressed (${before.coldMs} -> ${after.coldMs})`;
+        // Cold cohorts also need counterbalancing when process startup or scheduling drifts.
+        if (after.rtt === 0 && !process.env.BENCH_CONFIRM) { confirm.add(after.case); console.log('Confirming in reversed order: ' + message); }
+        else assert.fail(message);
+      }
       if (latencyRegressed(a.warm, b.warm, 0.15)) {
         const message = `${mode}: ${after.case} RTT=${after.rtt} warm median regression (${before.warmMs} -> ${after.warmMs})`;
         // Samples within one cohort cannot detect scheduling or JIT drift between variants.
