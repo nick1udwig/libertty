@@ -117,6 +117,20 @@ try {
     return frame;
   };
   const tab = id => page.locator('.herdr-agent-tab[data-terminal="term_' + id + '"]');
+  const tabBounds = async (...ids) => {
+    let bounds;
+    // Snapshots replace the strip DOM, so read both drag targets in one turn.
+    await until(async () => {
+      bounds = await page.evaluate(ids => ids.map(id => {
+        const element = document.querySelector('.herdr-agent-tab[data-terminal="term_' + id + '"]');
+        if (!element?.checkVisibility({ checkVisibilityCSS: true })) return null;
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      }), ids);
+      return bounds.every(Boolean);
+    }, 'visible agent drag targets');
+    return bounds;
+  };
   await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').waitFor();
   await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces', 'New installations default to spaces');
@@ -329,19 +343,20 @@ try {
   await terminal.locator('#termai-dictation').click(); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
   await terminal.locator('#termai-dictation').click(); await until(() => voiceAcks === 2, 'dictation after a hidden view reconnects');
   await swipeStrip('Agents');
-  const before = await tab(0).boundingBox(), after = await tab(2).boundingBox();
-  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2); await page.mouse.down(); await delay(500);
+  const [before, after] = await tabBounds(0, 2);
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2); await page.mouse.down();
+  await page.locator('.herdr-tab-menu').waitFor({ state: 'visible' });
   await page.mouse.move(after.x + after.width * .8, after.y + after.height / 2, { steps: 10 }); await page.mouse.up();
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   // Real touch drag goes back and forth; moving tabs must retain capture.
-  await delay(40);
-  const routeRect = await tab(0).boundingBox(), testRect = await tab(1).boundingBox();
-  await touch('touchStart', routeRect.x + routeRect.width / 2, routeRect.y + routeRect.height / 2); await delay(500);
+  const [routeRect, testRect] = await tabBounds(0, 1);
+  await touch('touchStart', routeRect.x + routeRect.width / 2, routeRect.y + routeRect.height / 2);
+  await page.locator('.herdr-tab-menu').waitFor({ state: 'visible' });
   await touch('touchMove', testRect.x + 5, testRect.y + testRect.height / 2); await touch('touchEnd');
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_0', 'term_1', 'term_2']);
-  await delay(40);
-  const routeAgain = await tab(0).boundingBox(), docsRect = await tab(2).boundingBox();
-  await touch('touchStart', routeAgain.x + routeAgain.width / 2, routeAgain.y + routeAgain.height / 2); await delay(500);
+  const [routeAgain, docsRect] = await tabBounds(0, 2);
+  await touch('touchStart', routeAgain.x + routeAgain.width / 2, routeAgain.y + routeAgain.height / 2);
+  await page.locator('.herdr-tab-menu').waitFor({ state: 'visible' });
   await touch('touchMove', docsRect.x + docsRect.width - 5, docsRect.y + docsRect.height / 2); await touch('touchEnd');
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   await tab(2).click();
