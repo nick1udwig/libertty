@@ -56,6 +56,9 @@ export class RemoteHost implements EngineHost {
       if (!batch.length) throw error;
     }
   }
+  async scoped(cwd: string, operation: Fact): Promise<FactValue> {
+    return this.request({ kind: 'scoped', cwd, operation });
+  }
   /** Also runs when matching stayed entirely local or produced only literal input. */
   async verify() { await this.flush(); this.signal.throwIfAborted(); }
   private use(path: string, snapshot: DirectorySnapshot) { this.used.set(path, snapshot); }

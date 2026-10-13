@@ -181,6 +181,12 @@ impl NativeHost {
         cancel: &CancellationToken,
     ) -> Result<termai_engine::host::FactValue, String> {
         use termai_engine::host::{FactValue, HostOperation};
+        if let HostOperation::Scoped { cwd, operation } = operation {
+            let mut scoped = self.clone();
+            scoped.catalog.cwd = cwd.clone();
+            Arc::make_mut(&mut scoped.environment).insert("PWD".into(), cwd.clone());
+            return Box::pin(scoped.engine_operation(operation, cancel)).await;
+        }
         if self.verification.is_some()
             && let HostOperation::Entries { path, limit } = operation
         {
@@ -203,6 +209,7 @@ impl NativeHost {
             return Err(ABORTED.into());
         }
         let value = match operation {
+            HostOperation::Scoped { .. } => unreachable!("Scoped operations are handled above"),
             HostOperation::Lookup { path } => FactValue::Lookup(Arc::new(
                 self.services.directories.lookup(path, cancel).await?,
             )),

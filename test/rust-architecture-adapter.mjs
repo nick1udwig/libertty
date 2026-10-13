@@ -53,6 +53,7 @@ export async function rustArchitectureAdapter(catalog, environment, client, brid
           abort.throwIfAborted();
           let value;
           switch (operation.kind) {
+            case 'scoped': value = await host.scoped(operation.cwd, operation.operation); break;
             case 'stat': value = await host.stat(operation.path); break;
             case 'lookup': value = await host.lookup(operation.path); break;
             case 'entries': value = await host.entries(operation.path, operation.limit); break;

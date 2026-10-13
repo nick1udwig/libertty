@@ -928,6 +928,27 @@
           "type": "object",
           "properties": {
             "kind": {
+              "const": "scoped",
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/$defs/Fact"
+            }
+          },
+          "required": [
+            "kind",
+            "cwd",
+            "operation"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
               "const": "stat",
               "type": "string"
             },

@@ -51,8 +51,86 @@ async fn policy_valid(
     host: &dyn Host,
     script_flags: Option<&[Flag]>,
 ) -> Result<bool, String> {
+    if let Some(list) = crate::shell_structure::command_list(&candidate.command) {
+        let checked = futures::future::join_all(list.commands.iter().map(|part| async move {
+            let mut node = candidate.clone();
+            node.command = (*part).into();
+            let protected = crate::shell_structure::protect(part);
+            if let Some(protected) = &protected {
+                node.command = protected.text.clone();
+            }
+            let opaque = protected
+                .as_ref()
+                .map(|p| {
+                    p.expressions
+                        .iter()
+                        .map(|(key, _)| key.as_str())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            policy_plain(
+                input,
+                &node,
+                catalog,
+                env,
+                metadata,
+                host,
+                script_flags,
+                &opaque,
+            )
+            .await
+        }))
+        .await;
+        return Ok(checked
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .all(|valid| valid));
+    }
+    if let Some(protected) = crate::shell_structure::protect(&candidate.command) {
+        let mut node = candidate.clone();
+        node.command = protected.text.clone();
+        let opaque = protected
+            .expressions
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect::<Vec<_>>();
+        return policy_plain(
+            input,
+            &node,
+            catalog,
+            env,
+            metadata,
+            host,
+            script_flags,
+            &opaque,
+        )
+        .await;
+    }
+    policy_plain(
+        input,
+        candidate,
+        catalog,
+        env,
+        metadata,
+        host,
+        script_flags,
+        &[],
+    )
+    .await
+}
+async fn policy_plain(
+    input: &str,
+    candidate: &Candidate,
+    catalog: &Catalog,
+    env: &Environment,
+    metadata: &CommandMetadata,
+    host: &dyn Host,
+    script_flags: Option<&[Flag]>,
+    opaque: &[&str],
+) -> Result<bool, String> {
     let Some(words) = simple_words(&candidate.command) else {
-        return Ok(true);
+        return Ok(false);
     };
     let Some(first) = words.first() else {
         return Ok(false);
@@ -167,6 +245,9 @@ async fn policy_valid(
         let cwd = &cwd;
         async move {
             if operand.value == "-" && command != "download" && command != "upload" {
+                return true;
+            }
+            if opaque.contains(&operand.value.as_str()) {
                 return true;
             }
             let Ok(Some(info)) = host::stat(host, &resolve(operand, cwd, env), false).await else {

@@ -14,7 +14,8 @@ Retain the shared Rust engine, original transcript choices, non-executing valida
 - [x] Use coarse backend repair for network-dependent work and retain Herdr metadata.
   Both production coordinators obtain context on the backend in one repair request, with no periodic catalog pushes.
   SSH placement, HTTP prompt guards, Herdr context isolation, native integrations, the frontend build, and browser regressions in both modes pass.
-- [ ] Compose repair over shared shell structure, preserving opaque quoted syntax and supporting command lists and wrappers.
+- [x] Compose repair over shared shell structure, preserving opaque quoted syntax and supporting command lists and wrappers.
+  Engine, native, fact-boundary, schema-contract, and TypeScript checks pass for shared operators, nested help, wrappers, opaque expressions, and directory-dependent commands.
 - [ ] Share path traversal and schema evidence across commands and option values.
 - [ ] Separate typed candidate changes, discovery completeness, cache invalidation, budgets, and partial results.
 - [ ] Combine repair and guarded line application, including backend dictation.

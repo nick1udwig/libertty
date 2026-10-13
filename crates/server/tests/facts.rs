@@ -51,6 +51,7 @@ fn complete_fact_batches_reject_invalid_paths_limits_routes_and_expensive_operat
         json!([{"kind":"entries","path":"/fixture","limit":10000.0}]),
         json!([{"kind":"directory","path":"/fixture","version":""}]),
         json!([{"kind":"help","command":"tool","route":["workspace","reconcile"]}]),
+        json!([{"kind":"scoped","cwd":"/other","operation":{"kind":"help","command":"tool","route":["workspace"]}}]),
     ] {
         assert!(validate(&valid).is_ok());
     }
@@ -61,6 +62,12 @@ fn complete_fact_batches_reject_invalid_paths_limits_routes_and_expensive_operat
         json!(vec![json!({"kind":"syntax","command":"true"}); 65]),
         json!([null]),
         json!([{"kind":"unknown"}]),
+        json!([{"kind":"scoped","cwd":"relative","operation":{"kind":"syntax","command":"true"}}]),
+        json!([{"kind":"scoped","cwd":"/other","operation":{"kind":"scoped","cwd":"/nested","operation":{"kind":"syntax","command":"true"}}}]),
+        json!(vec![
+            json!({"kind":"scoped","cwd":"/other","operation":{"kind":"help","command":"tool","route":[]}});
+            9
+        ]),
         json!([{"kind":"stat","path":"relative"}]),
         json!([{"kind":"stat","path":"/bad\0path"}]),
         json!([{"kind":"stat","path":format!("/{}","🌍".repeat(2048))}]),

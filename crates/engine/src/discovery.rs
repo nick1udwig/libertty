@@ -225,7 +225,7 @@ impl Discovery {
     ) -> Result<Discovered, String> {
         let deadline = host.now_ms() + 2500.0;
         let mut metadata = CommandMetadata::empty();
-        if test(r"[|&;<>()`$\\\n\r]", command_line) {
+        if crate::validation::simple_words(command_line).is_none() {
             return Ok(Discovered {
                 metadata,
                 script_flags: None,

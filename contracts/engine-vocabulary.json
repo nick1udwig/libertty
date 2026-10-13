@@ -306,6 +306,126 @@
         "name": "--ignore-case",
         "takesValue": false
       }
+    ],
+    "sudo": [
+      {
+        "name": "-u",
+        "takesValue": true
+      },
+      {
+        "name": "--user",
+        "takesValue": true
+      },
+      {
+        "name": "-g",
+        "takesValue": true
+      },
+      {
+        "name": "--group",
+        "takesValue": true
+      },
+      {
+        "name": "-E",
+        "takesValue": false
+      },
+      {
+        "name": "-H",
+        "takesValue": false
+      },
+      {
+        "name": "-n",
+        "takesValue": false
+      },
+      {
+        "name": "-S",
+        "takesValue": false
+      }
+    ],
+    "env": [
+      {
+        "name": "-u",
+        "takesValue": true
+      },
+      {
+        "name": "--unset",
+        "takesValue": true
+      },
+      {
+        "name": "-C",
+        "takesValue": true
+      },
+      {
+        "name": "--chdir",
+        "takesValue": true
+      },
+      {
+        "name": "-i",
+        "takesValue": false
+      },
+      {
+        "name": "--ignore-environment",
+        "takesValue": false
+      }
+    ],
+    "command": [
+      {
+        "name": "-p",
+        "takesValue": false
+      },
+      {
+        "name": "-v",
+        "takesValue": false
+      },
+      {
+        "name": "-V",
+        "takesValue": false
+      }
+    ],
+    "nohup": [
+      {
+        "name": "--help",
+        "takesValue": false
+      },
+      {
+        "name": "--version",
+        "takesValue": false
+      }
+    ],
+    "nice": [
+      {
+        "name": "-n",
+        "takesValue": true
+      },
+      {
+        "name": "--adjustment",
+        "takesValue": true
+      }
+    ],
+    "timeout": [
+      {
+        "name": "-s",
+        "takesValue": true
+      },
+      {
+        "name": "--signal",
+        "takesValue": true
+      },
+      {
+        "name": "-k",
+        "takesValue": true
+      },
+      {
+        "name": "--kill-after",
+        "takesValue": true
+      },
+      {
+        "name": "--foreground",
+        "takesValue": false
+      },
+      {
+        "name": "--preserve-status",
+        "takesValue": false
+      }
     ]
   },
   "subcommands": {

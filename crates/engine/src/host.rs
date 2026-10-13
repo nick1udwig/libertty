@@ -7,6 +7,10 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
 pub enum HostOperation {
+    Scoped {
+        cwd: String,
+        operation: Box<HostOperation>,
+    },
     Stat {
         path: String,
         executable: bool,
@@ -37,6 +41,34 @@ pub enum HostOperation {
     Describe {
         command: String,
     },
+}
+/// Keep facts for dependent command-list nodes bound to their effective directory.
+pub struct ScopedHost<'a> {
+    pub inner: &'a dyn Host,
+    pub cwd: &'a str,
+}
+impl Host for ScopedHost<'_> {
+    fn request(&self, operation: Value) -> LocalBoxFuture<'_, Result<FactValue, String>> {
+        match serde_json::from_value(operation) {
+            Ok(operation) => self.fact(operation),
+            Err(error) => Box::pin(async move { Err(error.to_string()) }),
+        }
+    }
+    fn fact(&self, operation: HostOperation) -> LocalBoxFuture<'_, Result<FactValue, String>> {
+        if matches!(operation, HostOperation::Scoped { .. }) {
+            return self.inner.fact(operation);
+        }
+        self.inner.fact(HostOperation::Scoped {
+            cwd: self.cwd.into(),
+            operation: Box::new(operation),
+        })
+    }
+    fn now_ms(&self) -> f64 {
+        self.inner.now_ms()
+    }
+    fn supports_completion(&self) -> bool {
+        self.inner.supports_completion()
+    }
 }
 fn serialize_timeout<S: serde::Serializer>(bits: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_f64(f64::from_bits(*bits))

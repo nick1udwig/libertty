@@ -32,6 +32,92 @@ fn executable(file: &std::path::Path, content: &str) {
 }
 
 #[tokio::test]
+async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    std::fs::create_dir(root.path().join("folder")).unwrap();
+    std::fs::write(root.path().join("folder/My Notes.txt"), "notes").unwrap();
+    executable(
+        &root.path().join("orchard"),
+        "#!/bin/sh\ncase \"$*\" in\n'--help') printf 'Commands:\\n  workspace    Workspaces\\n';;\n'workspace --help') printf 'Commands:\\n  reconcile    Reconcile\\n';;\n'workspace reconcile --help') printf '  --target NAME  Destination\\n';;\nesac\n",
+    );
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(cwd, &["git", "cat", "cd", "echo", "orchard", "sudo", "env"]),
+        BTreeMap::from([
+            ("HOME".into(), cwd.into()),
+            ("PATH".into(), format!("{cwd}:/usr/bin:/bin")),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    for (input, expected) in [
+        ("Get status pipe cat", "git status | cat"),
+        ("Get status pype cat", "git status | cat"),
+        ("Get status; echo done", "git status; echo done"),
+        ("Get status && echo done", "git status && echo done"),
+        ("Get status || echo done", "git status || echo done"),
+        (
+            "Get status semicolon echo done semicolon echo end",
+            "git status; echo done; echo end",
+        ),
+        (
+            "Orchard work space recon cile target VALUE semicolon echo done",
+            "orchard workspace reconcile --target VALUE; echo done",
+        ),
+        ("sudo Get status", "sudo git status"),
+        ("sudo -u tester Get status", "sudo -u tester git status"),
+        ("env FOO=bar Get status", "env FOO=bar git status"),
+        ("Get commit -m \"$USER\"", "git commit -m \"$USER\""),
+        ("gti status", "git status"),
+        (
+            "cd folder && cat my notes dot txt",
+            "cd folder && cat 'My Notes.txt'",
+        ),
+    ] {
+        let result = engine
+            .suggest(input, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            result
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["command"] == expected && c["literal"] != true),
+            "{input}: {result}"
+        );
+        assert_eq!(result.as_array().unwrap().last().unwrap()["command"], input);
+    }
+    let candidate = termai_engine::types::Candidate {
+        command: "unknown | cat".into(),
+        score: 90.0,
+        changes: vec![],
+        literal: None,
+    };
+    let result = engine
+        .invoke(
+            request(
+                "suggest",
+                json!(["unknown pipe cat", host.catalog, host.environment]),
+            ),
+            &host,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !result
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["command"] == candidate.command && c["literal"] != true),
+        "{result}"
+    );
+}
+
+#[tokio::test]
 async fn history_and_validation_do_not_discard_live_filename_alternatives() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();

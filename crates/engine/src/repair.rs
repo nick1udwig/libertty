@@ -182,6 +182,15 @@ fn one_edit(a: &str, b: &str) -> bool {
         return false;
     }
     let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() == b.len()
+        && let Some(at) = a.iter().zip(b).position(|(a, b)| a != b)
+        && at + 1 < a.len()
+        && a[at] == b[at + 1]
+        && a[at + 1] == b[at]
+        && a[at + 2..] == b[at + 2..]
+    {
+        return true;
+    }
     let (mut i, mut j, mut edits) = (0, 0, 0);
     while i < a.len() && j < b.len() {
         if a[i] == b[j] {
@@ -633,7 +642,7 @@ fn compact_boundaries(input: &str, catalog: &Catalog) -> Vec<Boundary> {
     result
 }
 pub fn discovery_target(input: &str, catalog: &Catalog) -> String {
-    if test(r"[|&;<>()`$\\\n\r]", input) {
+    if crate::validation::simple_words(input).is_none() {
         return String::new();
     }
     let words = command_tokens(input, catalog);
@@ -657,7 +666,7 @@ pub fn discovery_target(input: &str, catalog: &Catalog) -> String {
     }
 }
 pub fn discovery_targets(input: &str, catalog: &Catalog) -> Vec<String> {
-    if test(r"[|&;<>()`$\\\n\r]", input) {
+    if crate::validation::simple_words(input).is_none() {
         return vec![];
     }
     let words = command_tokens(input, catalog);
@@ -858,7 +867,7 @@ fn repair_normalized(
 ) -> Vec<Candidate> {
     let initial = repair_one(input, catalog, script_flags, metadata);
     if input.trim().is_empty()
-        || test(r"[|&;<>()`$\\\n\r]", input)
+        || crate::validation::simple_words(input).is_none()
         || initial
             .iter()
             .any(|candidate| !candidate.is_literal() && candidate.score >= 90.0)
@@ -1044,7 +1053,7 @@ fn repair_one(
     if input.trim().is_empty() {
         return vec![];
     }
-    if test(r"[|&;<>()`$\\\n\r]", input)
+    if crate::validation::simple_words(input).is_none()
         || !input.matches('\'').count().is_multiple_of(2)
         || !input.matches('"').count().is_multiple_of(2)
     {

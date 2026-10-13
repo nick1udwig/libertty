@@ -10,7 +10,6 @@ use crate::{
     host::{self, Host},
     path,
     path_repair::repair_directory,
-    pipeline::pipeline_parts,
     repair::{discovery_target, discovery_targets, repair_candidates as repair, tokens},
     speech::{expand_symbols, symbol_alternatives},
     transfer_command::download_pipeline,
@@ -181,94 +180,227 @@ async fn nearby_file_paths(input: &str, catalog: &Catalog, host: &dyn Host) -> C
     }
     expanded
 }
-async fn compound_alternatives(
-    input: &str,
-    catalog: &Catalog,
-    env: &Environment,
-    discovery: &Discovery,
-    host: &dyn Host,
-) -> Result<Vec<Candidate>, String> {
-    if !test(r"(?i)\b(?:semicolon|semi\s+colon|mic)\b|\s;\s", input) {
-        return Ok(vec![]);
-    }
-    let expanded = expand_symbols(input, true);
-    if !test(r"\s;\s", &expanded) || test(r#"["'`$\\|&<>()\[\]{}\n\r]"#, &expanded) {
-        return Ok(vec![]);
-    }
-    let parts: Vec<_> = regex(r"\s*;\s*").split(&expanded).collect();
-    if parts.len() != 2
-        || parts
-            .iter()
-            .any(|p| p.is_empty() || simple_words(p).is_none_or(|ws| ws.is_empty()))
-    {
-        return Ok(vec![]);
-    }
-    let metadata = discovery.cached(catalog, env, host.now_ms());
-    let choices = join_all(parts.iter().map(|part| {
-        let metadata = &metadata;
-        async move {
-            let mut candidates: Vec<_> = repair(part, catalog, None, metadata)
-                .into_iter()
-                .filter(|c| !c.is_literal())
-                .collect();
-            candidates.push(Candidate {
-                command: (*part).into(),
-                score: 100.0,
-                changes: vec![],
-                literal: Some(true),
-            });
-            let checked = join_all(
-                candidates
-                    .iter()
-                    .map(|c| candidate_valid(part, c, catalog, env, metadata, host, None)),
-            )
-            .await
+fn part_choices<'a>(
+    input: &'a str,
+    catalog: &'a Catalog,
+    env: &'a Environment,
+    discovery: &'a Discovery,
+    host: &'a dyn Host,
+    stage: &'a RefCell<Option<String>>,
+) -> LocalBoxFuture<'a, Result<Vec<Candidate>, String>> {
+    Box::pin(async move {
+        let mut candidates: Vec<_> = suggest(input, catalog, env, discovery, host, stage)
+            .await?
             .into_iter()
-            .collect::<Result<Vec<_>, String>>()?;
-            let mut valid: Vec<_> = candidates
-                .into_iter()
-                .zip(checked)
-                .filter_map(|(c, v)| v.then_some(c))
-                .collect();
-            let rank = |c: &Candidate| {
-                c.score
-                    - if !part.ends_with('/') && c.command.ends_with('/') {
-                        15.0
-                    } else {
-                        0.0
-                    }
-                    + if c.command == *part { 10.0 } else { 0.0 }
-            };
-            valid.sort_by(|a, b| rank(b).total_cmp(&rank(a)));
-            valid.truncate(2);
-            Ok(valid)
-        }
-    }))
-    .await
-    .into_iter()
-    .collect::<Result<Vec<Vec<Candidate>>, String>>()?;
-    let mut combined = Vec::new();
-    for first in &choices[0] {
-        for second in &choices[1] {
-            let command = format!("{}; {}", first.command, second.command);
-            if command == input.trim() || combined.iter().any(|c: &Candidate| c.command == command)
-            {
-                continue;
-            }
-            let candidate = Candidate {
-                command,
-                score: first.score.min(second.score) + 12.0,
-                changes: vec!["Spoken command separator".into()],
+            .filter(|c| !c.is_literal())
+            .collect();
+        if !candidates.iter().any(|c| c.command == input) {
+            let literal = Candidate {
+                command: input.into(),
+                score: 110.0,
+                changes: vec![],
                 literal: None,
             };
-            if candidate_valid(input, &candidate, catalog, env, &metadata, host, None).await? {
-                combined.push(candidate);
+            let metadata = discovery.cached(catalog, env, host.now_ms());
+            if candidate_valid(input, &literal, catalog, env, &metadata, host, None).await? {
+                candidates.insert(0, literal);
             }
         }
+        Ok(unique(candidates).into_iter().take(3).collect())
+    })
+}
+
+fn next_directory(command: &str, catalog: &Catalog, env: &Environment) -> Option<String> {
+    let words = simple_words(command)?;
+    if words.first()?.value != "cd" {
+        return None;
     }
-    sort(&mut combined);
-    combined.truncate(2);
-    Ok(combined)
+    let value = words.iter().skip(1).find(|w| !w.value.starts_with('-'));
+    let target = value.map_or_else(
+        || env.get("HOME").cloned(),
+        |word| {
+            Some(if word.home {
+                path::join(&[
+                    env.get("HOME")?.as_str(),
+                    word.value.trim_start_matches('~'),
+                ])
+            } else {
+                word.value.clone()
+            })
+        },
+    )?;
+    Some(path::resolve(&[&catalog.cwd, &target]))
+}
+
+fn suggest_text<'a>(
+    input: &'a str,
+    catalog: &'a Catalog,
+    env: &'a Environment,
+    discovery: &'a Discovery,
+    host: &'a dyn Host,
+    stage: &'a RefCell<Option<String>>,
+    spoken: &'a str,
+) -> LocalBoxFuture<'a, Result<Vec<Candidate>, String>> {
+    Box::pin(async move {
+        if let Some(pipeline) = catalog
+            .commands
+            .contains(&"download".into())
+            .then(|| download_pipeline(input))
+            .flatten()
+        {
+            return Ok(
+                suggest(&pipeline.command, catalog, env, discovery, host, stage)
+                    .await?
+                    .into_iter()
+                    .filter(|c| !c.is_literal())
+                    .map(|mut c| {
+                        c.command += &format!(" | {}", pipeline.tail);
+                        c
+                    })
+                    .collect(),
+            );
+        }
+        let expanded = expand_symbols(input, true);
+        if let Some(list) = crate::shell_structure::command_list(&expanded) {
+            use crate::shell_structure::Separator;
+            let pipes = list.separators.iter().all(|s| *s == Separator::Pipe);
+            let groups = if pipes {
+                Some(
+                    join_all(
+                        list.commands
+                            .iter()
+                            .map(|part| part_choices(part, catalog, env, discovery, host, stage)),
+                    )
+                    .await
+                    .into_iter()
+                    .collect::<Result<Vec<_>, _>>()?,
+                )
+            } else {
+                None
+            };
+            let mut combined = vec![(
+                Candidate {
+                    command: String::new(),
+                    score: 110.0,
+                    changes: vec![
+                        if pipes {
+                            "Pipeline commands"
+                        } else {
+                            "Spoken command separator"
+                        }
+                        .into(),
+                    ],
+                    literal: None,
+                },
+                catalog.clone(),
+            )];
+            for (index, part) in list.commands.iter().enumerate() {
+                let mut next = Vec::new();
+                for (prefix, context) in &combined {
+                    let choices = if let Some(groups) = &groups {
+                        groups[index].clone()
+                    } else {
+                        if context.cwd == catalog.cwd {
+                            part_choices(part, context, env, discovery, host, stage).await?
+                        } else {
+                            let scoped = crate::host::ScopedHost {
+                                inner: host,
+                                cwd: &context.cwd,
+                            };
+                            part_choices(part, context, env, discovery, &scoped, stage).await?
+                        }
+                    };
+                    for candidate in choices {
+                        let mut changes = prefix.changes.clone();
+                        changes.extend(candidate.changes.clone());
+                        let command = if index == 0 {
+                            candidate.command.clone()
+                        } else {
+                            format!(
+                                "{}{}{}",
+                                prefix.command,
+                                list.separators[index - 1].text(),
+                                candidate.command
+                            )
+                        };
+                        let mut context = context.clone();
+                        if list
+                            .separators
+                            .get(index)
+                            .is_some_and(|s| matches!(s, Separator::Sequence | Separator::And))
+                            && let Some(cwd) = next_directory(&candidate.command, &context, env)
+                        {
+                            context.cwd = cwd;
+                            context.paths.clear();
+                        }
+                        next.push((
+                            Candidate {
+                                command,
+                                score: prefix.score.min(candidate.score),
+                                changes,
+                                literal: None,
+                            },
+                            context,
+                        ));
+                    }
+                }
+                next.sort_by(|a, b| b.0.score.total_cmp(&a.0.score));
+                next.truncate(3);
+                combined = next;
+            }
+            let mut valid = Vec::new();
+            for (candidate, _) in combined {
+                if host::syntax(host, &candidate.command).await? {
+                    valid.push(candidate);
+                }
+            }
+            return Ok(valid);
+        }
+        let metadata = discovery.cached(catalog, env, host.now_ms());
+        if let Some(offset) = crate::shell_structure::nested_command(input, &metadata) {
+            let prefix = &input[..offset];
+            let wrapper = tokens(prefix).first().map(|w| w.value.to_lowercase());
+            if wrapper
+                .as_ref()
+                .is_some_and(|w| w.contains('=') || catalog.commands.contains(w))
+            {
+                let nested =
+                    suggest(&input[offset..], catalog, env, discovery, host, stage).await?;
+                let mut result = Vec::new();
+                for mut candidate in nested.into_iter().filter(|c| !c.is_literal()) {
+                    candidate.command = format!("{prefix}{}", candidate.command);
+                    if host::syntax(host, &candidate.command).await? {
+                        result.push(candidate);
+                    }
+                }
+                return Ok(result);
+            }
+        }
+        if let Some(protected) = crate::shell_structure::protect(input) {
+            let mut metadata = metadata;
+            let cheap = repair(&protected.text, catalog, None, &metadata);
+            if !cheap
+                .iter()
+                .any(|c| !c.is_literal() && covered(c, &metadata))
+            {
+                for target in discovery_targets(&protected.text, catalog) {
+                    if let Ok(found) = discovery.discover(&target, catalog, env, host).await {
+                        metadata.merge(found.metadata);
+                    }
+                }
+            }
+            let candidates = repair(&protected.text, catalog, None, &metadata)
+                .into_iter()
+                .filter(|c| !c.is_literal())
+                .map(|mut c| {
+                    c.command = protected.restore(&c.command);
+                    c
+                })
+                .collect();
+            return check(input, candidates, catalog, env, &metadata, host, None).await;
+        }
+        suggest_one(input, catalog, env, discovery, host, stage, spoken).await
+    })
 }
 
 pub fn suggest<'a>(
@@ -280,133 +412,20 @@ pub fn suggest<'a>(
     stage: &'a RefCell<Option<String>>,
 ) -> LocalBoxFuture<'a, Result<Vec<Candidate>, String>> {
     Box::pin(async move {
-        if let Some(pipeline) = catalog
-            .commands
-            .contains(&"download".into())
-            .then(|| download_pipeline(input))
-            .flatten()
-        {
-            let upstream = suggest(&pipeline.command, catalog, env, discovery, host, stage).await?;
-            let mut candidates: Vec<_> = upstream
-                .into_iter()
-                .filter(|c| !c.is_literal())
-                .take(3)
-                .map(|mut c| {
-                    c.command += &format!(" | {}", pipeline.tail);
-                    c
-                })
-                .collect();
-            candidates.push(Candidate::literal(input));
-            return Ok(candidates);
-        }
-        if let Some(parts) = pipeline_parts(input) {
-            let metadata = discovery.cached(catalog, env, host.now_ms());
-            let groups = join_all(parts.iter().map(|part| {
-                let metadata = &metadata;
-                async move {
-                    let mut candidates: Vec<_> =
-                        suggest(part, catalog, env, discovery, host, stage)
-                            .await?
-                            .into_iter()
-                            .filter(|c| !c.is_literal())
-                            .collect();
-                    let literal = Candidate {
-                        command: part.clone(),
-                        score: 110.0,
-                        changes: vec![],
-                        literal: None,
-                    };
-                    if candidate_valid(part, &literal, catalog, env, metadata, host, None).await? {
-                        candidates.insert(0, literal);
-                    }
-                    Ok(unique(candidates).into_iter().take(3).collect::<Vec<_>>())
-                }
-            }))
-            .await
-            .into_iter()
-            .collect::<Result<Vec<Vec<Candidate>>, String>>()?;
-            let mut combined = vec![Candidate {
-                command: String::new(),
-                score: 110.0,
-                changes: vec!["Pipeline commands".into()],
-                literal: None,
-            }];
-            for group in groups {
-                let mut next = Vec::new();
-                for prefix in &combined {
-                    for candidate in &group {
-                        let mut changes = prefix.changes.clone();
-                        changes.extend(candidate.changes.clone());
-                        next.push(Candidate {
-                            command: if prefix.command.is_empty() {
-                                candidate.command.clone()
-                            } else {
-                                format!("{} | {}", prefix.command, candidate.command)
-                            },
-                            score: prefix.score.min(candidate.score),
-                            changes,
-                            literal: None,
-                        });
-                    }
-                }
-                sort(&mut next);
-                next.truncate(3);
-                combined = next;
-            }
-            combined.push(Candidate::literal(input));
-            return Ok(combined);
-        }
-        let mut compound = compound_alternatives(input, catalog, env, discovery, host).await?;
-        if !compound.is_empty() {
-            compound.push(Candidate::literal(input));
-            return Ok(compound);
-        }
-        let alternatives = symbol_alternatives(input);
-        if alternatives.is_empty() {
-            return suggest_one(input, catalog, env, discovery, host, stage, input).await;
-        }
         let texts: Vec<_> = std::iter::once(input.to_owned())
-            .chain(alternatives)
+            .chain(symbol_alternatives(input))
             .collect();
-        let groups = join_all(texts.iter().enumerate().map(|(index, text)| async move {
-            if index > 0 && test(r#"[|&;<>()`$\\*?"'!\[\]{}#^]"#, text) {
-                let words = tokens(text);
-                let first = words.first();
-                let canonical = catalog.commands.iter().find(|command| {
-                    first.is_some_and(|word| command.to_lowercase() == word.value.to_lowercase())
-                });
-                let candidate = Candidate {
-                    command: if let (Some(canonical), Some(first)) = (canonical, first) {
-                        format!("{canonical}{}", &text[first.value.len()..])
-                    } else {
-                        text.clone()
-                    },
-                    score: 90.0,
-                    changes: vec!["Spoken symbols".into()],
-                    literal: None,
-                };
-                let metadata = discovery.cached(catalog, env, host.now_ms());
-                return Ok(
-                    if candidate_valid(input, &candidate, catalog, env, &metadata, host, None)
-                        .await?
-                    {
-                        vec![candidate]
-                    } else {
-                        vec![]
-                    },
-                );
-            }
-            suggest_one(text, catalog, env, discovery, host, stage, input).await
-        }))
+        let groups = join_all(
+            texts
+                .iter()
+                .map(|text| suggest_text(text, catalog, env, discovery, host, stage, input)),
+        )
         .await
         .into_iter()
-        .collect::<Result<Vec<Vec<Candidate>>, String>>()?;
+        .collect::<Result<Vec<_>, _>>()?;
         let mut candidates = Vec::new();
         for (index, group) in groups.into_iter().enumerate() {
-            for mut candidate in group {
-                if candidate.is_literal() || candidate.command == input.trim() {
-                    continue;
-                }
+            for mut candidate in group.into_iter().filter(|c| !c.is_literal()) {
                 if index > 0 {
                     candidate.score -= 12.0;
                     candidate

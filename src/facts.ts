@@ -3,6 +3,7 @@ import type { Help } from './engine/help.ts';
 import type { DirectoryEntry, FileInfo, DirectoryLookup, DirectorySnapshot } from './directory-data.ts';
 
 export type Fact =
+  | { kind: 'scoped'; cwd: string; operation: Fact }
   | { kind: 'stat'; path: string }
   | { kind: 'lookup'; path: string }
   | { kind: 'directory'; path: string; version?: string }

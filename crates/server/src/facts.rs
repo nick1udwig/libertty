@@ -127,7 +127,18 @@ pub fn validate(operations: &Value) -> Result<&[Value], String> {
         .ok_or("Use 1–64 fact operations.")?;
     let mut expensive = 0;
     let mut directories = 0;
-    for op in operations {
+    for supplied in operations {
+        let op = if supplied["kind"] == "scoped" {
+            if !supplied["cwd"].as_str().is_some_and(|cwd| {
+                cwd.starts_with('/') && cwd.encode_utf16().count() <= 4096 && !cwd.contains('\0')
+            }) || supplied["operation"]["kind"] == "scoped"
+            {
+                return Err("Invalid fact scope.".into());
+            }
+            &supplied["operation"]
+        } else {
+            supplied
+        };
         if !op.is_object() {
             return Err("Invalid fact operation.".into());
         }
@@ -215,6 +226,16 @@ pub async fn read(
         }
     }
     futures::future::join_all(operations.iter().map(|op| async move {
+        if op["kind"] == "scoped" {
+            let mut scoped = host.clone();
+            scoped.catalog.cwd = op["cwd"].as_str().unwrap().into();
+            std::sync::Arc::make_mut(&mut scoped.environment)
+                .insert("PWD".into(), scoped.catalog.cwd.clone());
+            let operations = vec![op["operation"].clone()];
+            return Box::pin(read(&scoped, &operations, cancel))
+                .await
+                .map(|mut values| values.remove(0));
+        }
         if op["kind"] == "directory" {
             let snapshot = host
                 .snapshot(op["path"].as_str().unwrap(), 10000, cancel)
