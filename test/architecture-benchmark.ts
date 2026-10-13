@@ -178,7 +178,7 @@ esac
   await mkdir(new URL('../.test-artifacts/', import.meta.url), { recursive: true });
   const output = process.env.BENCH_OUTPUT || new URL('../.test-artifacts/architecture-benchmark.json', import.meta.url);
   await writeFile(output, JSON.stringify({ revisions: loaded.map(({ name, revision }) => ({ name, revision })), repeats, cpuRepeats, coldRepeats, comparisons, runtime: process.version, platform: `${process.platform}/${process.arch}`, rows }, null, 2));
-  const confirm = new Set<string>();
+  const confirm = new Set<string>(), confirmRtts = new Set<number>();
   if (shared) for (const mode of ['master', 'experiment']) for (const after of rows.filter(row => row.variant === mode + ' after')) {
     const before = rows.find(row => row.variant === mode + ' before' && row.case === after.case && row.rtt === after.rtt)!;
     assert.ok(after.coldRequests <= before.coldRequests, `${mode}: ${after.case} gained cold requests`);
@@ -188,14 +188,14 @@ esac
       if (a.cold > b.cold + Math.max(10, b.cold * 0.2)) {
         const message = `${mode}: ${after.case} RTT=${after.rtt} coldMs regressed (${before.coldMs} -> ${after.coldMs})`;
         // Cold cohorts also need counterbalancing when process startup or scheduling drifts.
-        if (after.rtt === 0 && !process.env.BENCH_CONFIRM) { confirm.add(after.case); console.log('Confirming in reversed order: ' + message); }
+        if (!process.env.BENCH_CONFIRM) { confirm.add(after.case); confirmRtts.add(after.rtt); console.log('Confirming in reversed order: ' + message); }
         else assert.fail(message);
       }
       if (latencyRegressed(a.warm, b.warm, 0.15)) {
         const message = `${mode}: ${after.case} RTT=${after.rtt} warm median regression (${before.warmMs} -> ${after.warmMs})`;
         // Samples within one cohort cannot detect scheduling or JIT drift between variants.
-        // Require a fresh counterbalanced cohort before rejecting sub-millisecond CPU timings.
-        if (after.rtt === 0 && !process.env.BENCH_CONFIRM) { confirm.add(after.case); console.log('Confirming in reversed order: ' + message); }
+        // Require a fresh counterbalanced cohort before rejecting latency measurements.
+        if (!process.env.BENCH_CONFIRM) { confirm.add(after.case); confirmRtts.add(after.rtt); console.log('Confirming in reversed order: ' + message); }
         else assert.fail(message);
       }
     }
@@ -203,7 +203,7 @@ esac
   if (confirm.size) {
     await Promise.all(rustPeers.map(peer => peer?.dispose())); rustPeers.length = 0;
     const confirmation = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
-      stdio: 'inherit', env: { ...process.env, BENCH_RTT: '0', BENCH_CASES: [...confirm].join(','),
+      stdio: 'inherit', env: { ...process.env, BENCH_RTT: [...confirmRtts].join(','), BENCH_CASES: [...confirm].join(','),
         BENCH_REVERSE: process.env.BENCH_REVERSE === '1' ? '0' : '1', BENCH_CONFIRM: '1',
         BENCH_OUTPUT: fileURLToPath(new URL('../.test-artifacts/architecture-confirmation.json', import.meta.url)) },
     });
