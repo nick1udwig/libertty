@@ -160,5 +160,7 @@ try {
   console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; shell-to-TUI/joining baselines, incremental frames, stale snapshots, cursor, native touch scrolling, hold/copy, plain/OSC-8 links and keyboard behavior passed.');
 } finally {
   await browser?.close(); if (backend) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
-  desktop?.kill(); await herdrRequest(target, 'server.stop').catch(() => {}); herdr?.kill(); await rm(dir, { recursive: true, force: true });
+  const stopped = herdr && herdr.exitCode === null && herdr.signalCode === null ? once(herdr, 'exit') : null;
+  desktop?.kill(); await herdrRequest(target, 'server.stop').catch(() => {}); herdr?.kill(); await stopped;
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

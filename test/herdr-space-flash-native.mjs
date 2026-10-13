@@ -138,5 +138,8 @@ try {
   for(const page of browser?.contexts()[0]?.pages()||[]) { console.error('Paints:',await page.evaluate(()=>({paints:window.__flashPaints,selected:document.querySelector('.herdr-agent-tab[aria-selected=true]')?.dataset.terminal,frames:[...document.querySelectorAll('.herdr-screen iframe')].map(frame=>({terminal:frame.dataset.terminal,class:frame.className,visibility:frame.style.visibility}))}))); for(const frame of page.frames()) console.error('Frame:',frame.url(),await frame.evaluate(()=>{const t=window.__terminal,b=t?.buffer.active;return{pending:document.querySelector('#terminal-viewport')?.className,parentClass:frameElement?.className,parentVisibility:frameElement&&getComputedStyle(frameElement).visibility,visible:frameElement?.checkVisibility({checkVisibilityCSS:true}),cols:t?.cols,rows:t?.rows,top:b?.viewportY,lines:b&&Array.from({length:8},(_,i)=>b.getLine(b.viewportY+i)?.translateToString(true)),frames:window.__frames,signals:window.__layoutSignals,body:document.querySelector('#toast')?.textContent};}).catch(()=>({}))); }
   throw error;
 }finally {
-  await browser?.close();if(backend){const exited=once(backend,'exit');backend.kill();await exited;}desktop?.kill();await herdrRequest(target,'server.stop').catch(()=>{});herdr?.kill();await rm(dir,{recursive:true,force:true});
+  await browser?.close();if(backend){const exited=once(backend,'exit');backend.kill();await exited;}
+  const stopped=herdr&&herdr.exitCode===null&&herdr.signalCode===null?once(herdr,'exit'):null;
+  desktop?.kill();await herdrRequest(target,'server.stop').catch(()=>{});herdr?.kill();await stopped;
+  await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});
 }
