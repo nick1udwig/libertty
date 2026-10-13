@@ -22,6 +22,7 @@
     "dev": "node scripts/dev.mjs",
     "build:frontend": "npm run build:rust-engine && tsc --noEmit && vite build",
     "build": "npm run build:backend && npm run build:frontend",
+    "build:release": "cargo build --release --locked -p termai-server --bin termai && npm run build:frontend",
     "start": "cargo run --release --locked -p termai-server --bin termai",
     "test": "node --test test/*.test.ts test/dependencies.test.mjs test/migration-contracts.test.mjs",
     "test:browser": "node test/browser.mjs",

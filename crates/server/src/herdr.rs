@@ -269,7 +269,9 @@ impl Target {
                 kinds.push(kind.into());
             }
         }
-        Ok(json!({"kinds":kinds}))
+        Ok(
+            json!({"kinds":kinds,"actions":["list-worktrees","new-worktree","open-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
+        )
     }
     pub async fn action(&self, input: &Value) -> Result<Value, String> {
         let snapshot = self.snapshot().await?;
@@ -475,7 +477,7 @@ impl Target {
     }
     async fn space_request(&self, method: &str, params: Value) -> Result<Value, String> {
         self.request(method, params).await.map_err(|error| {
-            if error.to_lowercase().contains("unknown method") || error.to_lowercase().contains("unsupported") {
+            if ["unknown method", "unknown action", "method not found", "unsupported"].iter().any(|reason| error.to_lowercase().contains(reason)) {
                 format!("This Herdr server does not support {method}. Update Herdr on this host. ({error})")
             } else { error }
         })

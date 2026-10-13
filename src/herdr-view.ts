@@ -463,6 +463,11 @@ export class HerdrView {
     const input = node('input'), picker = node('select');
     try {
       if (action === 'split') {
+        progress.textContent = 'Checking split support…';
+        const options = await this.host.api<{ actions?: string[] }>('api/herdr/options');
+        if (!modal.open || this.disposed) return;
+        progress.textContent = '';
+        if (!options.actions?.includes('split')) throw new Error('This Termai backend is older than the interface. Restart it with the current build to enable Split.');
         field('Split direction', picker); picker.setAttribute('aria-label', 'Split direction');
         for (const [value, label] of [['right', 'Right (side by side)'], ['down', 'Down (above and below)']]) { const option = node('option', '', label); option.value = value; picker.append(option); }
         context.textContent = space.name + ' · ' + (this.terminals.find(t => t.terminalId === terminalId)?.name || 'No running terminal');

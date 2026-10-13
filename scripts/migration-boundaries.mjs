@@ -54,8 +54,12 @@ export function boundaries(definitions) {
     object({ herdrSession: string, herdrSource: string, name: string, remote: bool })]);
   definitions.HerdrConnectRequest = object({ source: string, session: { anyOf: [string, { type: 'null' }] } }, ['source']);
   definitions.HerdrConnectReply = object({ herdrSession: string, herdrSource: string });
-  definitions.HerdrOptionsReply = object({ kinds: array(string) });
+  definitions.HerdrOptionsReply = object({ kinds: array(string), actions: array(string) }, ['kinds']);
   definitions.HerdrActionRequest = union([
+    action('split', { workspaceId: string, terminalId: string, direction: { enum: ['right', 'down'] } }),
+    action('list-worktrees', { workspaceId: string }),
+    action('new-worktree', { workspaceId: string, branch: name }),
+    action('open-worktree', { workspaceId: string, path }),
     action('create-space', { workspaceId: string, terminalId: string }, []),
     action('move-space', { workspaceId: string, beforeWorkspaceId: string }, ['workspaceId']),
     action('create', { workspaceId: string, name, kind: string, cwd: path }, ['workspaceId', 'name', 'kind']),

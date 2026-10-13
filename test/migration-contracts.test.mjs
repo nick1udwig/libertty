@@ -66,6 +66,15 @@ test('optional properties remain distinct from null and file editing measures en
   assert.equal(action({ action: 'delete', paths: [] }), false);
 });
 
+test('Herdr space action contracts include splits and worktrees with scoped operands', () => {
+  const action = validate('HerdrActionRequest');
+  for (const direction of ['right', 'down']) assert.ok(action({ action: 'split', workspaceId: 'w1', terminalId: 'term_0', direction }));
+  assert.ok(action({ action: 'list-worktrees', workspaceId: 'w1' }));
+  assert.ok(action({ action: 'new-worktree', workspaceId: 'w1', branch: 'review/mobile' }));
+  assert.ok(action({ action: 'open-worktree', workspaceId: 'w1', path: '/worktrees/review' }));
+  for (const input of [{ action: 'split', workspaceId: 'w1', direction: 'right' }, { action: 'split', workspaceId: 'w1', terminalId: 'term_0', direction: 'left' }, { action: 'new-worktree', branch: 'review' }, { action: 'open-worktree', workspaceId: 'w1' }]) assert.equal(action(input), false);
+});
+
 test('persisted pairing credentials require hashed version-one records and bounded arrays', () => {
   const pairings = validate('PairingsData');const hash = 'a'.repeat(64);
   assert.ok(pairings({ version: 1, tokenHash: hash, credentials: [hash] }));

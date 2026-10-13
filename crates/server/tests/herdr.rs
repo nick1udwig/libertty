@@ -44,29 +44,30 @@ async fn worktrees_and_splits_are_scoped_to_the_held_space() {
         )
         .await
         .unwrap();
-    let actions = fixture.actions.lock().unwrap();
-    assert_eq!(
-        actions
-            .iter()
-            .find(|a| a["method"] == "worktree.create")
-            .unwrap()["params"],
-        json!({"workspace_id":"w1","branch":"review/mobile","base":"HEAD","focus":false,"trust_repository":false})
-    );
-    assert_eq!(
-        actions
-            .iter()
-            .find(|a| a["method"] == "worktree.open")
-            .unwrap()["params"],
-        json!({"workspace_id":"w1","path":"/worktrees/repo/review","focus":false,"trust_repository":false})
-    );
-    assert_eq!(
-        actions
-            .iter()
-            .find(|a| a["method"] == "pane.split")
-            .unwrap()["params"],
-        json!({"workspace_id":"w1","target_pane_id":"w1:p0","direction":"down","focus":false})
-    );
-    drop(actions);
+    {
+        let actions = fixture.actions.lock().unwrap();
+        assert_eq!(
+            actions
+                .iter()
+                .find(|a| a["method"] == "worktree.create")
+                .unwrap()["params"],
+            json!({"workspace_id":"w1","branch":"review/mobile","base":"HEAD","focus":false,"trust_repository":false})
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .find(|a| a["method"] == "worktree.open")
+                .unwrap()["params"],
+            json!({"workspace_id":"w1","path":"/worktrees/repo/review","focus":false,"trust_repository":false})
+        );
+        assert_eq!(
+            actions
+                .iter()
+                .find(|a| a["method"] == "pane.split")
+                .unwrap()["params"],
+            json!({"workspace_id":"w1","target_pane_id":"w1:p0","direction":"down","focus":false})
+        );
+    }
     fixture.snapshot.lock().unwrap()["workspaces"][0]["worktree"] =
         json!({"is_linked_worktree":true});
     assert!(
@@ -82,9 +83,13 @@ async fn worktrees_and_splits_are_scoped_to_the_held_space() {
 #[tokio::test]
 async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
     let fixture = support::Fixture::new().await;
-    assert_eq!(
-        fixture.target.options().await.unwrap(),
-        json!({"kinds":["codex","claude","pi"]})
+    let options = fixture.target.options().await.unwrap();
+    assert_eq!(options["kinds"], json!(["codex", "claude", "pi"]));
+    assert!(
+        options["actions"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("split"))
     );
     assert!(
         fixture
@@ -173,6 +178,31 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
             .rfind(|a| a["method"] == "workspace.close")
             .unwrap()["params"],
         json!({"workspace_id":"w1","close_group":false})
+    );
+}
+
+#[tokio::test]
+async fn unsupported_split_actions_explain_which_server_needs_updating() {
+    let fixture = support::Fixture::new().await;
+    *fixture.split_error.lock().unwrap() = "Unknown action: pane.split".into();
+    let error = fixture
+        .target
+        .action(
+            &json!({"action":"split","workspaceId":"w1","terminalId":"term_0","direction":"right"}),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.contains("Update Herdr on this host"), "{error}");
+    assert_eq!(
+        fixture
+            .actions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request["method"] == "pane.split")
+            .count(),
+        1,
+        "Unsupported actions are not replayed"
     );
 }
 

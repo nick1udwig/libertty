@@ -22,7 +22,7 @@ try {
   desktop = pty.spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', [], { cwd: dir, env, cols: 150, rows: 45, name: 'xterm-256color' }); desktop.onData(() => {});
   const alpha = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/alpha', label: 'Alpha', focus: false })).workspace.workspace_id;
   const beta = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/beta project', label: 'Beta', focus: false })).workspace.workspace_id;
-  backend = spawn(root + 'target/debug/termai', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3174', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  backend = spawn(process.env.TEST_EXECUTABLE || root + 'target/debug/termai', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3174', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
@@ -115,6 +115,13 @@ try {
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(await selected(), 'space:' + beta, 'Discovery failure preserves selection');
   const alphaBefore = (await herdrSnapshot(target)).spaces.find(space => space.id === alpha);
+  await page.route('**/api/herdr/options*', route => route.fulfill({ json: { kinds: ['codex'] } }));
+  await hold(alpha); await menuAction('Split');
+  await page.locator('.herdr-space-action .form-error').filter({ hasText: 'Restart it with the current build' }).waitFor();
+  assert.equal(await page.getByRole('dialog').getByRole('button', { name: 'Split', exact: true }).isDisabled(), true, 'A stale backend cannot receive an unsupported split action');
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.equal(await selected(), 'space:' + beta, 'A version mismatch preserves selection');
+  await page.unroute('**/api/herdr/options*');
   await hold(alpha); await menuAction('Split');
   let splitRequests = 0;
   await page.route('**/api/herdr/action*', async route => {
@@ -156,6 +163,8 @@ try {
   const openedSpaceId = (await selected()).slice(6);
   assert.equal((await herdrSnapshot(target)).spaces.find(space => space.id === openedSpaceId)?.cwd, dir + '/existing-review');
   await tab(created).click(); await wait(async () => await tab(created).getAttribute('aria-selected') === 'true', 'selected created space');
+  const closingTerminal = (await herdrSnapshot(target)).terminals.find(terminal => terminal.workspaceId === created)?.terminalId;
+  await wait(async () => await page.locator('.herdr-terminal:visible').count() === 1 && await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === closingTerminal, 'created pane rendered before holding its tab');
   const close = await bounds(created); await touch('touchStart', close.x + close.width / 2, close.y + close.height / 2); await delay(500); await touch('touchEnd');
   await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close', exact: true }).click();
   await wait(async () => !(await order()).includes(created), 'close removes the native space');

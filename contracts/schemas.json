@@ -6856,6 +6856,12 @@
           "items": {
             "type": "string"
           }
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -6865,6 +6871,95 @@
     },
     "HerdrActionRequest": {
       "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "split"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "terminalId": {
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "right",
+                "down"
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId",
+            "terminalId",
+            "direction"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "list-worktrees"
+            },
+            "workspaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "new-worktree"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "x-utf16MaxLength": 100
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId",
+            "branch"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "open-worktree"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId",
+            "path"
+          ],
+          "additionalProperties": true
+        },
         {
           "type": "object",
           "properties": {

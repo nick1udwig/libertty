@@ -431,6 +431,7 @@
       "assertions": [
         "worktrees_and_splits_are_scoped_to_the_held_space",
         "rpc_actions_preserve_labels_and_reject_stale_or_refused_changes",
+        "unsupported_split_actions_explain_which_server_needs_updating",
         "chunked_lines_keep_partial_frames_across_cancelled_reads_and_bound_memory"
       ]
     },
@@ -809,6 +810,7 @@
         "all migration schemas compile and every API route has a resolvable request, response and error contract",
         "request contracts reject malformed objects, UTF-16 overflow, invalid fact variants and numeric bounds",
         "optional properties remain distinct from null and file editing measures encoded bytes",
+        "Herdr space action contracts include splits and worktrees with scoped operands",
         "persisted pairing credentials require hashed version-one records and bounded arrays",
         "asynchronous native/Wasm messages obey their contracts"
       ]

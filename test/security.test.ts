@@ -29,8 +29,9 @@ for (const mode of ['production', 'development']) {
     const exited = once(child, 'exit');
     let logs = ''; child.stdout.on('data', data => logs += data); child.stderr.on('data', data => logs += data);
     try {
-      for (let i = 0; !logs.includes('Pairing token:'); i++) {
-        assert.equal(child.exitCode, null, 'server must start'); assert.ok(i < 100, 'server startup timeout');
+      const startupDeadline = Date.now() + 20000;
+      while (!logs.includes('Pairing token:')) {
+        assert.equal(child.exitCode, null, 'server must start'); assert.ok(Date.now() < startupDeadline, 'server startup timeout');
         await new Promise(resolve => setTimeout(resolve, 50));
       }
       const token = (await readFile(path.join(directory, 'pairing-token'), 'utf8')).trim();

@@ -98,6 +98,9 @@ Split offers Right and Down and targets the held space’s remembered terminal, 
 The refreshed terminal dropdown immediately includes the new pane, and both desktop and mobile see the same worktrees and splits.
 The dialogs show progress and errors, prevent repeated submissions, and preserve selection on cancellation or failure.
 Local and SSH connections route these actions through their selected Herdr server and session, with update guidance if its API is unavailable.
+Split checks that the Termai backend supports the action before submitting it, so an older running backend reports the version mismatch.
+After rebuilding the interface and backend, restart the Termai service to activate the backend changes.
+Use `npm run build:release` when the service runs `target/release/termai`, so both the optimized backend and the interface are rebuilt together.
 Hold, then drag onto the left or right edge of another space to reorder; drop on its middle to stack the spaces.
 The count button expands or collapses a stack.
 Expand it and drag a member to an edge to remove it.
