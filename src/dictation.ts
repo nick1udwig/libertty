@@ -2,6 +2,7 @@ import type { ClientMessage, ShellState } from './protocol.ts';
 import { dictationTarget } from './protocol.ts';
 import './dictation.css';
 import { DictationView } from './dictation-view.ts';
+import { DictationWakeLock, dictationWakeEnvironment } from './dictation-wake-lock.ts';
 
 interface Host {
   api<T>(path: string, data?: unknown): Promise<T>;
@@ -45,8 +46,15 @@ export class DictationControl {
   private pendingAudio: ArrayBuffer[] = [];
   private pendingBytes = 0;
   private host: Host;
+  private wakeLock: DictationWakeLock;
+  private capturePaused = false;
+  private captureInterrupted = false;
+  private lastAudio = 0;
+  private captureTimer?: ReturnType<typeof setInterval>;
   constructor(host: Host) {
     this.host = host;
+    this.wakeLock = new DictationWakeLock(dictationWakeEnvironment(), message => host.notice(message));
+    window.addEventListener('pagehide', () => { this.cancel(); this.wakeLock.stop(); });
     this.cancelButton.onclick = () => this.cancel();
     this.dialog.id = 'dictation-install';
     this.dialog.innerHTML = '<h2>Dictate with Voxtype Mobile</h2><p data-explanation>Install the daemon on your backend to dictate directly into this terminal.</p><p>Install pastes the command into your session. Review it and press Enter to run it.</p><label class="setting-toggle"><input type="checkbox"><span>Do not show again</span></label><div class="run-row"><button type="button" class="secondary-button" data-later>Not now</button><button type="button" class="run-button" data-install>Install</button></div>';
@@ -90,7 +98,16 @@ export class DictationControl {
     // a later tap or the cancel button still lets the user finish or discard it.
     this.button.addEventListener('pointercancel', () => { if (press?.dragged) this.view.remember(); press = undefined; });
     this.button.addEventListener('click', event => { if (event.detail === 0) { if (this.phase === 'idle') void this.start(); else this.finish(); } });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) void this.poll(); });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        void this.poll();
+        if (this.phase === 'recording') {
+          this.checkCapture();
+          const context = this.context;
+          if (context && context.state !== 'running') void context.resume().catch(() => { if (context === this.context) this.captureFailed('Microphone audio could not resume. Recording stopped; try again with the screen on.'); });
+        }
+      }
+    });
     setInterval(() => void this.poll(), 15000);
   }
   private save(value: string) { try { localStorage.setItem('termai.voxtype:' + this.host.key, value); } catch {} }
@@ -124,10 +141,11 @@ export class DictationControl {
       : 'Install the daemon on your backend to dictate directly into this terminal.';
     this.offered = true; this.dialog.showModal();
   }
-  private render() { this.view.update(this.phase, this.available && this.online && this.visible); }
+  private render() { this.view.update(this.phase, this.available && this.online && this.visible, this.capturePaused); }
   private async start() {
     if (!this.online || !this.available || !dictationTarget(this.host.state())) { this.host.notice('Wait for terminal input before dictating.'); return; }
     const generation = ++this.generation; this.id = crypto.randomUUID(); this.phase = 'starting'; this.finishPending = false; this.render();
+    this.wakeLock.start();
     try {
       // Resume within the user gesture, before the permission dialog settles.
       const context = this.context = new AudioContext(); await context.resume();
@@ -137,6 +155,12 @@ export class DictationControl {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
       if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
       this.stream = stream;
+      const track = stream.getAudioTracks()[0];
+      if (!track || track.readyState === 'ended') throw new Error('The microphone stopped before recording started.');
+      track.addEventListener('ended', () => { if (generation === this.generation) this.captureFailed('Microphone access ended. Recording stopped; check microphone permission and try again.'); });
+      track.addEventListener('mute', () => { if (generation === this.generation) this.checkCapture(); });
+      track.addEventListener('unmute', () => { if (generation === this.generation) this.checkCapture(); });
+      context.addEventListener('statechange', () => { if (generation === this.generation) this.checkCapture(); });
       await context.audioWorklet.addModule(new URL('dictation-worklet.js', document.baseURI).href);
       if (generation !== this.generation) return;
       this.source = context.createMediaStreamSource(stream);
@@ -146,6 +170,7 @@ export class DictationControl {
         if (event.data?.type === 'error') { this.host.notice(event.data.message); this.cancel(); return; }
         if (event.data === 'flushed') { this.encoder!.postMessage({ type: 'finish' }); this.releaseAudio(); }
         else {
+          this.lastAudio = Date.now(); this.checkCapture();
           this.view.level(event.data);
           if (++this.encoderPending > 8) { this.host.notice('Audio encoding is too slow. Please try again.'); this.cancel(); return; }
           this.encoder!.postMessage({ type: 'audio', pcm: event.data }, [event.data]);
@@ -156,6 +181,8 @@ export class DictationControl {
       if (!this.host.send({ type: 'dictation', id: this.id, action: 'start', prompt: state.prompt, revision: state.inputRevision, target: dictationTarget(state) })) throw new Error('The terminal is disconnected.');
       // Capture immediately, including speech while waiting for daemon admission.
       this.phase = 'recording'; this.source.connect(this.processor); this.processor.connect(context.destination);
+      this.lastAudio = Date.now(); this.capturePaused = this.captureInterrupted = false;
+      this.captureTimer = setInterval(() => this.checkCapture(), 1000); this.checkCapture();
       this.readyTimer = setTimeout(() => { this.host.notice('Voxtype did not become ready.'); this.cancel(); }, 10000);
       this.audioTimer = setTimeout(() => this.finish(), 299000);
       if (this.finishPending) this.finish();
@@ -209,13 +236,27 @@ export class DictationControl {
   private finish() {
     if (this.phase === 'starting') { this.finishPending = true; return; }
     if (this.phase !== 'recording') return;
-    this.phase = 'finishing'; clearTimeout(this.audioTimer); this.processor!.port.postMessage('flush');
+    if (this.capturePaused) { this.captureFailed('Recording was interrupted. Keep the screen on and try dictating again.'); return; }
+    this.phase = 'finishing'; this.wakeLock.stop(); clearInterval(this.captureTimer); clearTimeout(this.audioTimer); this.processor!.port.postMessage('flush');
     this.audioTimer = setTimeout(() => { this.host.notice('Dictation timed out.'); this.cancel(); }, 180000);
     this.render();
   }
   private releaseAudio() { this.stream?.getTracks().forEach(track => track.stop()); this.stream = undefined; this.source?.disconnect(); this.processor?.disconnect(); void this.context?.close().catch(() => {}); this.context = undefined; }
+  private captureFailed(message: string) { if (!this.active) return; this.host.notice(message); this.cancel(); }
+  private checkCapture() {
+    if (this.phase !== 'recording') return;
+    const track = this.stream?.getAudioTracks()[0];
+    if (!track || track.readyState === 'ended' || this.context?.state === 'closed') { this.captureFailed('Microphone audio stopped. Keep the screen on and try dictating again.'); return; }
+    const paused = track.muted || this.context?.state !== 'running' || Date.now() - this.lastAudio > 2500;
+    if (paused === this.capturePaused) return;
+    this.capturePaused = paused;
+    if (paused) { this.captureInterrupted = true; this.host.notice('Microphone audio paused. Unlock or return to this tab to resume; speech during the pause may be missing.'); }
+    else if (this.captureInterrupted) this.host.notice('Microphone audio resumed. Speech during the pause may be missing.');
+    this.render();
+  }
   cancel(notify = true) {
     ++this.generation;
+    this.wakeLock.stop(); clearInterval(this.captureTimer); this.capturePaused = this.captureInterrupted = false;
     if (notify && this.phase !== 'idle') this.host.send({ type: 'dictation', id: this.id, action: 'cancel' });
     this.encoderStartupCancel?.(); this.encoderStartupCancel = undefined;
     this.encoder?.terminate(); this.encoder = undefined; this.encoderPending = 0;

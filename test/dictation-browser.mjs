@@ -38,12 +38,13 @@ trust_level = "trusted"
 `);
 }
 const daemon = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(daemon, 'listening');
-let audioBytes = 0, capabilities = true;
+let audioBytes = 0, capabilities = true, recordingSocket;
 daemon.on('connection', (socket, request) => {
   assert.equal(request.headers.authorization, 'Bearer ' + 'secret'.repeat(8));
   assert.equal(request.headers.origin, undefined);
   if (request.url === '/v1/capabilities') { if (!capabilities) { socket.close(); return; } socket.send(JSON.stringify({ type: 'capabilities', protocol: 2, dictation: true, sample_rate: 16000, channels: 1, format: 'opus', framing: 'sequence_opus_v1', audio_encodings: ['opus_v1'], results: ['partial', 'final'] })); return; }
   assert.equal(request.headers['x-voxtype-protocol'], '2');
+  recordingSocket = socket;
   assert.equal(request.headers['x-voxtype-audio'], 'opus_v1');
   assert.match(String(request.headers['x-voxtype-session']), /^[a-f0-9]{32}$/);
   socket.send(JSON.stringify({ type: 'ready', protocol: 2, sample_rate: 16000, channels: 1, format: 'opus', audio_encoding: 'opus_v1', framing: 'sequence_opus_v1', max_seconds: 300, max_encoded_bytes: 2097152, resume: true, accepted_frames: 0, finished: false }));
@@ -65,7 +66,8 @@ let browser;
 try {
   for (let i = 0; i < 100; i++) { if (await fetch(base).then(r => r.ok, () => false)) break; if (server.exitCode !== null) throw new Error(logs); await new Promise(r => setTimeout(r, 100)); }
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
-  const page = await browser.newPage({ viewport: { width: 600, height: 850 }, hasTouch: true, serviceWorkers: 'block' });
+  const context = await browser.newContext({ viewport: { width: 600, height: 850 }, hasTouch: true, serviceWorkers: 'block' });
+  const page = await context.newPage();
   await page.route('**/assets/terminal-*.js', async route => {
     const response = await route.fetch(), original = await response.text();
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
@@ -73,9 +75,18 @@ try {
   });
   const errors = []; page.on('pageerror', error => errors.push(String(error)));
   await installWireObserver(page.context());
-  await page.addInitScript(() => {
+  await page.context().addInitScript(() => {
+    window.__wakeLocks = [];
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { async request(type) {
+      if (window.__denyWakeLock) throw new DOMException('Denied', 'NotAllowedError');
+      const lock = new EventTarget(); lock.released = false;
+      lock.release = async () => { lock.released = true; lock.dispatchEvent(new Event('release')); };
+      window.__wakeLocks.push(lock); return lock;
+    } } });
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-    navigator.mediaDevices.getUserMedia = constraints => { window.__captureConstraints = constraints; return capture(constraints); };
+    navigator.mediaDevices.getUserMedia = async constraints => { if (window.__denyMicrophone) throw new DOMException('Microphone denied', 'NotAllowedError'); window.__captureConstraints = constraints; const stream = await capture(constraints); window.__captureStream = stream; return stream; };
+    const Audio = window.AudioContext;
+    window.AudioContext = class extends Audio { constructor(...args) { super(...args); window.__captureContext = this; } };
     window.__messages = []; window.__sent = []; window.__out = ''; window.__paint = [];
     const paint = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...args) { window.__paint.push({ text, x, y }); return paint.call(this, text, x, y, ...args); };
@@ -154,6 +165,7 @@ try {
   await page.mouse.move(heldMic.x + heldMic.width / 2, heldMic.y + heldMic.height / 2);
   await page.mouse.down();
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+  assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Recording holds a screen wake lock');
   assert.deepEqual(await mic.boundingBox(), micPosition, 'Expanding controls must keep the button under the finger');
   assert.equal(await mic.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(112, 67, 154)');
   assert.equal(await mic.locator('.dictation-check').isVisible(), true);
@@ -167,6 +179,7 @@ try {
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     document.dispatchEvent(new Event('visibilitychange'));
+    void window.__wakeLocks.at(-1).release();
     document.querySelector('#termai-dictation').dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
   });
   await page.mouse.up();
@@ -179,8 +192,10 @@ try {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     document.dispatchEvent(new Event('visibilitychange'));
   });
+  await page.waitForFunction(() => window.__wakeLocks.length === 2 && !window.__wakeLocks.at(-1).released);
   await page.locator('#termai-dictation').click();
   await page.getByText('Transcribing…', { exact: true }).waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Finish releases wake locks before transcription');
   assert.equal(await mic.locator('.dictation-dots').isVisible(), true);
   assert.equal(await page.getByLabel('Cancel dictation', { exact: true }).isVisible(), true);
   await page.screenshot({ path: '/tmp/termai-voxtype-web-transcribing.png' });
@@ -214,6 +229,34 @@ try {
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await page.getByLabel('Cancel dictation', { exact: true }).click();
   assert.equal(await page.locator('#termai-dictation').getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Cancellation releases wake locks');
+  for (const interruption of ['suspend', 'ended', 'pagehide', 'denied', 'permission', 'disconnect']) {
+    await page.evaluate(kind => { window.__messages = []; window.__denyWakeLock = kind === 'denied'; window.__denyMicrophone = kind === 'permission'; }, interruption);
+    await mic.click();
+    if (interruption === 'permission') {
+      await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+    } else {
+      await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+      if (interruption === 'suspend') {
+        await page.evaluate(() => window.__captureContext.suspend());
+        await page.getByLabel('Audio capture paused', { exact: true }).waitFor();
+        await page.evaluate(() => window.__captureContext.resume());
+        await page.getByLabel('Microphone activity', { exact: true }).waitFor();
+        await page.getByLabel('Cancel dictation', { exact: true }).click();
+      } else if (interruption === 'ended') {
+        await page.evaluate(() => window.__captureStream.getAudioTracks()[0].dispatchEvent(new Event('ended')));
+        await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+      } else if (interruption === 'pagehide') {
+        await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+        await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+      } else if (interruption === 'disconnect') {
+        recordingSocket.close();
+        await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+      } else await page.getByLabel('Cancel dictation', { exact: true }).click();
+    }
+    await page.waitForFunction(() => window.__wakeLocks.every(lock => lock.released));
+    await page.evaluate(() => { window.__denyWakeLock = window.__denyMicrophone = false; });
+  }
   await page.evaluate(() => { window.__messages = []; });
   await page.locator('#termai-dictation').click();
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
@@ -297,8 +340,26 @@ try {
   await nativeDictation('Get in it.');
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'git init');
   assert.ok(repairRequests.length > 0);
+  const outer = await page.context().newPage(); outer.setDefaultTimeout(15000); await outer.goto(base);
+  if (await outer.locator('#backend-login').isVisible()) { await outer.locator('#backend-token').fill('feature-test-pairing-token-123456789'); await outer.locator('#backend-login-form button[type=submit]').click(); }
+  await outer.locator('#terminal-stack > iframe').waitFor();
+  const embedded = await (await outer.locator('#terminal-stack > iframe').elementHandle()).contentFrame();
+  const embeddedMic = embedded.locator('#termai-dictation'); await embeddedMic.waitFor({ state: 'visible' });
+  await embeddedMic.click(); await embedded.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+  assert.equal(await outer.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Ordinary embedded terminal requests from outer document');
+  const bytesBeforeBackground = audioBytes;
+  await outer.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); void window.__wakeLocks.at(-1).release(); });
+  await embedded.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await outer.waitForTimeout(400); assert.equal(await embeddedMic.getAttribute('aria-pressed'), 'true'); assert.ok(audioBytes > bytesBeforeBackground);
+  await outer.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await embedded.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await outer.waitForFunction(() => window.__wakeLocks.length === 2 && !window.__wakeLocks.at(-1).released);
+  await outer.locator('#terminal-back').click();
+  await embedded.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+  await outer.waitForFunction(() => window.__wakeLocks.every(lock => lock.released));
+  await outer.close();
   assert.deepEqual(errors, []);
-  console.log('PASS: daemon discovery, microphone Opus, shell alternatives, literal program dictation, paste modes, stale transcripts' + (process.env.TEST_CODEX ? ', Codex CLI with and without alternate screen' : ''));
+  console.log('PASS: daemon discovery, microphone Opus, simulated lock transport, wake lock lifecycle, paused/ended capture, shell alternatives, literal program dictation, paste modes, stale transcripts' + (process.env.TEST_CODEX ? ', Codex CLI with and without alternate screen' : ''));
 } catch (error) { console.error(logs); if (browser) console.error(await browser.contexts()[0]?.pages()[0]?.evaluate(() => ({ messages: window.__messages, out: window.__out, paint: window.__paint?.slice(-40) }))); throw error; }
 finally {
   await browser?.close();

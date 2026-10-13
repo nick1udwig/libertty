@@ -257,9 +257,15 @@ While a foreground application such as the Codex CLI is running, dictation inser
 Bash's private prompt and command-start markers identify the input target, including TUIs running without an alternate screen.
 Pasting respects the application's bracketed-paste mode and never sends Enter.
 Typing or changing the prompt during a recording rejects its late result.
-Screen locking or briefly backgrounding the browser keeps an active recording and its audio connection open.
+During recording, termai requests a screen wake lock to prevent automatic screen timeout, including in embedded terminals and Herdr panes.
+Finishing, cancelling, losing the connection, recording errors and leaving the recording terminal release it immediately.
+The browser can deny or release the lock; termai reports that condition and retries when the page becomes visible again while recording.
+An explicit device lock can still turn off the screen and suspend microphone capture.
+Termai preserves the recording’s input target and transport while the page is hidden, reports paused or ended audio capture, and attempts to resume a suspended audio context after unlocking.
+Speech during a capture pause may be missing, and the controls display **Audio paused** instead of microphone activity.
 Switching terminal tabs or losing the connection cancels it; a dropped connection now shows an error.
-Browser background microphone access can vary by Android browser and still needs real-device verification.
+The automated tests verify fake-microphone streaming and the wake lock lifecycle; actual locked-screen audio capture on Android and iOS browsers and installed web apps remains unverified.
+See [dictation validation](dictation-validation.md) for results and the real-device acceptance procedure.
 Recording is bounded to five minutes and slow connections fail explicitly rather than growing queues.
 The daemon on the termai backend also supplies dictation for its SSH sessions.
 

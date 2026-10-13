@@ -78,6 +78,12 @@ try {
   });
   await installWireObserver(context);
   await context.addInitScript(() => {
+    window.__wakeLocks = [];
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { async request() {
+      const lock = new EventTarget(); lock.released = false;
+      lock.release = async () => { lock.released = true; lock.dispatchEvent(new Event('release')); };
+      window.__wakeLocks.push(lock); return lock;
+    } } });
     window.__installed = false; window.__permissionRequests = 0; window.__presence = [];
     const media = window.matchMedia.bind(window); window.matchMedia = query => query === '(display-mode: standalone)' ? { ...media(query), matches: window.__installed } : media(query);
     let permission = 'default'; Object.defineProperty(Notification, 'permission', { get: () => localStorage.getItem('termai.notifications.primary') ? 'granted' : permission });
@@ -158,7 +164,18 @@ try {
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\x1b'), 'shared Escape button');
   const mic = terminal.locator('#termai-dictation'); await mic.waitFor({ state: 'visible' });
   await mic.click(); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
+  assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Embedded dictation holds a lock owned by the outer page');
+  assert.equal(await terminal.evaluate(() => window.__wakeLocks.length), 0, 'The iframe uses the eligible outer document');
+  const beforeHiddenVoice = voiceBytes;
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); void window.__wakeLocks.at(-1).release(); });
+  await terminal.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await delay(400); assert.equal(await mic.getAttribute('aria-pressed'), 'true', 'Hiding the page does not switch away from the recording pane');
+  assert.ok(voiceBytes > beforeHiddenVoice, 'Embedded audio transport continues during simulated lock');
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await terminal.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
+  await until(async () => await page.evaluate(() => window.__wakeLocks.length === 2 && !window.__wakeLocks.at(-1).released), 'outer wake lock restored');
   await mic.click(); await until(() => fixture.actions.some(a => a.method === 'pane.send_input' && a.params.text === 'Dictated directly into Herdr'), 'direct dictation delivery');
+  assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Herdr finish releases the outer wake lock');
   await until(() => voiceAcks === 1, 'acknowledge after insertion'); assert.ok(voiceBytes > 0);
   assert.equal(fixture.actions.filter(a => a.method === 'pane.send_input').length, 1, 'Dictation inserts once without pressing Enter');
   assert.equal(await terminal.locator('.alternative-choice').count(), 0, 'Program dictation stays in the terminal');

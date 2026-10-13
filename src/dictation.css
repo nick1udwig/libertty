@@ -4,6 +4,7 @@
 .dictation-mic:active, .dictation-cancel:active { background: #d0cdd7ee; }
 .dictation-mic:focus-visible, .dictation-cancel:focus-visible { outline: 2px solid #e1d5ea; outline-offset: 2px; }
 .dictation-mic.recording { border-radius: 24px; background: #70439a; color: #e1d5ea; }
+.dictation-mic.paused { background: #83512f; }
 .dictation-microphone-icon { display: block; width: 48px; height: 48px; background: currentColor; mask: url('./assets/voxtype-microphone.png') center / 24px 24px no-repeat; }
 .dictation-mic svg, .dictation-cancel svg { display: block; width: 48px; height: 48px; fill: currentColor; pointer-events: none; }
 .dictation-mic path, .dictation-cancel path { fill: none; stroke: currentColor; stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; }

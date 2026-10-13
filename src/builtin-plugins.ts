@@ -34,7 +34,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       connect: host => s.connect(host, 'terminal'),
       async mount(tab) {
         const frame = document.createElement('iframe'); frame.title = tab.name + ' terminal'; frame.id = 'frame-' + tab.id;
-        frame.allow = 'clipboard-read; clipboard-write'; frame.src = s.terminalURL(s.backend(tab), tab.session); s.frame(tab, frame);
+        frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write'; frame.src = s.terminalURL(s.backend(tab), tab.session); s.frame(tab, frame);
         return { element: frame, setVisible(visible) { frame.hidden = !visible; frame.contentWindow?.postMessage({ type: 'tab-visibility', visible }, location.origin); },
           focus() { frame.contentWindow?.postMessage({ type: 'focus-terminal' }, location.origin); },
           applySettings() { frame.contentWindow?.postMessage({ type: 'settings-changed' }, location.origin); },

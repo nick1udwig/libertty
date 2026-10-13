@@ -198,7 +198,7 @@ export class HerdrView {
     } else {
       const session = crypto.randomUUID();
       const frame = node('iframe','herdr-terminal'); frame.title = 'Herdr agent terminal'; frame.dataset.terminal = this.selected; frame.dataset.pane = agent.paneId; frame.style.visibility = 'hidden';
-      frame.allow = 'microphone; clipboard-read; clipboard-write';
+      frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write';
       const url = new URL('terminal.html',document.baseURI);
       url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:this.selected,herdrSession:this.host.session,...(this.host.source?{herdrSource:this.host.source}:{})}).toString();
       frame.src = url.href; this.frame = frame;

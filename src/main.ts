@@ -305,11 +305,10 @@ function updateTerminalLoading() {
   $('terminal-loading').classList.toggle('has-previous', herdrLoading && !!presentedTab);
 }
 function updateViewVisibility() {
-  const visible = page === 'terminal' && !document.hidden, target = pluginViews.get(active);
+  const visible = page === 'terminal' && !document.hidden, target = pluginViews.get(active), tab = tabs.find(tab => tab.id === active);
   target?.setHeld?.(false);
-  target?.setVisible(visible);
+  target?.setVisible(tab && ['terminal', 'herdr'].includes(tabPluginId(tab)) ? page === 'terminal' : visible);
   if (!pluginViews.has(presentedTab)) presentedTab = '';
-  const tab = tabs.find(tab => tab.id === active);
   const waiting = visible && tab && tabPluginId(tab) === 'herdr' && (!target || herdrViews.has(active)) && !herdrViews.get(active)?.ready;
   const preparing = !!waiting && presentedTab !== active;
   herdrLoading = preparing;
