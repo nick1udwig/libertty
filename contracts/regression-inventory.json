@@ -47,6 +47,9 @@
       "source": "crates/engine/src/runtime.rs"
     },
     {
+      "source": "crates/engine/src/shell_structure.rs"
+    },
+    {
       "source": "crates/engine/src/speech.rs"
     },
     {
@@ -66,6 +69,9 @@
     },
     {
       "source": "crates/engine/src/wasm.rs"
+    },
+    {
+      "source": "crates/server/src/alternatives.rs"
     },
     {
       "source": "crates/server/src/assets.rs"
@@ -217,7 +223,15 @@
       "source": "crates/engine/src/runtime.rs",
       "owner": "rust",
       "assertions": [
+        "stronger_stats_and_successful_lookups_satisfy_operand_checks",
         "successful_completion_reuses_results_across_budgets_but_errors_retry"
+      ]
+    },
+    {
+      "source": "crates/engine/src/shell_structure.rs",
+      "owner": "rust",
+      "assertions": [
+        "structure_preserves_quotes_expressions_and_operator_kinds"
       ]
     },
     {
@@ -260,6 +274,9 @@
       "source": "crates/engine/tests/runtime.rs",
       "owner": "rust",
       "assertions": [
+        "failed_candidate_facts_leave_independently_validated_alternatives_available",
+        "exhausted_request_budget_does_not_start_more_fact_waves",
+        "independent_operand_validation_uses_one_callback_wave",
         "prepared_contexts_preserve_pending_snapshots_reject_stale_ids_and_reset",
         "fused_directory_import_and_resume_matches_separate_calls_and_rejects_partial_imports",
         "directory_pins_survive_eviction_but_reject_stale_and_cross_request_references",
@@ -276,6 +293,14 @@
       "assertions": [
         "malformed_requests_are_errors_and_do_not_corrupt_subsequent_requests",
         "optional_wire_fields_reject_null_and_preserve_omission"
+      ]
+    },
+    {
+      "source": "crates/server/src/alternatives.rs",
+      "owner": "rust",
+      "assertions": [
+        "reading_intent_keeps_the_phrase_and_runs_fallback_on_the_backend",
+        "malformed_intent_cannot_put_control_characters_into_an_applied_line"
       ]
     },
     {
@@ -297,6 +322,13 @@
       "owner": "rust",
       "assertions": [
         "file_name_attributes_reject_truncated_offsets_and_invalid_strings"
+      ]
+    },
+    {
+      "source": "crates/server/src/herdr.rs",
+      "owner": "rust",
+      "assertions": [
+        "learned_metadata_survives_requests_but_not_terminal_or_shell_changes"
       ]
     },
     {
@@ -471,6 +503,7 @@
       "source": "crates/server/tests/http.rs",
       "owner": "rust",
       "assertions": [
+        "coarse_repair_reads_its_own_context_and_rejects_stale_prompts",
         "slow_ssh_connections_do_not_block_existing_or_new_local_sessions",
         "authentication_json_limits_static_assets_and_owned_file_streams_are_compatible",
         "conditional_plugin_reads_compression_and_owner_scoping"
@@ -490,6 +523,12 @@
       "source": "crates/server/tests/native_engine.rs",
       "owner": "rust",
       "assertions": [
+        "fact_deadlines_preserve_fast_results_when_an_optional_probe_is_slow",
+        "learned_schema_is_replaced_when_the_executable_changes",
+        "shared_paths_and_option_schemas_preserve_types_choices_and_arity",
+        "compound_commands_repair_each_node_and_preserve_shell_expressions",
+        "history_and_validation_do_not_discard_live_filename_alternatives",
+        "script_options_keep_their_scope_after_interpreter_options_and_multiple_values",
         "spelled_cd_uses_directory_discovery_without_catalog_paths",
         "directory_facts_preserve_hidden_names_symlinks_bounds_and_fresh_versions",
         "syntax_parses_without_execution_and_cancellation_releases_probes",
@@ -616,10 +655,20 @@
       ]
     },
     {
+      "source": "test/ci-build.test.mjs",
+      "owner": "integration",
+      "assertions": [
+        "browser and release builds survive artifact transport with checksums and executable permissions",
+        "reuse rejects stale revisions, wrong platforms, incomplete manifests and modified build files",
+        "dirty build provenance and dirty checkouts require the explicit local packaging override",
+        "release packaging reuses a verified build without Cargo and retains release pins and companion provenance"
+      ]
+    },
+    {
       "source": "test/compound-repair.test.ts",
       "owner": "frontend",
       "assertions": [
-        "dependent repairs require advertised capability and keep simple inputs local"
+        "coarse repairs depend on host capability rather than utterance length"
       ]
     },
     {
@@ -773,7 +822,8 @@
         "unchanged suggestions avoid a second replacement; rejected and superseded edits stay untouched",
         "reader command alternatives use the command engine and execute only after selection",
         "loading presentation is predicted up front and stays fixed even past 500 ms",
-        "typing while suggestions load preserves the pending transcript and ignores late repairs"
+        "typing while suggestions load preserves the pending transcript and ignores late repairs",
+        "fused repair avoids separate replacements and cancellation waits for its authoritative result"
       ]
     },
     {
@@ -806,7 +856,7 @@
       "source": "test/migration-contracts.test.mjs",
       "owner": "integration",
       "assertions": [
-        "Rust shell utilities and pairing assets retain their pre-cleanup bytes",
+        "Rust shell utilities and pairing assets match their declared byte checksums",
         "all migration schemas compile and every API route has a resolvable request, response and error contract",
         "request contracts reject malformed objects, UTF-16 overflow, invalid fact variants and numeric bounds",
         "optional properties remain distinct from null and file editing measures encoded bytes",
@@ -898,6 +948,11 @@
         "locked and ended sessions stop automatic retries until explicitly authorized",
         "another-tab close stops reconnecting instead of reclaiming the terminal"
       ]
+    },
+    {
+      "source": "test/repair-network.mjs",
+      "owner": "integration",
+      "assertions": []
     },
     {
       "source": "test/rust-architecture-adapter.mjs",
