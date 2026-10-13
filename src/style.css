@@ -54,3 +54,9 @@ dialog{color:#e4eee6;background:#17251c;border:1px solid #3d5343;border-radius:1
 .transfer-dialog{color:#ececf4;background:#24263d;border:1px solid #3c4058;border-radius:18px;width:min(460px,calc(100% - 24px));padding:22px;box-shadow:0 25px 100px #0007}.transfer-dialog::backdrop{background:#080b15bc}.transfer-dialog h2{font:600 20px system-ui;margin:0 0 14px}.transfer-dialog p{font:14px system-ui;line-height:1.5;overflow-wrap:anywhere}.transfer-dialog .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.transfer-dialog button{padding:12px 18px;border-radius:9px;color:inherit;border:0;font:14px system-ui;background:#3a3e56}.transfer-dialog .primary{background:#268dde}.transfer-dialog button:disabled{opacity:.5}
 
 #terminal-viewport.awaiting-herdr-layout{visibility:hidden}
+.terminal-presentation{position:absolute;left:0;top:0;width:100%;overflow:hidden;background:#0c1310;z-index:3;pointer-events:none}
+.terminal-presentation canvas{display:block;width:100%;height:100%}
+.terminal-loading-bar{position:absolute;left:0;right:0;top:0;height:3px;overflow:hidden;background:#263e32}
+.terminal-loading-bar::after{content:'';position:absolute;inset:0;background:#bbf6b4;transform:translateX(-100%);animation:terminal-progress 1.4s ease-in-out infinite}
+@keyframes terminal-progress{to{transform:translateX(100%)}}
+@media(prefers-reduced-motion:reduce){.terminal-loading-bar::after{animation:none;transform:none;opacity:.7}}

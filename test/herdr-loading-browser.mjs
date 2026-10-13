@@ -154,6 +154,16 @@ try {
   await wait(async () => await page.locator('#herdr-'+first+' .herdr-loading').isHidden(), 'return to already displayed Beta');
   await assertVisible(pane(first,'term_1'),true); await assertVisible(pane(first,'term_0'),false);
 
+  // Leaving the app tab keeps its last displayed pane for the return handoff.
+  await page.evaluate(() => { window.__holdRendered=['term_1']; });
+  await page.locator('#terminal-back').click();
+  await page.locator('#nav-terminals').click();
+  await assertVisible(pane(first,'term_1'),true);
+  assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),true);
+  assert.equal(await pane(first,'term_1').evaluate(element => element.inert),true);
+  await page.evaluate(() => { window.__holdRendered=[]; }); await release(beta);
+  await wait(async () => await page.locator('#herdr-'+first+' .herdr-loading').isHidden(), 'return to the retained app tab');
+
   // A top-level Herdr tab prepares offscreen while the prior tab remains visible.
   const tabLayout = await captureBottomLayout();
   await page.evaluate(() => { window.__holdAllRendered=true; window.__holdAllShortcuts=true; window.__visibleScreens=[]; });

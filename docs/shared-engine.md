@@ -71,6 +71,11 @@ Retain the SFTP compatibility path and defer a persistent remote worker until an
 A worker should then accept bounded compound operations, share the Rust traversal and schema logic, and return independently validated results under a versioned protocol.
 Changing the browser transport alone cannot remove those backend-to-SSH dependencies.
 
+Terminal presentation now retains the last painted viewport during foreground recovery and shows a loading bar over it.
+The hello message includes the last replay sequence, so native terminals reveal their new canvas after replay drains and the renderer paints.
+Herdr uses its existing geometry and presentation acknowledgements, and the workspace retains its displayed tab across hidden states.
+Input and shortcuts remain unavailable while a retained viewport is being replaced.
+
 See the [Rust migration report](rust-migration.md) for current parity results, browser initialization measurements and platform gates.
 The [workspace implementation](workspace.md) supplies SSH and multiple backends through adapters to this engine.
 

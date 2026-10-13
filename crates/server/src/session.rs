@@ -743,7 +743,7 @@ impl Session {
         let first = inner.outputs.front().map_or(1, |o| o.seq);
         let changed = stream.is_some_and(|s| !s.is_empty() && s != self.stream_id);
         let gap = changed || after > inner.seq || (after > 0 && after < first - 1);
-        inner.send(json!({"type":"hello","streamId":self.stream_id,"engine":self.engine_mode,"reset":after==0||gap,"truncated":((after==0||changed)&&inner.truncated)||(gap&&!changed),"firstSeq":first}));
+        inner.send(json!({"type":"hello","streamId":self.stream_id,"engine":self.engine_mode,"reset":after==0||gap,"truncated":((after==0||changed)&&inner.truncated)||(gap&&!changed),"firstSeq":first,"lastSeq":inner.seq}));
         inner.pending = inner
             .outputs
             .iter()
@@ -1950,6 +1950,7 @@ mod tests {
                     assert_eq!(hello["reset"], reset);
                     assert_eq!(hello["truncated"], false);
                     assert_eq!(hello["streamId"], session.stream_id);
+                    assert_eq!(hello["lastSeq"], 3);
                 }
                 _ => panic!(),
             }

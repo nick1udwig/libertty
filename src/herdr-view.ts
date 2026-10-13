@@ -136,17 +136,17 @@ export class HerdrView {
     if (!changed) { this.mountTerminal(); return; }
     this.rendered = false;
     if (!visible) {
-      if (this.displayed && ![...this.terminalFrames.values()].some(entry => entry.frame === this.displayed)) this.displayed.remove();
-      this.menu.hidden = true; this.displayed = undefined; this.setLoading(false);
+      if (this.displayed && ![...this.terminalFrames.values()].some(entry => entry.frame === this.displayed)) { this.displayed.remove(); this.displayed = undefined; }
+      this.menu.hidden = true; this.setLoading(false);
       for (const entry of [...this.terminalFrames.values()]) {
-        if (entry.frame !== this.frame) this.park(entry.frame);
-        else { entry.frame.style.visibility = 'hidden'; entry.frame.inert = true; }
+        if (entry.frame !== this.frame) this.park(entry.frame, entry.frame === this.displayed);
+        else { entry.frame.inert = true; }
       }
     }
     const before = this.frame; this.mountTerminal();
     if (visible && before === this.frame && this.frame) {
       const entry = this.terminalFrames.get(this.frame.dataset.terminal!);
-      if (entry) this.prepare(entry);
+      if (entry) { if (entry.frame === this.displayed) entry.frame.style.visibility = ''; this.prepare(entry); }
     }
     for (const entry of this.terminalFrames.values()) entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible },location.origin);
     if (visible && !this.connected) void this.connect();

@@ -12,6 +12,7 @@ import { TerminalGestures } from './terminal-gestures.ts';
 import { TerminalFocus } from './terminal-focus.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
 import { TerminalProjection } from './terminal-projection.ts';
+import { TerminalPresentation } from './terminal-presentation.ts';
 import { DictationControl } from './dictation.ts';
 import { SuggestionClient } from './suggestion-client.ts';
 import { InlineSuggestions } from './inline-suggestions.ts';
@@ -81,13 +82,13 @@ function connection(label: string, online = false) {
   updateRun();
 }
 function updateRun() {
-  const available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand;
+  const available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand && !presentation.pending;
   $('shell-status').textContent = state.exited ? 'Exited' : state.ready ? 'At prompt' : 'Running';
   for (const button of document.querySelectorAll<HTMLButtonElement>('.command-shortcut')) button.disabled = !available;
   for (const button of document.querySelectorAll<HTMLButtonElement>('.image-upload')) button.disabled = !canUploadImage();
   publishShortcuts(available);
 }
-function publishShortcuts(available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand) {
+function publishShortcuts(available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand && !presentation.pending) {
   if (!embedded) return;
   const snapshot = { shortcuts, ctrl, available, imageAvailable: canUploadImage() }, serialized = JSON.stringify(snapshot);
   if (serialized === shortcutState) return;
@@ -124,6 +125,11 @@ const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
 const projection = herdrTerminal ? new TerminalProjection(term, ghostty) : undefined;
 const terminalViewport = $('terminal-viewport');
+const presentation = new TerminalPresentation(terminalViewport, () => updateRun());
+let replayTarget: number | undefined, replayState = false;
+function revealReplay() {
+  if (!herdrTerminal && replayState && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) presentation.reveal();
+}
 const mobileViewport = matchMedia('(pointer: coarse) and (max-width: 1024px)');
 function mobileTerminal() { return !!herdrTerminal && mobileViewport.matches; }
 function refreshHerdrFrame() {
@@ -146,6 +152,7 @@ function drain() {
   }
   inline.refresh();
   if (queue.length) scheduleDrain();
+  else revealReplay();
 }
 function sizeTerminal() {
   if (herdrParked) {
@@ -198,6 +205,7 @@ mobileViewport.addEventListener('change', sizeTerminal);
 function viewport() { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height || window.innerHeight}px`); }
 window.visualViewport?.addEventListener('resize', viewport); window.addEventListener('resize', viewport); viewport();
 function rawInput(data: string) {
+  if (presentation.pending) { if (!['\x1b[I', '\x1b[O'].includes(data)) toast('Wait for the terminal to finish loading.'); return; }
   if (herdrTerminal && !herdrReady) { toast('Connecting to the agent. Input was not sent.'); return; }
   if (capturedConnection) { toast('Finish opening the connection first.'); return; }
   if (ctrl) { if (/^[a-zA-Z]$/.test(data)) data = String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64); setCtrl(false); }
@@ -254,7 +262,7 @@ function showReading(request: { path: string } | { capture: string; name: string
 }
 term.onData(rawInput);
 function setCtrl(value: boolean) { ctrl = value; for (const button of document.querySelectorAll('[data-modifier]')) button.setAttribute('aria-pressed', String(value)); publishShortcuts(); }
-function canUploadImage() { return !uploadingImage && !capturedConnection && !state.exited && (!herdrTerminal || herdrReady) && transport.socket?.readyState === WebSocket.OPEN; }
+function canUploadImage() { return !presentation.pending && !uploadingImage && !capturedConnection && !state.exited && (!herdrTerminal || herdrReady) && transport.socket?.readyState === WebSocket.OPEN; }
 const images = imagePicker(files => void attachImages(files)); document.body.append(images);
 async function attachImages(files: File[]) {
   if (!canUploadImage()) { toast('Connect to the terminal before attaching an image.'); return; }
@@ -326,10 +334,11 @@ const gestures = new TerminalGestures(term, {
       send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
     },
   },
-  tap: (x, y) => { if (!queue.length && !capturedConnection) inline.moveCursor(x, y); }, copy: copyTerminalText,
+  tap: (x, y) => { if (!presentation.pending && !queue.length && !capturedConnection) inline.moveCursor(x, y); }, copy: copyTerminalText,
 });
 
 async function socketURL(signal: AbortSignal) {
+  presentation.freeze();
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
   if (herdrTerminal) {
     sizeTerminal();
@@ -358,6 +367,7 @@ async function prepareConnection(signal: AbortSignal, token?: string) {
   return socketURL(signal);
 }
 function socketOpened() {
+  replayState = false;
   if (herdrTerminal) { herdrReady = false; state.inputRevision = 0; state.inputTarget = undefined; connection('Connecting'); }
   else { connection('Connected', true); notify('terminal-ready'); dictation.connected(true); }
   sizeTerminal();
@@ -377,8 +387,11 @@ function revealHerdrLayout() {
   };
   herdrLayoutFrame = requestAnimationFrame(() => { herdrLayoutFrame = requestAnimationFrame(reveal); });
 }
-function notifyHerdrRendered(presentation = herdrPresentation) {
-  if (!herdrLayoutPending && !herdrParked && presentation === herdrPresentation) notify('terminal-rendered', { presentation, cols:term.cols, rows:term.rows });
+function notifyHerdrRendered(presentationId = herdrPresentation) {
+  if (!herdrLayoutPending && !herdrParked && presentationId === herdrPresentation) {
+    presentation.reveal();
+    notify('terminal-rendered', { presentation: presentationId, cols:term.cols, rows:term.rows });
+  }
 }
 function notifyHerdrSizing() {
   if (herdrTerminal) notify('terminal-sizing', { presentation:herdrPresentation, cols:term.cols, rows:term.rows });
@@ -467,12 +480,13 @@ function socketMessage(event: MessageEvent) {
   } else if (message.type === 'ssh-released') {
     if (capturedConnection === message.id) capturedConnection = undefined;
   } else if (message.type === 'hello') {
+    replayTarget = message.lastSeq ?? after;
     suggestions.setMode(message.engine);
     inline.setLatencyProfile(baseURL.href + ':' + message.engine);
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
-    if (message.reset) { queue.clear(); after = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
+    if (message.reset) { presentation.freeze(); queue.clear(); after = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
     if (message.truncated) {
       term.write('\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n');
       toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.');
@@ -481,6 +495,7 @@ function socketMessage(event: MessageEvent) {
     if (message.seq > after) queue.push(message);
     if (!frameQueued) scheduleDrain();
   } else if (message.type === 'state') {
+    replayState = true;
     transport.ready();
     if (herdrTerminal) { herdrReady = true; sizeTerminal(); connection('Connected', true); notify('terminal-ready', { retainGeometry: herdrParkable }); dictation.connected(true); }
     // A state acknowledgement can arrive after newer local keystrokes were
@@ -490,6 +505,7 @@ function socketMessage(event: MessageEvent) {
     dictation.prompt();
     updateRun();
     inline.onState(state); suggestions.onState(state.prompt);
+    revealReplay();
   } else if (message.type === 'context') {
     if (message.context.prompt === state.prompt && state.ready) suggestions.updateContext(message);
   } else if (message.type === 'edit-result') {
@@ -503,6 +519,7 @@ function socketMessage(event: MessageEvent) {
 
 }
 function socketClosed(event?: CloseEvent) {
+  presentation.freeze(); replayState = false;
   herdrReady = false;
   if (event?.code === 4001 || state.exited) inline.disconnect(); else inline.suspend(); suggestions.disconnect();
   dictation.connected(false);
@@ -535,19 +552,20 @@ const connect = (token?: string) => transport.connect(token);
 $('login-form').onsubmit = e => { e.preventDefault(); void connect($<HTMLInputElement>('token').value); };
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
+    presentation.freeze();
     // Dictation may keep the transport alive through lock; geometry still
     // belongs to the desktop while this pane is no longer visible.
     if (herdrTerminal) send({ type: 'resize', cols: term.cols, rows: term.rows, mobile: false });
     // Keep both audio transport and shell input context while dictating through lock.
     if (!dictation.active) { inline.suspend(); transport.suspend(); }
   }
-  else { void transport.resume(transport.socket?.readyState !== WebSocket.OPEN); sizeTerminal(); }
+  else { void transport.resume(transport.socket?.readyState !== WebSocket.OPEN); sizeTerminal(); revealReplay(); }
 });
 window.addEventListener('online', () => void transport.resume(true));
 window.addEventListener('offline', () => transport.suspend());
 
 function execute(command: string) {
-  if (capturedConnection || !state.ready && !herdrReady || state.exited || pendingCommand || transport.socket?.readyState !== WebSocket.OPEN) { toast('Wait for terminal input before running a command.'); return; }
+  if (presentation.pending || capturedConnection || !state.ready && !herdrReady || state.exited || pendingCommand || transport.socket?.readyState !== WebSocket.OPEN) { toast('Wait for terminal input before running a command.'); return; }
   if (!command.trim() || /[\x00-\x1f\x7f]/.test(command)) { toast('Use one command line at a time.'); return; }
   inline.disconnect();
   const id = crypto.randomUUID(); pendingCommand = { id };
@@ -583,6 +601,7 @@ if (embedded) {
     }
     if (event.data?.type === 'terminal-images' && tabVisible && !herdrParked && Array.isArray(event.data.files) && event.data.files.every((file: unknown) => file instanceof File)) void attachImages(event.data.files);
     if (event.data?.type === 'herdr-present' && herdrTerminal && typeof event.data.presentation === 'string') {
+      presentation.freeze();
       herdrPresentation = event.data.presentation; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0;
       notifyHerdrSizing();
       return;
@@ -604,7 +623,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible && herdrTerminal) { herdrPreserve = false; herdrLayoutPending = true; herdrLayoutMatched = false; terminalViewport.classList.add('awaiting-herdr-layout'); } dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); clearTimeout(outputTimer); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) presentation.freeze(); if (!tabVisible && herdrTerminal) { herdrPreserve = false; herdrLayoutPending = true; herdrLayoutMatched = false; terminalViewport.classList.add('awaiting-herdr-layout'); } dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); clearTimeout(outputTimer); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);

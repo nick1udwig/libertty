@@ -36,7 +36,7 @@ export type ServerMessage =
   | { type: 'herdr-frame'; width: number; height: number; full: boolean; bytes: string }
   | { type: 'state'; state: ShellState }
   | { type: 'context'; context: ContextReply; directories: { path: string; snapshot: DirectorySnapshot }[] }
-  | { type: 'hello'; engine: EngineMode; reset: boolean; truncated: boolean; firstSeq: number; streamId: string }
+  | { type: 'hello'; engine: EngineMode; reset: boolean; truncated: boolean; firstSeq: number; lastSeq?: number; streamId: string }
   | { type: 'edit-result'; id: string; accepted: boolean; revision: number }
   | { type: 'result'; id: string; accepted: boolean; message?: string };
 export type ClientMessage =

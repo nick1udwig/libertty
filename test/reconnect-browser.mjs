@@ -99,7 +99,17 @@ try {
 
   // A request stranded by backgrounding cannot block the next foreground attempt.
   let stalled = await stallNext('/api/connect'); states = await stateCount();
-  await online(); await stalled.entered; await background(); await foreground(); await connected(states);
+  await online(); await stalled.entered;
+  await page.locator('.terminal-loading-bar').waitFor({ state: 'visible' });
+  const retainedPixels = await page.locator('.terminal-presentation canvas').evaluate(canvas => {
+    const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+    let painted = 0;
+    for (let i = 0; i < pixels.length; i += 4) if (pixels[i] > 40 || pixels[i + 1] > 40 || pixels[i + 2] > 40) painted++;
+    return painted;
+  });
+  assert.ok(retainedPixels > 100, 'Retain painted text while authorization is pending');
+  await background(); await foreground(); await connected(states);
+  await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   await page.waitForFunction(() => window.__sockets.filter(socket => socket.readyState === WebSocket.OPEN).length === 1);
   assert.equal(stalled.aborted(), true, 'backgrounding aborts authorization'); await stalled.done();
 
@@ -111,7 +121,11 @@ try {
   // Herdr also bounds/cancels the ticket request after authorization succeeds.
   await page.goto(base + 'terminal.html?herdrTerminal=term_0'); await connected(0);
   stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
-  await online(); await stalled.entered; await background(); await foreground(); await connected(states);
+  await online(); await stalled.entered;
+  await page.locator('.terminal-loading-bar').waitFor({ state: 'visible' });
+  assert.ok(await page.locator('.terminal-presentation canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0), 'Keep the Herdr screen during ticket acquisition');
+  await background(); await foreground(); await connected(states);
+  await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   assert.equal(stalled.aborted(), true, 'backgrounding aborts Herdr ticket acquisition'); await stalled.done();
   stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
   await online(); await stalled.entered; await connected(states, 22000);

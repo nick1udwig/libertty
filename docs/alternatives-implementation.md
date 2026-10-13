@@ -33,6 +33,10 @@ Retain the shared Rust engine, original transcript choices, non-executing valida
   The architecture harness now models both current coordinators on the backend, builds its host before measuring, and passes shared-cohort checks.
   Full Rust and 99 frontend tests pass, and the network analysis records the remaining unknown-buffer snapshot and SSH dependencies.
   Retain the SFTP fallback and defer a remote worker until actual WAN tracing demonstrates a benefit that warrants its installation and lifecycle costs.
-- [ ] Keep the old screen visible with a loading bar when returning to the app, and replace it only when the new screen is ready.
+- [x] Keep the old screen visible with a loading bar when returning to the app, and replace it only when the new screen is ready.
+  A painted viewport snapshot covers reconnect replay and Herdr redraw, and a loading bar remains visible until the new frame is painted.
+  Normal terminals use the hello replay watermark, while Herdr retains its geometry and presentation acknowledgements.
+  Workspace views retain their displayed-tab reference across hidden states, and pending views cannot receive stale input or shortcuts.
+  Frontend, reconnect pixel retention, Herdr loading and native flash, workspace and SSH, schema-contract, Rust, and lint checks pass.
 
 Update this queue with validation evidence as each change is committed.

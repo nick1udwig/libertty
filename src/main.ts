@@ -317,8 +317,7 @@ function updateViewVisibility() {
   const waiting = visible && tab && tabPluginId(tab) === 'herdr' && (!target || herdrViews.has(active)) && !herdrViews.get(active)?.ready;
   const preparing = !!waiting && presentedTab !== active;
   herdrLoading = preparing;
-  if (!visible) presentedTab = '';
-  else if (!preparing) presentedTab = target ? active : '';
+  if (visible && !preparing) presentedTab = target ? active : '';
   for (const [id, view] of pluginViews) {
     if (id !== active) view.setVisible(visible && id === presentedTab);
     view.setHeld?.(visible && id === presentedTab && id !== active);
