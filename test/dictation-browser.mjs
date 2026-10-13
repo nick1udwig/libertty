@@ -65,7 +65,12 @@ let browser;
 try {
   for (let i = 0; i < 100; i++) { if (await fetch(base).then(r => r.ok, () => false)) break; if (server.exitCode !== null) throw new Error(logs); await new Promise(r => setTimeout(r, 100)); }
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
-  const page = await browser.newPage({ viewport: { width: 600, height: 850 }, hasTouch: true });
+  const page = await browser.newPage({ viewport: { width: 600, height: 850 }, hasTouch: true, serviceWorkers: 'block' });
+  await page.route('**/assets/terminal-*.js', async route => {
+    const response = await route.fetch(), original = await response.text();
+    const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
+    assert.notEqual(body, original); await route.fulfill({ response, body });
+  });
   const errors = []; page.on('pageerror', error => errors.push(String(error)));
   await installWireObserver(page.context());
   await page.addInitScript(() => {
@@ -89,20 +94,29 @@ try {
   await page.locator('[data-install]').click();
   await page.waitForFunction(() => window.__out.includes('/scripts/install'));
   assert.equal(await access(path.join(fixture, 'installed')).then(() => true, () => false), false, 'Install must not execute');
-  await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+u');
+  let prompt = await page.evaluate(() => window.__state.prompt);
+  await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+e'); await page.keyboard.press('Control+u'); await page.keyboard.press('Enter');
+  await page.waitForFunction(previous => window.__state?.ready && window.__state.prompt > previous, prompt);
   await page.reload(); await page.waitForFunction(() => window.__state?.ready);
   await page.waitForTimeout(300); assert.equal(await page.locator('#dictation-install').isVisible(), false);
+  prompt = await page.evaluate(() => window.__state.prompt);
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Enter');
-  await page.waitForFunction(() => window.__state?.ready && window.__state.prompt > 1);
+  await page.waitForFunction(previous => window.__state?.ready && window.__state.prompt > previous, prompt);
   // Touch an editable cell, then type there. The running command proves real Readline movement.
   await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo Z12345');
-  await page.waitForTimeout(250);
-  const point = await page.evaluate(() => {
-    const mark = window.__paint.filter(p => p.text === '3').at(-1); if (!mark) throw new Error('Missing terminal glyph');
-    const canvas = document.querySelector('#terminal canvas'), rect = canvas.getBoundingClientRect();
-    return { x: rect.left + mark.x / (canvas.width / rect.width) + 1, y: rect.top + mark.y / (canvas.height / rect.height) - 3 };
+  await page.waitForFunction(() => {
+    const term = window.__testTerminal, buffer = term?.buffer.active;
+    return buffer?.getLine(Math.max(0, buffer.length - term.rows) + buffer.cursorY)?.translateToString(true).endsWith('345');
   });
-  await page.touchscreen.tap(point.x, point.y); await page.keyboard.type('Q'); await page.keyboard.press('Enter');
+  const point = await page.evaluate(() => {
+    const term = window.__testTerminal, buffer = term.buffer.active;
+    const position = buffer.cursorY * term.cols + buffer.cursorX - 3;
+    const rect = document.querySelector('#terminal canvas').getBoundingClientRect();
+    return { position, x: rect.left + (position % term.cols + .25) * rect.width / term.cols, y: rect.top + (Math.floor(position / term.cols) + .5) * rect.height / term.rows };
+  });
+  await page.touchscreen.tap(point.x, point.y);
+  await page.waitForFunction(position => { const term = window.__testTerminal, buffer = term.buffer.active; return buffer.cursorY * term.cols + buffer.cursorX === position; }, point.position);
+  await page.keyboard.type('Q'); await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__out.includes('Z12Q345\r\n'));
   await writeFile(path.join(fixture, 'token'), 'secret'.repeat(8), { mode: 0o600 });
   // A token/binary and the legacy saved 'installed' flag do not prove API support.
@@ -116,8 +130,9 @@ try {
   await page.locator('[data-install]').click();
   await page.waitForFunction(() => window.__out.includes('/scripts/install'));
   assert.equal(await access(path.join(fixture, 'installed')).then(() => true, () => false), false, 'Update must not execute');
-  await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+u'); await page.keyboard.press('Enter');
-  await page.waitForFunction(() => window.__state?.ready);
+  prompt = await page.evaluate(() => window.__state.prompt);
+  await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+e'); await page.keyboard.press('Control+u'); await page.keyboard.press('Enter');
+  await page.waitForFunction(previous => window.__state?.ready && window.__state.prompt > previous, prompt);
   await page.reload(); await page.locator('#dictation-install').waitFor({ state: 'visible' });
   await page.locator('#dictation-install input').check(); await page.locator('[data-later]').click();
   await page.reload(); await page.waitForFunction(() => window.__state?.ready);
@@ -283,4 +298,10 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS: daemon discovery, microphone Opus, shell alternatives, literal program dictation, paste modes, stale transcripts' + (process.env.TEST_CODEX ? ', Codex CLI with and without alternate screen' : ''));
 } catch (error) { console.error(logs); if (browser) console.error(await browser.contexts()[0]?.pages()[0]?.evaluate(() => ({ messages: window.__messages, out: window.__out, paint: window.__paint?.slice(-40) }))); throw error; }
-finally { await browser?.close(); server.kill('SIGTERM'); for (const socket of daemon.clients) socket.terminate(); await new Promise(resolve => daemon.close(resolve)); await rm(fixture, { recursive: true, force: true }); }
+finally {
+  await browser?.close();
+  if (server.exitCode === null && server.signalCode === null) { const exited = once(server, 'exit'); server.kill('SIGTERM'); await exited; }
+  for (const socket of daemon.clients) socket.terminate();
+  await new Promise(resolve => daemon.close(resolve));
+  await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
