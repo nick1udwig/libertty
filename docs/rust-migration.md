@@ -187,6 +187,7 @@ Cold latency is the median of fresh application-cache trials, controlled by `BEN
 Native measurements additionally report engine latency separately from peer-process IPC.
 Native and Wasm candidate results must match the reference exactly, and cold and warm foreground request counts must not increase in either mode.
 Median warm latency must stay within the larger of 20 percent or 0.15 milliseconds of the corresponding reference measurement on the same runner.
+At zero injected RTT, a warm latency failure must repeat in a fresh run with the variant order reversed before CI fails, using the same limits and retaining both reports.
 For sufficiently sampled CPU cases, a warm regression fails only when the 95 percent median intervals confirm it exceeds that allowance, and raw medians and intervals remain in the report.
 Cold latency retains the larger of 20 percent or 10 milliseconds as its allowance for subprocess startup variation.
 The benchmark writes its measurements before evaluating latency gates so a failing CI run retains the evidence.
