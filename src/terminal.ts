@@ -53,6 +53,7 @@ let pendingCommand: { id: string } | undefined;
 const edits = new Map<string, (accepted: boolean) => void>();
 const inputLines = new Map<string, (line?: { text: string; cursor: number }) => void>();
 const repairs = new Map<string, (result: RepairResult) => void>();
+let pendingPaintInput: { socket: WebSocket; prompt: number; stream: string; data: string[]; length: number } | undefined;
 let shortcuts: Shortcut[] = structuredClone(defaults);
 try {
   const saved = localStorage.getItem('termai.shortcuts');
@@ -125,7 +126,14 @@ const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
 const projection = herdrTerminal ? new TerminalProjection(term, ghostty) : undefined;
 const terminalViewport = $('terminal-viewport');
-const presentation = new TerminalPresentation(terminalViewport, () => updateRun());
+const presentation = new TerminalPresentation(terminalViewport, () => {
+  updateRun();
+  const pending = pendingPaintInput; pendingPaintInput = undefined;
+  if (!pending) return;
+  if (pending.socket === transport.socket && pending.prompt === state.prompt && pending.stream === streamId && !capturedConnection && !state.exited) {
+    for (const data of pending.data) rawInput(data);
+  } else toast('Terminal input changed. Queued input was not sent.');
+});
 let replayTarget: number | undefined, replayState = false;
 function revealReplay() {
   if (!herdrTerminal && replayState && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) presentation.reveal();
@@ -205,7 +213,15 @@ mobileViewport.addEventListener('change', sizeTerminal);
 function viewport() { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height || window.innerHeight}px`); }
 window.visualViewport?.addEventListener('resize', viewport); window.addEventListener('resize', viewport); viewport();
 function rawInput(data: string) {
-  if (presentation.pending) { if (!['\x1b[I', '\x1b[O'].includes(data)) toast('Wait for the terminal to finish loading.'); return; }
+  if (presentation.pending) {
+    if (['\x1b[I', '\x1b[O'].includes(data)) return;
+    if (!herdrTerminal && transport.socket?.readyState === WebSocket.OPEN && streamId && !capturedConnection && !state.exited) {
+      pendingPaintInput ||= { socket: transport.socket, prompt: state.prompt, stream: streamId, data: [], length: 0 };
+      if (pendingPaintInput.length + data.length <= 65536) { pendingPaintInput.data.push(data); pendingPaintInput.length += data.length; }
+      else toast('Wait for the terminal to finish loading. Input was not sent.');
+    } else toast('Wait for the terminal to finish loading. Input was not sent.');
+    return;
+  }
   if (herdrTerminal && !herdrReady) { toast('Connecting to the agent. Input was not sent.'); return; }
   if (capturedConnection) { toast('Finish opening the connection first.'); return; }
   if (ctrl) { if (/^[a-zA-Z]$/.test(data)) data = String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64); setCtrl(false); }
@@ -519,6 +535,7 @@ function socketMessage(event: MessageEvent) {
 
 }
 function socketClosed(event?: CloseEvent) {
+  if (pendingPaintInput) { pendingPaintInput = undefined; toast('Connection changed. Queued input was not sent.'); }
   presentation.freeze(); replayState = false;
   herdrReady = false;
   if (event?.code === 4001 || state.exited) inline.disconnect(); else inline.suspend(); suggestions.disconnect();

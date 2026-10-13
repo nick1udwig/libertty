@@ -83,6 +83,24 @@ try {
   assert.equal(await page.evaluate(() => window.__sent.filter(message => message.type === 'input').length), inputs);
   await page.keyboard.press('Control+c');
 
+  // Input after acknowledgement waits for the retained screen's final paint.
+  await page.evaluate(() => {
+    window.__paintRAF = window.requestAnimationFrame;
+    window.__pendingPaintFrames = [];
+    window.requestAnimationFrame = callback => { window.__pendingPaintFrames.push(callback); return 0; };
+    window.__sent = [];
+  });
+  states = await stateCount(); await online();
+  await page.waitForFunction(states => window.__states > states && document.querySelector('#connection-label').textContent === 'Connected', states, { polling: 50 });
+  await page.keyboard.press('Control+c');
+  assert.equal(await page.evaluate(() => window.__sent.filter(message => message.type === 'input').length),0,'Keep fast input queued until replay paints');
+  await page.evaluate(() => {
+    window.requestAnimationFrame = window.__paintRAF;
+    for (const callback of window.__pendingPaintFrames.splice(0)) requestAnimationFrame(callback);
+  });
+  await page.waitForFunction(() => window.__sent.some(message => message.type === 'input' && message.data === '\x03'));
+  await page.locator('.terminal-presentation').waitFor({state:'hidden'});
+
   async function stallNext(path) {
     let seen, release, held = false, aborted = false;
     const entered = new Promise(resolve => seen = resolve), unblock = new Promise(resolve => release = resolve);

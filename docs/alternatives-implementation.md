@@ -37,6 +37,7 @@ Retain the shared Rust engine, original transcript choices, non-executing valida
   A painted viewport snapshot covers reconnect replay and Herdr redraw, and a loading bar remains visible until the new frame is painted.
   Normal terminals use the hello replay watermark, while Herdr retains its geometry and presentation acknowledgements.
   Workspace views retain their displayed-tab reference across hidden states, and pending views cannot receive stale input or shortcuts.
+  Native keys pressed between reconnect acknowledgement and paint are queued under socket, stream, and prompt guards, with a deterministic browser regression.
   Frontend, reconnect pixel retention, Herdr loading and native flash, workspace and SSH, schema-contract, Rust, and lint checks pass.
 
 Update this queue with validation evidence as each change is committed.
