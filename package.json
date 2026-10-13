@@ -8,6 +8,7 @@
     "node": ">=22.18.0"
   },
   "scripts": {
+    "ci:quick": "node --experimental-vm-modules --disable-warning=ExperimentalWarning scripts/ci-quick.mjs",
     "migration:schemas": "node scripts/migration-schemas.mjs",
     "migration:inventory": "node scripts/migration-inventory.mjs",
     "migration:vocabulary": "node scripts/migration-vocabulary.mjs",

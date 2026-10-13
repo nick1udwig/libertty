@@ -2,7 +2,7 @@
 
 The [Release workflow](../.github/workflows/release.yml) builds native Linux x86_64, Linux ARM64 and macOS Apple Silicon archives when a GitHub release is published.
 Daily runs at 08:17 UTC run the same native verification and packaging without publishing assets.
-Pull requests and updates to `master` run the default checks and relevant Linux integration suites described in [ci.md](ci.md).
+Pull requests and updates to `master` run the quick main CI and separate integration workflow described in [ci.md](ci.md).
 Publishing a prerelease also triggers the workflow, while the installer selects stable releases by default.
 All three native jobs must pass before the workflow uploads any release assets.
 
@@ -40,7 +40,7 @@ Browser checks run in three parallel groups per platform using those builds, wit
 Build manifests record the source commit, platform, compiler and file checksums, and consumers reject mismatched or modified artifacts.
 Release packaging reuses the verified optimized executable and frontend after all native and browser checks pass.
 The pinned Linux dictation daemon prepares alongside verification, and its cache depends on the companion source, runner, compiler and CPU build settings.
-Feature branches run default checks and selected Linux integration suites through pull requests, while full manual runs remain available for branches without a pull request.
+Feature branches run quick CI and independent integration checks through pull requests, while full manual runs remain available for branches without a pull request.
 The npm postinstall hook applies a version-scoped ssh2 Ed25519 key-generation fix and restores the execute permission on macOS node-pty helpers.
 Keep the deterministic leading-zero key test and helper permission checks when updating those dependencies, and remove the compatibility fixes when stable upstream releases include them.
 The packaged smoke check starts the bundled server, pairs a browser client and exercises a real PTY with Bash prompt hooks.

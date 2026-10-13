@@ -1,0 +1,189 @@
+name: Integration checks
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Select relevant integration checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      suites: ${{ steps.selection.outputs.suites }}
+      integration: ${{ steps.selection.outputs.integration }}
+      state: ${{ steps.selection.outputs.state }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.1'
+      - id: selection
+        run: node scripts/ci-suites.mjs
+
+  build:
+    name: Build and native verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.1'
+          cache: npm
+      - name: Install native test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config openssh-server bash-completion
+          sudo mkdir -p /run/sshd
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: termai-linux-x64
+          cache-on-failure: true
+          cache-bin: false
+      - name: Install dependencies and verify generated contracts
+        run: |
+          npm ci --no-audit --no-fund
+          npm run migration:schemas -- --check
+          npm run migration:inventory -- --check
+          npm run migration:vocabulary -- --check
+      - name: Verify Rust formatting and lints
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          cargo clippy --package termai-engine --target wasm32-unknown-unknown --lib --locked -- -D warnings
+      - name: Verify Rust unit and parity tests
+        run: npm run test:rust
+      - name: Build the backend, WebAssembly and frontend with type checks
+        run: |
+          npm run build
+          npm run build:test-support
+      - name: Record build provenance and checksums
+        run: node scripts/ci-build.mjs create browser .test-artifacts/browser-build.json
+      - name: Verify JavaScript, contracts and installer fixtures
+        env:
+          TERMAI_DEV_BUILD_MANIFEST: .test-artifacts/browser-build.json
+        run: |
+          npm test
+          npm run test:install
+      - name: Install the pinned test browser
+        run: |
+          npx --no-install playwright-core install --with-deps chromium
+          echo "CHROME_PATH=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+          echo "CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Verify development pairing and actual browser WebAssembly
+        env:
+          TERMAI_DEV_BUILD_MANIFEST: .test-artifacts/browser-build.json
+        run: |
+          npm run test:pairing
+          npm run test:rust-browser
+      - name: Archive the build for selected integration suites
+        run: tar -czf .test-artifacts/browser-build.tar.gz dist src/engine/termai-engine.wasm target/debug/termai target/debug/examples/herdr_snapshot .test-artifacts/browser-build.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: validated-browser-linux-x64
+          path: .test-artifacts/browser-build.tar.gz
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: integration-build-diagnostics
+          path: .test-artifacts/*.json
+          if-no-files-found: ignore
+          include-hidden-files: true
+
+  integration:
+    needs: [changes, build]
+    if: needs.changes.outputs.integration == 'true'
+    name: Relevant browser checks (${{ matrix.suite }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.changes.outputs.suites) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.1'
+          cache: npm
+      - name: Install native browser test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server bash-completion
+          sudo mkdir -p /run/sshd
+      - name: Install test dependencies
+        run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v8
+        with:
+          name: validated-browser-linux-x64
+          path: .test-artifacts
+      - name: Restore and verify the shared build
+        run: |
+          tar -xzpf .test-artifacts/browser-build.tar.gz
+          node scripts/ci-build.mjs verify browser .test-artifacts/browser-build.json
+      - name: Install the pinned test browser
+        run: |
+          npx --no-install playwright-core install --with-deps chromium
+          echo "CHROME_PATH=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+          echo "CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Run the selected suite
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: node scripts/ci-suites.mjs "$SUITE"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: integration-browser-${{ matrix.suite }}
+          path: .test-artifacts/*.json
+          if-no-files-found: ignore
+          include-hidden-files: true
+
+  state:
+    needs: [changes, build]
+    if: needs.changes.outputs.state == 'true'
+    name: Saved-data compatibility
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.1'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: termai-linux-x64
+          cache-on-failure: true
+          cache-bin: false
+      - run: npm ci --no-audit --no-fund
+      - run: npm run test:rust-state
+

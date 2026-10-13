@@ -179,7 +179,7 @@ Run the browser harness in each engine mode with dedicated ports, including `TES
 Reading, development pairing/HMR, plugins, files, transfers, gestures, touch, workspace and Herdr harnesses exercise the Rust executable.
 The native Herdr harnesses use the checksum-pinned supported Herdr executable, including mobile sizing, native scroll and shared spaces.
 Nightly and release runs repeat the same checks on Linux ARM64 and macOS Apple Silicon, and the release workflow waits for all three platform gates before building publishable archives.
-Pull requests and pushes to `master` run the default checks and relevant Linux integration suites described in [ci.md](ci.md).
+Pull requests and pushes to `master` run quick main CI and independent Linux integration checks as described in [ci.md](ci.md).
 Architecture latency comparisons run in a separate manual workflow and do not block commit or release checks.
 
 The architecture baseline uses `BENCH_SUITE=shared`, both before references set to `.`, the after reference set to `.`, and RTTs of 0, 50, and 150 milliseconds.
