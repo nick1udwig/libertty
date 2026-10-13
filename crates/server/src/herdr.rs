@@ -90,6 +90,49 @@ pub struct Target {
     pub binary: String,
     pub env: Environment,
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
+    pub repairs: RepairSessions,
+}
+#[derive(Clone, Default)]
+pub struct RepairSessions(Arc<tokio::sync::Mutex<HashMap<String, RepairContext>>>);
+struct RepairContext {
+    identity: String,
+    engine: crate::engine::NativeEngine,
+    help: crate::help::HelpProvider,
+}
+impl std::fmt::Debug for RepairSessions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RepairSessions").finish_non_exhaustive()
+    }
+}
+impl RepairSessions {
+    async fn get(
+        &self,
+        terminal: &str,
+        identity: String,
+        services: &crate::host::HostServices,
+    ) -> Result<(crate::engine::NativeEngine, crate::help::HelpProvider), String> {
+        let mut contexts = self.0.lock().await;
+        if let Some(context) = contexts.get(terminal).filter(|c| c.identity == identity) {
+            return Ok((context.engine.clone(), context.help.clone()));
+        }
+        if let Some(previous) = contexts.remove(terminal) {
+            previous.help.dispose();
+            let _ = previous.engine.reset();
+        }
+        if contexts.len() >= 32
+            && let Some(key) = contexts.keys().next().cloned()
+        {
+            contexts.remove(&key);
+        }
+        let context = RepairContext {
+            identity,
+            engine: crate::engine::NativeEngine::new()?,
+            help: crate::help::HelpProvider::new(services.pool.clone()),
+        };
+        let result = (context.engine.clone(), context.help.clone());
+        contexts.insert(terminal.into(), context);
+        Ok(result)
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShellInput {
@@ -164,25 +207,24 @@ impl Target {
         } else {
             services.catalog.executable_names(&env, cancel).await?
         };
-        let paths = if termai_engine::path_repair::directory_input(text).is_some() {
-            Default::default()
-        } else if let Some(remote) = &self.remote {
-            remote.paths(&shell.cwd, cancel).await?.into()
+        let paths = Default::default();
+        let history = if self.remote.is_none() {
+            crate::history::history_sources(&env).await.into()
         } else {
-            services.catalog.paths_in(&shell.cwd, cancel).await?
+            Default::default()
         };
         let catalog = termai_engine::types::Catalog {
             cwd: shell.cwd.clone(),
             commands: commands.into(),
             paths,
+            history,
             ..Default::default()
         };
-        let help = crate::help::HelpProvider::new(services.pool.clone());
+        let identity = crate::facts::digest(&json!([shell.pid, shell.cwd, env]));
+        let (engine, help) = self.repairs.get(terminal, identity, &services).await?;
         let mut host = crate::host::NativeHost::new(services, catalog, env, help);
         host.remote = self.remote.clone();
-        let candidates = crate::engine::NativeEngine::new()?
-            .suggest(text, &host, cancel)
-            .await?;
+        let candidates = engine.suggest(text, &host, cancel).await?;
         if self.shell_input(&pane["paneId"]).await?.as_ref() != Some(&shell) {
             return Err("Terminal input changed. Try again.".into());
         }
@@ -195,6 +237,7 @@ impl Target {
             binary: "herdr".into(),
             env: std::env::vars().collect(),
             remote: None,
+            repairs: Default::default(),
         })
     }
     pub fn path(&self) -> Result<String, String> {
@@ -586,6 +629,7 @@ impl Target {
             binary: "herdr".into(),
             env,
             remote: Some(remote.clone()),
+            repairs: Default::default(),
         })
     }
     pub async fn preview(&self, agent: &Value) -> String {
@@ -1048,4 +1092,51 @@ fn pane_key(snapshot: &Value) -> Vec<String> {
         .collect();
     result.sort();
     result
+}
+
+#[cfg(test)]
+mod repair_cache_tests {
+    use super::*;
+    #[tokio::test]
+    async fn learned_metadata_survives_requests_but_not_terminal_or_shell_changes() {
+        let services = crate::host::HostServices::new();
+        let cache = RepairSessions::default();
+        let catalog = termai_engine::types::Catalog {
+            cwd: "/fixture".into(),
+            commands: vec!["fixture".into()].into(),
+            ..Default::default()
+        };
+        let environment = Environment::new();
+        let (engine, help) = cache.get("one", "shell-a".into(), &services).await.unwrap();
+        let host = crate::host::NativeHost::new(
+            services.clone(),
+            catalog.clone(),
+            environment.clone(),
+            help,
+        );
+        let cancel = CancellationToken::new();
+        engine.invoke(termai_engine::Request { operation: "seedMetadata".into(), args: vec![json!(catalog), json!(environment), json!({"flags":{"fixture":[{"name":"--learned","takesValue":false}]},"subcommands":{}})] }, &host, &cancel).await.unwrap();
+        for (terminal, identity, expected) in [
+            ("one", "shell-a", true),
+            ("two", "shell-a", false),
+            ("one", "shell-b", false),
+        ] {
+            let (engine, _) = cache
+                .get(terminal, identity.into(), &services)
+                .await
+                .unwrap();
+            let metadata = engine
+                .invoke(
+                    termai_engine::Request {
+                        operation: "cachedMetadata".into(),
+                        args: vec![json!(catalog), json!(environment)],
+                    },
+                    &host,
+                    &cancel,
+                )
+                .await
+                .unwrap();
+            assert_eq!(metadata["flags"].get("fixture").is_some(), expected);
+        }
+    }
 }

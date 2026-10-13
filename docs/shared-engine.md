@@ -1,23 +1,23 @@
-# One repair engine, two execution locations
+# One repair engine and coarse network operations
 
 `crates/engine` implements the shared library in Rust.
-The backend links it natively, and the browser worker loads its WebAssembly build through `src/engine/wasm.ts`.
+The backend links it natively, and parity tools can load its WebAssembly build through `src/engine/wasm.ts`.
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
 The library's types live in `crates/engine/src/types.rs`, and it has no filesystem, subprocess, browser, network or terminal effects.
-The TypeScript implementation remains in `src/engine` as the independent parity oracle.
+Historical TypeScript revisions remain available in Git for parity comparisons.
 
 The default remains server execution: `npm start` or `npm run dev`.
-Use `TERMAI_ENGINE=client npm start` (or `npm run dev`) for browser WebAssembly execution.
-This setting chooses where the same library runs; it does not change its matching policy.
+Use `TERMAI_ENGINE=client npm start` (or `npm run dev`) to route requests through the browser coordinator.
+Both production modes keep interpretation and dependent host facts on the backend, avoiding sequential browser fact exchanges.
 The WebSocket hello message announces the choice to the frontend, without an additional request.
 
 ## Adapters
 
 - `crates/server/src/engine.rs` supplies native host facts and delegates to the library's bounded asynchronous runtime.
   Native help, script and completion adapters retain probe-pool capacity and cancellation.
-- `src/suggestion-worker.ts` invokes the same engine through WebAssembly with `RemoteHost`, preserving fact batching, context prefetch, directory freshness checks and retries.
+- `src/suggestion-worker.ts` sends one coarse repair request without fetching context keys or catalogs first.
 - Each `Discovery` instance owns a session's learned metadata.
-  `forHost()` binds operations to a particular repair, so overlapping work cannot accidentally pick up another request's host or cancellation signal.
+  Request-owned host futures keep cancellation and fact memoization isolated between overlapping repairs.
 - Terminal edits and execution remain outside the library.
   Host adapters obtain facts; the engine decides how to interpret and rank them.
 
@@ -27,9 +27,10 @@ Prompt-time metadata prewarming is retained.
 Native discovery uses routes already verified by the engine instead of rewalking every help ancestor as an HTTP boundary must.
 File-operand validation requests metadata without an extra executable-access check, preserving master's original I/O behavior.
 
-Client execution retains its existing transport and cache strategy.
-Native-only prewarming is not enabled in this mode.
-Remote help requests still receive independent route verification at the server boundary.
+Managed SSH sessions honor the configured mode instead of forcing browser interpretation.
+Both coordinators obtain lightweight context on the backend and fetch targeted facts during repair.
+Periodic catalog and directory pushes are removed, and prompt-time prewarming is shared between coordinators.
+Herdr retains an engine and help provider per terminal context and invalidates them when the shell or environment changes.
 
 ## Validation and performance
 
@@ -45,7 +46,7 @@ The original four-way architecture benchmark remains available without `BENCH_SU
 Run `npm test`, `npm run test:rust` and `npm run build`, then `TEST_ENGINE=server npm run test:browser` and `TEST_ENGINE=client npm run test:browser`.
 `TEST_BASE_PATH=/t` checks a mounted deployment.
 Server browser checks reject worker creation, fact requests and context pushes.
-Client browser checks require one warm directory request containing freshness validation.
+Client browser checks require one coarse repair request without prerequisite context keys.
 
 See the [Rust migration report](rust-migration.md) for current parity results, browser initialization measurements and platform gates.
 The [workspace implementation](workspace.md) supplies SSH and multiple backends through adapters to this engine.

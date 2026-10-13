@@ -370,7 +370,6 @@ try {
   // After the first repair, fresh pushed context and verified directory snapshots
   // reduce the next repair to one foreground fact batch in the real worker.
   before = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, before);
-  if (engine === 'client') await page.waitForFunction(() => window.__shellContext?.prompt === window.__shellState.prompt);
   const directoryRequests = [];
   const captureDirectoryRequest = request => { if (request.url().endsWith(engine === 'client' ? '/api/facts' : '/api/suggest')) directoryRequests.push(request.postDataJSON()); };
   context.on('request', captureDirectoryRequest);
@@ -379,7 +378,7 @@ try {
   context.off('request', captureDirectoryRequest);
   assert.equal(directoryRequests.length, 1, JSON.stringify(directoryRequests));
   if (engine === 'client') {
-    { assert.equal(directoryRequests[0].kind, 'repair'); assert.ok(directoryRequests[0].catalogKey); }
+    { assert.equal(directoryRequests[0].kind, 'repair'); assert.equal(directoryRequests[0].catalogKey, undefined, 'Coarse repair must acquire context on the backend'); }
   }
   else {
     assert.equal(workers.length, 0, 'Server mode must not start a repair worker');

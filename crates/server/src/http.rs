@@ -1438,6 +1438,28 @@ async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body
                     .context(input["known"].as_str(), input["paths"] != false)
                     .await
             } else if input["kind"] == "repair" {
+                if input.get("key").is_none() {
+                    let prompt = session.state().prompt;
+                    if input
+                        .get("prompt")
+                        .is_some_and(|value| value.as_u64() != Some(prompt))
+                    {
+                        return Err("Shell context changed. Try again.".into());
+                    }
+                    let result = session
+                        .suggest(
+                            input["text"]
+                                .as_str()
+                                .filter(|text| text.encode_utf16().count() <= 2000)
+                                .ok_or("Expected command text under 2,000 characters.")?,
+                            cancel,
+                        )
+                        .await?;
+                    if session.state().prompt != prompt {
+                        return Err("Shell context changed. Try again.".into());
+                    }
+                    return Ok(result["candidates"].clone());
+                }
                 session
                     .repair(
                         input["key"].as_str().ok_or("Expected a context key.")?,
@@ -1563,6 +1585,7 @@ async fn herdr_request(
             binary,
             socket_path: Some(socket_path.clone()),
             env,
+            repairs: Default::default(),
         };
         target.ensure(&source.state().cwd).await.map_err(fail)?;
         if !app
@@ -1598,12 +1621,15 @@ async fn herdr_request(
         .map(String::as_str)
         .unwrap_or("");
     let target = if source.is_empty() {
-        app.herdr_targets
-            .lock()
-            .unwrap()
-            .get(&format!("{owner}//{session_name}"))
-            .cloned()
-            .unwrap_or(herdr::Target::local(&session_name).map_err(fail)?)
+        let key = format!("{owner}//{session_name}");
+        let mut targets = app.herdr_targets.lock().unwrap();
+        if let Some(target) = targets.get(&key) {
+            target.clone()
+        } else {
+            let target = herdr::Target::local(&session_name).map_err(fail)?;
+            targets.insert(key, target.clone());
+            target
+        }
     } else {
         let source = session_id(Some(&json!(source)))?;
         if !app

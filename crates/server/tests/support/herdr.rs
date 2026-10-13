@@ -50,6 +50,7 @@ impl Fixture {
                 socket_path: Some(path.to_string_lossy().into_owned()),
                 binary: "herdr".into(),
                 env: std::env::vars().collect(),
+                repairs: Default::default(),
             },
             snapshot: snapshot.clone(),
             actions: actions.clone(),

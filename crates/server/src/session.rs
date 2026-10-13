@@ -126,9 +126,6 @@ struct Inner {
     captured_result: Option<Value>,
     facts: Facts,
     results: VecDeque<(String, Value)>,
-    pushed_catalog: Option<String>,
-    pushed_directories: VecDeque<(String, String)>,
-    context_generation: u64,
     reading: Captures,
     transfers: Transfers,
     reading_queue: VecDeque<(String, String, u8)>,
@@ -348,14 +345,14 @@ impl Session {
     }
     pub async fn start_remote(
         remote: Arc<crate::ssh::SSHHost>,
-        _engine_mode: String,
+        engine_mode: String,
         files_only: bool,
         services: HostServices,
     ) -> Result<Arc<Self>, String> {
         Self::start_host(
             remote.cwd.clone(),
             vec![],
-            "client".into(),
+            engine_mode,
             files_only,
             services,
             Some(remote),
@@ -472,9 +469,6 @@ impl Session {
                 captured_result: None,
                 facts: Facts::default(),
                 results: VecDeque::new(),
-                pushed_catalog: None,
-                pushed_directories: VecDeque::new(),
-                context_generation: 0,
                 reading: Captures::default(),
                 transfers: Transfers::new(capture_cleanup.clone()),
                 reading_queue: VecDeque::new(),
@@ -656,7 +650,6 @@ impl Session {
                 drop(inner);
                 session.schedule_reading();
                 if prompt != before {
-                    session.schedule_context();
                     session.schedule_prewarm();
                 }
                 if closed && exit.is_some() {
@@ -673,9 +666,6 @@ impl Session {
                     break;
                 };
                 session.inner.lock().unwrap().transfers.expire();
-                if session.inner.lock().unwrap().socket.is_some() {
-                    session.schedule_context();
-                }
             }
         });
     }
@@ -730,9 +720,6 @@ impl Session {
         inner.outstanding.clear();
         inner.outstanding_bytes = 0;
         inner.sent_seq = 0;
-        inner.pushed_catalog = None;
-        inner.pushed_directories.clear();
-        inner.context_generation += 1;
         let first = inner.outputs.front().map_or(1, |o| o.seq);
         let changed = stream.is_some_and(|s| !s.is_empty() && s != self.stream_id);
         let gap = changed || after > inner.seq || (after > 0 && after < first - 1);
@@ -761,7 +748,6 @@ impl Session {
             inner.send(json!({"type":format!("{}-command",capture["kind"].as_str().unwrap_or("ssh")),"id":capture["id"],"command":capture["command"]}));
         }
         drop(inner);
-        self.schedule_context();
         (id, receive)
     }
     pub fn detach(&self, id: u64) {
@@ -778,7 +764,6 @@ impl Session {
         if let Some(pty) = &inner.pty {
             pty.pause(false);
         }
-        inner.context_generation += 1;
     }
     pub fn reading_capture(&self, id: &str) -> Option<reading::Capture> {
         self.inner.lock().unwrap().reading.get(id)
@@ -788,21 +773,6 @@ impl Session {
             remote.read_for_viewing(cwd, input, &self.lifetime).await
         } else {
             reading::read(cwd, &std::env::var("HOME").unwrap_or_default(), input).await
-        }
-    }
-    async fn directory_snapshot(
-        &self,
-        directory: &str,
-        limit: usize,
-        cancel: &CancellationToken,
-    ) -> Result<termai_engine::types::DirectorySnapshot, String> {
-        if let Some(remote) = &self.remote {
-            remote.snapshot(directory, limit, cancel).await
-        } else {
-            self.services
-                .directories
-                .snapshot(directory, limit, cancel)
-                .await
         }
     }
     pub fn captured(&self) -> Option<Value> {
@@ -1385,7 +1355,8 @@ impl Session {
         Ok(json!(values))
     }
     pub async fn suggest(&self, text: &str, cancel: &CancellationToken) -> Result<Value, String> {
-        let (catalog, env, _) = self.snapshot(directory_input(text).is_none()).await?;
+        let (catalog, env, prompt) = self.snapshot(false).await?;
+        let key = facts::context_key(prompt, &catalog, &env);
         let mut host = NativeHost::new(
             self.services.clone(),
             catalog.clone(),
@@ -1393,7 +1364,23 @@ impl Session {
             self.help.clone(),
         );
         host.remote = self.remote.clone();
-        let candidates = self.engine.suggest(text, &host, cancel).await?;
+        let mut candidates = None;
+        for _ in 0..3 {
+            host.verify_listings();
+            let result = self.engine.suggest(text, &host, cancel).await?;
+            if host.listings_unchanged(cancel).await? {
+                candidates = Some(result);
+                break;
+            }
+        }
+        let candidates = candidates.ok_or("Directory changed. Try again.")?;
+        let (latest, latest_env, latest_prompt) = self.snapshot(false).await?;
+        if facts::context_key(latest_prompt, &latest, &latest_env) != key
+            || !self.state().ready
+            || self.state().exited
+        {
+            return Err("Shell context changed. Try again.".into());
+        }
         Ok(
             json!({"candidates":candidates,"source":"Commands, paths, history & syntax checks","cwd":catalog.cwd}),
         )
@@ -1453,85 +1440,8 @@ impl Session {
         }
         Ok(candidates)
     }
-    fn schedule_context(self: &Arc<Self>) {
-        if self.engine_mode != "client" {
-            return;
-        }
-        let weak = Arc::downgrade(self);
-        let (known, generation, attachment) = {
-            let mut inner = self.inner.lock().unwrap();
-            if !inner.state.ready || inner.state.exited || inner.socket.is_none() {
-                return;
-            }
-            inner.context_generation += 1;
-            (
-                inner.pushed_catalog.clone(),
-                inner.context_generation,
-                inner.attachment,
-            )
-        };
-        tokio::spawn(async move {
-            let Some(session) = weak.upgrade() else {
-                return;
-            };
-            let state = session.state();
-            if let Ok(context) = session.context(known.as_deref(), false).await {
-                let mut directories = Vec::new();
-                let mut roots = vec![state.cwd.clone()];
-                if let Some(home) = context["home"]
-                    .as_str()
-                    .filter(|h| !h.is_empty() && *h != state.cwd)
-                {
-                    roots.push(home.into());
-                }
-                for dir in roots {
-                    if let Ok(snapshot) = session
-                        .directory_snapshot(&dir, 10000, &session.lifetime)
-                        .await
-                        && snapshot.complete
-                        && snapshot.entries.len() <= 1000
-                        && !session
-                            .inner
-                            .lock()
-                            .unwrap()
-                            .pushed_directories
-                            .iter()
-                            .any(|(path, version)| path == &dir && version == &snapshot.version)
-                    {
-                        directories.push(json!({"path":dir,"snapshot":snapshot}));
-                    }
-                }
-                let mut inner = session.inner.lock().unwrap();
-                if inner.context_generation == generation
-                    && inner.attachment == attachment
-                    && inner.state.prompt == state.prompt
-                    && inner.state.ready
-                    && !inner.state.exited
-                {
-                    inner.send(
-                        json!({"type":"context","context":context,"directories":directories}),
-                    );
-                    inner.pushed_catalog = context["catalogKey"].as_str().map(str::to_owned);
-                    for entry in directories {
-                        let path = entry["path"].as_str().unwrap().to_owned();
-                        inner.pushed_directories.retain(|(old, _)| old != &path);
-                        inner.pushed_directories.push_back((
-                            path,
-                            entry["snapshot"]["version"].as_str().unwrap().into(),
-                        ));
-                        while inner.pushed_directories.len() > 8 {
-                            inner.pushed_directories.pop_front();
-                        }
-                    }
-                }
-            }
-        });
-    }
     fn schedule_prewarm(self: &Arc<Self>) {
-        if self.engine_mode != "server"
-            || self.lifetime.is_cancelled()
-            || self.prewarming.swap(true, Ordering::SeqCst)
-        {
+        if self.lifetime.is_cancelled() || self.prewarming.swap(true, Ordering::SeqCst) {
             return;
         }
         let weak = Arc::downgrade(self);

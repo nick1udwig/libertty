@@ -358,6 +358,10 @@ async fn remote_pty_and_sftp_share_session_guards_and_file_actions() {
     let session = Session::start_remote(host.clone(), "server".into(), false, HostServices::new())
         .await
         .unwrap();
+    assert_eq!(
+        session.engine_mode, "server",
+        "Remote sessions must honor execution placement"
+    );
     let (attachment, mut receive) = session.attach(0, None);
     ready(&session, attachment, &mut receive, 0).await;
     assert_eq!(session.state().cwd, fixture.home());

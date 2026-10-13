@@ -11,7 +11,9 @@ Retain the shared Rust engine, original transcript choices, non-executing valida
 - [x] Batch independent facts and reduce redundant filesystem and completion work.
   A runtime regression verifies that three independent operands require one callback wave.
   Engine, native, filesystem, and completion suites pass, including broader completion fallback after unrelated narrow matches.
-- [ ] Use coarse backend repair for network-dependent work and retain Herdr metadata.
+- [x] Use coarse backend repair for network-dependent work and retain Herdr metadata.
+  Both production coordinators obtain context on the backend in one repair request, with no periodic catalog pushes.
+  SSH placement, HTTP prompt guards, Herdr context isolation, native integrations, the frontend build, and browser regressions in both modes pass.
 - [ ] Compose repair over shared shell structure, preserving opaque quoted syntax and supporting command lists and wrappers.
 - [ ] Share path traversal and schema evidence across commands and option values.
 - [ ] Separate typed candidate changes, discovery completeness, cache invalidation, budgets, and partial results.

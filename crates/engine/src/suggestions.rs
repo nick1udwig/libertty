@@ -151,7 +151,8 @@ async fn nearby_file_paths(input: &str, catalog: &Catalog, host: &dyn Host) -> C
     if test(r"[~/*?<>|&;$]", &expanded) {
         return catalog.clone();
     }
-    let words = tokens(&expanded);
+    let target = discovery_target(&expanded, catalog);
+    let words = tokens(&target);
     let Some(command) = catalog.commands.iter().find(|name| {
         words
             .first()
@@ -160,7 +161,8 @@ async fn nearby_file_paths(input: &str, catalog: &Catalog, host: &dyn Host) -> C
         return catalog.clone();
     };
     if words.len() < 2
-        || !is_path_position(&[command.clone(), words[1].value.clone()])
+        || !is_path_position(&[command.clone()])
+            && !is_path_position(&[command.clone(), words[1].value.clone()])
         || !words[1..]
             .iter()
             .any(|w| !w.quoted && !w.value.starts_with('-'))

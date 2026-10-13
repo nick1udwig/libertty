@@ -20,7 +20,8 @@ export class SuggestionClient {
   private prompt = -1;
   onState(prompt: number) { this.prompt = prompt; }
   updateContext(message: Extract<ServerMessage, { type: 'context' }>) {
-    if (this.mode === 'client') { this.openWorker(); this.worker!.postMessage(message); }
+    // Coarse repairs obtain authoritative context on the backend.
+    void message;
   }
   disconnect() {
     for (const request of this.pending.values()) request.reject(new Error('Connection changed.'));

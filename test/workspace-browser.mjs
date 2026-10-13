@@ -219,7 +219,7 @@ try {
   await page.screenshot({ path: root + '/.test-artifacts/workspace-hosts.png' });
   await context.route(origin + '/api/ssh/probe', async route => { await delay(150); await route.continue(); });
   await page.getByRole('button', { name: 'Remote shell SSH' }).click(); await page.locator('#ssh-secret').fill('test-key-passphrase'); await page.screenshot({ path: root + '/.test-artifacts/workspace-passphrase.png' }); await page.locator('#ssh-connect').click();
-  await page.locator('#ssh-dialog').waitFor({ state: 'hidden', timeout: 30000 }); frame = await activeFrame(page); assert.equal(await frame.evaluate(() => window.__engine), 'client');
+  await page.locator('#ssh-dialog').waitFor({ state: 'hidden', timeout: 30000 }); frame = await activeFrame(page); assert.equal(await frame.evaluate(() => window.__engine), 'server');
   assert.ok(await page.locator('[role=tab][aria-selected=true]').getAttribute('title').then(title => title.includes('Build server')), 'The eligible lower-latency backend should carry SSH');
   const sshSession = new URL(frame.url()).searchParams.get('session'), createsBeforeReuse = sessionCreates;
   await page.locator('#add-tab').click();
@@ -397,7 +397,7 @@ try {
     if (method === 'typing') await context.unroute(secondary + '/api/ssh/captured?**');
     const childId = await page.locator('#terminal-stack iframe:visible').getAttribute('id'); frame = await activeFrame(page);
     assert.equal(await page.locator('#terminal-loading').isVisible(), false, 'SSH loading ends at the remote prompt');
-    assert.notEqual(childId, parentId, method); assert.equal(await frame.evaluate(() => window.__engine), 'client');
+    assert.notEqual(childId, parentId, method); assert.equal(await frame.evaluate(() => window.__engine), 'server');
     assert.equal(await page.locator('#ssh-dialog').isVisible(), false); assert.equal(await page.locator('#captured-ssh-dialog').isVisible(), false);
     await command(frame, `printf ${method} > capture-${method}.txt`);
     assert.equal(await readFile(fixture + '/remote/capture-' + method + '.txt', 'utf8'), method);
