@@ -65,8 +65,8 @@ npm test
 npm run test:rust
 npm run test:install
 VOXTYPE_MOBILE_CHECKOUT=/path/to/pinned/voxtype-mobile npm run release:package
-node scripts/smoke-release.mjs release/termai-v0.1.1-linux-x64.tar.gz
-node scripts/smoke-install.mjs release/termai-v0.1.1-linux-x64.tar.gz
+node scripts/smoke-release.mjs release/termai-v0.2.0-linux-x64.tar.gz
+node scripts/smoke-install.mjs release/termai-v0.2.0-linux-x64.tar.gz
 ```
 
 Packaging requires a clean checkout, the pinned Node version and a complete Linux companion bundle.
