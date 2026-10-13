@@ -415,6 +415,7 @@
       "source": "crates/server/tests/files.rs",
       "owner": "rust",
       "assertions": [
+        "images_get_unique_private_paths_and_enforce_type_and_size_limits",
         "uploads_are_exclusive_accept_empty_files_and_remove_cancelled_writes",
         "edits_reject_stale_binary_symlink_and_oversized_inputs_and_preserve_modes",
         "copy_and_delete_bound_recursion_do_not_follow_links_or_overwrite_targets",
@@ -428,6 +429,7 @@
       "source": "crates/server/tests/herdr.rs",
       "owner": "rust",
       "assertions": [
+        "worktrees_and_splits_are_scoped_to_the_held_space",
         "rpc_actions_preserve_labels_and_reject_stale_or_refused_changes",
         "chunked_lines_keep_partial_frames_across_cancelled_reads_and_bound_memory"
       ]
@@ -487,6 +489,7 @@
       "source": "crates/server/tests/native_engine.rs",
       "owner": "rust",
       "assertions": [
+        "spelled_cd_uses_directory_discovery_without_catalog_paths",
         "directory_facts_preserve_hidden_names_symlinks_bounds_and_fresh_versions",
         "syntax_parses_without_execution_and_cancellation_releases_probes",
         "a_cancelled_subscriber_leaves_shared_work_for_the_other_subscriber",
@@ -662,6 +665,16 @@
       ]
     },
     {
+      "source": "test/dictation-wake-lock.test.ts",
+      "owner": "frontend",
+      "assertions": [
+        "wake lock survives capture and reacquires after visibility restoration",
+        "pending acquisition is released after cancellation, teardown, or hiding",
+        "a new recording waits for and releases a stale acquisition before acquiring its own",
+        "denial, missing support and automatic visible release warn without retry loops"
+      ]
+    },
+    {
       "source": "test/dictation.test.ts",
       "owner": "frontend",
       "assertions": [
@@ -704,6 +717,11 @@
       "assertions": []
     },
     {
+      "source": "test/herdr-dictation-browser.mjs",
+      "owner": "integration",
+      "assertions": []
+    },
+    {
       "source": "test/herdr-loading-browser.mjs",
       "owner": "integration",
       "assertions": []
@@ -735,6 +753,8 @@
       "source": "test/herdr-spaces.test.ts",
       "owner": "frontend",
       "assertions": [
+        "held-space actions use its remembered pane, then desktop selection, then first pane",
+        "checkout preview follows Herdr desktop branch slug rules",
         "space stacks support edge reordering, joining, extraction and closed members without losing spaces"
       ]
     },

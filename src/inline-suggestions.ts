@@ -13,6 +13,7 @@ interface Host {
   suggest(text: string, signal: AbortSignal): Promise<{ candidates: Candidate[] }>;
   raw(data: string): void;
   execute(text: string): void;
+  dictate?(text: string, applied: boolean, replace: boolean): void;
 }
 export class InlineSuggestions {
   private line = new InputLine();
@@ -209,6 +210,7 @@ export class InlineSuggestions {
   disconnect() { this.clear(); this.line.known = false; this.prompt = -1; }
   prepareExternalPaste() { this.clear(); }
   private async nativeDictation(text: string, replacement: boolean, alreadyApplied = false) {
+    if (this.host.dictate) { const replace = replacement && !!this.literal; this.clear(); this.host.dictate(text, alreadyApplied, replace); return; }
     if (this.line.known) return this.dictate(text, replacement, alreadyApplied);
     if (!this.host.readLine) { if (!alreadyApplied) this.term.paste(text); return; }
     this.clear(); const request = this.generation;
@@ -230,9 +232,10 @@ export class InlineSuggestions {
     }
     return this.dictate(text, replacement);
   }
-  externalPaste(text: string, replace: boolean, dictated = false) {
+  externalPaste(text: string, replace: boolean, dictated = false, isolated = false) {
     this.clear();
     if (!this.host.state().ready || this.host.state().exited) { this.line.known = false; return; }
+    if (isolated && dictated) this.line.reset();
     if (dictated && !replace && !this.line.known) return this.nativeDictation(text, false, true);
     if (dictated && !replace && this.line.known && this.host.state().ready && !this.host.state().exited) {
       // The backend has already inserted this text. Reuse dictation's repair and
@@ -426,7 +429,7 @@ export class InlineSuggestions {
     const bounds = this.canvas.getBoundingClientRect(), pane = this.pane.getBoundingClientRect();
     const buffer = this.term.buffer.active;
     const row = buffer.baseY + buffer.cursorY - buffer.viewportY;
-    if (row < 0 || row >= this.term.rows || buffer.type !== 'normal' || this.term.getViewportY() > 0) { this.toggle.hidden = true; this.menu.hidden = true; return; }
+    if (row < 0 || row >= this.term.rows || this.term.getViewportY() > 0) { this.toggle.hidden = true; this.menu.hidden = true; return; }
     // Read geometry before writes. The menu observer schedules a follow-up if its
     // width or height changes, without forcing another layout in this frame.
     const menuHeight = this.menu.offsetHeight;

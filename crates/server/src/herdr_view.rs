@@ -13,6 +13,21 @@ struct Inner {
     revision: u64,
     dictation: Option<Recording>,
     dictation_id: String,
+    shell: Option<crate::herdr::ShellInput>,
+    prompt: u64,
+    prompt_revision: u64,
+    editable: Option<Editable>,
+}
+#[derive(Clone)]
+struct Editable {
+    text: String,
+    screen: String,
+}
+struct Replacement {
+    previous: Editable,
+    revision: u64,
+    shell: crate::herdr::ShellInput,
+    edit_id: Option<String>,
 }
 struct Input {
     text: String,
@@ -21,6 +36,7 @@ struct Input {
     command: Option<String>,
     complete: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
     _permit: tokio::sync::OwnedSemaphorePermit,
+    replacement: Option<Replacement>,
 }
 pub struct View {
     target: Target,
@@ -77,6 +93,10 @@ impl View {
                 revision: 0,
                 dictation: None,
                 dictation_id: String::new(),
+                shell: None,
+                prompt: 1,
+                prompt_revision: 0,
+                editable: None,
             }),
             capacity: Arc::new(Semaphore::new(128)),
             pending_input,
@@ -96,7 +116,32 @@ impl View {
                 json!({"type":"herdr-layout","cols":size.cols,"rows":size.rows,"ready":false}),
             );
         }
-        view.send(json!({"type":"state","state":{"cwd":view.agent["cwd"],"ready":false,"inputTarget":"program","terminalScroll":true,"exited":false,"prompt":1,"promptRevision":0,"inputRevision":0}}));
+        view.send_state();
+        let weak = Arc::downgrade(&view);
+        let lifetime = view.cancel.clone();
+        tokio::spawn(async move {
+            loop {
+                let Some(view) = weak.upgrade() else { break };
+                let shell = tokio::select! { biased; _=lifetime.cancelled()=>break, result=view.target.shell_input(&view.agent["paneId"])=>result.ok().flatten() };
+                let changed = {
+                    let mut inner = view.inner.lock().unwrap();
+                    if inner.shell == shell {
+                        false
+                    } else {
+                        inner.shell = shell;
+                        inner.editable = None;
+                        inner.revision += 1;
+                        inner.prompt += 1;
+                        inner.prompt_revision = inner.revision;
+                        true
+                    }
+                };
+                if changed {
+                    view.send_state();
+                }
+                tokio::select! { biased; _=lifetime.cancelled()=>break, _=tokio::time::sleep(std::time::Duration::from_millis(300))=>{} }
+            }
+        });
         let weak = Arc::downgrade(&view);
         let lifetime = view.cancel.clone();
         // One worker preserves receive order across typing, commands and dictation.
@@ -109,7 +154,18 @@ impl View {
                     .guard
                     .as_ref()
                     .map(|(revision, id)| (*revision, id.as_str()));
-                let result = view.input_serial(&input.text, input.paste, guard).await;
+                let result = view
+                    .input_serial(&input.text, input.paste, guard, input.replacement.as_ref())
+                    .await;
+                if let Some(id) = input
+                    .replacement
+                    .as_ref()
+                    .and_then(|replacement| replacement.edit_id.as_ref())
+                {
+                    let revision = view.inner.lock().unwrap().revision;
+                    view.send(json!({"type":"edit-result","id":id,"accepted":result.is_ok(),"revision":revision}));
+                    continue;
+                }
                 if let Some(complete) = input.complete {
                     let _ = complete.send(result);
                 } else {
@@ -224,6 +280,23 @@ impl View {
             self.send.send(Transport::Message(message));
         }
     }
+    fn send_state(&self) {
+        let inner = self.inner.lock().unwrap();
+        self.send(json!({"type":"state","state":{"cwd":inner.shell.as_ref().map(|shell| shell.cwd.as_str()).or(self.agent["cwd"].as_str()).unwrap_or(""),"ready":inner.shell.is_some(),"inputTarget":if inner.shell.is_some(){"shell"}else{"program"},"terminalScroll":true,"exited":false,"prompt":inner.prompt,"promptRevision":inner.prompt_revision,"inputRevision":inner.revision}}));
+    }
+    async fn editable_screen(&self, text: &str) -> Result<String, String> {
+        for _ in 0..20 {
+            let reply = self.target.request("pane.read", json!({"pane_id":self.agent["paneId"],"source":"recent_unwrapped","lines":1000})).await?;
+            let screen = reply["read"]["text"]
+                .as_str()
+                .ok_or("Cannot read the shell input.")?;
+            if screen.contains(text) {
+                return Ok(screen.into());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        Err("The shell input has not finished updating.".into())
+    }
     fn guard(&self, revision: u64, id: &str) -> Result<(), String> {
         let inner = self.inner.lock().unwrap();
         if self.cancel.is_cancelled() || inner.revision != revision || inner.dictation_id != id {
@@ -237,6 +310,7 @@ impl View {
         text: &str,
         paste: bool,
         guard: Option<(u64, &str)>,
+        replacement: Option<Replacement>,
     ) -> Result<(), String> {
         if text.encode_utf16().count() > 16000 {
             return Err("Terminal input exceeded its limit.".into());
@@ -255,11 +329,18 @@ impl View {
                 command: None,
                 complete: Some(complete),
                 _permit: permit,
+                replacement,
             })
             .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
         tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=result=>result.map_err(|_| "The agent view changed. No input was sent.".to_owned())?}
     }
-    fn queue_input(&self, text: String, command: Option<String>, paste: bool) {
+    fn queue_input(
+        &self,
+        text: String,
+        command: Option<String>,
+        paste: bool,
+        replacement: Option<Replacement>,
+    ) {
         let permit = match self.capacity.clone().try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
@@ -277,6 +358,7 @@ impl View {
             command,
             complete: None,
             _permit: permit,
+            replacement,
         }) {
             self.input_complete(
                 error.into_inner().command.as_deref(),
@@ -300,6 +382,7 @@ impl View {
         text: &str,
         paste: bool,
         guard: Option<(u64, &str)>,
+        replacement: Option<&Replacement>,
     ) -> Result<(), String> {
         if text.encode_utf16().count() > 16000 {
             return Err("Terminal input exceeded its limit.".into());
@@ -321,7 +404,40 @@ impl View {
             }
             if let Some((revision, id)) = guard {
                 self.guard(revision, id)?;
+                let current_shell = self
+                    .target
+                    .shell_input(&self.agent["paneId"])
+                    .await
+                    .ok()
+                    .flatten();
+                if current_shell != self.inner.lock().unwrap().shell {
+                    return Err("Terminal input changed during dictation.".into());
+                }
             }
+            let text = if let Some(replacement) = replacement {
+                if self
+                    .target
+                    .shell_input(&self.agent["paneId"])
+                    .await?
+                    .as_ref()
+                    != Some(&replacement.shell)
+                {
+                    return Err("The shell is no longer at the prompt.".into());
+                }
+                let reply = self.target.request("pane.read", json!({"pane_id":self.agent["paneId"],"source":"recent_unwrapped","lines":1000})).await?;
+                if reply["read"]["text"] != replacement.previous.screen
+                    || self.inner.lock().unwrap().revision != replacement.revision
+                {
+                    return Err("Shell input changed. No replacement was sent.".into());
+                }
+                format!(
+                    "{}{}",
+                    "\x7f".repeat(replacement.previous.text.chars().count()),
+                    text
+                )
+            } else {
+                text.to_owned()
+            };
             self.target
                 .request(
                     if paste {
@@ -332,6 +448,22 @@ impl View {
                     json!({"pane_id":self.agent["paneId"],"text":text}),
                 )
                 .await?;
+            if let Some(replacement) = replacement {
+                if replacement.edit_id.is_some() {
+                    let screen = self
+                        .editable_screen(text.trim_start_matches('\x7f'))
+                        .await?;
+                    let mut inner = self.inner.lock().unwrap();
+                    if inner.revision == replacement.revision {
+                        inner.editable = Some(Editable {
+                            text: text.trim_start_matches('\x7f').into(),
+                            screen,
+                        });
+                    }
+                } else {
+                    self.inner.lock().unwrap().editable = None;
+                }
+            }
             Ok(())
         };
         tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=work=>result}
@@ -486,8 +618,12 @@ impl View {
                     .filter(|s| s.encode_utf16().count() <= 16000)
                     .ok_or("Invalid input")?
                     .to_owned();
-                self.inner.lock().unwrap().revision += 1;
-                self.queue_input(text, None, false);
+                {
+                    let mut inner = self.inner.lock().unwrap();
+                    inner.revision += 1;
+                    inner.editable = None;
+                }
+                self.queue_input(text, None, false, None);
                 Ok(())
             }
             "paste" => {
@@ -499,7 +635,46 @@ impl View {
                     .ok_or("Invalid paste")?
                     .to_owned();
                 self.inner.lock().unwrap().revision += 1;
-                self.queue_input(text, None, true);
+                self.queue_input(text, None, true, None);
+                Ok(())
+            }
+            "replace" => {
+                let id = message["id"]
+                    .as_str()
+                    .filter(|id| id.len() <= 100)
+                    .ok_or("Invalid replacement")?
+                    .to_owned();
+                let text = message["text"]
+                    .as_str()
+                    .filter(|text| {
+                        !text.is_empty() && text.encode_utf16().count() <= 2000 && !controls(text)
+                    })
+                    .ok_or("Invalid replacement")?
+                    .to_owned();
+                let replacement = {
+                    let mut inner = self.inner.lock().unwrap();
+                    let valid = integer(&message["prompt"]) == Some(inner.prompt as f64)
+                        && integer(&message["revision"]) == Some(inner.revision as f64);
+                    let replacement = inner
+                        .shell
+                        .clone()
+                        .zip(inner.editable.clone())
+                        .filter(|_| valid);
+                    replacement.map(|(shell, previous)| {
+                        inner.revision += 1;
+                        Replacement {
+                            shell,
+                            previous,
+                            revision: inner.revision,
+                            edit_id: Some(id.clone()),
+                        }
+                    })
+                };
+                if let Some(replacement) = replacement {
+                    self.queue_input(text, None, false, Some(replacement));
+                } else {
+                    self.send(json!({"type":"edit-result","id":id,"accepted":false,"revision":self.inner.lock().unwrap().revision}));
+                }
                 Ok(())
             }
             "command" => {
@@ -515,8 +690,21 @@ impl View {
                     .filter(|s| s.encode_utf16().count() <= 100)
                     .ok_or("Invalid command")?
                     .to_owned();
-                self.inner.lock().unwrap().revision += 1;
-                self.queue_input(command + "\r", Some(id), false);
+                let replacement = {
+                    let mut inner = self.inner.lock().unwrap();
+                    inner.revision += 1;
+                    inner
+                        .shell
+                        .clone()
+                        .zip(inner.editable.clone())
+                        .map(|(shell, previous)| Replacement {
+                            shell,
+                            previous,
+                            revision: inner.revision,
+                            edit_id: None,
+                        })
+                };
+                self.queue_input(command + "\r", Some(id), false, replacement);
                 Ok(())
             }
             "dictation" => {
@@ -530,14 +718,22 @@ impl View {
                     Some("start") => {
                         inner.dictation.take();
                         let revision = inner.revision;
-                        if message["target"] != "program"
-                            || integer(&message["prompt"]) != Some(1.0)
+                        if message["target"]
+                            != if inner.shell.is_some() {
+                                "shell"
+                            } else {
+                                "program"
+                            }
+                            || integer(&message["prompt"]) != Some(inner.prompt as f64)
                             || integer(&message["revision"]) != Some(revision as f64)
                         {
                             self.send(json!({"type":"dictation","id":id,"state":"error","message":"Terminal input changed. Try again."}));
                             return Ok(());
                         }
                         inner.dictation_id = id.clone();
+                        inner.editable = None;
+                        let prompt = inner.prompt;
+                        let shell = inner.shell.is_some();
                         let weak = Arc::downgrade(self);
                         let result_id = id.clone();
                         let result = Arc::new(move |text: String| {
@@ -549,13 +745,27 @@ impl View {
                                 if text.is_empty() {
                                     return Ok(());
                                 }
-                                view.input(&text, true, Some((revision, &id))).await?;
+                                view.input(&text, true, Some((revision, &id)), None).await?;
+                                let screen = if shell {
+                                    view.editable_screen(&text).await.ok()
+                                } else {
+                                    None
+                                };
                                 let new_revision = {
                                     let mut inner = view.inner.lock().unwrap();
+                                    if inner.revision != revision {
+                                        return Err(
+                                            "Terminal input changed during dictation.".into()
+                                        );
+                                    }
                                     inner.revision += 1;
+                                    inner.editable = screen.map(|screen| Editable {
+                                        text: text.clone(),
+                                        screen,
+                                    });
                                     inner.revision
                                 };
-                                view.send(json!({"type":"pasted","text":text,"replace":false,"prompt":1,"revision":new_revision,"source":"dictation"}));
+                                view.send(json!({"type":"pasted","text":text,"replace":false,"prompt":prompt,"revision":new_revision,"source":"dictation"}));
                                 Ok(())
                             })
                                 as futures::future::BoxFuture<'static, Result<(), String>>
@@ -587,6 +797,81 @@ impl View {
                     }
                     _ => {}
                 }
+                Ok(())
+            }
+            "dictation-paste" => {
+                let text = message["text"]
+                    .as_str()
+                    .filter(|text| {
+                        !text.is_empty() && text.encode_utf16().count() <= 2000 && !controls(text)
+                    })
+                    .ok_or("Invalid dictation")?
+                    .to_owned();
+                let (revision, prompt, id, replacement, shell) = {
+                    let mut inner = self.inner.lock().unwrap();
+                    let shell = inner
+                        .shell
+                        .clone()
+                        .ok_or("Dictation alternatives require a shell prompt.")?;
+                    if integer(&message["prompt"]) != Some(inner.prompt as f64)
+                        || integer(&message["revision"]) != Some(inner.revision as f64)
+                    {
+                        return Err("Terminal input changed. Try again.".into());
+                    }
+                    let id = crate::storage::random_hex(16);
+                    inner.dictation_id = id.clone();
+                    let replacement = if message["replace"] == true {
+                        inner.editable.clone().map(|previous| Replacement {
+                            previous,
+                            shell: shell.clone(),
+                            revision: inner.revision,
+                            edit_id: None,
+                        })
+                    } else {
+                        None
+                    };
+                    (inner.revision, inner.prompt, id, replacement, shell)
+                };
+                let applied = message["applied"] == true;
+                let view = self.clone();
+                tokio::spawn(async move {
+                    let work = async {
+                        if view
+                            .target
+                            .shell_input(&view.agent["paneId"])
+                            .await?
+                            .as_ref()
+                            != Some(&shell)
+                        {
+                            return Err("The shell is no longer at the prompt.".to_owned());
+                        }
+                        if !applied {
+                            view.input(
+                                &text,
+                                replacement.is_none(),
+                                Some((revision, &id)),
+                                replacement,
+                            )
+                            .await?;
+                        }
+                        let screen = view.editable_screen(&text).await?;
+                        view.guard(revision, &id)?;
+                        let revision = {
+                            let mut inner = view.inner.lock().unwrap();
+                            inner.revision += 1;
+                            inner.editable = Some(Editable {
+                                text: text.clone(),
+                                screen,
+                            });
+                            inner.revision
+                        };
+                        view.send(json!({"type":"pasted","text":text,"replace":false,"source":"dictation","prompt":prompt,"revision":revision}));
+                        Ok(())
+                    };
+                    if let Err(error) = work.await {
+                        view.send(json!({"type":"reading-error","message":error}));
+                    }
+                });
                 Ok(())
             }
             _ => Err("Unknown terminal action".into()),

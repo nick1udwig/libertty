@@ -32,6 +32,54 @@ fn executable(file: &std::path::Path, content: &str) {
 }
 
 #[tokio::test]
+async fn spelled_cd_uses_directory_discovery_without_catalog_paths() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    std::fs::create_dir_all(root.path().join("projects/work-space/deep-folder")).unwrap();
+    let catalog = catalog(cwd, &["cd", "pushd", "upload"]);
+    let services = HostServices::new();
+    let help = HelpProvider::new(services.pool.clone());
+    let env = BTreeMap::from([
+        ("HOME".into(), cwd.into()),
+        ("PATH".into(), "/usr/bin:/bin".into()),
+    ]);
+    let host = NativeHost::new(services, catalog, env, help);
+    let engine = NativeEngine::new().unwrap();
+    for (phrase, expected) in [
+        (
+            "C D projects slash work space slash deep folder".to_owned(),
+            "cd projects/work-space/deep-folder".to_owned(),
+        ),
+        (
+            "see dee tilda slash projects slash work space".to_owned(),
+            "cd ~/projects/work-space".to_owned(),
+        ),
+        (
+            format!("C D {cwd}/projects/work space/deep folder"),
+            format!("cd {cwd}/projects/work-space/deep-folder"),
+        ),
+    ] {
+        let candidates = engine
+            .suggest(&phrase, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        let candidates: Vec<termai_engine::types::Candidate> =
+            serde_json::from_value(candidates).unwrap();
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.command == expected && !candidate.is_literal()),
+            "{phrase}: {candidates:?}"
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.command == phrase && candidate.is_literal())
+        );
+    }
+}
+
+#[tokio::test]
 async fn directory_facts_preserve_hidden_names_symlinks_bounds_and_fresh_versions() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_str().unwrap();

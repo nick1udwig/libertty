@@ -91,10 +91,103 @@ pub struct Target {
     pub env: Environment,
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
 }
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShellInput {
+    pub pid: u64,
+    pub cwd: String,
+}
 pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
 pub type Connection = Box<dyn Stream>;
 impl Target {
+    pub async fn shell_input(&self, pane: &Value) -> Result<Option<ShellInput>, String> {
+        let response = self
+            .request("pane.process_info", json!({"pane_id":pane}))
+            .await?;
+        let info = &response["process_info"];
+        let Some(pid) = info["shell_pid"].as_u64().filter(|pid| *pid > 0) else {
+            return Ok(None);
+        };
+        if info["foreground_process_group_id"].as_u64() != Some(pid) {
+            return Ok(None);
+        }
+        let process = info["foreground_processes"]
+            .as_array()
+            .and_then(|items| items.iter().find(|item| item["pid"] == pid));
+        let Some(process) = process else {
+            return Ok(None);
+        };
+        if !matches!(
+            process["name"].as_str(),
+            Some("bash" | "zsh" | "fish" | "sh" | "dash" | "ksh")
+        ) {
+            return Ok(None);
+        }
+        let Some(cwd) = process["cwd"].as_str().filter(|cwd| cwd.starts_with('/')) else {
+            return Ok(None);
+        };
+        Ok(Some(ShellInput {
+            pid,
+            cwd: cwd.into(),
+        }))
+    }
+    pub async fn suggest(
+        &self,
+        terminal: &str,
+        text: &str,
+        services: crate::host::HostServices,
+        cancel: &CancellationToken,
+    ) -> Result<Value, String> {
+        let snapshot = self.snapshot().await?;
+        let pane = snapshot["terminals"]
+            .as_array()
+            .and_then(|items| items.iter().find(|item| item["terminalId"] == terminal))
+            .ok_or("This terminal has ended.")?;
+        let shell = self
+            .shell_input(&pane["paneId"])
+            .await?
+            .ok_or("Command alternatives require a shell prompt.")?;
+        let mut env = self.env.clone();
+        if self.remote.is_none()
+            && let Ok(bytes) = tokio::fs::read(format!("/proc/{}/environ", shell.pid)).await
+        {
+            for entry in String::from_utf8_lossy(&bytes).split('\0') {
+                if let Some((key, value)) = entry.split_once('=') {
+                    env.insert(key.into(), value.into());
+                }
+            }
+        }
+        env.insert("PWD".into(), shell.cwd.clone());
+        let commands = if let Some(remote) = &self.remote {
+            let result = remote.exec("bash -c 'compgen -c'", cancel).await?;
+            result.stdout.lines().map(str::to_owned).collect::<Vec<_>>()
+        } else {
+            services.catalog.executable_names(&env, cancel).await?
+        };
+        let paths = if termai_engine::path_repair::directory_input(text).is_some() {
+            Default::default()
+        } else if let Some(remote) = &self.remote {
+            remote.paths(&shell.cwd, cancel).await?.into()
+        } else {
+            services.catalog.paths_in(&shell.cwd, cancel).await?
+        };
+        let catalog = termai_engine::types::Catalog {
+            cwd: shell.cwd.clone(),
+            commands: commands.into(),
+            paths,
+            ..Default::default()
+        };
+        let help = crate::help::HelpProvider::new(services.pool.clone());
+        let mut host = crate::host::NativeHost::new(services, catalog, env, help);
+        host.remote = self.remote.clone();
+        let candidates = crate::engine::NativeEngine::new()?
+            .suggest(text, &host, cancel)
+            .await?;
+        if self.shell_input(&pane["paneId"]).await?.as_ref() != Some(&shell) {
+            return Err("Terminal input changed. Try again.".into());
+        }
+        Ok(json!({"candidates":candidates}))
+    }
     pub fn local(session_name: &str) -> Result<Self, String> {
         Ok(Self {
             session: session(Some(&json!(session_name)))?,

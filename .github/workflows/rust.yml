@@ -130,6 +130,7 @@ jobs:
           node scripts/install-test-herdr.mjs
           export HERDR_BINARY="$PWD/.test-artifacts/bin/herdr"
           export PATH="$PWD/.test-artifacts/bin:$PATH"
+          npm run test:herdr-dictation
           npm run test:herdr-spaces
           npm run test:herdr-resize
           npm run test:herdr-flash

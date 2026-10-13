@@ -213,6 +213,7 @@ function replaceLine(text: string): Promise<boolean> {
 }
 const suggestions = new SuggestionClient(baseURL.href, session, () => accessToken);
 const inline = new InlineSuggestions(term, { latencyKey: baseURL.href, state: () => state, replace: replaceLine,
+  ...(herdrTerminal ? { dictate: (text: string, applied: boolean, replace: boolean) => { send({ type: 'dictation-paste', text, applied, replace, prompt: state.prompt, revision: state.inputRevision }); } } : {}),
   readLine: () => {
     const id = crypto.randomUUID(), prompt = state.prompt, revision = state.inputRevision;
     return new Promise(resolve => {
@@ -221,7 +222,13 @@ const inline = new InlineSuggestions(term, { latencyKey: baseURL.href, state: ()
       if (!send({ type: 'input-line', id, prompt, revision })) { inputLines.get(id)?.(); inputLines.delete(id); }
     });
   },
-  suggest: (text, signal) => suggestions.suggest(text, signal), raw: rawInput, execute });
+  suggest: async (text, signal) => {
+    if (!herdrTerminal) return suggestions.suggest(text, signal);
+    const response = await fetch(herdrEndpoint('api/herdr/suggest'), { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}) }, body: JSON.stringify({ text }), signal });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || 'Alternatives unavailable.');
+    return result;
+  }, raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, key: baseURL.href,
   audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data, transport.socket.protocol)); return true; },
   prepare: () => inline.prepareExternalPaste(), notice: toast, focus: () => term.focus() });
@@ -399,7 +406,7 @@ function socketMessage(event: MessageEvent) {
     if (message.prompt === state.prompt && message.revision === state.inputRevision + 1) {
       state.inputRevision = message.revision;
       term.scrollToBottom();
-      inline.externalPaste(message.text, message.replace, message.source === 'dictation');
+      inline.externalPaste(message.text, message.replace, message.source === 'dictation', !!herdrTerminal);
     }
     else inline.disconnect();
     return;

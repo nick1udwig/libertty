@@ -12,6 +12,8 @@ export function boundaries(definitions) {
   const path = { type: 'string', maxLength: 4096, 'x-utf16MaxLength': 4096, pattern: '^[^\\u0000]*$' };
   definitions.Json = { type: ['object', 'array', 'string', 'number', 'boolean', 'null'] };
   definitions.PathReply = object({ path });
+  definitions.ImageUploadReply = object({ path: { ...path, pattern: '^/tmp/termai-image-[a-f0-9]+\\.(png|jpg|jpeg|webp|gif)$' } });
+  definitions.HerdrSuggestReply = object({ candidates: { type: 'array', items: ref('Candidate'), maxItems: 4 } });
   definitions.DictationStatus = object({ installed: bool, available: bool, reason: string }, ['installed', 'available']);
   definitions.EmptyRequest = object({}, []);
   definitions.HealthReply = object({ ok: { const: true }, version: string, commit: { anyOf: [string, { type: 'null' }] }, platform: string, node: string }, ['ok', 'version']);
@@ -93,6 +95,7 @@ export function boundaries(definitions) {
   route('POST', '/api/files/mkdir', 'FileMkdirRequest', 'PathReply');
   route('POST', '/api/files/action', 'FileActionRequest', 'FileActionReply', { bodyLimitUTF16: 256 * 1024, statuses: [200, 400, 401, 403, 404, 409, 504] });
   route('POST', '/api/files/upload', null, 'Json', { requestEncoding: 'application/octet-stream', query: object({ path: string, name: string }, ['name']), streaming: true, bodyLimitUTF16: null, bodyLimitBytes: 1024 ** 3 });
+  for (const imageRoute of ['/api/images/upload', '/api/herdr/images/upload']) route('POST', imageRoute, null, 'ImageUploadReply', { requestEncoding: 'application/octet-stream', query: object({ name: string }), bodyLimitUTF16: null, bodyLimitBytes: 20 * 1024 ** 2, statuses: [200, 400, 401, 403, 404, 413] });
   route('POST', '/api/files/download', 'FileDownloadRequest', 'FileDownloadReply');
   route('POST', '/api/files/transfer', 'TransferRequestBody', 'Json');
   route('GET', '/api/files/download', null, null, { authentication: 'single-use-download-ticket', query: object({ ticket: string }), responseEncoding: 'application/octet-stream', streaming: true });
@@ -101,6 +104,7 @@ export function boundaries(definitions) {
   route('POST', '/api/herdr/connect', 'HerdrConnectRequest', 'HerdrConnectReply');
   route('POST', '/api/herdr/captured', 'CapturedRequest', 'CapturedReply');
   route('GET', '/api/herdr/snapshot', null, 'HerdrSnapshot'); route('GET', '/api/herdr/options', null, 'HerdrOptionsReply');
+  route('POST', '/api/herdr/suggest', 'SuggestRequest', 'HerdrSuggestReply', { timeoutMs: 5000 });
   route('POST', '/api/herdr/action', 'HerdrActionRequest', 'Json', { bodyLimitUTF16: 64 * 1024, responseContract: 'Forward the selected Herdr RPC result unchanged.' });
   route('POST', '/api/herdr/ticket', 'EmptyRequest', 'TicketReply'); route('POST', '/api/herdr/notifications', 'PushViewRequest', 'Ok');
   route('GET', '/api/notifications/key', null, 'PushKeyReply'); route('POST', '/api/notifications/subscribe', 'PushSubscribeRequest', 'PushDeviceReply');

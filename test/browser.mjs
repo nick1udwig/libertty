@@ -334,6 +334,8 @@ try {
     ['Alice', 'ls'],
     ['L S', 'ls'],
     ['c D ops semicolon ls', 'cd ops; ls'],
+    ['C D tilda slash git slash pebble agent', 'cd ~/git/pebble-agent'],
+    ['see dee tilda slash git slash branch point slash branch po', 'cd ~/git/branchpoint/branchpoint'],
     ['vi skill dot md', 'vi SKILL.md'],
     ['ell ess', 'ls'],
     ['pee double you dee', 'pwd'],

@@ -62,6 +62,10 @@ Herdr routes these to the app’s own scroll handler or native terminal history.
 Apps that own their history share that scroll position with the desktop.
 The shared gesture code also preserves momentum and hold-to-copy.
 Typing uses `pane.send_text`; dictation uses `pane.send_input` to respect the application's paste mode without submitting it.
+Shell panes use Herdr’s foreground process information to enable command alternatives after dictation, including spoken directory commands such as `C D`.
+Corrections replace only the latest dictated text and preserve surrounding input.
+Edits from another viewer invalidate the correction before it can replace or submit that input.
+Agent and other foreground application panes keep literal dictation.
 Input is serialized and validates the current agent before writing.
 Uncertain input is never replayed after a disconnect.
 Older scrollback and applications that do not handle terminal resizes can retain their original formatting.
@@ -127,6 +131,7 @@ Discovery resolves these paths from the source shell's environment.
 HERDR_CONFIG_PATH affects configuration, not socket location.
 
 The integration requires session.snapshot, events.subscribe, pane.rename, pane.read with recent_unwrapped, pane.send_text and pane.send_input.
+Shell alternatives also require pane.process_info.
 The read-only history API was verified against the installed Herdr 0.9.3 server.
 The Herdr CLI is also required on the target host for live frame streams and scoped PTY control.
 Agent creation uses `server.agent_manifests`, `tab.create`, `pane.rename` and `agent.start`; space renaming uses `workspace.rename`.

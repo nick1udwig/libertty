@@ -699,6 +699,60 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "paste",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dictation-paste",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "applied": {
+              "type": "boolean"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "applied",
+            "replace",
+            "prompt",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "replace",
               "type": "string"
             },
@@ -1459,6 +1513,18 @@
         },
         "cwd": {
           "type": "string"
+        },
+        "linkedWorktree": {
+          "anyOf": [
+            {
+              "const": false,
+              "type": "boolean"
+            },
+            {
+              "const": true,
+              "type": "boolean"
+            }
+          ]
         }
       },
       "required": [
@@ -1494,12 +1560,80 @@
           "items": {
             "$ref": "#/$defs/HerdrSpace"
           }
+        },
+        "worktreeDirectory": {
+          "type": "string"
         }
       },
       "required": [
         "version",
         "protocol",
         "agents"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrWorktrees": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "object",
+          "properties": {
+            "repo_name": {
+              "type": "string"
+            },
+            "repo_root": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "repo_name",
+            "repo_root"
+          ],
+          "additionalProperties": true
+        },
+        "worktrees": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "maxLength": 4096,
+                "x-utf16MaxLength": 4096,
+                "pattern": "^[^\\u0000]*$"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "label": {
+                "type": "string"
+              },
+              "is_bare": {
+                "type": "boolean"
+              },
+              "is_prunable": {
+                "type": "boolean"
+              },
+              "open_workspace_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "label",
+              "is_bare",
+              "is_prunable"
+            ],
+            "additionalProperties": true
+          }
+        },
+        "directory": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "worktrees"
       ],
       "additionalProperties": true
     },
@@ -5780,6 +5914,37 @@
       ],
       "additionalProperties": true
     },
+    "ImageUploadReply": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "maxLength": 4096,
+          "x-utf16MaxLength": 4096,
+          "pattern": "^[^\\u0000]*$"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrSuggestReply": {
+      "type": "object",
+      "properties": {
+        "candidates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Candidate"
+          },
+          "maxItems": 4
+        }
+      },
+      "required": [
+        "candidates"
+      ],
+      "additionalProperties": true
+    },
     "DictationStatus": {
       "type": "object",
       "properties": {
@@ -7148,6 +7313,60 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "paste",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "dictation-paste",
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "applied": {
+              "type": "boolean"
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "prompt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "type",
+            "text",
+            "applied",
+            "replace",
+            "prompt",
+            "revision"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "replace",
               "type": "string"
             },
@@ -7314,41 +7533,8 @@
             "seq"
           ],
           "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "paste",
-              "type": "string"
-            },
-            "text": {
-              "type": "string",
-              "minLength": 1,
-              "x-utf16MaxLength": 16000,
-              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]+$"
-            }
-          },
-          "required": [
-            "type",
-            "text"
-          ],
-          "additionalProperties": true
         }
       ]
-    },
-    "ImageUploadReply": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "type": "string",
-          "pattern": "^/tmp/termai-image-[a-f0-9]+\\.(png|jpg|jpeg|webp|gif)$"
-        }
-      },
-      "required": [
-        "path"
-      ],
-      "additionalProperties": true
     }
   }
 }

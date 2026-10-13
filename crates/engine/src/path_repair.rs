@@ -1,7 +1,8 @@
 use crate::{
+    command_speech::command_speech,
     host::{self, Host},
     path,
-    repair::{directory_scores, shell_quote},
+    repair::{directory_scores, shell_quote, tokens},
     types::{Candidate, Catalog, DirectoryEntry, SharedList},
     util::locale_cmp,
 };
@@ -309,8 +310,24 @@ pub struct DirectoryInput {
 pub fn directory_input(input: &str) -> Option<DirectoryInput> {
     let expanded = expand_symbols(input, true);
     let expanded = expanded.trim();
-    let matched = regex("(?i)^(cd|pushd|upload)\\s+(.*)$").captures(expanded)?;
-    let mut target = matched[2].trim().to_owned();
+    let direct = regex("(?i)^(cd|pushd|upload)\\s+(.*)$").captures(expanded);
+    let (command, target) = if let Some(matched) = direct {
+        (matched[1].to_lowercase(), matched[2].trim().to_owned())
+    } else {
+        // Resolve spelled command names before scanning directory operands.
+        // The general command repair path only has nearby catalog paths.
+        let commands = ["cd".to_owned(), "pushd".to_owned(), "upload".to_owned()];
+        let matched = command_speech(&tokens(expanded), &commands)
+            .into_iter()
+            .filter(|matched| matched.score >= 100.0)
+            .max_by_key(|matched| matched.consumed)?;
+        let end = regex(r"\S+\s*")
+            .find_iter(expanded)
+            .nth(matched.consumed - 1)?
+            .end();
+        (matched.value, expanded[end..].trim().to_owned())
+    };
+    let mut target = target;
     let mut options = String::new();
     if let Some(matched) = regex("^((?:(?:-[LPe]+|--)\\s+)+)(.+)$").captures(&target) {
         options = matched[1].into();
@@ -356,7 +373,7 @@ pub fn directory_input(input: &str) -> Option<DirectoryInput> {
         return None;
     }
     Some(DirectoryInput {
-        command: matched[1].to_lowercase(),
+        command,
         options,
         quoted,
         from_home,

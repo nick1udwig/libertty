@@ -1649,6 +1649,20 @@ async fn herdr_request(
     if path == "/api/herdr/options" && get {
         return ok(target.options().await.map_err(fail)?);
     }
+    if path == "/api/herdr/suggest" && *req.method() == Method::POST {
+        let input = body(req, 16384).await?;
+        let text = input["text"]
+            .as_str()
+            .filter(|text| text.encode_utf16().count() <= 2000)
+            .ok_or_else(|| fail("Keep a command under 2,000 characters."))?;
+        let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
+        return ok(bounded(async |cancel| {
+            target
+                .suggest(terminal, text, app.services.clone(), cancel)
+                .await
+        })
+        .await?);
+    }
     if path == "/api/herdr/action" && *req.method() == Method::POST {
         return ok(target
             .action(&body(req, 65536).await?)

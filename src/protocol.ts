@@ -41,6 +41,7 @@ export type ClientMessage =
   | { type: 'dictation'; id: string; action: 'start' | 'finish' | 'cancel'; prompt?: number; revision?: number; target?: DictationTarget }
   | { type: 'input'; data: string }
   | { type: 'paste'; text: string }
+  | { type: 'dictation-paste'; text: string; applied: boolean; replace: boolean; prompt: number; revision: number }
   | { type: 'replace'; text: string; id: string; prompt: number; revision: number }
   | { type: 'command'; command: string; id: string; prompt: number }
   | { type: 'resize'; cols: number; rows: number; mobile?: boolean }

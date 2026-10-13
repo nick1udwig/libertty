@@ -616,6 +616,80 @@
     },
     {
       "method": "POST",
+      "path": "/api/images/upload",
+      "authentication": "paired-client",
+      "origin": "required",
+      "request": null,
+      "response": {
+        "$ref": "#/$defs/ImageUploadReply"
+      },
+      "requestEncoding": "application/octet-stream",
+      "responseEncoding": "application/json",
+      "bodyLimitUTF16": null,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404,
+        413
+      ],
+      "query": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": true
+      },
+      "bodyLimitBytes": 20971520
+    },
+    {
+      "method": "POST",
+      "path": "/api/herdr/images/upload",
+      "authentication": "paired-client",
+      "origin": "required",
+      "request": null,
+      "response": {
+        "$ref": "#/$defs/ImageUploadReply"
+      },
+      "requestEncoding": "application/octet-stream",
+      "responseEncoding": "application/json",
+      "bodyLimitUTF16": null,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404,
+        413
+      ],
+      "query": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": true
+      },
+      "bodyLimitBytes": 20971520
+    },
+    {
+      "method": "POST",
       "path": "/api/files/download",
       "authentication": "paired-client",
       "origin": "required",
@@ -899,6 +973,32 @@
     },
     {
       "method": "POST",
+      "path": "/api/herdr/suggest",
+      "authentication": "paired-client",
+      "origin": "required",
+      "request": {
+        "$ref": "#/$defs/SuggestRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/HerdrSuggestReply"
+      },
+      "requestEncoding": "application/json",
+      "responseEncoding": "application/json",
+      "bodyLimitUTF16": 16384,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404
+      ],
+      "timeoutMs": 5000
+    },
+    {
+      "method": "POST",
       "path": "/api/herdr/action",
       "authentication": "paired-client",
       "origin": "required",
@@ -1069,56 +1169,6 @@
         401,
         403,
         404
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/images/upload",
-      "authentication": "paired-client",
-      "origin": "required",
-      "scope": "session",
-      "request": null,
-      "response": {
-        "$ref": "#/$defs/ImageUploadReply"
-      },
-      "requestEncoding": "application/octet-stream",
-      "responseEncoding": "application/json",
-      "bodyLimitBytes": 20971520,
-      "error": {
-        "$ref": "#/$defs/Error"
-      },
-      "statuses": [
-        200,
-        400,
-        401,
-        403,
-        404,
-        413
-      ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/herdr/images/upload",
-      "authentication": "paired-client",
-      "origin": "required",
-      "scope": "herdr",
-      "request": null,
-      "response": {
-        "$ref": "#/$defs/ImageUploadReply"
-      },
-      "requestEncoding": "application/octet-stream",
-      "responseEncoding": "application/json",
-      "bodyLimitBytes": 20971520,
-      "error": {
-        "$ref": "#/$defs/Error"
-      },
-      "statuses": [
-        200,
-        400,
-        401,
-        403,
-        404,
-        413
       ]
     }
   ],

@@ -33,6 +33,7 @@
     "bench:architecture": "node test/architecture-benchmark.ts",
     "test:workspace": "node test/workspace-browser.mjs",
     "test:herdr": "node test/herdr-browser.mjs",
+    "test:herdr-dictation": "node test/herdr-dictation-browser.mjs",
     "test:herdr-resize": "node test/herdr-resize-native.mjs",
     "test:herdr-scroll": "node test/herdr-app-scroll-native.mjs",
     "test:herdr-spaces": "node test/herdr-spaces-browser.mjs",
