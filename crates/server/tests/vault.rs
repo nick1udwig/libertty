@@ -149,60 +149,38 @@ fn backups_and_references_preserve_identity_and_inspection_does_not_persist() {
 }
 
 #[test]
-fn existing_typescript_vault_and_pairings_are_readable_and_writes_preserve_unknown_fields() {
-    let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../test/fixtures/rust-migration/state.json"
-    ))
-    .unwrap();
+fn persisted_data_writes_preserve_unknown_fields() {
     let directory = tempfile::tempdir().unwrap();
-    let mut data = fixture["vault"]["data"].clone();
-    data["futureField"] = serde_json::json!("retained");
-    data["knownHosts"][0]["futureHostField"] = serde_json::json!({"retained":true});
-    fs::write(
-        directory.path().join("vault.json"),
-        serde_json::to_vec(&data).unwrap(),
-    )
-    .unwrap();
     let vault = Vault::new(directory.path());
-    assert_eq!(serde_json::to_value(vault.list().unwrap()).unwrap(), {
-        let mut listed = fixture["vault"]["listed"].clone();
-        listed["knownHosts"][0]["futureHostField"] = serde_json::json!({"retained":true});
-        listed
-    });
-    for case in fixture["vault"]["cases"].as_array().unwrap() {
-        let id = case["id"].as_str().unwrap();
-        let passphrase = case["passphrase"].as_str().unwrap();
-        let raw = case["privateKey"].as_str().unwrap();
-        assert_eq!(&*vault.unlock(id, passphrase).unwrap(), raw.as_bytes());
-        assert!(vault.unlock(id, "wrong-password").is_err());
-        let info = inspect_private_key(raw, passphrase).unwrap();
-        assert_eq!(info.public_key, case["publicKey"]);
-        assert_eq!(info.fingerprint, case["fingerprint"]);
-        assert!(inspect_private_key(raw, "").is_err());
-        if raw.contains("PRIVATE KEY") && passphrase.ends_with("true") {
-            assert!(inspect_private_key(raw, "wrong-password").is_err());
-        }
-        vault
-            .create("refresh", passphrase, Some(raw), Some(id))
-            .unwrap();
-        assert_eq!(&*vault.unlock(id, passphrase).unwrap(), raw.as_bytes());
-    }
-    let saved: serde_json::Value =
-        serde_json::from_slice(&fs::read(directory.path().join("vault.json")).unwrap()).unwrap();
+    let key = vault
+        .create("original", "synthetic-passphrase", Some(&raw_key()), None)
+        .unwrap();
+    vault
+        .trust("fixture.example", 22, "SHA256:synthetic-host-pin")
+        .unwrap();
+    let file = directory.path().join("vault.json");
+    let mut data: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    data["futureField"] = serde_json::json!("retained");
+    data["keys"][0]["futureKeyField"] = serde_json::json!({"retained":true});
+    data["knownHosts"][0]["futureHostField"] = serde_json::json!({"retained":true});
+    fs::write(&file, serde_json::to_vec(&data).unwrap()).unwrap();
+    let restarted = Vault::new(directory.path());
+    restarted.rename(&key.id, "renamed").unwrap();
+    assert!(
+        !restarted
+            .unlock(&key.id, "synthetic-passphrase")
+            .unwrap()
+            .is_empty()
+    );
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    assert_eq!(saved["keys"][0]["name"], "renamed");
     assert_eq!(saved["futureField"], "retained");
+    assert_eq!(
+        saved["keys"][0]["futureKeyField"],
+        serde_json::json!({"retained":true})
+    );
     assert_eq!(
         saved["knownHosts"][0]["futureHostField"],
         serde_json::json!({"retained":true})
     );
-    fs::write(
-        directory.path().join("paired-clients.json"),
-        serde_json::to_vec(&fixture["pairing"]["data"]).unwrap(),
-    )
-    .unwrap();
-    let registry = termai_server::pairing::Pairings::open(
-        directory.path(),
-        fixture["pairing"]["token"].as_str().unwrap(),
-    )
-    .unwrap();
-    assert!(registry.has(fixture["pairing"]["credential"].as_str().unwrap()));
 }

@@ -1,6 +1,7 @@
 import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,9 +20,9 @@ try {
   for (const dir of ['local', 'remote', 'secondary']) { await writeFile(`${fixture}/${dir}/docs/über file.bin`, bytes); await writeFile(`${fixture}/${dir}/.hidden`, 'hidden'); await writeFile(`${fixture}/${dir}/hello_world.py`, 'source file'); await symlink('docs', `${fixture}/${dir}/linked`); }
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'), key = ssh2.utils.generateKeyPairSync('ed25519');
   await writeFile(fixture + '/host', hostKey.private, { mode: 0o600 }); await writeFile(fixture + '/authorized', key.public);
-  await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote PATH=${sshFixturePath()}\nSubsystem sftp internal-sftp\n`);
+  await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote PATH=${sshFixturePath()} LANG=${process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8'}\nSubsystem sftp internal-sftp\n`);
   start(sshdPath(), ['-D', '-e', '-f', fixture + '/sshd_config']);
-  for (const [port, dir] of [[3184, 'local'], [3185, 'secondary']]) start(process.env.TEST_BACKEND !== 'node' ? root + '/target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: 'files-feature-test-123456789', TERMAI_CWD: fixture + '/' + dir, TERMAI_DATA_DIR: fixture + '/data-' + dir, TERMAI_NO_RC: '1', HOME: fixture + '/' + dir });
+  for (const [port, dir] of [[3184, 'local'], [3185, 'secondary']]) start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: 'files-feature-test-123456789', TERMAI_CWD: fixture + '/' + dir, TERMAI_DATA_DIR: fixture + '/data-' + dir, TERMAI_NO_RC: '1', HOME: fixture + '/' + dir });
   for (let n = 0; n < 200; n++) { try { if ((await fetch(base)).ok && (await fetch(second)).ok) break; } catch {} await delay(50); }
   const owner = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
   const other = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
@@ -42,7 +43,7 @@ try {
     const Original = WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'state') window.__state = m.state; if (m.type === 'transfer') window.__transfer = m.request; if (m.type === 'output') window.__output = (window.__output || '') + m.data; }); } };
   }, { base, owner });
   const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(String(error)));
-  async function type(command) { await page.locator('#terminal textarea').focus(); await page.keyboard.type(command); await page.keyboard.press('Enter'); }
+  async function type(command) { await page.waitForFunction(() => window.__state?.ready); await page.locator('#terminal textarea').focus(); await page.keyboard.type(command); await page.keyboard.press('Enter'); }
   for (const [session, dir] of [[local.id, 'local'], [remote.id, 'remote']]) {
     console.log('Testing utilities', dir);
     await page.goto(base + 'terminal.html?session=' + session); await page.waitForFunction(() => window.__state?.ready && document.querySelector('#connection-label')?.textContent === 'Connected');
@@ -75,7 +76,7 @@ try {
     await modal.locator('input[type=file]').setInputFiles({ name: 'shell-upload.bin', mimeType: 'application/octet-stream', buffer: bytes });
     await modal.getByRole('button', { name: 'Done', exact: true }).waitFor(); assert.deepEqual(await readFile(fixture + '/' + dir + '/shell-upload.bin'), bytes);
     await modal.getByRole('button', { name: 'Done', exact: true }).click();
-    await page.waitForFunction(() => window.__state?.cwd.endsWith('/docs'));
+    await page.waitForFunction(() => window.__state?.ready && window.__state.cwd.endsWith('/docs'));
     let pending = page.waitForEvent('download'); await type("download 'über file.bin'"); let file = await pending;
     assert.equal(file.suggestedFilename(), 'über file.bin'); assert.deepEqual(await readFile(await file.path()), bytes);
     await page.locator('.download-dialog h2').filter({ hasText: 'Download complete' }).waitFor();
@@ -95,4 +96,11 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS transfer utilities: local and real SSH upload picker, invocation cwd despite cd, Unicode file downloads, binary pipe downloads, named/default output, empty output');
 } catch (e) { console.error(logs); if (browser) console.error(await browser.contexts()[0].pages()[0].evaluate(() => ({ state: window.__state, transfer: window.__transfer, output: window.__output, modal: document.querySelector('.transfer-dialog')?.outerHTML }))); throw e; }
-finally { await browser?.close(); for (const p of processes) p.kill('SIGTERM'); await delay(200); await rm(fixture, { recursive: true, force: true }); }
+finally {
+  await browser?.close();
+  await Promise.all(processes.map(async process => {
+    if (process.exitCode !== null || process.signalCode !== null) return;
+    const exited = once(process, 'exit'); process.kill('SIGTERM'); await exited;
+  }));
+  await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}

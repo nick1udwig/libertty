@@ -1,73 +1,7 @@
-use serde_json::{Value, json};
-use termai_server::{herdr, herdr_state::Tracker};
+use serde_json::json;
+use termai_server::herdr;
 #[path = "support/herdr.rs"]
 mod support;
-
-#[test]
-fn boundaries_match_unchanged_reference_fixtures() {
-    let corpus: Value = serde_json::from_str(include_str!(
-        "../../../test/fixtures/rust-migration/herdr.json"
-    ))
-    .unwrap();
-    for (index, row) in corpus["rows"].as_array().unwrap().iter().enumerate() {
-        let args = row["args"].as_array().unwrap();
-        let string = |i: usize| args[i].as_str().unwrap();
-        let result = match row["operation"].as_str().unwrap() {
-            "session" => herdr::session(args.first()).map(|v| json!(v)),
-            "name" => herdr::name(&args[0]).map(|v| json!(v)),
-            "socket" => herdr::socket(string(0), &serde_json::from_value(args[1].clone()).unwrap())
-                .map(|v| json!(v)),
-            "parse" => {
-                herdr::parse_command(string(0), &serde_json::from_value(args[1].clone()).unwrap())
-                    .map(|(binary, session)| json!({"binary":binary,"session":session}))
-            }
-            "normalize" => herdr::normalize(&args[0]),
-            "preview" => Ok(json!(herdr::response_preview(string(0)))),
-            "body" => Ok(json!(herdr::notification_body(string(0), string(1)))),
-            _ => panic!("Unknown fixture operation"),
-        };
-        let expected = &row["expected"];
-        match result {
-            Ok(value) => assert_eq!(
-                &value, &expected["value"],
-                "Fixture {index}: {}",
-                row["operation"]
-            ),
-            Err(error) => assert_eq!(
-                json!(error),
-                expected["error"],
-                "Fixture {index}: {}",
-                row["operation"]
-            ),
-        }
-    }
-}
-#[test]
-fn notification_histories_match_reference_checkpoints_and_transitions() {
-    let corpus: Value = serde_json::from_str(include_str!(
-        "../../../test/fixtures/rust-migration/herdr.json"
-    ))
-    .unwrap();
-    for row in corpus["states"].as_array().unwrap() {
-        let mut tracker = Tracker::new(row.get("initial"));
-        for step in row["steps"].as_array().unwrap() {
-            if let Some(snapshot) = step.get("snapshot") {
-                assert_eq!(json!(tracker.update(snapshot)), step["notifications"]);
-                assert_eq!(
-                    json!(tracker.status(&snapshot["agents"][0])),
-                    step["status"]
-                );
-                assert_eq!(json!(tracker.attention()), step["attention"]);
-            } else {
-                assert_eq!(
-                    json!(tracker.viewed(step["viewed"].as_str().unwrap())),
-                    step["result"]
-                );
-            }
-            assert_eq!(tracker.checkpoint(), step["checkpoint"]);
-        }
-    }
-}
 
 #[tokio::test]
 async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {

@@ -1,7 +1,10 @@
 // Exercised only with synthetic fixtures in an isolated temporary directory.
 use serde_json::{Value, json};
 use std::{fs, path::PathBuf};
-use termai_server::{pairing::Pairings, vault::Vault};
+use termai_server::{
+    pairing::Pairings,
+    vault::{Vault, inspect_private_key},
+};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = PathBuf::from(
         std::env::args()
@@ -23,6 +26,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let raw = case["privateKey"].as_str().ok_or("Missing key")?;
         if *vault.unlock(id, password)? != raw.as_bytes() {
             return Err("Reference private key mismatch.".into());
+        }
+        if vault.unlock(id, "wrong-password").is_ok() {
+            return Err("Incorrect vault password was accepted.".into());
+        }
+        let info = inspect_private_key(raw, password)?;
+        if info.public_key != case["publicKey"] || info.fingerprint != case["fingerprint"] {
+            return Err("Imported key metadata mismatch.".into());
         }
         let refreshed = vault.create("Rust refreshed fixture", password, Some(raw), Some(id))?;
         checks.push(json!({"id":refreshed.id,"passphrase":password,"privateKey":raw}));

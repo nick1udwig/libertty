@@ -1,9 +1,7 @@
-import { commonFlags, subcommands } from '../src/engine/command-policy.ts';
-import { symbolNames } from '../src/engine/speech.ts';
-import { readFile, writeFile } from 'node:fs/promises';
-const output = new URL('../contracts/engine-vocabulary.json', import.meta.url);
-const content = JSON.stringify({ commonFlags, subcommands, symbolNames }, null, 2) + '\n';
-if (process.argv.includes('--check')) {
-  if (await readFile(output, 'utf8') !== content) throw new Error('Rust engine vocabulary is stale.');
-} else await writeFile(output, content);
-console.log('Verified shared command and speech vocabulary.');
+import { readFile } from 'node:fs/promises';
+
+// The native engine and the frontend now consume this same canonical data.
+const vocabulary=JSON.parse(await readFile(new URL('../contracts/engine-vocabulary.json',import.meta.url),'utf8'));
+for (const key of ['commonFlags','subcommands','symbolNames']) if (!vocabulary[key]||typeof vocabulary[key]!=='object') throw new Error('Missing engine vocabulary: '+key);
+for (const [name,symbol] of Object.entries(vocabulary.symbolNames)) if (!name||typeof symbol!=='string'||!symbol) throw new Error('Invalid speech symbol: '+name);
+console.log('Verified canonical command and speech vocabulary.');

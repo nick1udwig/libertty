@@ -11,8 +11,7 @@ const directory = await mkdtemp('/tmp/termai-dev-pairing-');
 const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
 const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
 const origin = `http://127.0.0.1:${port}`; const base = origin + '/audit/';
-const rust = process.env.TEST_BACKEND !== 'node';
-const server = spawn(process.execPath, [rust ? 'scripts/dev.mjs' : 'server/index.ts'], { cwd: path.resolve(import.meta.dirname, '..'), env: { ...process.env, NODE_ENV: 'development', HOST: '127.0.0.1', PORT: String(port), HOME: directory, TERMAI_CWD: directory, TERMAI_NO_RC: '1', TERMAI_TOKEN: 'dev-test-pairing-token-123456789', TERMAI_DATA_DIR: directory, TERMAI_BASE_PATH: '/audit', TERMAI_ALLOWED_HOSTS: '127.0.0.1', CARGO_HOME: process.env.CARGO_HOME || path.join(process.env.HOME, '.cargo'), RUSTUP_HOME: process.env.RUSTUP_HOME || path.join(process.env.HOME, '.rustup') }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.execPath, ['scripts/dev.mjs'], { cwd: path.resolve(import.meta.dirname, '..'), env: { ...process.env, NODE_ENV: 'development', HOST: '127.0.0.1', PORT: String(port), HOME: directory, TERMAI_CWD: directory, TERMAI_NO_RC: '1', TERMAI_TOKEN: 'dev-test-pairing-token-123456789', TERMAI_DATA_DIR: directory, TERMAI_BASE_PATH: '/audit', TERMAI_ALLOWED_HOSTS: '127.0.0.1', CARGO_HOME: process.env.CARGO_HOME || path.join(process.env.HOME, '.cargo'), RUSTUP_HOME: process.env.RUSTUP_HOME || path.join(process.env.HOME, '.rustup') }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', d => logs += d); server.stderr.on('data', d => logs += d); const exited = once(server, 'exit'); let browser;
 try {
   for (let i = 0; !logs.includes('Pairing token:'); i++) { if (i > 1200 || server.exitCode !== null) throw Error('Startup failed: ' + logs); await new Promise(r => setTimeout(r, 50)); }
@@ -60,5 +59,5 @@ try {
   const reopenedFrame = await (await reopenedPage.locator('#terminal-stack iframe').elementHandle()).contentFrame();
   await reopenedFrame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected');
   await reopened.close();
-  console.log('PASS ' + (rust ? 'Rust' : 'reference') + ' development browser: mounted pairing gate, protected development assets, incorrect-token rejection, connected terminal, remembered pairing without cookies, authenticated Vite HMR');
+  console.log('PASS ' + ('Rust') + ' development browser: mounted pairing gate, protected development assets, incorrect-token rejection, connected terminal, remembered pairing without cookies, authenticated Vite HMR');
 } finally { await browser?.close(); server.kill('SIGTERM'); await exited; await rm(directory, { recursive: true, force: true }); }

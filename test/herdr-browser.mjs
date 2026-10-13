@@ -9,7 +9,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import os from 'node:os';
 import ssh2 from 'ssh2';
 import { sshdPath, sshFixturePath } from './support/sshd.mjs';
-import { fingerprint } from '../server/vault.ts';
+import { fingerprint } from './support/ssh-key.ts';
 import { herdrFixture } from './herdr-fixture.ts';
 
 const fixture = await herdrFixture(), origin = 'http://127.0.0.1:3167', base = origin + '/herdr-test';
@@ -26,7 +26,7 @@ daemon.on('connection', (socket, request) => {
     else { const message = JSON.parse(bytes.toString()); if (message.type === 'finish') socket.send(JSON.stringify({ type: 'final', text: 'Dictated directly into Herdr' })); if (message.type === 'ack') voiceAcks++; }
   });
 });
-const backend = spawn(process.env.TEST_BACKEND !== 'node' ? root + 'target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+const backend = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, TERMAI_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token', TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate', NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3167', TERMAI_BASE_PATH: '/herdr-test',
   TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/termai',
   TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory,
@@ -46,7 +46,7 @@ try {
   const bearer = (await (await request('connect', { noSession: true, token })).json()).accessToken;
   assert.equal((await request('herdr/snapshot?herdrSession=../../escape', undefined, bearer)).status, 400);
   assert.equal((await request('herdr/action', { action: 'rename', terminalId: 'missing', name: 'x' }, bearer)).status, 400);
-  if (process.env.TEST_BACKEND !== 'node') {
+  {
     for (const geometry of [{ mobile: true, cols: 0, rows: 30 }, { mobile: true, cols: 40, rows: 1001 }, { mobile: true, cols: 40.5, rows: 30 }, { mobile: true, cols: 40 }]) assert.equal((await request('herdr/ticket?terminalId=term_0', geometry, bearer)).status, 400);
     const reply = await (await request('herdr/ticket?terminalId=term_0', { mobile: true, cols: 40, rows: 30 }, bearer)).json(); assert.equal(reply.initialGeometry, true);
   }
@@ -403,6 +403,25 @@ try {
   assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control'));
   assert.equal(await page.locator('.herdr-view').count(), 0); assert.equal(fixture.snapshot.agents.length, 3);
   await page.setViewportSize({ width: 390, height: 844 });
+  // Reopening a dedicated local Herdr transport reuses its tab after the source closes.
+  const localHerdr = await page.evaluate(async () => {
+    const api = async (name, data) => { const response = await fetch(new URL('api/' + name, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); return result; };
+    const source = await api('sessions', { files: true, name: 'Dedicated Herdr' });
+    const target = await api('herdr/connect', { source: source.id, session: '' });
+    const tab = { id: crypto.randomUUID(), session: source.id, backendId: 'primary', hostId: 'local', pluginId: 'herdr', pluginVersion: '1', mode: 'herdr', ownsSession: true, name: 'Dedicated Herdr', ...target };
+    const tabs = JSON.parse(localStorage.getItem('termai.tabs')); tabs.push(tab); localStorage.setItem('termai.tabs', JSON.stringify(tabs)); localStorage.setItem('termai.activeTab', JSON.stringify(tab.id));
+    return tab;
+  });
+  await page.reload(); await tab(0).waitFor();
+  await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, localHerdr.session);
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).waitFor();
+  await page.locator('#terminal-back').click();
+  await page.getByRole('button', { name: /^Terminals for This machine / }).click();
+  await page.getByRole('menuitem', { name: 'Connect Herdr', exact: true }).click();
+  await page.locator('#plugin-connect-form').getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.session !== previous.session && tab.herdrSource === tab.session && !tab.ended), localHerdr);
+  await tab(0).waitFor(); assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the local Herdr tab');
+  await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
   const controlsBeforeSSH = fixture.actions.filter(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control').length;
   // A real disposable SSH server exercises command capture and Unix socket forwarding.
   await mkdir(fixture.directory + '/remote');
@@ -436,6 +455,22 @@ try {
   assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Explicit terminal focus must enable SSH input');
   await page.keyboard.type('SSH input');
   await until(() => fixture.actions.filter(a => a.method === 'pane.send_text').map(a => a.params.text).join('').includes('SSH input'), 'input through SSH Unix forwarding');
+  // A captured SSH profile reconnects through its saved source host with fresh credentials.
+  const reconnectKey = await page.evaluate(async privateKey => {
+    const response = await fetch(new URL('api/keychain', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', name: 'Reconnect fixture', privateKey, passphrase: 'fixture-passphrase' }) });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
+  }, identity.private);
+  const remoteHerdrTab = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.mode === 'herdr'));
+  await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, remote.id);
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
+  await page.locator('#ssh-dialog').waitFor({ state: 'visible' });
+  await page.locator('#ssh-key').selectOption(reconnectKey.fingerprint); await page.locator('#ssh-secret').fill('fixture-passphrase'); await page.locator('#ssh-connect').click();
+  await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.herdrSource !== previous.herdrSource && tab.herdrSource === tab.session && tab.ownsSession && !tab.ended), remoteHerdrTab);
+  await tab(0).waitFor(); terminal = await agentFrame();
+  assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the captured SSH Herdr tab');
+  const restoredSource = await page.evaluate(hostId => JSON.parse(localStorage.getItem('termai.hosts')).find(host => host.id === hostId).herdrSource, remoteHost.id);
+  assert.notEqual(restoredSource, remote.id, 'The captured host must save its refreshed source');
+  assert.equal((await request('herdr/ticket?herdrSource=' + restoredSource, {}, bearer)).status, 404, 'Reconnection retains owner isolation');
   const standalone = await context.newPage(); await standalone.goto(base + '/terminal.html');
   await standalone.waitForFunction(() => window.__state?.ready);
   await standalone.locator('#terminal textarea').focus(); await standalone.keyboard.type('herdr'); await standalone.keyboard.press('Enter');

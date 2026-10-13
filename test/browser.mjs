@@ -35,8 +35,7 @@ const repairEndpoint = `**/api/${engine === 'server' ? 'suggest' : 'facts'}`;
 const mount = process.env.TEST_BASE_PATH || '';
 const base = origin + mount;
 const pairingToken = 'test-local-pairing-token-123456789';
-const rustBackend = process.env.TEST_BACKEND !== 'node';
-const server = spawn(rustBackend ? process.env.TEST_EXECUTABLE || path.join(root, 'target/debug/termai') : process.execPath, rustBackend ? [] : ['server/index.ts'], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_BASE_PATH: mount, TERMAI_ENGINE: engine, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: pairingToken, TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.env.TEST_EXECUTABLE || path.join(root, 'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_BASE_PATH: mount, TERMAI_ENGINE: engine, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: pairingToken, TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 let browser;
 const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -378,8 +377,7 @@ try {
   context.off('request', captureDirectoryRequest);
   assert.equal(directoryRequests.length, 1, JSON.stringify(directoryRequests));
   if (engine === 'client') {
-    if (rustBackend) { assert.equal(directoryRequests[0].kind, 'repair'); assert.ok(directoryRequests[0].catalogKey); }
-    else assert.ok(directoryRequests[0].operations.some(operation => operation.kind === 'directory'));
+    { assert.equal(directoryRequests[0].kind, 'repair'); assert.ok(directoryRequests[0].catalogKey); }
   }
   else {
     assert.equal(workers.length, 0, 'Server mode must not start a repair worker');

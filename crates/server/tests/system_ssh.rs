@@ -1,45 +1,10 @@
-use serde_json::{Value, json};
+use serde_json::json;
 use std::os::unix::fs::PermissionsExt;
 use termai_server::{system_ssh, vault};
 use tokio_util::sync::CancellationToken;
 
-fn corpus() -> Value {
-    serde_json::from_str(include_str!(
-        "../../../test/fixtures/rust-migration/keys.json"
-    ))
-    .unwrap()
-}
 #[test]
-fn literal_commands_addresses_and_legacy_keys_match_reference_results() {
-    let corpus = corpus();
-    for row in corpus["commands"].as_array().unwrap() {
-        assert_eq!(
-            json!(system_ssh::arguments(row["command"].as_str().unwrap())),
-            row["expected"],
-            "{}",
-            row["command"]
-        );
-    }
-    for row in corpus["cases"].as_array().unwrap() {
-        let result = vault::inspect_private_key(
-            row["privateKey"].as_str().unwrap(),
-            row["passphrase"].as_str().unwrap(),
-        );
-        match result {
-            Ok(value) => assert_eq!(
-                serde_json::to_value(value).unwrap(),
-                row["expected"]["value"],
-                "{}",
-                row["name"]
-            ),
-            Err(error) => assert_eq!(
-                json!(error.to_string()),
-                row["expected"]["error"],
-                "{}",
-                row["name"]
-            ),
-        }
-    }
+fn addresses_reject_shell_controls_and_invalid_ports() {
     let address =
         system_ssh::address(&json!({"host":" ::1 ","username":" nick ","port":22.0})).unwrap();
     assert_eq!(
@@ -60,15 +25,12 @@ fn literal_commands_addresses_and_legacy_keys_match_reference_results() {
 async fn config_resolution_external_references_and_locked_keys_preserve_identity() {
     let directory = tempfile::tempdir().unwrap();
     let dir = directory.path().to_string_lossy().into_owned();
-    let state: Value = serde_json::from_str(include_str!(
-        "../../../test/fixtures/rust-migration/state.json"
-    ))
-    .unwrap();
-    let pair = &state["vault"]["cases"][0];
+    let private =
+        ssh_key::PrivateKey::random(&mut rand::rngs::OsRng, ssh_key::Algorithm::Ed25519).unwrap();
+    let raw = private.to_openssh(ssh_key::LineEnding::LF).unwrap();
+    let public = private.public_key().to_openssh().unwrap();
     let identity = format!("{dir}/identity");
-    tokio::fs::write(&identity, pair["privateKey"].as_str().unwrap())
-        .await
-        .unwrap();
+    tokio::fs::write(&identity, raw.as_bytes()).await.unwrap();
     let config = format!("{dir}/config");
     tokio::fs::write(&config,format!("Host fixture\n HostName 127.0.0.1\n User example\n Port 2222\n IdentityFile {identity}\n IdentitiesOnly yes\n IdentityAgent none\n UserKnownHostsFile {dir}/known\n GlobalKnownHostsFile /dev/null\n")).await.unwrap();
     let env = std::env::vars().collect();
@@ -86,10 +48,7 @@ async fn config_resolution_external_references_and_locked_keys_preserve_identity
     assert_eq!(info.address.port, 2222);
     assert_eq!(info.address.username, "example");
     assert_eq!(info.identities.len(), 1);
-    assert_eq!(
-        info.identities[0].public_key,
-        pair["publicKey"].as_str().unwrap()
-    );
+    assert_eq!(info.identities[0].public_key, public);
     let vault = vault::Vault::new(&directory.path().join("vault"));
     let key = &info.identities[0];
     let first = vault
@@ -128,7 +87,7 @@ async fn config_resolution_external_references_and_locked_keys_preserve_identity
     vault.remove(&first.id).unwrap();
     assert_eq!(
         tokio::fs::read_to_string(&identity).await.unwrap(),
-        pair["privateKey"].as_str().unwrap()
+        raw.as_str()
     );
     for setting in [
         "ProxyJump jump.example",
@@ -152,16 +111,20 @@ async fn config_resolution_external_references_and_locked_keys_preserve_identity
             "{setting}"
         );
     }
-    let encrypted = &state["vault"]["cases"][1];
-    tokio::fs::write(&identity, encrypted["privateKey"].as_str().unwrap())
-        .await
-        .unwrap();
+    let passphrase = "synthetic-passphrase";
+    let encrypted = private.encrypt(&mut rand::rngs::OsRng, passphrase).unwrap();
     tokio::fs::write(
-        identity.clone() + ".pub",
-        encrypted["publicKey"].as_str().unwrap(),
+        &identity,
+        encrypted
+            .to_openssh(ssh_key::LineEnding::LF)
+            .unwrap()
+            .as_bytes(),
     )
     .await
     .unwrap();
+    tokio::fs::write(identity.clone() + ".pub", &public)
+        .await
+        .unwrap();
     let info = system_ssh::resolve(
         &format!("ssh -F {config} fixture"),
         &env,
@@ -174,7 +137,7 @@ async fn config_resolution_external_references_and_locked_keys_preserve_identity
     assert!(info.locked);
     assert!(info.identities.is_empty());
     assert!(
-        system_ssh::read_identity(&identity, encrypted["passphrase"].as_str())
+        system_ssh::read_identity(&identity, Some(passphrase))
             .await
             .unwrap()
             .is_some()

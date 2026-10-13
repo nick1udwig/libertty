@@ -2,16 +2,16 @@
 
 Issue [#10](https://github.com/nick1udwig/termai/issues/10) migrates the backend and shared engine while preserving the frontend and saved backend data.
 The reference revision is `455386b`, and the implementation branch is `feat/rust-backend`.
-The contract inventory, regression matrix, reference fixtures and reference baseline were captured before production conversion.
+Migration contracts, reference fixtures and benchmark baselines were captured before production conversion and remain available in Git history.
 The Rust executable is the default for source commands, release packaging and installed services.
-The TypeScript backend remains available through the explicit reference commands and `TERMAI_BACKEND=node` packaging for parity and rollback checks.
+The TypeScript backend and duplicate engine implementation were retired on `feat/cleanup-post-rust`, which also removes the archived migration corpora and benchmark reports.
 
 ## Implementation status
 
 This branch implements migration contracts, baseline capture, the full Rust suggestion engine, a production Wasm worker, and a Rust HTTP/WebSocket executable for local and SSH sessions.
 The same engine crate builds as a native library and JSON command-line oracle and as browser WebAssembly.
-The reference corpus contains 16,404 original pure fixtures, 156 additional ECMAScript Unicode and quoting fixtures, 331 synthetic asynchronous fixtures, 138 asynchronous fixtures captured from unchanged original tests using real host adapters, and 48 prewarm cache steps.
-Native Rust and Chromium compare complete candidate arrays, scores, ordering, literal alternatives and recorded host operations.
+Active native, frontend and browser tests use self-contained inputs and disposable runtime data instead of the archived reference corpus.
+The live architecture benchmark compares complete native and Wasm candidate arrays with the historical TypeScript engine recovered from Git.
 The asynchronous runtime batches independent host operations, caches facts within a request, limits active requests to 32, rejects foreign or incomplete replies, and drops request-owned futures when cancelled.
 The JavaScript adapter aborts callbacks, ignores late results, and releases Wasm allocations on success, failure and cancellation.
 The Wasm boundary limits individual inputs to 64 MiB, outstanding buffers to 64, and their combined bytes to 128 MiB.
@@ -35,16 +35,15 @@ Local file listing, folder creation, exclusive streaming uploads, single-use dow
 The unchanged Bash hooks are embedded in the executable, and native tests cover actual Readline behavior, binary captures, attachment replacement, stale edits, command deduplication and large output.
 Synthetic Voxtype daemon tests cover authenticated discovery, capability negotiation, bounded Opus frames, final transcript insertion, terminal control rejection and explicit cancellation.
 The existing browser harness passes against the Rust executable in server mode and client mode under `/terminal/`, and the mounted Reading Mode browser harness also passes.
-Synthetic fixtures verify encrypted and unencrypted OpenSSH imports, saved credential reuse, host pins, key fingerprints, private-file modes, and Node-to-Rust-to-Node rollback.
+Generated temporary data verifies encrypted and unencrypted OpenSSH imports, saved credential reuse, host pins, key fingerprints, private-file modes, and compatibility with Node-written state and independent verification of Rust-written encryption and credential formats.
 OpenSSH import preserves the original private-key bytes and accepts both the reference writer's 64-column wrapping and ordinary OpenSSH wrapping.
-Forty synthetic legacy-key fixtures cover traditional RSA, DSA and EC PEM, encrypted imports, PuTTY passphrase integrity, incorrect passwords, and the reference's rejection of generic PKCS8 imports.
 System SSH configuration resolution preserves identity-file and agent ordering, external references, known-host verification, and native fallback for unsupported shell invocations and SSH configuration.
 Real SSH tests cover host-key verification, failed authentication, bounded and cancelled fact channels, remote Bash PTYs, SFTP file actions, reading, and transport cleanup.
 SSH sessions retain the reference's client-engine mode.
 Herdr snapshots, actions, status tracking, mobile terminal ownership, incremental frames, scrolling, dictation, remote Unix socket forwarding, and notification persistence are implemented.
 The full Herdr and file browser suites pass against the Rust backend, including remote SSH sessions.
 Notification tests use synthetic subscriptions and mocked deliveries to verify encryption, saved VAPID identity, owner isolation, foreground suppression, acknowledgements, restart behavior, and expired devices.
-The inventory maps all 254 named tests across 83 harnesses and 61 modules to native equivalents or explicit retained-harness justifications.
+The generated inventory records active Rust modules, named unit tests and integration harnesses.
 Retained Bash utilities are byte-identical to the reference source, with a contract assertion checking the embedded bytes.
 Rust also serves the unchanged development pairing page and proxies loopback Vite assets and hot-reload sockets behind native authorization.
 Release archives contain the native executable and production Wasm, and installed launchers execute Rust directly with the existing configuration format.
@@ -54,7 +53,7 @@ The release workflow requires the complete regression and platform matrix before
 ## Run the migration checks
 
 Install Rust 1.89 or later and add the `wasm32-unknown-unknown` target before building the browser artifact.
-The browser parity harness requires Chromium, selected through `CHROME_PATH` when it is not available at `/usr/bin/chromium`.
+The browser Wasm harness requires Chromium, selected through `CHROME_PATH` when it is not available at `/usr/bin/chromium`.
 
 ```sh
 npm ci
@@ -70,26 +69,26 @@ npm run test:rust-browser
 npm run build
 npm test
 cargo build --locked -p termai-server --bin termai
-TEST_BACKEND=rust TEST_ENGINE=server TEST_PORT=3137 npm run test:browser
-TEST_BACKEND=rust TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
-TEST_BACKEND=rust TEST_BASE_PATH=/terminal npm run test:reading
-TEST_BACKEND=rust node test/files-browser.mjs
-TEST_BACKEND=rust npm run test:herdr
-TEST_BACKEND=rust npm run test:workspace
+TEST_ENGINE=server TEST_PORT=3137 npm run test:browser
+TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
+TEST_BASE_PATH=/terminal npm run test:reading
+node test/files-browser.mjs
+npm run test:herdr
+npm run test:workspace
 npm run test:rust-herdr
 ```
 
-`npm run migration:fixtures`, `npm run migration:host-fixtures`, and `npm run migration:state-fixtures` regenerate independent TypeScript oracles and synthetic state.
-Do not regenerate expected outputs to accommodate a Rust mismatch.
+The cleanup branch retires corpus-only migration parity checks and the historical assertion ledger while retaining active unit, browser, saved-data compatibility and integration tests.
+Historical corpora and reports remain available in Git history, and benchmark tooling writes fresh results to ignored `.test-artifacts` files.
 The native oracle accepts one `{operation, args}` JSON request per line through `cargo run --locked --release -p termai-engine`.
 The asynchronous Rust `Runtime` and JavaScript `WasmEngine.invoke` interfaces support full suggestions, discovery, completion, file and directory repairs, candidate validation, and session metadata caching.
-`npm run migration:async-fixtures` and `npm run migration:prewarm-fixtures` record unchanged reference behavior for real host assertions and prewarm cache steps.
+Native and browser tests exercise prewarm expiry, prepared catalog isolation, immutable directory snapshots and cancellation with self-contained inputs.
 
 ## Contracts and inventory
 
 `contracts/schemas.json` contains JSON Schema 2020-12 definitions generated from the five existing protocol modules, shared engine data types, help metadata, and SSH key metadata.
 `contracts/engine-operations.json` defines operation-specific argument tuples, optional argument nulls, result schemas and ignored trailing callback arguments.
-`contracts/regression-inventory.json` records every backend and shared engine module and every existing test harness with its assertions, destination, and retention justification.
+`contracts/regression-inventory.json` records active Rust modules, named tests and integration harnesses.
 Run `npm run migration:schemas` and `npm run migration:inventory` to regenerate these files, or append `-- --check` to detect drift.
 Optional properties are omitted, and null is accepted only by explicitly nullable unions or the fact result for a missing file or description.
 Unknown object fields and terminal message tags are ignored for compatibility, while unknown fact operation kinds and Herdr actions are rejected before starting work.
@@ -167,20 +166,15 @@ Preserve key UUIDs, names, ISO timestamps, public keys, and host/port pins, and 
 Vault mutations remain serialized and atomic, and concurrent updates must not lose entries.
 Notification state retains its existing subscription keys, device ownership digests, source watches, and VAPID identity across restarts.
 Browser host profiles, keys, plugins, workspaces, and service-worker cache formats are retained because their owning frontend remains TypeScript.
-No persisted-data rewrite is required for a compatible port, and rollback must be tested by opening Rust-written state with the reference implementation.
+No persisted-data rewrite is required, and an independent crypto reader verifies that Rust-written state retains the legacy encryption and credential formats.
 Compatibility fixtures must use synthetic credentials and keys rather than material from the user's home directory.
 
 ## Regression baseline and performance gates
 
-`npm test` passes 214 tests with one existing installed-manual skip, and `npm run test:install` passes all 26 tests on Linux x86_64 with Node 26.8.1.
-`npm run build` passes against the reference implementation.
-`npm run migration:fixtures` executes the unchanged reference assertions through a recording loader and captures complete pure-engine arguments and results.
-The corpus compares full arrays, ordering, scores, change descriptions, literal alternatives, quoted values, paths, Unicode, help flags, history, and pipeline parsing.
-The corpus must remain an independent oracle and must not be rewritten to make Rust failures pass.
-The recorded loader only instruments pure functions and does not replace process, filesystem, authorization, or browser assertions.
-The recorder excludes individual records longer than 65,536 UTF-16 units, so the existing large-catalog stress assertions still require dedicated Rust equivalents and performance measurements.
-The asynchronous corpus covers synthetic and original real-host behavior, and native adapter tests add actual Bash, PTY, shared cancellation and filesystem changes.
-Every original standalone backend assertion has a checked native destination or an explicit retained-harness justification in the regression inventory.
+`npm test` runs frontend and contract tests, and `npm run test:install` exercises the installer in isolated temporary directories.
+`npm run build` compiles the native backend, browser Wasm and frontend.
+Native adapter tests exercise actual Bash, PTY, shared cancellation and filesystem changes.
+The active regression inventory tracks these tests without claiming coverage for the retired migration corpus.
 Run the browser harness in each engine mode with dedicated ports, including `TEST_BASE_PATH=/terminal` in client mode.
 Reading, development pairing/HMR, plugins, files, transfers, gestures, touch, workspace and Herdr harnesses exercise the Rust executable.
 The native Herdr harnesses use the checksum-pinned supported Herdr executable, including mobile sizing, native scroll and shared spaces.
@@ -193,6 +187,7 @@ Cold latency is the median of fresh application-cache trials, controlled by `BEN
 Native measurements additionally report engine latency separately from peer-process IPC.
 Native and Wasm candidate results must match the reference exactly, and cold and warm foreground request counts must not increase in either mode.
 Median warm latency must stay within the larger of 20 percent or 0.15 milliseconds of the corresponding reference measurement on the same runner.
+At zero injected RTT, a warm latency failure must repeat in a fresh run with the variant order reversed before CI fails, using the same limits and retaining both reports.
 For sufficiently sampled CPU cases, a warm regression fails only when the 95 percent median intervals confirm it exceeds that allowance, and raw medians and intervals remain in the report.
 Cold latency retains the larger of 20 percent or 10 milliseconds as its allowance for subprocess startup variation.
 The benchmark writes its measurements before evaluating latency gates so a failing CI run retains the evidence.
@@ -264,6 +259,15 @@ At 150 ms RTT, warm client Python repair measures 190.17 ms against 1,471.06 ms 
 Those cases reduce their foreground request counts from nine, three and five respectively to one.
 Client rows identify native delegation explicitly rather than presenting those measurements as Wasm CPU performance.
 This round does not meet the tenfold target in every case, and native peer IPC, injected RTT and Node-hosted Wasm retain their existing measurement limitations.
-Local validation passes 102 Rust tests, 234 frontend and reference tests with one existing skip, and Chromium parity for 16,560 pure fixtures, 469 asynchronous fixtures and 48 prewarm steps.
+Current coverage comes from the active Rust, frontend, browser and integration suites plus the live architecture comparison.
 Both mounted browser engine modes pass with the Rust backend, and native and Wasm Clippy checks pass with warnings denied.
 The full architecture gate passes 1,440 exact candidate-array comparisons across 108 rows at 0, 50 and 150 ms RTT, with 31 warm CPU samples and three warm network samples per case and variant.
+
+## Post-migration cleanup
+
+Rust is the only backend in the working tree and release packages.
+The frontend retains TypeScript wire types, its Wasm bridge and the shell helpers used by reading and transfer actions.
+Command and speech vocabulary comes from the canonical contract data rather than a second engine implementation.
+Archived migration fixtures, corpus-only checks, the retired regression ledger and recorded benchmark outputs are removed from the cleanup branch.
+Historical benchmark references are recovered into temporary directories from Git revision `0e0646c`, so performance comparisons remain available without shipping a Node backend.
+The installer continues to support rollback to already published Node bundles through their own archived launchers.

@@ -4,12 +4,6 @@ import { stripTypeScriptTypes } from 'node:module';
 import http from 'node:http';
 import assert from 'node:assert/strict';
 
-const corpus = JSON.parse(await readFile(new URL('./fixtures/rust-migration/engine.json', import.meta.url), 'utf8'));
-corpus.fixtures.push(...JSON.parse(await readFile(new URL('./fixtures/rust-migration/lexical.json', import.meta.url), 'utf8')).fixtures);
-const hostCorpus = JSON.parse(await readFile(new URL('./fixtures/rust-migration/host.json', import.meta.url), 'utf8'));
-const nativeCorpus = JSON.parse(await readFile(new URL('./fixtures/rust-migration/native-host.json', import.meta.url), 'utf8'));
-const prewarmCorpus = JSON.parse(await readFile(new URL('./fixtures/rust-migration/prewarm.json', import.meta.url), 'utf8'));
-hostCorpus.fixtures.push(...nativeCorpus.fixtures);
 const wasm = await readFile(new URL('../src/engine/termai-engine.wasm', import.meta.url));
 const bridge = stripTypeScriptTypes(await readFile(new URL('../src/engine/wasm.ts', import.meta.url), 'utf8'));
 const directoryData = stripTypeScriptTypes(await readFile(new URL('../src/directory-data.ts', import.meta.url), 'utf8'));
@@ -18,10 +12,7 @@ const server = http.createServer((req, res) => {
   else if (req.url === '/directory-data.ts') { res.writeHead(200, { 'Content-Type': 'application/javascript' }); res.end(directoryData); }
   else if (req.url === '/terminal/termai-engine.wasm') { res.writeHead(200, { 'Content-Type': 'application/wasm' }); res.end(wasm); }
   else if (req.url === '/terminal/engine-fallback.wasm') { res.writeHead(200, { 'Content-Type': 'application/octet-stream' }); res.end(wasm); }
-  else if (req.url === '/terminal/corpus.json') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(corpus)); }
-  else if (req.url === '/terminal/host-corpus.json') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(hostCorpus)); }
-  else if (req.url === '/terminal/prewarm-corpus.json') { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(prewarmCorpus)); }
-  else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><title>Rust engine parity</title>'); }
+  else { res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<!doctype html><title>Rust engine browser checks</title>'); }
 });
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
 let browser;
@@ -44,64 +35,33 @@ try {
     const fallback = await WasmEngine.load(new URL('engine-fallback.wasm', location.href));
     const loading = { streamingCalls, fallback: fallback.call('tokens', ['echo fallback'])[1].value };
     WebAssembly.instantiateStreaming = originalStreaming;
-    const corpus = await (await fetch('./corpus.json')).json();
-    const failures = [];
     // Sort object keys without disturbing array order or numeric values.
     const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
-    for (let index = 0; index < corpus.fixtures.length; index++) {
-      const row = corpus.fixtures[index];
-      const actual = engine.call(row.operation, row.args);
-      if (JSON.stringify(canonical(actual)) !== JSON.stringify(canonical(row.result))) failures.push({ index, row, actual });
-      if (failures.length >= 10) break;
-    }
     let unknown = '', cancelled = '';
     try { engine.call('unknown', []); } catch (error) { unknown = error.message; }
     try { engine.call('tokens', ['ignored'], AbortSignal.abort()); } catch (error) { cancelled = error.name; }
     // A failed call or cancelled request must leave the instance reusable.
     const unicode = engine.call('simpleWords', ["echo 'hello 🌍'"]);
     const key = value => JSON.stringify(canonical(value));
-    const hostCorpus = await (await fetch('./host-corpus.json')).json();
-    const hostFailures = [], preparedFailures = [];
-    for (let index = 0; index < hostCorpus.fixtures.length; index++) {
-      const row = hostCorpus.fixtures[index], observed = new Set();
-      for (const prepared of row.operation === 'suggest' ? [false, true, 'directories'] : [false]) {
-      observed.clear();
-      engine.reset();
-      if (row.metadata) await engine.invoke('seedMetadata', [row.args[1], row.args[2], row.metadata], async () => []);
-      let actual;
-      try {
-        const provide = async callback => ({ results: callback.operations.map(operation => {
-          operation = { ...operation }; delete operation.timeoutMs;
-          const fact = row.facts.find(fact => key(fact.operation) === key(operation));
-          if (!fact) throw new Error('Unexpected host operation: ' + key(operation));
-          observed.add(key(operation));
-          if (prepared === 'directories') {
-            const entries = operation.kind === 'entries' ? fact.reply.value : fact.reply.value?.listing?.entries;
-            if (entries) markImmutableDirectoryEntries(entries);
-          }
-          return fact.reply;
-        }) });
-        actual = { value: await (prepared ? engine.suggest(row.args[0], row.args[1], row.args[2], provide) : engine.invoke(row.operation, row.args, provide)) };
-      } catch (error) { actual = { error: error.message }; }
-      if (key(actual) !== key(row.expected) || row.facts.some(fact => !observed.has(key(fact.operation)))) (prepared ? preparedFailures : hostFailures).push({ index, expected: row.expected, actual });
-      }
-    }
-    engine.reset();
-    const prewarm = await (await fetch('./prewarm-corpus.json')).json();
-    const prewarmFailures = [];
+    const prewarmCatalog = { cwd: '/fixture', commands: ['git'], paths: [], history: [] };
     const previousClock = Object.getOwnPropertyDescriptor(performance, 'now');
     let clock = 0;
     Object.defineProperty(performance, 'now', { configurable: true, value: () => clock });
+    const prewarm = {};
+    const noHost = async () => { throw new Error('Prewarm selection must not request host facts.'); };
     try {
-      for (let index = 0; index < prewarm.steps.length; index++) {
-        const step = prewarm.steps[index]; clock = step.now;
-        const actual = await engine.invoke(step.operation, step.args, async () => { throw new Error('Prewarm selection must not request host facts.'); });
-        if (key(actual) !== key(step.expected)) prewarmFailures.push({ index, actual, expected: step.expected });
-      }
+      prewarm.initial = await engine.invoke('prewarmTargets', [prewarmCatalog, {}], noHost);
+      await engine.invoke('markWarmed', ['git', prewarmCatalog, {}], noHost);
+      clock = 599999;
+      prewarm.warm = await engine.invoke('prewarmTargets', [prewarmCatalog, {}], noHost);
+      clock = 600000;
+      prewarm.expired = await engine.invoke('prewarmTargets', [prewarmCatalog, {}], noHost);
+      clock = 1;
+      engine.reset();
+      prewarm.reset = await engine.invoke('prewarmTargets', [prewarmCatalog, {}], noHost);
     } finally {
       if (previousClock) Object.defineProperty(performance, 'now', previousClock); else delete performance.now;
     }
-    const validation = hostCorpus.fixtures[0];
     const provider = exists => async callback => callback.operations.map(operation => operation.kind === 'syntax' ? true : exists ? { file: true, directory: false, executable: false } : null);
     engine.reset();
     const savedCatalog = { cwd: '/fixture', commands: ['git'], paths: [], history: ['git init'] };
@@ -184,7 +144,7 @@ try {
     const beforeReset = imported;
     const afterReset = await directorySuggest(firstDirectory);
     const directorySnapshots = { warmShared, changed: directoryChanged, eviction, mutable, reset: imported > beforeReset && key(afterReset) === key(firstResult) };
-    const isolationArgs = structuredClone(validation.args); isolationArgs[1].command = 'cat one';
+    const isolationArgs = ['cat one', { command: 'cat one', score: 100, changes: [] }, { cwd: '/fixture', commands: ['cat'], paths: [], history: [] }, {}, { flags: {}, subcommands: {}, requiredPositionals: {} }];
     const isolated = await Promise.all([engine.invoke('candidateValid', isolationArgs, provider(true)), engine.invoke('candidateValid', isolationArgs, provider(false))]);
     const controller = new AbortController();
     let release;
@@ -214,14 +174,12 @@ try {
     const bufferReused = readStep(raw.termai_suggest_buffer(inputBuffer, 4, 2, 1, 0));
     raw.termai_free(inputBuffer);
     const recovered = raw.termai_alloc(1); raw.termai_free(recovered);
-    return { initialization, loading, separateImports, count: corpus.fixtures.length, failures, unknown, cancelled, unicode, hostCount: hostCorpus.fixtures.length, hostFailures, preparedFailures, preparedSnapshots, directorySnapshots, isolated,
-      cancelledPending, reused, hostError, incomplete, allocated, invalidReply, bufferBounds, bufferUtf8, bufferReused, recovered: !!recovered, prewarmFailures, prewarmCount: prewarm.steps.length };
+    return { initialization, loading, separateImports, unknown, cancelled, unicode, prewarm, preparedSnapshots, directorySnapshots, isolated,
+      cancelledPending, reused, hostError, incomplete, allocated, invalidReply, bufferBounds, bufferUtf8, bufferReused, recovered: !!recovered };
   });
-  assert.deepEqual(report.failures, []);
   assert.equal(report.unknown, 'Unknown engine operation.'); assert.equal(report.cancelled, 'AbortError');
   assert.deepEqual(report.unicode, [{ value: 'echo', home: false }, { value: 'hello 🌍', home: false }]);
-  assert.deepEqual(report.hostFailures, []); assert.deepEqual(report.isolated, [true, false]);
-  assert.deepEqual(report.preparedFailures, []);
+  assert.deepEqual(report.isolated, [true, false]);
   assert.deepEqual(report.preparedSnapshots, { reused: true, sharedPreparation: true, ordinary: true, pending: true, reset: true, changed: true });
   assert.deepEqual(report.directorySnapshots, { warmShared: true, changed: true, eviction: true, mutable: true, reset: true });
   assert.deepEqual(report.loading, { streamingCalls: 1, fallback: 'fallback' });
@@ -229,8 +187,8 @@ try {
   assert.equal(report.bufferBounds.state, 'error'); assert.match(report.bufferBounds.error, /Invalid engine buffer/);
   assert.equal(report.bufferUtf8.state, 'error'); assert.match(report.bufferUtf8.error, /utf-8/);
   assert.equal(report.bufferReused.request, 2); assert.match(report.bufferReused.error, /context/i);
-  assert.deepEqual(report.prewarmFailures, []);
-  console.log('PASS Rust browser prewarm parity: ' + report.prewarmCount + ' reference cache steps.');
+  const targets = ['git', 'git init', 'git add', 'git commit', 'git status'];
+  assert.deepEqual(report.prewarm, { initial: targets, warm: targets.slice(1), expired: targets, reset: targets });
   assert.equal(report.cancelledPending, 'AbortError'); assert.equal(report.reused, true);
   assert.equal(report.hostError, 'Host denied.'); assert.equal(report.incomplete, 'Invalid or incomplete host reply.');
   assert.equal(report.allocated, 8); assert.equal(report.invalidReply.ok, false); assert.equal(report.recovered, true);
@@ -240,5 +198,5 @@ try {
   await mkdir(new URL('../.test-artifacts/', import.meta.url), { recursive: true });
   await writeFile(new URL('../.test-artifacts/rust-browser-initialization.json', import.meta.url), JSON.stringify(report.initialization, null, 2) + '\n');
   console.log('Rust browser initialization: ' + JSON.stringify(report.initialization));
-  console.log(`PASS Rust browser WebAssembly: ${report.count} pure and ${report.hostCount} asynchronous reference fixtures, mounted assets, host errors, cancellation, concurrent isolation, allocation limits, and instance reuse.`);
+  console.log('PASS Rust browser WebAssembly: mounted assets, prewarm expiry, prepared catalogs, shared directories, host errors, cancellation, concurrent isolation, allocation limits, and instance reuse.');
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

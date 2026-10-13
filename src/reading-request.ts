@@ -1,6 +1,6 @@
-import { shellQuote } from './engine/repair.ts';
-import { simpleWords } from './engine/validation.ts';
-import { expandSymbols } from './engine/speech.ts';
+import { shellQuote } from './shell-words.ts';
+import { simpleWords } from './shell-words.ts';
+import { expandSymbols } from './speech-symbols.ts';
 
 export const defaultReadingPhrases = ['look at'];
 

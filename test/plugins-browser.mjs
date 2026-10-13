@@ -29,7 +29,7 @@ async function loadPackage(pkg) {
 try {
   await writeFile(fixture.directory + '/app.log', 'info started\nwarning review this\n');
   await mkdir(fixture.directory + '/remote'); await writeFile(fixture.directory + '/remote/app.log', 'remote warning\n');
-  start(process.env.TEST_BACKEND !== 'node' ? root + 'target/debug/termai' : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/plugins-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/data', TERMAI_TOKEN: 'plugin-test-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory, HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH });
+  start(root + 'target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/plugins-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/data', TERMAI_TOKEN: 'plugin-test-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory, HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH });
   await until(async () => { try { return (await fetch(base + '/')).ok; } catch { return false; } }, 'backend');
   assert.equal((await request('plugins/read?path=app.log', undefined, undefined)).status, 401);
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });

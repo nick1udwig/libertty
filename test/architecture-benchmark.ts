@@ -1,10 +1,10 @@
 /** Four-way engine comparison using real host facts and a JSON transport with injected RTT.
  * Idle pushes are measured separately from foreground time; this is not a phone CPU profile. */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm, cp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { compoundRepairRecommended } from '../src/compound-repair.ts';
 import { rustArchitectureAdapter } from './rust-architecture-adapter.mjs';
@@ -12,16 +12,11 @@ import { latencyStatistics, latencyRegressed, type LatencyStatistics } from './a
 import type { Catalog } from '../src/protocol.ts';
 
 const shared = process.env.BENCH_SUITE === 'shared';
-const variants = shared ? [
-  { name: 'master before', ref: process.env.BENCH_BEFORE_MASTER || 'ead84d9', client: false, optimized: true },
+const variants = [
+  { name: 'master before', ref: process.env.BENCH_BEFORE_MASTER || '0e0646c', client: false, optimized: true },
   { name: 'master after', ref: process.env.BENCH_AFTER || '.', client: false, optimized: true },
-  { name: 'experiment before', ref: process.env.BENCH_BEFORE_CLIENT || 'bfa4362', client: true, optimized: true },
+  { name: 'experiment before', ref: process.env.BENCH_BEFORE_CLIENT || '0e0646c', client: true, optimized: true },
   { name: 'experiment after', ref: process.env.BENCH_AFTER || '.', client: true, optimized: true },
-] : [
-  { name: 'original master', ref: 'ba21e2c', client: false, optimized: false },
-  { name: 'optimized master', ref: process.env.BENCH_MASTER || 'master', client: false, optimized: true },
-  { name: 'original experiment', ref: '17e629b', client: true, optimized: false },
-  { name: 'optimized experiment', ref: process.env.BENCH_CLIENT || 'experiment/client-driven-terminal', client: true, optimized: true },
 ];
 const rtts = (process.env.BENCH_RTT || '0,50,150').split(',').map(Number);
 const repeats = Number(process.env.BENCH_REPEATS || 3);
@@ -40,6 +35,8 @@ const cases = [
   ['directory', 'Cd ~ fas get fas pebble agent'], ['exact directory', 'cd git/pebble-agent'],
   ['large directory', 'cd big/wor kspace'], ['referenced file', 'cat ~/docs/my notes dot txt'],
 ] as const;
+const selectedCases = process.env.BENCH_CASES?.split(',');
+if (selectedCases?.some(name => !cases.some(([label]) => label === name))) throw new Error('Unknown benchmark case.');
 const rows: { variant: string; case: string; rtt: number; coldMs: number; warmMs: number; coldRequests: number; warmRequests: number; [key: string]: unknown }[] = [];
 const measurements = new WeakMap<object, { cold: number; warm: LatencyStatistics }>();
 let comparisons = 0;
@@ -68,20 +65,22 @@ esac
     const root = path.join(temp, variant.name.replaceAll(' ', '-')); await mkdir(root);
     const revision = variant.ref === '.' ? 'working tree' : execFileSync('git', ['rev-parse', variant.ref], { encoding: 'utf8' }).trim();
     if (variant.ref === '.') {
-      for (const name of ['server', 'src', 'package.json']) await cp(new URL('../' + name, import.meta.url), path.join(root, name), { recursive: true });
+      for (const name of ['src', 'package.json']) await cp(new URL('../' + name, import.meta.url), path.join(root, name), { recursive: true });
     } else {
       const archive = execFileSync('git', ['archive', revision, 'server', 'src', 'package.json'], { maxBuffer: 10 * 1024 * 1024 });
       execFileSync('tar', ['-x', '-C', root], { input: archive });
     }
     const load = (file: string) => import(pathToFileURL(path.join(root, file)).href);
-    const engine = await load(variant.client ? 'src/engine/suggestions.ts' : 'server/suggestions.ts');
-    const discovery = await load(variant.client ? 'src/engine/discovery.ts' : 'server/discovery.ts');
+    // Archived reference revisions remain available from Git for comparisons.
+    // The working tree runs exclusively through native Rust and its Wasm build.
+    const rust = variant.ref === '.';
+    const engine = rust ? undefined : await load(variant.client ? 'src/engine/suggestions.ts' : 'server/suggestions.ts');
+    const discovery = rust ? undefined : await load(variant.client ? 'src/engine/discovery.ts' : 'server/discovery.ts');
     const modules = variant.client ? {
-      ...await load('server/facts.ts'), ...await load('server/help.ts'), ...await load('src/remote-host.ts'),
-      ...(process.env.BENCH_RUST === '1' && variant.name.endsWith(' after') ? await load('src/engine/wasm.ts') : {}),
-      ...(variant.optimized ? { ...await load('src/directory-cache.ts'), ...await load('server/directories.ts'), ...await load('src/engine/path-repair.ts') } : {}),
+      ...await load('src/remote-host.ts'), ...await load('src/directory-cache.ts'),
+      ...(rust ? await load('src/engine/wasm.ts') : { ...await load('server/facts.ts'), ...await load('server/help.ts'), ...await load('server/directories.ts'), ...await load('src/engine/path-repair.ts') }),
     } : {};
-    loaded.push({ ...variant, revision, engine, discovery, modules, rust: process.env.BENCH_RUST === '1' && variant.name.endsWith(' after') });
+    loaded.push({ ...variant, revision, engine, discovery, modules, rust });
   }
   if (process.env.BENCH_REVERSE === '1') loaded.reverse();
   for (const variant of loaded) {
@@ -89,8 +88,8 @@ esac
     rustPeers.push(adapter);
     Object.assign(variant, { adapter });
   }
-  for (const rtt of rtts) for (const [name, text] of cases) {
-    const warmRepeats = process.env.BENCH_RUST === '1' && rtt === 0 ? Math.max(repeats, cpuRepeats) : repeats;
+  for (const rtt of rtts) for (const [name, text] of cases.filter(([name]) => !selectedCases || selectedCases.includes(name))) {
+    const warmRepeats = rtt === 0 ? Math.max(repeats, cpuRepeats) : repeats;
     let expected: unknown;
     for (const variant of loaded) {
       const coldTimes: number[] = [], coldCounts: number[] = [], coldSizes: number[] = [];
@@ -105,7 +104,7 @@ esac
         const cache = variant.client ? new m.ContextCache() : undefined;
         const syntax = new Map<string, boolean>(), directories = variant.client && variant.optimized ? new m.DirectoryCache() : undefined;
         let host: any, requests = 0, bytes = 0, hostMs = 0, pushKey: string | undefined, pushDirectoryVersion: string | undefined;
-        const discovery = variant.client ? new variant.discovery.Discovery({ help: (command: string, route: string[]) => host.help(command, route), describe: (command: string) => host.describe(command) }) : new variant.discovery.Discovery();
+        const discovery = rust ? { dispose() {} } : variant.client ? new variant.discovery!.Discovery({ help: (command: string, route: string[]) => host.help(command, route), describe: (command: string) => host.describe(command) }) : new variant.discovery!.Discovery();
         const transport = async (body: any, signal: AbortSignal) => {
           requests++; bytes += Buffer.byteLength(JSON.stringify(body));
           await delay(rtt / 2);
@@ -141,12 +140,12 @@ esac
               const start = performance.now();
               if (rust) {
                 const reply = await rust.native(text, signal); actual = reply.candidates; nativeEngineTimes.push(reply.elapsedMs);
-              } else actual = await variant.engine.suggest(text, catalog, env, discovery, undefined, signal);
+              } else actual = await variant.engine!.suggest(text, catalog, env, discovery, undefined, signal);
               hostMs = performance.now() - start;
               bytes = Buffer.byteLength(JSON.stringify({ text })) + Buffer.byteLength(JSON.stringify({ candidates: actual }));
               await delay(rtt / 2);
             } else {
-              const includePaths = !(rust && compoundRepairRecommended(text, { compoundRepair: true } as any)) && (!variant.optimized || !m.directoryInput(text));
+              const includePaths = !(rust && compoundRepairRecommended(text, { compoundRepair: true } as any)) && (!variant.optimized || !(rust ? rust.directoryInput(text) : m.directoryInput(text)));
               const snapshot = await cache.get(transport, signal, includePaths, variant.optimized ? 1 : undefined);
               if (rust && compoundRepairRecommended(text, snapshot)) {
                 nativeDelegated = true;
@@ -158,8 +157,8 @@ esac
                 host = new m.RemoteHost(transport, snapshot, signal, syntax, directories);
                 try {
                   const requestHost = host;
-                  const metadata = discovery.forHost ? discovery.forHost({ help: (command: string, route: string[]) => requestHost.help(command, route), describe: (command: string) => requestHost.describe(command) }) : discovery;
-                  actual = rust ? await rust.suggest(text, snapshot, host, signal) : await variant.engine.suggest(text, snapshot.catalog, { HOME: snapshot.home, HOST_CONTEXT: snapshot.discoveryKey }, metadata, host, undefined, signal);
+                  const metadata = (discovery as any).forHost ? (discovery as any).forHost({ help: (command: string, route: string[]) => requestHost.help(command, route), describe: (command: string) => requestHost.describe(command) }) : discovery;
+                  actual = rust ? await rust.suggest(text, snapshot, host, signal) : await variant.engine!.suggest(text, snapshot.catalog, { HOME: snapshot.home, HOST_CONTEXT: snapshot.discoveryKey }, metadata, host, undefined, signal);
                   if (variant.optimized) await host.verify();
                   break;
                 } catch (error) { if (!variant.optimized || !(error instanceof m.DirectoryChanged) || attempt >= 2) throw error; }
@@ -183,14 +182,31 @@ esac
   await mkdir(new URL('../.test-artifacts/', import.meta.url), { recursive: true });
   const output = process.env.BENCH_OUTPUT || new URL('../.test-artifacts/architecture-benchmark.json', import.meta.url);
   await writeFile(output, JSON.stringify({ revisions: loaded.map(({ name, revision }) => ({ name, revision })), repeats, cpuRepeats, coldRepeats, comparisons, runtime: process.version, platform: `${process.platform}/${process.arch}`, rows }, null, 2));
+  const confirm = new Set<string>();
   if (shared) for (const mode of ['master', 'experiment']) for (const after of rows.filter(row => row.variant === mode + ' after')) {
     const before = rows.find(row => row.variant === mode + ' before' && row.case === after.case && row.rtt === after.rtt)!;
     assert.ok(after.coldRequests <= before.coldRequests, `${mode}: ${after.case} gained cold requests`);
     assert.ok(after.warmRequests <= before.warmRequests, `${mode}: ${after.case} gained warm requests`);
-    if (process.env.BENCH_RUST === '1') {
+    {
       const a = measurements.get(after)!, b = measurements.get(before)!;
       assert.ok(a.cold <= b.cold + Math.max(10, b.cold * 0.2), `${mode}: ${after.case} RTT=${after.rtt} coldMs regressed (${before.coldMs} -> ${after.coldMs})`);
-      assert.ok(!latencyRegressed(a.warm, b.warm, 0.15), `${mode}: ${after.case} RTT=${after.rtt} confirmed warm median regression (${before.warmMs} -> ${after.warmMs})`);
+      if (latencyRegressed(a.warm, b.warm, 0.15)) {
+        const message = `${mode}: ${after.case} RTT=${after.rtt} warm median regression (${before.warmMs} -> ${after.warmMs})`;
+        // Samples within one cohort cannot detect scheduling or JIT drift between variants.
+        // Require a fresh counterbalanced cohort before rejecting sub-millisecond CPU timings.
+        if (after.rtt === 0 && !process.env.BENCH_CONFIRM) { confirm.add(after.case); console.log('Confirming in reversed order: ' + message); }
+        else assert.fail(message);
+      }
     }
+  }
+  if (confirm.size) {
+    await Promise.all(rustPeers.map(peer => peer?.dispose())); rustPeers.length = 0;
+    const confirmation = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+      stdio: 'inherit', env: { ...process.env, BENCH_RTT: '0', BENCH_CASES: [...confirm].join(','),
+        BENCH_REVERSE: process.env.BENCH_REVERSE === '1' ? '0' : '1', BENCH_CONFIRM: '1',
+        BENCH_OUTPUT: fileURLToPath(new URL('../.test-artifacts/architecture-confirmation.json', import.meta.url)) },
+    });
+    if (confirmation.error) throw confirmation.error;
+    assert.equal(confirmation.status, 0, 'The reversed-order cohort must pass the same performance and correctness budgets.');
   }
 } finally { await Promise.all(rustPeers.map(peer => peer?.dispose())); await rm(temp, { recursive: true, force: true }); }

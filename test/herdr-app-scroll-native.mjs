@@ -5,8 +5,8 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
 import { chromium } from 'playwright-core';
-import { herdrRequest, herdrSnapshot } from '../server/herdr.ts';
-import { shellQuote } from '../src/engine/repair.ts';
+import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
+import { shellQuote } from '../src/shell-words.ts';
 
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-app-scroll-');
 const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:3173';
@@ -47,7 +47,7 @@ try {
   const terminal = (await herdrSnapshot(target)).terminals.find(t => t.workspaceId === created.workspace.workspace_id); assert.ok(terminal);
   await delay(400); await herdrRequest(target, 'pane.send_text', { pane_id: terminal.paneId, text: "printf 'SHELL HISTORY\\n%.0s' {1..160}\r" });
   await wait(async () => (await herdrRequest(target, 'pane.read', { pane_id: terminal.paneId, source: 'recent_unwrapped', lines: 1000, format: 'ansi' })).read.text.includes('SHELL HISTORY'), 'native shell history');
-  backend = spawn(process.env.TEST_BACKEND !== 'node' ? new URL('../target/debug/termai', import.meta.url).pathname : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3173', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  backend = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3173', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });

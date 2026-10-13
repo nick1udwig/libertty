@@ -38,8 +38,8 @@ jobs:
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   verify:
     needs: source
-    name: Verify Rust parity on all supported platforms
-    uses: ./.github/workflows/rust-migration.yml
+    name: Verify Rust on all supported platforms
+    uses: ./.github/workflows/rust.yml
     with:
       ref: ${{ needs.source.outputs.sha }}
   build:

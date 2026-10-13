@@ -10,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-gestures-'));
 const port = Number(process.env.TEST_PORT || 3182), base = `http://127.0.0.1:${port}`;
 const token = 'gesture-test-pairing-token-123456789';
-const server = spawn(process.env.TEST_BACKEND !== 'node' ? new URL('../target/debug/termai', import.meta.url).pathname : process.execPath, process.env.TEST_BACKEND !== 'node' ? [] : ['server/index.ts'], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: token, TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: token, TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = '', browser;
 server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));

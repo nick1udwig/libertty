@@ -33,7 +33,7 @@ Select the workflow branch and optionally supply a branch, tag or commit in the 
 Manual runs produce downloadable workflow artifacts and never execute the publication job.
 
 Release builds depend on the complete three-platform Rust parity workflow, including contracts, native tests, actual Chromium Wasm, both engine modes, SSH, Herdr, saved-data rollback, latency gates and packaged browser and installation checks.
-Every native build also runs the type check, frontend build, reference unit suite and installer fixture suite.
+Every native build also runs the type check, frontend build, frontend and contract suite and installer fixture suite.
 The npm postinstall hook applies a version-scoped ssh2 Ed25519 key-generation fix and restores the execute permission on macOS node-pty helpers.
 Keep the deterministic leading-zero key test and helper permission checks when updating those dependencies, and remove the compatibility fixes when stable upstream releases include them.
 The packaged smoke check starts the bundled server, pairs a browser client and exercises a real PTY with Bash prompt hooks.
