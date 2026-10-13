@@ -1,6 +1,7 @@
 use crate::{
     command_policy::{
-        child_scope, flags_for, is_path_position, option_arity, script_command, vocabulary,
+        child_scope, flags_for, is_path_position, option_arity, script_command, script_operand,
+        vocabulary,
     },
     completion::complete_arguments,
     discovery::Discovery,
@@ -36,7 +37,9 @@ fn covered(candidate: &Candidate, metadata: &CommandMetadata) -> bool {
     let Some(words) = simple_words(&candidate.command).filter(|words| !words.is_empty()) else {
         return false;
     };
-    if script_command(&words[0].value) && words.get(1).is_some_and(|w| !w.value.starts_with('-')) {
+    if script_command(&words[0].value)
+        && script_operand(&words.iter().map(|w| &w.value).collect::<Vec<_>>()).is_some()
+    {
         return false;
     }
     let mut scope = words[0].value.clone();

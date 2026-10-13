@@ -1,5 +1,5 @@
 use crate::{
-    command_policy::{option_arity, vocabulary},
+    command_policy::{option_arity, script_operand, vocabulary},
     host::{self, Host},
     repair::{matches, tokens},
     types::{Catalog, CommandMetadata, Flag, Help},
@@ -240,7 +240,8 @@ impl Discovery {
         };
         let command = &first.value;
         if ["python", "python3"].contains(&command.as_str())
-            && words.get(1).is_some_and(|w| w.value.ends_with(".py"))
+            && script_operand(&words.iter().map(|w| &w.value).collect::<Vec<_>>())
+                .is_some_and(|index| words[index].value.ends_with(".py"))
             && let Some(flags) = host::describe(host, command_line).await?
         {
             return Ok(Discovered {

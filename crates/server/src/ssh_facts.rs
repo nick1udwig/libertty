@@ -271,13 +271,16 @@ impl SSHHost {
             }
             "describe" => {
                 let args = tokens(text("command")?);
+                let script = termai_engine::command_policy::script_operand(
+                    &args.iter().map(|w| &w.value).collect::<Vec<_>>(),
+                );
                 if args.len() < 2
                     || !["python", "python3"].contains(&args[0].value.as_str())
-                    || !args[1].value.ends_with(".py")
+                    || !script.is_some_and(|index| args[index].value.ends_with(".py"))
                 {
                     return Ok(Value::Null);
                 }
-                let file = path::resolve(&[&catalog.cwd, &args[1].value]);
+                let file = path::resolve(&[&catalog.cwd, &args[script.unwrap()].value]);
                 if !bounded(cancel, async {
                     Ok(self
                         .files

@@ -170,14 +170,17 @@ impl CatalogHost {
             return Err(ABORTED.into());
         }
         let words = tokens(command);
+        let script = termai_engine::command_policy::script_operand(
+            &words.iter().map(|w| &w.value).collect::<Vec<_>>(),
+        );
         if !words
             .first()
             .is_some_and(|w| ["python", "python3"].contains(&w.value.as_str()))
-            || !words.get(1).is_some_and(|w| w.value.ends_with(".py"))
+            || !script.is_some_and(|index| words[index].value.ends_with(".py"))
         {
             return Ok(None);
         }
-        let file = path::resolve(&[cwd, &words[1].value]);
+        let file = path::resolve(&[cwd, &words[script.unwrap()].value]);
         let info = tokio::fs::metadata(&file).await.ok();
         if cancel.is_cancelled() {
             return Err(ABORTED.into());

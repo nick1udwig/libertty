@@ -155,6 +155,58 @@
       {
         "name": "-c",
         "takesValue": true
+      },
+      {
+        "name": "-u",
+        "takesValue": false
+      },
+      {
+        "name": "-B",
+        "takesValue": false
+      },
+      {
+        "name": "-E",
+        "takesValue": false
+      },
+      {
+        "name": "-s",
+        "takesValue": false
+      },
+      {
+        "name": "-S",
+        "takesValue": false
+      },
+      {
+        "name": "-I",
+        "takesValue": false
+      },
+      {
+        "name": "-O",
+        "takesValue": false
+      },
+      {
+        "name": "-OO",
+        "takesValue": false
+      },
+      {
+        "name": "-v",
+        "takesValue": false
+      },
+      {
+        "name": "-q",
+        "takesValue": false
+      },
+      {
+        "name": "-i",
+        "takesValue": false
+      },
+      {
+        "name": "-W",
+        "takesValue": true
+      },
+      {
+        "name": "-X",
+        "takesValue": true
       }
     ],
     "python": [
@@ -168,6 +220,58 @@
       },
       {
         "name": "-c",
+        "takesValue": true
+      },
+      {
+        "name": "-u",
+        "takesValue": false
+      },
+      {
+        "name": "-B",
+        "takesValue": false
+      },
+      {
+        "name": "-E",
+        "takesValue": false
+      },
+      {
+        "name": "-s",
+        "takesValue": false
+      },
+      {
+        "name": "-S",
+        "takesValue": false
+      },
+      {
+        "name": "-I",
+        "takesValue": false
+      },
+      {
+        "name": "-O",
+        "takesValue": false
+      },
+      {
+        "name": "-OO",
+        "takesValue": false
+      },
+      {
+        "name": "-v",
+        "takesValue": false
+      },
+      {
+        "name": "-q",
+        "takesValue": false
+      },
+      {
+        "name": "-i",
+        "takesValue": false
+      },
+      {
+        "name": "-W",
+        "takesValue": true
+      },
+      {
+        "name": "-X",
         "takesValue": true
       }
     ],

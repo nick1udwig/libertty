@@ -3,7 +3,9 @@
 Implement the [review proposals](alternatives-pipeline-review.md) in separate commits, with regression checks and fixes before each commit.
 Retain the shared Rust engine, original transcript choices, non-executing validation, and authoritative edit guards.
 
-- [ ] Preserve script option scope and interpreter invocation boundaries.
+- [x] Preserve script option scope and interpreter invocation boundaries.
+  Native engine and catalog tests pass, including multiple script options, interpreter options, and module exclusion.
+  Canonical vocabulary contract checks pass.
 - [ ] Retain candidates through validation and combine history with relevant alternatives.
 - [ ] Batch independent facts and reduce redundant filesystem and completion work.
 - [ ] Use coarse backend repair for network-dependent work and retain Herdr metadata.

@@ -70,6 +70,29 @@ pub fn option_arity(value: &str, flags: &[Flag]) -> Option<bool> {
 pub fn script_command(command: &str) -> bool {
     ["python", "python3", "node", "ruby", "bash", "sh"].contains(&command)
 }
+/// Locate a script after interpreter options, without interpreting script arguments.
+pub fn script_operand<T: AsRef<str>>(args: &[T]) -> Option<usize> {
+    let command = args.first()?.as_ref();
+    if !script_command(command) {
+        return None;
+    }
+    let flags = flags_for(command, &CommandMetadata::default());
+    let mut index = 1;
+    while index < args.len() {
+        let word = args[index].as_ref();
+        if ["-c", "-m", "-e", "--eval"].contains(&word) {
+            return None;
+        }
+        if word == "--" {
+            return (index + 1 < args.len()).then_some(index + 1);
+        }
+        if !word.starts_with('-') {
+            return Some(index);
+        }
+        index += if option_arity(word, &flags)? { 2 } else { 1 };
+    }
+    None
+}
 pub fn directory_command(command: &str) -> bool {
     ["cd", "pushd", "upload"].contains(&command)
 }
@@ -89,6 +112,10 @@ pub fn is_path_position<T: AsRef<str>>(args: &[T]) -> bool {
     input_file_command(command)
         || editor_command(command)
         || directory_command(command)
-        || (script_command(command) && args.len() == 1)
+        || (script_command(command)
+            && script_operand(args).is_none()
+            && !args
+                .iter()
+                .any(|arg| ["-c", "-m", "-e", "--eval"].contains(&arg.as_ref())))
         || (command == "git" && args.get(1).is_some_and(|arg| arg.as_ref() == "add"))
 }

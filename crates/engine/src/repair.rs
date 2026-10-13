@@ -965,6 +965,7 @@ struct State<'a> {
     quoted: Vec<usize>,
     fold_flags: bool,
     repaired_flag: bool,
+    script_scope: bool,
 }
 #[derive(Default)]
 struct Push {
@@ -999,12 +1000,11 @@ fn push<'a>(
         new.repaired_flag |= opts.flag.is_some();
     }
     new.value_next = opts.flag.as_ref().is_some_and(|flag| flag.takes_value);
-    new.flags = if ["python", "python3"].contains(&new.args.first())
-        && new.args.len() == 2
+    new.script_scope |= ["python", "python3"].contains(&new.args.first())
         && value.ends_with(".py")
-        && let Some(script_flags) = script_flags
-    {
-        script_flags
+        && script_operand(&new.args.values()) == Some(new.args.len() - 1);
+    new.flags = if new.script_scope {
+        script_flags.unwrap_or(state.flags)
     } else {
         flags_ref(&new.scope, metadata, state.flags)
     };
@@ -1072,6 +1072,7 @@ fn repair_one(
                         && words[0].value != item.value
                         && words[0].value.to_lowercase() == item.value.to_lowercase()),
                 repaired_flag: false,
+                script_scope: false,
             }
         })
         .collect();

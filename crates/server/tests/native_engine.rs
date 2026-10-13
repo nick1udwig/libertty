@@ -32,6 +32,71 @@ fn executable(file: &std::path::Path, content: &str) {
 }
 
 #[tokio::test]
+async fn script_options_keep_their_scope_after_interpreter_options_and_multiple_values() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    std::fs::write(root.path().join("tool.py"), "import argparse\np=argparse.ArgumentParser()\np.add_argument('--output')\np.add_argument('--force', action='store_true')\n").unwrap();
+    let mut catalog = catalog(cwd, &["python3"]);
+    catalog.paths = vec!["tool.py".into()].into();
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog,
+        BTreeMap::from([
+            ("HOME".into(), cwd.into()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    for (input, expected) in [
+        (
+            "python3 tool.py output result force",
+            "python3 tool.py --output result --force",
+        ),
+        (
+            "python3 tool.py force output result",
+            "python3 tool.py --force --output result",
+        ),
+        (
+            "python3 tool.py --output result --force",
+            "python3 tool.py --output result --force",
+        ),
+        (
+            "python3 -u tool.py output result force",
+            "python3 -u tool.py --output result --force",
+        ),
+    ] {
+        let result = engine
+            .suggest(input, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            result
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["command"] == expected && c["literal"] != true),
+            "{input}: {result}"
+        );
+        assert!(
+            result
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["command"] == input && c["literal"] == true)
+        );
+    }
+    let flags = host
+        .services
+        .catalog
+        .describe("python3 -m tool.py", cwd, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(flags.is_none());
+}
+
+#[tokio::test]
 async fn spelled_cd_uses_directory_discovery_without_catalog_paths() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();
