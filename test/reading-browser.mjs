@@ -104,8 +104,9 @@ try {
   await page.locator('[role=tab]').first().click();
   await frame.locator('#terminal textarea').focus();
   await frame.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'look at docs slash guide dot md', bubbles: true, cancelable: true })));
-  await frame.locator('.reading-choice').filter({ hasText: 'Read docs/Guide.md' }).waitFor();
-  await frame.locator('.reading-choice').filter({ hasText: 'Read docs/Guide.md' }).tap();
+  const guideChoice = frame.locator('.reading-choice').filter({ hasText: /Read docs\/guide\.md/i });
+  await guideChoice.waitFor();
+  await guideChoice.tap();
   await page.locator('.reading-view:not([hidden]) .reading-markdown h1').waitFor();
   assert.equal(await page.locator('.reading-view:not([hidden]) .reading-markdown h1').textContent(), 'Nested guide');
   await page.locator('[role=tab]').first().click();
