@@ -1,10 +1,11 @@
+import { constrainedLink } from './wire.ts';
 import type { FileClient } from './file-browser.ts';
 import { downloadFile, type DownloadTicket } from './download-view.ts';
 export function saveDownload(base: string, prepare: () => Promise<DownloadTicket>, name?: string) { return downloadFile(base, prepare, name); }
 export function fileClient(base: string, session: string, token: () => string | undefined, authenticate: () => Promise<void>): FileClient {
   async function request(route: string, query: Record<string, string>, init: RequestInit = {}) {
     const url = new URL(route, base); url.search = new URLSearchParams({ session, ...query }).toString();
-    const send = () => fetch(url, { ...init, credentials: 'same-origin', cache: 'no-store', headers: { ...init.headers, ...(token() ? { Authorization: 'Bearer ' + token() } : {}) } });
+    const send = () => fetch(url, { ...init, credentials: 'same-origin', cache: 'no-store', headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...init.headers, ...(token() ? { Authorization: 'Bearer ' + token() } : {}) } });
     let response = await send();
     if (response.status === 401) { await authenticate(); response = await send(); }
     const result = await response.json();

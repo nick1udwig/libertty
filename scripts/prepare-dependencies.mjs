@@ -20,7 +20,9 @@ export async function prepareDependencies(directory = root, platform = process.p
   // Remove this version-scoped patch once ssh2 publishes its upstream fix:
   // https://github.com/mscdex/ssh2/pull/1515
   const ssh = path.join(directory, 'node_modules/ssh2');
-  const pkg = JSON.parse(await readFile(path.join(ssh, 'package.json'), 'utf8'));
+  const packageFile = await readFile(path.join(ssh, 'package.json'), 'utf8').catch(error => { if (error.code !== 'ENOENT') throw error; });
+  if (!packageFile) return; // SSH and PTY peers are development-only test dependencies.
+  const pkg = JSON.parse(packageFile);
   if (pkg.version !== '1.17.0') throw new Error('Review the Ed25519 compatibility patch before updating ssh2.');
   const file = path.join(ssh, 'lib/keygen.js'), source = await readFile(file, 'utf8');
   const start = source.indexOf("    case 'ed25519': {"), end = source.indexOf('      // Parse private key', start);

@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -9,7 +10,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-gestures-'));
 const port = Number(process.env.TEST_PORT || 3182), base = `http://127.0.0.1:${port}`;
 const token = 'gesture-test-pairing-token-123456789';
-const server = spawn(process.execPath, ['server/index.ts'], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: token, TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: token, TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = '', browser;
 server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -28,6 +29,7 @@ try {
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
   });
+  await installWireObserver(context);
   await context.addInitScript(() => {
     window.__sent = [];
     window.__clipboardWrites = [];
@@ -45,8 +47,8 @@ try {
     };
     const Original = WebSocket;
     window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', e => { const m = JSON.parse(e.data); if (m.type === 'state') window.__state = m.state; if (m.type === 'output') window.__outputSeq = m.seq; }); }
-      send(data) { if (typeof data === 'string') window.__sent.push(JSON.parse(data)); super.send(data); }
+      constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; if (m.type === 'output') window.__outputSeq = m.seq; }); }
+      send(data) { if (window.__wireSent(data).type !== 'audio') window.__sent.push(window.__wireSent(data)); super.send(data); }
     };
   });
   const page = await context.newPage(), errors = []; page.on('pageerror', e => errors.push(String(e)));

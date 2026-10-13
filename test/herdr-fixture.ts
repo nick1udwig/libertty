@@ -9,6 +9,7 @@ export async function herdrFixture() {
   const actions: any[] = [];
   let closeError = '';
   let createdSpaces = 0;
+  let frameSequence = 0;
   const remove = <T>(items: T[], matches: (item: T) => boolean) => { for (let i = items.length - 1; i >= 0; i--) if (matches(items[i])) items.splice(i, 1); };
   const snapshot = { version: 'test', protocol: 22,
     workspaces: [{ workspace_id: 'w1', label: 'Termai', active_tab_id: 't1' }] as any[],
@@ -37,7 +38,8 @@ export async function herdrFixture() {
     if (cursor) cursors.set(paneId, cursor);
     const point = cursors.get(paneId) || { x: Math.min(width - 1, rows.at(-1)?.length || 0), y: Math.max(0, rows.length - 1), visible: true };
     const bytes = '\x1b[2J' + rows.map((row, i) => '\x1b[' + (i + 1) + ';1H' + row).join('') + '\x1b[' + (point.y + 1) + ';' + (point.x + 1) + 'H\x1b[?25' + (point.visible === false ? 'l' : 'h');
-    await writeFile(directory + '/' + pane.terminal_id + '.json', JSON.stringify({ type: 'terminal.frame', encoding: 'ansi', width, height, full: true, bytes: Buffer.from(bytes).toString('base64') }) + '\n');
+    // Native Herdr sends a fresh sequenced baseline even if resize keeps the size.
+    await writeFile(directory + '/' + pane.terminal_id + '.json', JSON.stringify({ type: 'terminal.frame', seq: ++frameSequence, encoding: 'ansi', width, height, full: true, bytes: Buffer.from(bytes).toString('base64') }) + '\n');
   };
   const addTerminal = (workspaceId: string, name: string, isAgent = true) => {
     const i = snapshot.panes.length, pane = { pane_id: workspaceId + ':p' + i, terminal_id: 'term_' + i, workspace_id: workspaceId, tab_id: 't' + (i + 1), focused: true, label: name, cwd: '/workspace' };
@@ -74,6 +76,7 @@ export async function herdrFixture() {
           reply({ ok: true });
         }
         else if (request.method === 'fixture.terminal.release') { actions.push(request); reply({ ok: true }); socket.end(); }
+        else if (request.method === 'fixture.terminal.scroll') { actions.push(request); reply({ ok: true }); }
         else if (request.method === 'server.agent_manifests') reply({ manifests: [{ agent: 'codex' }, { agent: 'claude' }, { agent: 'pi' }] });
         else if (request.method === 'workspace.create') {
           actions.push(request);
@@ -130,12 +133,13 @@ export async function herdrFixture() {
     const size = { cols: Number(args[args.indexOf('--cols') + 1] || 120), rows: Number(args[args.indexOf('--rows') + 1] || 40) };
     socket.on('connect', () => send('open', { mode, ...size })); socket.on('error', () => process.exit(1)); socket.on('close', () => process.exit(0));
     socket.on('data', data => { if (String(data).includes('"error"')) process.exit(1); });
-    if (mode === 'control') { const input = readline.createInterface({ input: process.stdin }); input.on('line', line => { const command = JSON.parse(line); if (command.type === 'terminal.resize') send('resize', command); else if (command.type === 'terminal.release') send('release'); }); input.on('close', () => send('release')); }
+    if (mode === 'control') { const input = readline.createInterface({ input: process.stdin }); input.on('line', line => { const command = JSON.parse(line); if (command.type === 'terminal.resize') send('resize', command); else if (command.type === 'terminal.release') send('release'); else if (command.type === 'terminal.scroll') send('scroll', command); }); input.on('close', () => send('release')); }
     let last = ''; setInterval(async () => { try { const text = await readFile(file, 'utf8'); if (text !== last) { last = text; process.stdout.write(text); } } catch {} }, 50);
   `);
   await writeFile(binary, '#!/bin/sh\nif [ "$1" = terminal ]; then shift 2; exec ' + process.execPath + ' ' + directory + '/observe.mjs "$@"; fi\nprintf "Fixture Herdr command\\n"\n', { mode: 0o700 });
   await Promise.all(snapshot.panes.map(p => updateFrame(p.pane_id)));
   return { directory, socketPath, binary, snapshot, actions,
+    async setFrame(index: number, frame: unknown) { await writeFile(directory + '/' + snapshot.panes[index].terminal_id + '.json', JSON.stringify(frame) + '\n'); },
     rename(index: number, label: string) { snapshot.panes[index].label = label; event(); },
     setScreen(index: number, text: string, cursor?: { x: number; y: number; visible?: boolean }, size?: { width: number; height: number }) { const pane = snapshot.panes[index]; if (size) dimensions.set(pane.pane_id, size); cursors.delete(pane.pane_id); screens.set(pane.pane_id, text); void updateFrame(pane.pane_id, cursor); },
     addTerminal,

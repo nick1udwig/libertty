@@ -13,11 +13,13 @@ export interface BuiltinServices extends ReadingServices {
   api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string): Promise<T>;
   connect(host: HostProfile, pluginId: string): Promise<void>;
   closeSession(tab: TerminalTab): Promise<void>;
+  reconnectHerdr(tab: TerminalTab): Promise<void>;
   store(): void;
   notice(message: string): void;
   terminalURL(backend: BackendProfile, session: string): string;
   frame(tab: TerminalTab, frame?: HTMLIFrameElement): void;
   herdr(tab: TerminalTab, view?: HerdrView): void;
+  ready(tab: TerminalTab): void;
   attention(tab: TerminalTab, count: number): void;
   notification(connection: string, event: Parameters<ConstructorParameters<typeof HerdrView>[0]['notification']>[0]): void;
   notificationDevice(backendId: string): string | undefined;
@@ -58,15 +60,18 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         const backend = s.backend(tab); await s.authenticate(backend);
         const { HerdrView } = await import('./herdr-view.ts');
         if (!s.active(tab)) throw new Error('This tab has closed.');
-        const session = herdrSession(tab.herdrSession), sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
-        const connection = backend.url + '#' + (tab.herdrSource ? sourceHost || tab.hostId || tab.herdrSource : '') + '#' + session;
-        const view = new HerdrView({ url: backend.url, session, source: tab.herdrSource, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), key: 'termai.herdr.' + connection,
+        const session = herdrSession(tab.herdrSession), source = tab.herdrSource, sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
+        const connection = backend.url + '#' + (source ? sourceHost || tab.hostId || source : '') + '#' + session;
+        const view = new HerdrView({ url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'termai.herdr.' + connection,
           notificationDevice: () => s.notificationDevice(tab.backendId),
-          api: <T>(name: string, data?: unknown) => s.api<T>(backend, name + '?' + new URLSearchParams({ herdrSession: session, ...(tab.herdrSource ? { herdrSource: tab.herdrSource } : {}) }), data),
-          changed: count => s.attention(tab, count), notification: event => s.notification(connection, event), notice: s.notice });
+          api: async <T>(name: string, data?: unknown) => {
+            try { return await s.api<T>(backend, name + '?' + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data); }
+            catch (error: any) { if (error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
+          },
+          changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice });
         view.element.id = 'herdr-' + tab.id; s.herdr(tab, view);
         void s.watch(tab).then(() => view.updatePresence()).catch(error => s.notice(error.message));
-        return { element: view.element, setVisible: visible => view.setVisible(visible), applySettings: () => view.applySettings(), copySelection: () => view.copySelection(),
+        return { element: view.element, setVisible: visible => view.setVisible(visible), setHeld: held => view.setHeld(held), applySettings: () => view.applySettings(), copySelection: () => view.copySelection(),
           dispose() { view.dispose(); s.herdr(tab); } };
       },
       async close(tab) { await s.unwatch(tab); if (tab.ownsSession) await s.closeSession(tab); return true; },

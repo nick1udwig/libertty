@@ -1,6 +1,6 @@
 {
   "name": "termai",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "license": "MIT",
@@ -8,15 +8,28 @@
     "node": ">=22.18.0"
   },
   "scripts": {
+    "migration:schemas": "node scripts/migration-schemas.mjs",
+    "migration:inventory": "node scripts/migration-inventory.mjs",
+    "migration:vocabulary": "node scripts/migration-vocabulary.mjs",
+    "build:rust-engine": "node scripts/build-rust-engine.mjs",
+    "build:backend": "cargo build --locked -p termai-server --bin termai",
+    "test:rust": "cargo test --workspace --locked",
+    "test:rust-browser": "node test/rust-engine-browser.mjs",
+    "test:contracts": "node --test test/migration-contracts.test.mjs",
+    "test:rust-state": "node test/rust-state-compat.mjs",
+    "test:rust-herdr": "node test/rust-herdr.mjs",
     "postinstall": "node scripts/prepare-dependencies.mjs",
-    "dev": "node server/index.ts",
-    "build": "tsc --noEmit && vite build",
-    "start": "NODE_ENV=production node server/index.ts",
-    "test": "node --test test/*.test.ts test/dependencies.test.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build:frontend": "npm run build:rust-engine && tsc --noEmit && vite build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start": "cargo run --release --locked -p termai-server --bin termai",
+    "test": "node --test test/*.test.ts test/dependencies.test.mjs test/migration-contracts.test.mjs",
     "test:browser": "node test/browser.mjs",
+    "test:reconnect": "node test/reconnect-browser.mjs",
     "test:gestures": "node test/terminal-gestures-browser.mjs",
     "test:touch": "node test/terminal-touch-browser.mjs",
     "test:reading": "node test/reading-browser.mjs",
+    "test:files": "node test/files-browser.mjs",
     "bench:architecture": "node test/architecture-benchmark.ts",
     "test:workspace": "node test/workspace-browser.mjs",
     "test:herdr": "node test/herdr-browser.mjs",
@@ -26,25 +39,29 @@
     "test:pairing": "node test/pairing-browser.mjs",
     "test:plugins": "node test/plugins-browser.mjs",
     "release:package": "node scripts/package-release.mjs",
-    "test:install": "node --test test/install.test.mjs test/setup-integrations.test.mjs"
+    "test:install": "node --test test/install.test.mjs test/setup-integrations.test.mjs",
+    "test:herdr-flash": "node test/herdr-space-flash-native.mjs",
+    "test:herdr-loading": "node test/herdr-loading-browser.mjs",
+    "build:test-support": "cargo build --locked -p termai-server --examples",
+    "pretest": "npm run build:test-support"
   },
   "dependencies": {
     "ghostty-web": "0.4.0-next.20.g1858a59",
     "libopus-wasm": "0.4.1",
     "markdown-it": "^15.0.2",
-    "node-pty": "1.1.0",
-    "ssh2": "1.17.0",
-    "web-push": "^3.6.7",
     "ws": "8.21.3"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",
     "@types/node": "26.6.1",
     "@types/ssh2": "^1.15.6",
-    "@types/web-push": "^3.6.4",
     "@types/ws": "8.18.1",
+    "ajv": "8.20.0",
     "playwright-core": "1.63.0",
     "typescript": "7.0.2",
-    "vite": "8.3.0"
+    "typescript-reference": "npm:typescript@5.9.3",
+    "vite": "8.3.0",
+    "node-pty": "1.1.0",
+    "ssh2": "1.17.0"
   }
 }

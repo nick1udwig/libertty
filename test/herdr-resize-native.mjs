@@ -1,11 +1,12 @@
+import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
 import { chromium } from 'playwright-core';
-import { herdrRequest, herdrSnapshot } from '../server/herdr.ts';
-import { shellQuote } from '../src/engine/repair.ts';
+import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
+import { shellQuote } from '../src/shell-words.ts';
 
 // A real Herdr desktop and responsive PTY app, in an entirely disposable HOME.
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-resize-');
@@ -22,7 +23,7 @@ try {
     const draw = () => { const cols = process.stdout.columns, rows = process.stdout.rows;
       writeFileSync(${JSON.stringify(dir + '/geometry.json')}, JSON.stringify({ cols, rows }));
       process.stdout.write('\\x1b[2J\\x1b[HResponsive terminal\\r\\n' + '╭' + '─'.repeat(cols - 2) + '╮\\r\\n│ › type here' + ' '.repeat(Math.max(0, cols - 14)) + '│\\r\\n' + '╰' + '─'.repeat(cols - 2) + '╯\\r\\n' + cols + ' columns × ' + rows + ' rows\\x1b[3;5H\\x1b[?25h'); };
-    process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.on('data', data => { if (data.includes(3)) process.exit(); });
+    process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.on('data', data => { if (data.includes(3)) process.exit(); writeFileSync(${JSON.stringify(dir + '/input.txt')}, data); });
     draw(); process.on('SIGWINCH', () => setImmediate(draw)); setInterval(() => {}, 10000);
   `);
   herdr = spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server'], { cwd: dir, env, stdio: 'ignore' });
@@ -37,7 +38,7 @@ try {
   await wait(async () => (await geometry()).cols > 80, 'desktop application geometry');
   const original = await geometry();
   const base = 'http://127.0.0.1:3172';
-  backend = spawn(process.execPath, ['server/index.ts'], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3172', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  backend = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3172', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated Termai backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
@@ -47,9 +48,19 @@ try {
     const body = source.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
     assert.notEqual(body, source); await route.fulfill({ response, body });
   });
+  await installWireObserver(context);
   await context.addInitScript(() => {
-    window.__resizes = []; window.__frames = []; const Original = WebSocket;
-    window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', event => { const m = JSON.parse(event.data); if (m.type === 'herdr-frame') window.__frames.push({ width: m.width, height: m.height }); }); } send(data) { try { const m = JSON.parse(data); if (m.type === 'resize') window.__resizes.push(m); } catch {} return super.send(data); } };
+    window.__resizes = []; window.__frames = []; window.__layoutPaints = []; const Original = WebSocket;
+    const observe = () => {
+      const t = window.__terminal;
+      if (t && window.__layoutPaints.length < 300) {
+        const buffer = t.buffer.active, top = buffer.viewportY;
+        const title = buffer.getLine(top)?.translateToString(true), border = buffer.getLine(top+1)?.translateToString(true);
+        if (title?.startsWith('Responsive terminal')) window.__layoutPaints.push({ time: performance.now(), cols:t.cols, rows:t.rows, title, border, visible: getComputedStyle(document.querySelector('#terminal-viewport')).visibility !== 'hidden' });
+      }
+      requestAnimationFrame(observe);
+    }; requestAnimationFrame(observe);
+    window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'herdr-frame') window.__frames.push({ width: m.width, height: m.height }); }); } send(data) { try { const m = window.__wireSent(data); if (m.type === 'resize') window.__resizes.push(m); } catch {} return super.send(data); } };
   });
   const errors = [];
   const phone = await context.newPage(); phone.on('pageerror', error => errors.push(error.message));
@@ -60,6 +71,11 @@ try {
   const mobile = await geometry();
   assert.ok(mobile.cols < original.cols);
   await phone.waitForFunction(() => { const t = window.__terminal; return t.buffer.active.getLine(1)?.translateToString(true) === '╭' + '─'.repeat(t.cols - 2) + '╮' && t.buffer.active.cursorX === 4 && t.buffer.active.cursorY === 2; });
+  const firstFrames = await phone.evaluate(() => window.__frames.filter(f => f.width));
+  assert.deepEqual(firstFrames[0], { width:mobile.cols, height:mobile.rows }, 'First native frame must already have the requested mobile geometry');
+  const paints = await phone.evaluate(() => window.__layoutPaints);
+  await writeFile(root + '.test-artifacts/herdr-initial-layout-paints.json', JSON.stringify({ original, mobile, firstFrames, paints }, null, 2));
+  assert.deepEqual(paints.filter(p => p.visible && p.border !== '╭' + '─'.repeat(p.cols - 2) + '╮'), [], 'Every visible mobile paint must already contain the resized native layout');
   await mkdir(root + '.test-artifacts', { recursive: true }); await phone.screenshot({ path: root + '.test-artifacts/herdr-resize-mobile.png' });
   const webDesktop = await context.newPage(); await webDesktop.setViewportSize({ width: 1200, height: 800 });
   await webDesktop.goto(phone.url()); await webDesktop.waitForFunction(() => window.__terminal && document.querySelector('#connection-label').textContent === 'Connected');
@@ -71,6 +87,20 @@ try {
   await wait(async () => JSON.stringify(await geometry()) === JSON.stringify(original), 'backgrounding releases native geometry');
   await phone.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
   await wait(async () => JSON.stringify(await geometry()) === JSON.stringify(mobile), 'foreground reconnect reacquires mobile geometry');
+  await phone.bringToFront();
+  await phone.locator('#terminal-viewport.awaiting-herdr-layout').waitFor({state:'detached'});
+  const input = phone.locator('#terminal textarea');
+  await input.evaluate(element => { window.__inputBlurs=0; element.addEventListener('blur',()=>window.__inputBlurs++); });
+  const canvas = await phone.locator('#terminal canvas').boundingBox();
+  await phone.touchscreen.tap(canvas.x+canvas.width*.5,canvas.y+canvas.height*.3);
+  assert.equal(await input.evaluate(element => element===document.activeElement && !element.readOnly),true,'A real Herdr pane accepts tapped input');
+  await phone.setViewportSize({width:390,height:460});
+  await wait(async () => { const actual=await geometry(), wanted=await phone.evaluate(() => ({cols:window.__terminal.cols,rows:window.__terminal.rows})); return actual.rows<mobile.rows && JSON.stringify(actual)===JSON.stringify(wanted); },'keyboard opening resizes the real PTY');
+  await phone.locator('#terminal-viewport.awaiting-herdr-layout').waitFor({state:'detached'});
+  assert.equal(await phone.evaluate(() => window.__inputBlurs),0,'The real Herdr redraw must keep the keyboard input focused');
+  assert.equal(await input.evaluate(element => element===document.activeElement && !element.readOnly),true,'Keyboard-sized Herdr remains editable');
+  await phone.keyboard.type('k');
+  await wait(async () => await readFile(dir+'/input.txt','utf8').catch(()=>undefined)==='k','typed input reaches the real Herdr application after keyboard resize');
   await phone.bringToFront(); await phone.setViewportSize({ width: 360, height: 500 });
   await wait(async () => { const size = await geometry(); return size.cols < mobile.cols && size.rows < mobile.rows; }, 'keyboard/screen size updates native PTY');
   const resized = await phone.evaluate(() => ({ cols: window.__terminal.cols, rows: window.__terminal.rows })); assert.deepEqual(await geometry(), resized);

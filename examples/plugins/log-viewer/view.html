@@ -21,7 +21,7 @@
   async function read() {
     if (busy || !termai.visible) return;
     busy = true; refresh.disabled = true;
-    try { const result = await termai.request('file.read'); text = result.text; truncated = result.truncated; document.querySelector('#path').textContent = result.path; render(); }
+    try { const result = await termai.request('file.read'); if (result.unchanged) return; text = result.text; truncated = result.truncated; document.querySelector('#path').textContent = result.path; render(); }
     catch (error) { status.textContent = error.message; }
     finally { busy = false; refresh.disabled = false; }
   }

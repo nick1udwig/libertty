@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
@@ -7,7 +8,8 @@ import { createHash } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import os from 'node:os';
 import ssh2 from 'ssh2';
-import { fingerprint } from '../server/vault.ts';
+import { sshdPath, sshFixturePath } from './support/sshd.mjs';
+import { fingerprint } from './support/ssh-key.ts';
 import { herdrFixture } from './herdr-fixture.ts';
 
 const fixture = await herdrFixture(), origin = 'http://127.0.0.1:3167', base = origin + '/herdr-test';
@@ -24,7 +26,7 @@ daemon.on('connection', (socket, request) => {
     else { const message = JSON.parse(bytes.toString()); if (message.type === 'finish') socket.send(JSON.stringify({ type: 'final', text: 'Dictated directly into Herdr' })); if (message.type === 'ack') voiceAcks++; }
   });
 });
-const backend = spawn(process.execPath, ['server/index.ts'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+const backend = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, TERMAI_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token', TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate', NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3167', TERMAI_BASE_PATH: '/herdr-test',
   TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/termai',
   TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory,
@@ -44,6 +46,10 @@ try {
   const bearer = (await (await request('connect', { noSession: true, token })).json()).accessToken;
   assert.equal((await request('herdr/snapshot?herdrSession=../../escape', undefined, bearer)).status, 400);
   assert.equal((await request('herdr/action', { action: 'rename', terminalId: 'missing', name: 'x' }, bearer)).status, 400);
+  {
+    for (const geometry of [{ mobile: true, cols: 0, rows: 30 }, { mobile: true, cols: 40, rows: 1001 }, { mobile: true, cols: 40.5, rows: 30 }, { mobile: true, cols: 40 }]) assert.equal((await request('herdr/ticket?terminalId=term_0', geometry, bearer)).status, 400);
+    const reply = await (await request('herdr/ticket?terminalId=term_0', { mobile: true, cols: 40, rows: 30 }, bearer)).json(); assert.equal(reply.initialGeometry, true);
+  }
   const ticket = (await (await request('herdr/ticket', {}, bearer)).json()).ticket;
   const wsURL = base.replace('http:', 'ws:') + '/herdr/ws?ticket=' + ticket;
   await new Promise((resolve, reject) => { const ws = new WebSocket(wsURL, { origin }); ws.once('open', () => { ws.close(); resolve(); }); ws.once('error', reject); });
@@ -70,6 +76,7 @@ try {
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:').replace(/([\w$]+)=([\w$]+)\?new ([\w$]+)\(([\w$]+),([\w$]+)\):void 0/, '$1=$2?(window.__testProjection=new $3($4,$5)):void 0');
     assert.notEqual(body, original); assert.ok(body.includes('window.__testProjection')); await route.fulfill({ response, body });
   });
+  await installWireObserver(context);
   await context.addInitScript(() => {
     window.__installed = false; window.__permissionRequests = 0; window.__presence = [];
     const media = window.matchMedia.bind(window); window.matchMedia = query => query === '(display-mode: standalone)' ? { ...media(query), matches: window.__installed } : media(query);
@@ -86,7 +93,7 @@ try {
     window.__notices = [];
     if (window.parent === window && !location.pathname.endsWith('terminal.html')) document.addEventListener('DOMContentLoaded', () => new MutationObserver(() => window.__notices.push(document.querySelector('#notice')?.textContent)).observe(document.querySelector('#notice'), { childList: true }));
     window.__herdrMessages = [];
-    const Original = window.WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', e => { const m = JSON.parse(e.data); if (m.type === 'state') window.__state = m.state; }); if (String(args[0]).includes('/herdr/ws')) { this.addEventListener('message', e => window.__herdrMessages.push(JSON.parse(e.data))); this.addEventListener('close', e => window.__herdrMessages.push({ closed: e.code })); } } send(data) { try { const message = JSON.parse(data); if (message.type === 'notification-presence') window.__presence.push(message); } catch {} return super.send(data); } };
+    const Original = window.WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; }); if (String(args[0]).includes('/herdr/ws')) { this.addEventListener('message', async e => window.__herdrMessages.push(await window.__wireMessage(e.data, this))); this.addEventListener('close', e => window.__herdrMessages.push({ closed: e.code })); } } send(data) { try { const message = window.__wireSent(data); if (message.type === 'notification-presence') window.__presence.push(message); } catch {} return super.send(data); } };
     Object.defineProperty(document, 'hasFocus', { value: () => window.__focused });
     // Capture scheduled playback while still fetching/decoding the real bundled assets.
     if (window.parent !== window) return;
@@ -106,10 +113,24 @@ try {
   assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('termai.hosts'))).some(host => host.kind === 'herdr'), 'Typing herdr saves its host automatically');
   const agentFrame = async () => {
     const element = await page.locator('.herdr-terminal').elementHandle(), frame = await element.contentFrame();
-    await frame.waitForFunction(() => window.__testTerminal && window.__state?.inputTarget === 'program' && document.querySelector('#connection-label').textContent === 'Connected');
+    await frame.waitForFunction(() => window.__testTerminal && window.__state?.inputTarget === 'program' && document.querySelector('#connection-label').textContent === 'Connected' && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && frameElement.checkVisibility({checkVisibilityCSS:true}));
     return frame;
   };
   const tab = id => page.locator('.herdr-agent-tab[data-terminal="term_' + id + '"]');
+  const tabBounds = async (...ids) => {
+    let bounds;
+    // Snapshots replace the strip DOM, so read both drag targets in one turn.
+    await until(async () => {
+      bounds = await page.evaluate(ids => ids.map(id => {
+        const element = document.querySelector('.herdr-agent-tab[data-terminal="term_' + id + '"]');
+        if (!element?.checkVisibility({ checkVisibilityCSS: true })) return null;
+        const rect = element.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      }), ids);
+      return bounds.every(Boolean);
+    }, 'visible agent drag targets');
+    return bounds;
+  };
   await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').waitFor();
   await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces', 'New installations default to spaces');
@@ -158,8 +179,18 @@ try {
   await until(async () => await desktop.evaluate(cols => window.__testProjection.nativeColumns === cols, nativeSize.cols), 'Desktop sees the shared mobile PTY geometry');
   assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.resize' && a.params.cols === nativeSize.cols), 'Mobile screen changes resize the real terminal');
   await desktop.close(); await page.bringToFront(); await page.setViewportSize({ width: 390, height: 844 });
+  await terminal.waitForFunction(cols => window.__testTerminal.cols === cols && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && getComputedStyle(frameElement).visibility !== 'hidden', mobileSize.cols);
   const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
-  const hold = async locator => { await locator.scrollIntoViewIfNeeded(); const rect = await locator.boundingBox(); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd'); };
+  const hold = async locator => {
+    let rect;
+    await until(async () => {
+      try { await locator.scrollIntoViewIfNeeded(); rect = await locator.boundingBox(); return !!rect; }
+      catch (error) { if (!error.message.includes('not attached')) throw error; return false; }
+    }, 'attached tab for long press');
+    await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2);
+    await page.waitForFunction(() => [...document.querySelectorAll('.herdr-tab-menu, .host-terminal-menu')].some(menu => menu.checkVisibility({ checkVisibilityCSS: true })));
+    await touch('touchEnd');
+  };
   const swipeStrip = async mode => {
     const style = await page.addStyleTag({ content: '.herdr-agent-strip .herdr-agent-tab { min-width: 260px; }' });
     const strip = page.locator('.herdr-agent-strip:visible');
@@ -262,8 +293,13 @@ try {
   await page.setViewportSize({ width: 1100, height: 900 });
   await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#font-size').fill('24'); await page.locator('#page-back').click();
   await until(async () => await terminal.evaluate(() => window.__testTerminal.cols === 80), 'Desktop full-width layout retains the native column count after releasing mobile geometry');
+  await terminal.waitForFunction(() => {
+    const viewport = document.querySelector('#terminal-viewport');
+    return window.__testTerminal.options.fontSize === 32 && viewport.classList.contains('full-width') && viewport.scrollWidth > viewport.clientWidth + 160;
+  });
   const wideBounds = await terminal.locator('#terminal-viewport').boundingBox();
   await touch('touchStart', wideBounds.x + 250, wideBounds.y + 200); await delay(30); await touch('touchMove', wideBounds.x + 90, wideBounds.y + 200); await touch('touchEnd');
+  await terminal.waitForFunction(() => document.querySelector('#terminal-viewport').scrollLeft > 100);
   assert.ok(await terminal.locator('#terminal-viewport').evaluate(el => el.scrollLeft > 100), 'Full-width terminal pans sideways with the shared gesture code');
   assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Panning leaves the keyboard closed');
   await terminal.locator('#terminal-viewport').evaluate(el => el.scrollLeft = 0); await terminal.evaluate(() => window.__testTerminal.scrollToBottom());
@@ -307,19 +343,20 @@ try {
   await terminal.locator('#termai-dictation').click(); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
   await terminal.locator('#termai-dictation').click(); await until(() => voiceAcks === 2, 'dictation after a hidden view reconnects');
   await swipeStrip('Agents');
-  const before = await tab(0).boundingBox(), after = await tab(2).boundingBox();
-  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2); await page.mouse.down(); await delay(500);
+  const [before, after] = await tabBounds(0, 2);
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2); await page.mouse.down();
+  await page.locator('.herdr-tab-menu').waitFor({ state: 'visible' });
   await page.mouse.move(after.x + after.width * .8, after.y + after.height / 2, { steps: 10 }); await page.mouse.up();
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   // Real touch drag goes back and forth; moving tabs must retain capture.
-  await delay(40);
-  const routeRect = await tab(0).boundingBox(), testRect = await tab(1).boundingBox();
-  await touch('touchStart', routeRect.x + routeRect.width / 2, routeRect.y + routeRect.height / 2); await delay(500);
+  const [routeRect, testRect] = await tabBounds(0, 1);
+  await touch('touchStart', routeRect.x + routeRect.width / 2, routeRect.y + routeRect.height / 2);
+  await page.locator('.herdr-tab-menu').waitFor({ state: 'visible' });
   await touch('touchMove', testRect.x + 5, testRect.y + testRect.height / 2); await touch('touchEnd');
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_0', 'term_1', 'term_2']);
-  await delay(40);
-  const routeAgain = await tab(0).boundingBox(), docsRect = await tab(2).boundingBox();
-  await touch('touchStart', routeAgain.x + routeAgain.width / 2, routeAgain.y + routeAgain.height / 2); await delay(500);
+  const [routeAgain, docsRect] = await tabBounds(0, 2);
+  await touch('touchStart', routeAgain.x + routeAgain.width / 2, routeAgain.y + routeAgain.height / 2);
+  await page.locator('.herdr-tab-menu').waitFor({ state: 'visible' });
   await touch('touchMove', docsRect.x + docsRect.width - 5, docsRect.y + docsRect.height / 2); await touch('touchEnd');
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   await tab(2).click();
@@ -366,15 +403,34 @@ try {
   assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control'));
   assert.equal(await page.locator('.herdr-view').count(), 0); assert.equal(fixture.snapshot.agents.length, 3);
   await page.setViewportSize({ width: 390, height: 844 });
+  // Reopening a dedicated local Herdr transport reuses its tab after the source closes.
+  const localHerdr = await page.evaluate(async () => {
+    const api = async (name, data) => { const response = await fetch(new URL('api/' + name, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); return result; };
+    const source = await api('sessions', { files: true, name: 'Dedicated Herdr' });
+    const target = await api('herdr/connect', { source: source.id, session: '' });
+    const tab = { id: crypto.randomUUID(), session: source.id, backendId: 'primary', hostId: 'local', pluginId: 'herdr', pluginVersion: '1', mode: 'herdr', ownsSession: true, name: 'Dedicated Herdr', ...target };
+    const tabs = JSON.parse(localStorage.getItem('termai.tabs')); tabs.push(tab); localStorage.setItem('termai.tabs', JSON.stringify(tabs)); localStorage.setItem('termai.activeTab', JSON.stringify(tab.id));
+    return tab;
+  });
+  await page.reload(); await tab(0).waitFor();
+  await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, localHerdr.session);
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).waitFor();
+  await page.locator('#terminal-back').click();
+  await page.getByRole('button', { name: /^Terminals for This machine / }).click();
+  await page.getByRole('menuitem', { name: 'Connect Herdr', exact: true }).click();
+  await page.locator('#plugin-connect-form').getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.session !== previous.session && tab.herdrSource === tab.session && !tab.ended), localHerdr);
+  await tab(0).waitFor(); assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the local Herdr tab');
+  await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
   const controlsBeforeSSH = fixture.actions.filter(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control').length;
   // A real disposable SSH server exercises command capture and Unix socket forwarding.
   await mkdir(fixture.directory + '/remote');
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'), identity = ssh2.utils.generateKeyPairSync('ed25519', { cipher: 'aes256-ctr', passphrase: 'fixture-passphrase' });
   await writeFile(fixture.directory + '/host-key', hostKey.private, { mode: 0o600 });
   await writeFile(fixture.directory + '/authorized', identity.public + '\n');
-  const config = ['Port 3168', 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + fixture.directory + ':/usr/bin:/bin', 'Subsystem sftp internal-sftp'].join('\n') + '\n';
+  const config = ['Port 3168', 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + sshFixturePath(fixture.directory), 'Subsystem sftp internal-sftp'].join('\n') + '\n';
   await writeFile(fixture.directory + '/sshd_config', config);
-  sshd = spawn('/usr/bin/sshd', ['-D', '-e', '-f', fixture.directory + '/sshd_config'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  sshd = spawn(sshdPath(), ['-D', '-e', '-f', fixture.directory + '/sshd_config'], { stdio: ['ignore', 'pipe', 'pipe'] });
   sshd.stderr.on('data', bytes => logs += bytes); await delay(150);
   const trust = fingerprint(ssh2.utils.parseKey(hostKey.private).getPublicSSH());
   const remote = await page.evaluate(async ({ identity, trust, username }) => {
@@ -395,8 +451,26 @@ try {
   const remoteCols = await terminal.evaluate(() => window.__testTerminal.cols);
   await until(async () => await terminal.evaluate(cols => window.__testProjection.nativeColumns === cols, remoteCols), 'SSH controller frames match the mobile grid');
   assert.equal((await request('herdr/ticket?herdrSource=' + remote.id, {}, bearer)).status, 404, 'Another pairing cannot use an SSH host it does not own');
-  await terminal.locator('#terminal textarea').focus(); await page.keyboard.type('SSH input');
+  await terminal.evaluate(() => window.__testTerminal.focus());
+  assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Explicit terminal focus must enable SSH input');
+  await page.keyboard.type('SSH input');
   await until(() => fixture.actions.filter(a => a.method === 'pane.send_text').map(a => a.params.text).join('').includes('SSH input'), 'input through SSH Unix forwarding');
+  // A captured SSH profile reconnects through its saved source host with fresh credentials.
+  const reconnectKey = await page.evaluate(async privateKey => {
+    const response = await fetch(new URL('api/keychain', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', name: 'Reconnect fixture', privateKey, passphrase: 'fixture-passphrase' }) });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
+  }, identity.private);
+  const remoteHerdrTab = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.mode === 'herdr'));
+  await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, remote.id);
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
+  await page.locator('#ssh-dialog').waitFor({ state: 'visible' });
+  await page.locator('#ssh-key').selectOption(reconnectKey.fingerprint); await page.locator('#ssh-secret').fill('fixture-passphrase'); await page.locator('#ssh-connect').click();
+  await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.herdrSource !== previous.herdrSource && tab.herdrSource === tab.session && tab.ownsSession && !tab.ended), remoteHerdrTab);
+  await tab(0).waitFor(); terminal = await agentFrame();
+  assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the captured SSH Herdr tab');
+  const restoredSource = await page.evaluate(hostId => JSON.parse(localStorage.getItem('termai.hosts')).find(host => host.id === hostId).herdrSource, remoteHost.id);
+  assert.notEqual(restoredSource, remote.id, 'The captured host must save its refreshed source');
+  assert.equal((await request('herdr/ticket?herdrSource=' + restoredSource, {}, bearer)).status, 404, 'Reconnection retains owner isolation');
   const standalone = await context.newPage(); await standalone.goto(base + '/terminal.html');
   await standalone.waitForFunction(() => window.__state?.ready);
   await standalone.locator('#terminal textarea').focus(); await standalone.keyboard.type('herdr'); await standalone.keyboard.press('Enter');
@@ -473,13 +547,13 @@ try {
   await page.evaluate(() => { window.__focused = true; window.dispatchEvent(new Event('focus')); });
   const notificationTab = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.mode === 'herdr').id);
   await page.evaluate(tabId => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'herdr-notification', tabId, terminalId: 'term_1' } })), notificationTab);
-  await until(async () => await page.locator('.herdr-view:visible iframe').getAttribute('data-terminal') === 'term_1');
+  await until(async () => await page.locator('.herdr-view:visible .herdr-terminal').getAttribute('data-terminal') === 'term_1');
   await page.goto(base + '/?notificationTab=' + notificationTab + '&notificationTerminal=term_2');
-  await until(async () => await page.locator('.herdr-view:visible iframe').getAttribute('data-terminal') === 'term_2');
+  await until(async () => await page.locator('.herdr-view:visible .herdr-terminal').getAttribute('data-terminal') === 'term_2');
   assert.equal(new URL(page.url()).search, '', 'Cold notification routing consumes its parameters');
   await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#herdr-notifications button').first().click();
   await until(async () => !(await page.evaluate(() => localStorage.getItem('termai.notifications.primary'))));
   assert.ok(notificationRequests.some(request => request.url.endsWith('/unsubscribe')));
   assert.deepEqual(errors, []); console.log('Herdr browser checks passed: automatic discovery, shared direct input/shortcuts/touch scroll/copy, live-output selection and wrapped/labeled link taps, native mobile sizing/release, desktop reflow/full-width layouts and panning, PWA enable/disable/scoped workers/focus/click routing, session labels, hold menus, ordering, persistence, server pane/space close, sounds and scoped tickets.');
-} catch (error) { await page?.screenshot({ path: '/tmp/termai-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all(page.frames().map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('.selection-notice')?.textContent, rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: window.__herdrMessages?.filter(m => m.type === 'herdr-frame').slice(-2), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('termai.hosts'), tabs: localStorage.getItem('termai.tabs') })).catch(() => ({}))); throw error; }
+} catch (error) { await page?.screenshot({ path: '/tmp/termai-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all(page.frames().map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('.selection-notice')?.textContent, pending: document.querySelector('#terminal-viewport')?.className, parentVisible: frameElement && getComputedStyle(frameElement).visibility, layout: window.__herdrMessages?.filter(m => m.type === 'herdr-layout'), rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: JSON.stringify(window.__herdrMessages?.filter(m => m.type === 'herdr-frame').map(m => ({width:m.width,height:m.height,full:m.full}))), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('termai.hosts'), tabs: localStorage.getItem('termai.tabs') })).catch(() => ({}))); throw error; }
 finally { clearInterval(liveOutput); await browser?.close(); backend.kill('SIGTERM'); await exited; sshd?.kill('SIGTERM'); for (const socket of daemon.clients) socket.terminate(); await new Promise(resolve => daemon.close(resolve)); await fixture.close(); }

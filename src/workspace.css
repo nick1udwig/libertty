@@ -8,5 +8,7 @@
 .terminal-loading-spinner{width:38px;height:38px;border:3px solid #416256;border-top-color:#44d5ac;border-radius:50%;animation:terminal-loading-spin .8s linear infinite}
 @keyframes terminal-loading-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.terminal-loading-spinner{animation-duration:2s}}
+#terminal-loading.has-previous{inset:60px 12px auto auto;flex-direction:row;gap:9px;max-width:calc(100% - 24px);padding:10px 13px;border:1px solid #416256;border-radius:10px;background:#11201bf2;box-shadow:0 3px 12px #0004;pointer-events:none}
+#terminal-loading.has-previous .terminal-loading-spinner{width:18px;height:18px;border-width:2px;flex:none}
 
 .plugin-entry{border:1px solid #44485e;border-radius:12px;padding:14px;margin:12px 0}.plugin-entry strong{display:block}.plugin-entry .actions{flex-wrap:wrap}.plugin-entry .toggle{margin:10px 0!important}.plugin-entry p{overflow-wrap:anywhere}

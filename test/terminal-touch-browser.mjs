@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -9,7 +10,7 @@ const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pat
 const base = 'http://127.0.0.1:3183', history = Array.from({ length: 160 }, (_, i) => `ROW-${i} alpha beta gamma`).join('\n')
   + '\nRead https://example.com/touch\n\x1b]8;;https://example.com/help\x07Open help\x1b]8;;\x07\n';
 fixture.setScreen(0, history);
-const server = spawn(process.execPath, ['server/index.ts'], { cwd: root, stdio: 'ignore', env: { ...process.env,
+const server = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, stdio: 'ignore', env: { ...process.env,
   NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3183', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base,
   TERMAI_DATA_DIR: fixture.directory + '/termai', HOME: fixture.directory, TERMAI_CWD: fixture.directory, TERMAI_TOKEN: '',
   TERMAI_NO_RC: '1', HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH,
@@ -26,13 +27,20 @@ try {
   for (const herdr of [false, true]) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const errors = [];
-    await context.addInitScript(({ accessToken }) => {
+    await installWireObserver(context);
+    await context.route(url => url.pathname.endsWith('/api/dictation'), route => route.fulfill({ json: { installed: true, available: true } }));
+  await context.addInitScript(({ accessToken }) => {
       window.__copies = []; window.__inputs = []; window.__opened = [];
+      window.__nativeTouches = [];
+      for (const type of ['pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel']) document.addEventListener(type, event => {
+        if (event.isTrusted) window.__nativeTouches.push({ type, at: event.timeStamp, target: { tag: event.target?.tagName, id: event.target?.id, class: event.target?.className }, x: event.clientX, y: event.clientY, primary: event.isPrimary, pointer: event.pointerType,
+          touches: event.changedTouches && [...event.changedTouches].map(touch => ({ id: touch.identifier, x: touch.clientX, y: touch.clientY })) });
+      }, { capture: true });
       Object.defineProperty(navigator, 'clipboard', { value: { writeText: async text => { window.__copies.push(text); } } });
       window.open = (...args) => { window.__opened.push(args); return null; };
       const Original = WebSocket;
-      window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', e => { const m = JSON.parse(e.data); if (m.type === 'state') window.__state = m.state; }); } send(data) { if (typeof data === 'string' && JSON.parse(data).type === 'input') window.__inputs.push(data); return super.send(data); } };
-      if (parent === window) addEventListener('message', e => { if (e.data?.type === 'terminal-loaded') e.source.postMessage({ type: 'authorize', accessToken }, location.origin); });
+      window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; }); } send(data) { if (window.__wireSent(data).type === 'input') window.__inputs.push(JSON.stringify(window.__wireSent(data))); return super.send(data); } };
+      if (parent === window) addEventListener('message', async e => { if (e.data?.type === 'terminal-loaded') e.source.postMessage({ type: 'authorize', accessToken }, location.origin); });
     }, { accessToken });
     await context.route('**/assets/terminal-*.js', async route => {
       const response = await route.fetch(), original = await response.text();
@@ -58,28 +66,35 @@ try {
     }
     // Deliberately omit pointer events. These previously got stopped without
     // ever starting a gesture, leaving both scrolling and selection inert.
-    const touch = (type, point, selector = '#terminal canvas') => frame.evaluate(({ type, point, selector }) => {
-      const target = document.querySelector(selector), contact = { identifier: 42, target, clientX: point.x, clientY: point.y };
-      const touches = type === 'touchend' || type === 'touchcancel' ? [] : [contact];
-      // Linux WebKit exposes Touch but does not allow constructing one. Replay
-      // the event's lists explicitly; native taps are checked separately below.
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [contact] } });
-      target.dispatchEvent(event);
-    }, { type, point, selector });
-    const pointer = (type, point = { x: 150, y: 180 }) => frame.evaluate(({ type, point }) => document.querySelector('#terminal canvas').dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 42, pointerType: 'touch', isPrimary: true, clientX: point.x, clientY: point.y })), { type, point });
+    const contacts = events => frame.evaluate(events => {
+      for (const { type, point, selector = '#terminal canvas' } of events) {
+        const target = document.querySelector(selector);
+        if (type.startsWith('touch')) {
+          const contact = { identifier: 42, target, clientX: point.x, clientY: point.y };
+          const touches = type === 'touchend' || type === 'touchcancel' ? [] : [contact];
+          // Linux WebKit exposes Touch but does not allow constructing one.
+          // Native taps are checked separately below.
+          const event = new Event(type, { bubbles: true, cancelable: true });
+          Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [contact] } });
+          target.dispatchEvent(event);
+        } else target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 42, pointerType: 'touch', isPrimary: true, clientX: point.x, clientY: point.y }));
+      }
+    }, events);
+    const touch = (type, point, selector = '#terminal canvas') => contacts([{ type, point, selector }]);
+    const pointer = (type, point = { x: 150, y: 180 }) => contacts([{ type, point }]);
     const start = { x: 150, y: 180 }, end = { x: 150, y: 280 };
-    await touch('touchstart', start); await touch('touchmove', end);
+    // Keep synthetic drag sequences in one browser turn so slow test-driver
+    // round trips cannot turn them into a 350ms long press.
+    const drag = types => contacts(types.map(type => ({ type, point: type === 'touchmove' || type === 'touchend' ? end : start })));
+    await drag(['touchstart', 'touchmove']);
     assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Touch-only dragging must scroll ' + (herdr ? 'Herdr' : 'the normal terminal'));
-    await touch('touchend', end); await touch('touchstart', start); await touch('touchcancel', start);
+    await drag(['touchend', 'touchstart', 'touchcancel']);
     // Pointer cancellation must not cancel the continuing touch stream.
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
-    await pointer('pointerdown'); await touch('touchstart', start); await pointer('pointercancel'); await pointer('lostpointercapture');
-    await touch('touchmove', end); await touch('touchend', end); await touch('touchstart', start); await touch('touchcancel', start);
+    await drag(['pointerdown', 'touchstart', 'pointercancel', 'lostpointercapture', 'touchmove', 'touchend', 'touchstart', 'touchcancel']);
     assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Touch scrolling survives pointer cancellation');
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
-    await touch('touchstart', start); await pointer('pointerdown'); await pointer('pointercancel');
-    await touch('touchmove', end); await touch('touchend', end); await touch('touchstart', start); await touch('touchcancel', start);
+    await drag(['touchstart', 'pointerdown', 'pointercancel', 'touchmove', 'touchend', 'touchstart', 'touchcancel']);
     assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Touch-first event ordering must also keep touch ownership');
     const word = await frame.evaluate(() => {
       const t = window.__testTerminal, b = t.buffer.active, rect = document.querySelector('#terminal canvas').getBoundingClientRect(), top = b.length - t.rows - Math.floor(t.getViewportY());
@@ -97,14 +112,22 @@ try {
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta gamma');
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
     for (const [needle, expected] of [['https://example.com/touch', 'https://example.com/touch'], ['Open help', 'https://example.com/help']]) {
-      const point = await frame.evaluate(needle => {
+      const linkPoint = () => frame.evaluate(needle => {
         const t = window.__testTerminal, b = t.buffer.active, r = document.querySelector('#terminal canvas').getBoundingClientRect(), top = b.length - t.rows;
         for (let row = 0; row < t.rows; row++) { const col = b.getLine(top + row)?.translateToString(true).indexOf(needle) ?? -1; if (col >= 0) return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; } throw new Error('Missing link');
       }, needle);
+      const point = await linkPoint();
       await touch('touchstart', point); await touch('touchend', point);
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected, 'Touch-only taps activate terminal links');
       const count = await frame.evaluate(() => window.__opened.length);
-      await page.touchscreen.tap(point.x, point.y);
+      await frame.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const nativePoint = await linkPoint(), frameBounds = await page.locator('iframe').boundingBox();
+      await page.touchscreen.tap(frameBounds.x + nativePoint.x, frameBounds.y + nativePoint.y);
+      await frame.waitForFunction(count => window.__opened.length >= count + 1, count).catch(async error => {
+        console.error('Native link tap:', JSON.stringify({ herdr, needle, nativePoint, frameBounds, observed: await frame.evaluate(() => ({ opened: window.__opened, copies: window.__copies, events: window.__nativeTouches,
+          viewport: { width: innerWidth, height: innerHeight, scale: visualViewport?.scale, ratio: devicePixelRatio }, screen: { width: screen.width, height: screen.height }, rows: window.__testTerminal.rows, cols: window.__testTerminal.cols, scroll: window.__testTerminal.getViewportY() })) }));
+        throw error;
+      });
       assert.equal(await frame.evaluate(() => window.__opened.length), count + 1, 'Native pointer/touch delivery opens a link exactly once');
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected);
     }

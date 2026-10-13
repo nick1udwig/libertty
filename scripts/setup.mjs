@@ -69,6 +69,7 @@ export async function install(options, dependencies = {}) {
   const metadata = JSON.parse(await readFile(path.join(bundle, 'release.json'), 'utf8'));
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(metadata.version) || metadata.tag !== 'v' + metadata.version || !/^[a-f0-9]{40}$/.test(metadata.commit)) throw new Error('Invalid release metadata.');
   if (metadata.platform !== platform + '-' + (dependencies.arch || process.arch)) throw new Error('This release does not match the host platform.');
+  if (metadata.backend !== undefined && !['node', 'rust'].includes(metadata.backend)) throw new Error('Unsupported release backend.');
   const previous = await read(configFile);
   if (previous && JSON.parse(previous).managedBy !== 'termai') throw new Error('Existing config.json is not managed by Termai; review it before installing.');
   const env = { HOST: '127.0.0.1', PORT: '7321', TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_HOSTS: 'localhost,127.0.0.1', TERMAI_DATA_DIR: path.join(dataHome, 'termai'), TERMAI_CWD: home, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome, PATH: [path.join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].join(':'), ...(previous ? JSON.parse(previous).env : {}) };
@@ -121,7 +122,8 @@ export async function install(options, dependencies = {}) {
   try {
     await rm(current + '.new', { force: true }); await symlink(releaseDir, current + '.new'); await rename(current + '.new', current);
     await atomic(configFile, JSON.stringify(config, null, 2) + '\n');
-    await atomic(launch, '#!/bin/sh\n' + marker + '\nexec ' + shellQuote(path.join(current, 'bin/node')) + ' ' + shellQuote(path.join(current, 'scripts/launch.mjs')) + ' --config ' + shellQuote(configFile) + ' "$@"\n', 0o755);
+    const command = metadata.backend === 'rust' ? shellQuote(path.join(current, 'bin/termai-backend')) : shellQuote(path.join(current, 'bin/node')) + ' ' + shellQuote(path.join(current, 'scripts/launch.mjs'));
+    await atomic(launch, '#!/bin/sh\n' + marker + '\nexec ' + command + ' --config ' + shellQuote(configFile) + ' "$@"\n', 0o755);
     await atomic(userBin, '#!/bin/sh\n' + marker + '\nexec ' + shellQuote(launch) + ' "$@"\n', 0o755);
     if (service) {
       if (platform === 'linux') {

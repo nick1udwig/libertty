@@ -1,5 +1,6 @@
+import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -20,7 +21,7 @@ await promisify(execFile)('git', ['init', '-q', fixture]);
 await writeFile(path.join(fixture, 'change.txt'), 'before\n');
 await promisify(execFile)('git', ['-C', fixture, 'add', 'change.txt']);
 await writeFile(path.join(fixture, 'change.txt'), 'after\n');
-const server = spawn(process.execPath, ['server/index.ts'], { cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), NODE_ENV: 'production', HOME: fixture, TERMAI_CWD: fixture, TERMAI_DATA_DIR: fixture + '/data', TERMAI_TOKEN: token, TERMAI_NO_RC: '1', TERMAI_BASE_PATH: mount }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(path.join(root, 'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), NODE_ENV: 'production', HOME: fixture, TERMAI_CWD: fixture, TERMAI_DATA_DIR: fixture + '/data', TERMAI_TOKEN: token, TERMAI_NO_RC: '1', TERMAI_BASE_PATH: mount }, stdio: ['ignore', 'pipe', 'pipe'] });
 const serverExited = once(server, 'exit');
 let logs = '', browser;
 server.stdout.on('data', data => logs += data); server.stderr.on('data', data => logs += data);
@@ -40,10 +41,11 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(String(error)));
+  await installWireObserver(page.context());
   await page.addInitScript(() => {
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', event => { const message = JSON.parse(event.data); if (message.type === 'state') window.__shellState = message.state; }); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'state') window.__shellState = message.state; }); }
     };
   });
   await page.goto(base + '/');
@@ -162,9 +164,11 @@ try {
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
   await frame.waitForFunction(() => window.__shellState.ready);
+  const missingExitCode = spawnSync('ls', ['/definitely/not/present'], { stdio: 'ignore' }).status;
+  assert.ok(missingExitCode > 0, 'The missing-file fixture must fail on this platform.');
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at ls /definitely/not/present'); await page.keyboard.press('Enter');
-  await page.locator('.reading-view.reading-empty:not([hidden])').waitFor();
-  assert.match(await page.locator('.reading-view.reading-empty:not([hidden])').textContent(), /Exited with status 2.*Check the terminal for errors/s);
+  await page.waitForFunction(code => new RegExp(`Exited with status ${code}.*Check the terminal for errors`, 's').test(document.querySelector('.reading-view.reading-empty:not([hidden])')?.textContent || ''), missingExitCode);
+  assert.match(await page.locator('.reading-view.reading-empty:not([hidden])').textContent(), new RegExp(`Exited with status ${missingExitCode}.*Check the terminal for errors`, 's'));
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   let finishRead, startedRead;
   const readingStarted = new Promise(resolve => startedRead = resolve);

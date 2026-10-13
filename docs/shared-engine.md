@@ -1,21 +1,21 @@
 # One repair engine, two execution locations
 
-`src/engine/index.ts` is the public entry point for the internal TypeScript library.
-Both the native server and browser worker import it.
+`crates/engine` implements the shared library in Rust.
+The backend links it natively, and the browser worker loads its WebAssembly build through `src/engine/wasm.ts`.
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
-The library's types live inside `src/engine`; it imports no Node, browser, network or terminal APIs.
+The library's types live in `crates/engine/src/types.rs`, and it has no filesystem, subprocess, browser, network or terminal effects.
+The TypeScript implementation remains in `src/engine` as the independent parity oracle.
 
 The default remains server execution: `npm start` or `npm run dev`.
-Use `TERMAI_ENGINE=client npm start` (or `npm run dev`) for the previous experimental execution path.
+Use `TERMAI_ENGINE=client npm start` (or `npm run dev`) for browser WebAssembly execution.
 This setting chooses where the same library runs; it does not change its matching policy.
 The WebSocket hello message announces the choice to the frontend, without an additional request.
 
 ## Adapters
 
-- `server/suggestions.ts` supplies the native host and delegates to the library.
-  `server/discovery.ts` supplies native help/script facts and probe-pool capacity.
-  The small server validation/path modules are compatibility exports, not separate algorithms.
-- `src/suggestion-worker.ts` uses the same public entry point with `RemoteHost`, preserving fact batching, context prefetch, directory freshness checks and retries.
+- `crates/server/src/engine.rs` supplies native host facts and delegates to the library's bounded asynchronous runtime.
+  Native help, script and completion adapters retain probe-pool capacity and cancellation.
+- `src/suggestion-worker.ts` invokes the same engine through WebAssembly with `RemoteHost`, preserving fact batching, context prefetch, directory freshness checks and retries.
 - Each `Discovery` instance owns a session's learned metadata.
   `forHost()` binds operations to a particular repair, so overlapping work cannot accidentally pick up another request's host or cancellation signal.
 - Terminal edits and execution remain outside the library.
@@ -33,23 +33,24 @@ Remote help requests still receive independent route verification at the server 
 
 ## Validation and performance
 
-The shared-engine benchmark compares the optimized pre-change commits (`ead84d9` master and `bfa4362` experiment) against both execution modes in the new source.
+The Rust migration benchmark compares the retained TypeScript implementation with native Rust and Wasm using the same working-tree snapshot and prepared inputs.
 It checks complete candidate arrays and rejects increases in cold or warm foreground request counts for any case.
 
-Run `BENCH_SUITE=shared npm run bench:architecture`.
+Run `BENCH_SUITE=shared BENCH_BEFORE_MASTER=. BENCH_BEFORE_CLIENT=. BENCH_AFTER=. BENCH_RUST=1 BENCH_REPEATS=3 npm run bench:architecture`.
 By default, the after variants use a copied snapshot of the working tree; set `BENCH_AFTER` to a commit for a reproducible revision.
-`BENCH_RTT`, `BENCH_REPEATS` and `BENCH_OUTPUT` control the measurement.
+`BENCH_RTT`, `BENCH_REPEATS`, `BENCH_COLD_REPEATS` and `BENCH_OUTPUT` control the measurement.
+Cold latency uses the median of fresh application-cache trials and retains the first call and individual cold samples separately.
 The original four-way architecture benchmark remains available without `BENCH_SUITE`.
 
-Run `npm test` and `npm run build`, then `TEST_ENGINE=server npm run test:browser` and `TEST_ENGINE=client npm run test:browser`.
+Run `npm test`, `npm run test:rust` and `npm run build`, then `TEST_ENGINE=server npm run test:browser` and `TEST_ENGINE=client npm run test:browser`.
 `TEST_BASE_PATH=/t` checks a mounted deployment.
 Server browser checks reject worker creation, fact requests and context pushes.
 Client browser checks require one warm directory request containing freshness validation.
 
-This work consolidates the library and its two existing execution paths.
-The subsequent [workspace implementation](workspace.md) adds SSH and multiple backends through adapters to this engine.
+See the [Rust migration report](rust-migration.md) for current parity results, browser initialization measurements and platform gates.
+The [workspace implementation](workspace.md) supplies SSH and multiple backends through adapters to this engine.
 
-## Before/after results (`516ad8f`)
+## Historical TypeScript consolidation results (`516ad8f`)
 
 Both execution modes retain the pre-change request counts and candidate arrays across all nine cases.
 The recorded runs passed **8,208 candidate-array comparisons**: seven warm repetitions at each of 0/50/150 ms RTT, plus two local runs of 101 warm repetitions in opposite variant orders.

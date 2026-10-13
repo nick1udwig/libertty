@@ -1,6 +1,6 @@
 # Install and set up Termai
 
-The release installer bundles Node, production dependencies and the built frontend, so you do not need npm or a compiler on the server.
+The release installer bundles the native Rust executable, built frontend and a Node runtime for setup tools, so you do not need npm or a compiler on the server.
 The command below becomes available after the first release built by the [release workflow](../.github/workflows/release.yml) has finished publishing its assets.
 
 ```sh
@@ -85,7 +85,7 @@ bash /tmp/termai-install.sh
 To select a release, including a prerelease:
 
 ```sh
-bash /tmp/termai-install.sh --version v0.1.1
+bash /tmp/termai-install.sh --version v0.2.0
 ```
 
 To change the port and mount:
@@ -110,7 +110,7 @@ It does not bypass sudo authentication or Tailscale login.
 For a downloaded or locally built archive, supply its SHA-256 digest explicitly:
 
 ```sh
-bash install.sh --archive release/termai-v0.1.1-linux-x64.tar.gz --sha256 YOUR_SHA256 --no-companions --no-tailscale
+bash install.sh --archive release/termai-v0.2.0-linux-x64.tar.gz --sha256 YOUR_SHA256 --no-companions --no-tailscale
 ```
 
 ## Configuration, upgrades and troubleshooting

@@ -60,7 +60,7 @@ export class TerminalProjection {
     if (this.live && this.canRenderLive()) return;
     this.paint();
   }
-  frame(frame: { width: number; height: number; full: boolean; bytes: string }) {
+  frame(frame: { width: number; height: number; full: boolean; bytes: string | Uint8Array }) {
     const wasLive = this.live;
     if (!frame.width || !frame.height) {
       this.native?.free(); this.native = undefined; this.complete = this.live = this.awaitingFrame = false;
@@ -71,7 +71,7 @@ export class TerminalProjection {
       if (this.native) this.native.resize(frame.width, frame.height); else this.native = this.ghostty.createTerminal(frame.width, frame.height);
       this.rebuild();
     }
-    const bytes = Uint8Array.from(atob(frame.bytes), c => c.charCodeAt(0));
+    const bytes = typeof frame.bytes === 'string' ? Uint8Array.from(atob(frame.bytes), c => c.charCodeAt(0)) : frame.bytes;
     if (frame.full) { this.native.write('\x1bc\x1b[2J\x1b[H'); this.awaitingFrame = false; }
     this.native.write(bytes);
     this.complete ||= frame.full;
@@ -89,6 +89,10 @@ export class TerminalProjection {
     if (wasLive) this.paint();
     this.cursor(this.nativePosition());
     return false;
+  }
+  /** Paint the certified native baseline before exposing a previously hidden canvas. */
+  paintBaseline() {
+    if (this.native && this.live && this.canRenderLive()) this.term.renderer?.render(this.native, true, 0, this.term);
   }
   private canRenderLive() {
     return this.mobile && this.complete && this.native?.cols === this.term.cols && this.native.rows === this.term.rows

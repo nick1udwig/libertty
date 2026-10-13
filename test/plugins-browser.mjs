@@ -6,6 +6,7 @@ import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import ssh2 from 'ssh2';
+import { sshdPath, sshFixturePath } from './support/sshd.mjs';
 import { WebSocket } from 'ws';
 import { herdrFixture } from './herdr-fixture.ts';
 
@@ -28,7 +29,7 @@ async function loadPackage(pkg) {
 try {
   await writeFile(fixture.directory + '/app.log', 'info started\nwarning review this\n');
   await mkdir(fixture.directory + '/remote'); await writeFile(fixture.directory + '/remote/app.log', 'remote warning\n');
-  start(process.execPath, ['server/index.ts'], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/plugins-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/data', TERMAI_TOKEN: 'plugin-test-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory, HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH });
+  start(root + 'target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/plugins-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/data', TERMAI_TOKEN: 'plugin-test-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory, HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH });
   await until(async () => { try { return (await fetch(base + '/')).ok; } catch { return false; } }, 'backend');
   assert.equal((await request('plugins/read?path=app.log', undefined, undefined)).status, 401);
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
@@ -99,8 +100,8 @@ try {
 
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'), identity = ssh2.utils.generateKeyPairSync('ed25519');
   await writeFile(fixture.directory + '/host-key', hostKey.private, { mode: 0o600 }); await writeFile(fixture.directory + '/authorized', identity.public + '\n');
-  const config = ['Port ' + sshPort, 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + fixture.directory + ':/usr/bin:/bin', 'Subsystem sftp internal-sftp'].join('\n') + '\n';
-  await writeFile(fixture.directory + '/sshd_config', config); start('/usr/bin/sshd', ['-D', '-e', '-f', fixture.directory + '/sshd_config']);
+  const config = ['Port ' + sshPort, 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + sshFixturePath(fixture.directory), 'Subsystem sftp internal-sftp'].join('\n') + '\n';
+  await writeFile(fixture.directory + '/sshd_config', config); start(sshdPath(), ['-D', '-e', '-f', fixture.directory + '/sshd_config']);
   await delay(150);
   const key = await (await request('keychain', { action: 'create', name: 'Fixture key', privateKey: identity.private, passphrase: 'fixture-secret' })).json();
   assert.ok(key.id);

@@ -1,5 +1,5 @@
 import { uploadIcon, downloadIcon } from './icons.ts';
-import { transferAction, downloadPipeline } from './engine/transfer-command.ts';
+import { transferAction, downloadPipeline } from './transfer-command.ts';
 import type { Terminal } from 'ghostty-web';
 import type { Candidate, ShellState } from './protocol.ts';
 import { InputLine } from './input-line.ts';

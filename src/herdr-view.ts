@@ -1,3 +1,4 @@
+import { wireProtocols, decodeWire } from './wire.ts';
 import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSpace } from './herdr-protocol.ts';
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
 import { tabGestures } from './tab-gestures.ts';
@@ -10,8 +11,11 @@ interface Host {
   api<T>(path: string, data?: unknown): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
   notice(message: string): void;
+  reconnect?(): Promise<void>;
+  ready?(): void;
   notificationDevice?(): string | undefined;
 }
+interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; retain:boolean; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
 type StripItem = HerdrAgent & { space?: HerdrSpace };
 interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; spaceTerminals?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']> }
 const node = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => {
@@ -22,9 +26,12 @@ export class HerdrView {
   private strip = node('div', 'herdr-agent-strip');
   private screen = node('div', 'herdr-screen');
   private frame?: HTMLIFrameElement;
-  private frameSession = crypto.randomUUID();
+  private displayed?: HTMLIFrameElement;
+  private terminalFrames = new Map<string, CachedTerminal>();
   private status = node('div', 'herdr-connection');
   private empty = node('div', 'herdr-empty');
+  private loading = node('div', 'herdr-loading');
+  private loadingLabel = node('span');
   private menu = node('div', 'herdr-tab-menu');
   private tracker = new HerdrState();
   private preferences: Preferences;
@@ -42,6 +49,7 @@ export class HerdrView {
   private terminals: HerdrAgent[] = [];
   private spaces: HerdrSpace[] = [];
   private rendered = false;
+  private handoffHeld = false;
   private held = false;
   private dragOrderChanged = false;
   private dropTarget?: { id: string; drop: SpaceDrop };
@@ -68,18 +76,35 @@ export class HerdrView {
     this.strip.role = 'tablist'; this.strip.setAttribute('aria-label', 'Herdr agents');
     this.menu.role = 'menu'; this.menu.hidden = true;
     this.status.setAttribute('role', 'status');
-    this.screen.append(this.status, this.empty);
+    this.loading.role = 'status'; this.loading.hidden = true;
+    const spinner = node('span', 'terminal-loading-spinner'); spinner.setAttribute('aria-hidden', 'true');
+    this.loading.append(spinner, this.loadingLabel);
+    this.screen.append(this.status, this.empty, this.loading);
     this.element.append(this.strip, this.screen, this.menu);
     const viewed = () => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     const messages = (event: MessageEvent) => {
-      if (event.source !== this.frame?.contentWindow || event.origin !== location.origin || event.data?.session !== this.frameSession) return;
+      if (event.origin !== location.origin) return;
+      const entry = [...this.terminalFrames.values()].find(entry => event.source === entry.frame.contentWindow && event.data?.session === entry.session);
+      if (!entry) return;
+      const active = entry.frame === this.frame;
       if (event.data.type === 'terminal-loaded') {
-        this.post({ type: 'authorize', accessToken: this.host.token() });
-        this.post({ type: 'tab-visibility', visible: this.visible });
+        entry.frame.contentWindow?.postMessage({ type:'herdr-present', presentation:entry.presentation },location.origin);
+        entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
+        entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible:this.visible },location.origin);
       }
-      if (event.data.type === 'terminal-rendered') { this.rendered = true; viewed(); }
-      if (event.data.type === 'terminal-notice') this.host.notice(event.data.message);
-      if (event.data.type === 'terminal-locked') void this.host.authenticate().then(() => this.post({ type: 'authorize', accessToken: this.host.token() })).catch(error => this.host.notice(error.message));
+      if (event.data.type === 'terminal-ready') entry.retain = event.data.retainGeometry === true;
+      const geometry = event.data.cols + 'x' + event.data.rows;
+      if (event.data.type === 'terminal-sizing' && active && event.data.presentation === entry.presentation) entry.geometry = geometry;
+      if (event.data.type === 'terminal-rendered' && active && this.visible && !this.handoffHeld && event.data.presentation === entry.presentation && geometry === entry.geometry) {
+        entry.rendered = true;
+        if (this.displayed && this.displayed !== entry.frame) this.park(this.displayed);
+        this.displayed = entry.frame; entry.frame.className = 'herdr-terminal'; entry.frame.style.visibility = ''; entry.frame.inert = false;
+        const bounds = entry.frame.getBoundingClientRect(); entry.width = bounds.width; entry.height = bounds.height;
+        this.rendered = true; this.setLoading(false); viewed(); this.host.ready?.();
+      }
+      if (active && event.data.type === 'terminal-notice') this.host.notice(event.data.message);
+      if (event.data.type === 'terminal-locked') entry.locked = true;
+      if (active && event.data.type === 'terminal-locked') void this.host.authenticate().then(() => entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin)).catch(error => this.host.notice(error.message));
     };
     document.addEventListener('visibilitychange', viewed); window.addEventListener('focus', viewed); window.addEventListener('message', messages);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', viewed), () => window.removeEventListener('focus', viewed), () => window.removeEventListener('message', messages));
@@ -96,42 +121,118 @@ export class HerdrView {
     this.render(); void this.connect();
   }
   setVisible(visible: boolean) {
+    const changed = this.visible !== visible;
     this.visible = visible; this.element.hidden = !visible;
-    if (!visible) this.menu.hidden = true;
-    this.mountTerminal(); this.post({ type: 'tab-visibility', visible });
+    if (!changed) { this.mountTerminal(); return; }
+    this.rendered = false;
+    if (!visible) {
+      if (this.displayed && ![...this.terminalFrames.values()].some(entry => entry.frame === this.displayed)) this.displayed.remove();
+      this.menu.hidden = true; this.displayed = undefined; this.setLoading(false);
+      for (const entry of [...this.terminalFrames.values()]) {
+        if (entry.frame !== this.frame) this.park(entry.frame);
+        else { entry.frame.style.visibility = 'hidden'; entry.frame.inert = true; }
+      }
+    }
+    const before = this.frame; this.mountTerminal();
+    if (visible && before === this.frame && this.frame) {
+      const entry = this.terminalFrames.get(this.frame.dataset.terminal!);
+      if (entry) this.prepare(entry);
+    }
+    for (const entry of this.terminalFrames.values()) entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible },location.origin);
+  }
+  get ready() { return this.rendered || !!this.status.textContent || this.connected && !this.selected; }
+  setHeld(held: boolean) {
+    if (this.handoffHeld === held) return;
+    this.handoffHeld = held;
+    if (held && this.displayed) this.park(this.displayed,true);
+    else if (this.visible) this.mountTerminal(true);
+  }
+  private setLoading(loading: boolean) {
+    this.loading.hidden = !loading; this.loading.classList.toggle('has-previous', !!this.displayed);
+    this.screen.setAttribute('aria-busy', String(loading));
+  }
+  private prepare(entry: CachedTerminal) {
+    entry.presentation = crypto.randomUUID(); entry.frame.className = 'herdr-terminal herdr-terminal-pending'; entry.frame.inert = true;
+    if (entry.frame !== this.displayed) entry.frame.style.visibility = 'hidden';
+    this.rendered = false; this.loadingLabel.textContent = 'Loading ' + (this.terminals.find(agent => agent.terminalId === entry.frame.dataset.terminal)?.name || 'terminal') + '…';
+    this.setLoading(true);
+    entry.frame.contentWindow?.postMessage({type:'herdr-present',presentation:entry.presentation},location.origin);
+  }
+  private park(frame: HTMLIFrameElement, keepVisible = false) {
+    const id = frame.dataset.terminal!, entry = this.terminalFrames.get(id);
+    if (!entry || entry.frame !== frame) { frame.remove(); return; }
+    frame.inert = true;
+    if (keepVisible || matchMedia('(pointer: coarse) and (max-width: 1024px)').matches && entry.retain) {
+      frame.className = keepVisible ? 'herdr-terminal-previous' : 'herdr-terminal-cached'; frame.style.visibility = keepVisible ? '' : 'hidden';
+      frame.contentWindow?.postMessage({type:'herdr-park',parked:true},location.origin);
+    } else { frame.remove(); this.terminalFrames.delete(id); }
   }
   private post(message: object) { this.frame?.contentWindow?.postMessage(message, location.origin); }
-  private mountTerminal() {
-    if (!this.selected) { this.frame?.remove(); this.frame = undefined; this.rendered = false; return; }
+  private mountTerminal(force = false) {
+    if (this.displayed && !this.terminals.some(agent => agent.terminalId === this.displayed!.dataset.terminal && agent.paneId === this.displayed!.dataset.pane)) { this.displayed.remove(); this.displayed = undefined; }
+    for (const [id, entry] of this.terminalFrames) {
+      if (!this.terminals.some(agent => agent.terminalId === id && agent.paneId === entry.pane)) { entry.frame.remove(); this.terminalFrames.delete(id); if (this.frame === entry.frame) this.frame = undefined; if (this.displayed === entry.frame) this.displayed = undefined; }
+    }
+    if (!this.selected) { this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.frame = this.displayed = undefined; this.rendered = false; this.setLoading(false); return; }
     const agent = this.terminals.find(agent => agent.terminalId === this.selected);
-    if (!agent || this.frame?.dataset.terminal === this.selected && this.frame.dataset.pane === agent.paneId || !this.visible || this.disposed) return;
-    this.frame?.remove(); this.rendered = false; this.frameSession = crypto.randomUUID();
-    const frame = node('iframe', 'herdr-terminal'); frame.title = 'Herdr agent terminal'; frame.dataset.terminal = this.selected; frame.dataset.pane = agent.paneId;
-    frame.allow = 'microphone; clipboard-read; clipboard-write';
-    const url = new URL('terminal.html', document.baseURI);
-    url.search = new URLSearchParams({ embedded: '1', backend: this.host.url, session: this.frameSession, herdrTerminal: this.selected, herdrSession: this.host.session, ...(this.host.source ? { herdrSource: this.host.source } : {}) }).toString();
-    frame.src = url.href; this.frame = frame; this.screen.append(frame);
+    if (!agent || !force && this.frame?.dataset.terminal === this.selected && this.frame.dataset.pane === agent.paneId || !this.visible || this.disposed) return;
+    if (this.frame) this.park(this.frame, this.frame === this.displayed);
+    this.rendered = false;
+    let cached = this.terminalFrames.get(this.selected);
+    if (cached && cached.frame === this.displayed) {
+      const bounds = cached.frame.getBoundingClientRect();
+      if (cached.width !== bounds.width || cached.height !== bounds.height) {
+        // Keep the displayed grid frozen while a separate iframe fits the new size.
+        this.terminalFrames.delete(this.selected); cached = undefined;
+      }
+    }
+    if (cached) {
+      this.terminalFrames.delete(this.selected); this.terminalFrames.set(this.selected,cached);
+      this.frame = cached.frame;
+      const bounds = cached.frame.getBoundingClientRect(), preserve = cached.rendered && cached.width === bounds.width && cached.height === bounds.height;
+      this.prepare(cached);
+      if (cached.locked) { cached.locked = false; void this.host.authenticate().then(() => cached.frame.contentWindow?.postMessage({type:'authorize',accessToken:this.host.token()},location.origin)).catch(error => this.host.notice(error.message)); }
+      cached.frame.contentWindow?.postMessage({type:'herdr-park',parked:false,preserve},location.origin);
+      cached.frame.contentWindow?.postMessage({type:'tab-visibility',visible:this.visible},location.origin);
+    } else {
+      const session = crypto.randomUUID();
+      const frame = node('iframe','herdr-terminal'); frame.title = 'Herdr agent terminal'; frame.dataset.terminal = this.selected; frame.dataset.pane = agent.paneId; frame.style.visibility = 'hidden';
+      frame.allow = 'microphone; clipboard-read; clipboard-write';
+      const url = new URL('terminal.html',document.baseURI);
+      url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:this.selected,herdrSession:this.host.session,...(this.host.source?{herdrSource:this.host.source}:{})}).toString();
+      frame.src = url.href; this.frame = frame;
+      const entry = {frame,session,pane:agent.paneId,retain:false,rendered:false}; this.terminalFrames.set(this.selected,entry); this.screen.append(frame); this.prepare(entry);
+    }
+    while (this.terminalFrames.size > 4) { const candidate = [...this.terminalFrames].find(([,entry]) => entry.frame !== this.frame && entry.frame !== this.displayed); if (!candidate) break; const [id, entry] = candidate; entry.frame.remove(); this.terminalFrames.delete(id); }
   }
   private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
   private async connect() {
     if (this.disposed || this.connecting) return; this.connecting = true;
     try {
-      const { ticket } = await this.host.api<{ ticket: string }>('api/herdr/ticket', {});
+      const { ticket, wire } = await this.host.api<{ ticket: string; wire?: string[] }>('api/herdr/ticket', {});
       if (this.disposed) return;
       const url = this.endpoint('herdr/ws'); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
-      const ws = new WebSocket(url); this.ws = ws;
+      const ws = new WebSocket(url, wireProtocols(wire)); ws.binaryType = 'arraybuffer'; this.ws = ws; let decoded = Promise.resolve();
       ws.onopen = () => { if (this.ws !== ws) return; this.connected = true; this.quietSnapshot = true; this.status.textContent = ''; this.updatePresence(); this.render(); };
-      ws.onmessage = event => { if (this.ws === ws) this.receive(JSON.parse(event.data)); };
+      ws.onmessage = event => { decoded = decoded.then(async () => { const value = await decodeWire(event.data); if (this.ws === ws) this.receive(value); }).catch(() => { if (this.ws === ws) ws.close(4002, 'Invalid transport message'); }); };
       ws.onclose = () => {
         if (this.ws !== ws || this.disposed) return;
         this.connected = false; this.status.textContent = 'Herdr disconnected. Reconnecting…'; this.render();
+        this.setLoading(false); this.host.ready?.();
         this.reconnect = setTimeout(() => void this.connect(), 2000);
       };
-    } catch (error: any) { if (!this.disposed) { this.status.textContent = error.message; this.reconnect = setTimeout(() => void this.connect(), 3000); } }
+    } catch (error: any) { if (!this.disposed) {
+      this.status.textContent = error.message; this.setLoading(false); this.host.ready?.();
+      if (error.status === 404 && this.host.source && this.host.reconnect) {
+        const reconnect = node('button', 'secondary', 'Reconnect'); reconnect.type = 'button';
+        reconnect.onclick = async () => { reconnect.disabled = true; try { await this.host.reconnect!(); } catch (error: any) { this.host.notice(error.message); } finally { reconnect.disabled = false; } };
+        this.status.append(document.createElement('br'), reconnect);
+      } else this.reconnect = setTimeout(() => void this.connect(), 3000);
+    } }
     finally { this.connecting = false; }
   }
   private receive(message: HerdrMessage) {
-    if (message.type === 'error') { this.status.textContent = message.message; return; }
+    if (message.type === 'error') { this.status.textContent = message.message; this.setLoading(false); this.host.ready?.(); return; }
     if (message.type !== 'snapshot') return;
     this.status.textContent = '';
     this.terminals = message.snapshot.terminals || message.snapshot.agents; this.spaces = message.snapshot.spaces || [];
@@ -148,6 +249,7 @@ export class HerdrView {
     this.ensureSelection();
     if (this.requestedTerminal && this.terminals.some(agent => agent.terminalId === this.requestedTerminal)) { this.selected = this.requestedTerminal; this.requestedTerminal = ''; }
     this.save(); this.render(); this.mountTerminal();
+    if (!this.selected) this.host.ready?.();
     requestAnimationFrame(() => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } });
   }
   private get spaceMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStrip') || 'null') !== 'agents'; } catch { return true; } }
@@ -421,7 +523,7 @@ export class HerdrView {
   copySelection() { this.post({ type: 'settings-action', action: 'copy-selection' }); }
   dispose() {
     if (this.disposed) return; this.disposed = true;
-    clearTimeout(this.reconnect); clearInterval(this.presenceTimer); this.ws?.close(); this.frame?.remove(); this.element.remove();
+    clearTimeout(this.reconnect); clearInterval(this.presenceTimer); this.ws?.close(); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
   }
 }

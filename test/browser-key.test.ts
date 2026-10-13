@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import ssh2 from 'ssh2';
 import { generateBrowserKey, encryptBrowserKey, decryptBrowserKey, parseKeyBackup, publicInfo } from '../src/browser-key.ts';
-import { fingerprint } from '../server/vault.ts';
+import { fingerprint } from './support/ssh-key.ts';
 
 test('browser generation produces interoperable OpenSSH Ed25519 keys and fingerprints', async () => {
   const key = await generateBrowserKey(), parsed = ssh2.utils.parseKey(key.privateKey);

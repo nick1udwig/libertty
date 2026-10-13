@@ -24,7 +24,26 @@ defaults:
     shell: bash
 
 jobs:
+  source:
+    name: Resolve the source revision
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.ref || github.sha }}
+          persist-credentials: false
+      - id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  verify:
+    needs: source
+    name: Verify Rust on all supported platforms
+    uses: ./.github/workflows/rust.yml
+    with:
+      ref: ${{ needs.source.outputs.sha }}
   build:
+    needs: [source, verify]
     name: Build and verify ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -42,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name || inputs.ref || github.ref }}
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
       - name: Read release pins and validate tag
         id: pins
@@ -63,6 +82,15 @@ jobs:
         with:
           node-version: ${{ steps.pins.outputs.node }}
           cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Reuse validation Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: termai-${{ matrix.target }}
+          cache-on-failure: true
+          cache-bin: false
       - name: Verify native architecture
         env:
           EXPECTED_TARGET: ${{ matrix.target }}
@@ -77,12 +105,10 @@ jobs:
         run: |
           brew install bash
           echo "TERMAI_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
-      - name: Build and test Termai
+      - name: Build the validated frontend
         run: |
           npm ci --no-audit --no-fund
-          npm run build
-          npm test
-          npm run test:install
+          npm run build:frontend
           bash -n install.sh
       - name: Check out the pinned Voxtype Mobile source
         if: runner.os == 'Linux'
@@ -93,8 +119,15 @@ jobs:
           submodules: recursive
           path: .release-companions/voxtype-mobile
           persist-credentials: false
-      - name: Build the compatible CPU dictation daemon
+      - name: Restore pinned dictation daemon
         if: runner.os == 'Linux'
+        id: voxtype-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: .release-companions/voxtype-mobile/artifacts
+          key: voxtype-${{ matrix.runner }}-${{ matrix.target }}-${{ hashFiles('build/release-config.json', '.github/workflows/release.yml') }}
+      - name: Build the compatible CPU dictation daemon
+        if: runner.os == 'Linux' && steps.voxtype-cache.outputs.cache-hit != 'true'
         env:
           CARGO_BUILD_JOBS: '2'
           GGML_NATIVE: 'OFF'
@@ -102,17 +135,23 @@ jobs:
           GGML_AVX512: 'OFF'
           GGML_FMA: 'OFF'
         run: |
-          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o "$RUNNER_TEMP/rustup-init.sh"
-          sh "$RUNNER_TEMP/rustup-init.sh" -y --profile minimal --default-toolchain stable
-          source "$HOME/.cargo/env"
           cargo build --manifest-path .release-companions/voxtype-mobile/daemon/Cargo.toml --locked --release --features parakeet --bin voxtype --config 'profile.release.lto=false' --config 'profile.release.codegen-units=8'
           mkdir -p .release-companions/voxtype-mobile/artifacts
           cp .release-companions/voxtype-mobile/daemon/target/release/voxtype .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon
+      - name: Verify dictation daemon compatibility
+        if: runner.os == 'Linux'
+        run: |
           .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon --version
           ldd .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon > "$RUNNER_TEMP/voxtype-libraries.txt"
           cat "$RUNNER_TEMP/voxtype-libraries.txt"
           if grep -q 'not found' "$RUNNER_TEMP/voxtype-libraries.txt"; then exit 1; fi
           echo "VOXTYPE_MOBILE_CHECKOUT=$GITHUB_WORKSPACE/.release-companions/voxtype-mobile" >> "$GITHUB_ENV"
+      - name: Cache verified pinned dictation daemon
+        if: runner.os == 'Linux' && steps.voxtype-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: .release-companions/voxtype-mobile/artifacts
+          key: ${{ steps.voxtype-cache.outputs.cache-primary-key }}
       - name: Package and verify the actual release
         env:
           RELEASE_TAG: ${{ steps.pins.outputs.tag }}

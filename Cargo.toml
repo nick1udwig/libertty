@@ -1,0 +1,19 @@
+[workspace]
+members = ["crates/engine", "crates/server"]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.89"
+
+[workspace.dependencies]
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+serde_json = { version = "1.0.150", features = ["float_roundtrip"] }
+regex = "1.13.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -1,3 +1,4 @@
+import { installWireObserver } from './wire-observer.mjs';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, access, mkdir, rm } from 'node:fs/promises';
@@ -34,7 +35,7 @@ const repairEndpoint = `**/api/${engine === 'server' ? 'suggest' : 'facts'}`;
 const mount = process.env.TEST_BASE_PATH || '';
 const base = origin + mount;
 const pairingToken = 'test-local-pairing-token-123456789';
-const server = spawn(process.execPath, ['server/index.ts'], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_BASE_PATH: mount, TERMAI_ENGINE: engine, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: pairingToken, TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.env.TEST_EXECUTABLE || path.join(root, 'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_BASE_PATH: mount, TERMAI_ENGINE: engine, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: pairingToken, TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 let browser;
 const delay = ms => new Promise(r => setTimeout(r, ms));
@@ -56,13 +57,14 @@ try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(String(e)));
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
+  await installWireObserver(page.context());
   await page.addInitScript(() => {
     const paint = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', event => { const message = JSON.parse(event.data); if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'context') window.__shellContext = message.context; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
-      send(data) { const message = JSON.parse(data); if (message.type === 'resize') window.__terminalSize = message; super.send(data); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'context') window.__shellContext = message.context; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
+      send(data) { const message = window.__wireSent(data); if (message.type === 'resize') window.__terminalSize = message; super.send(data); }
     };
   });
   const workers = []; page.on('worker', worker => workers.push(worker));
@@ -374,7 +376,9 @@ try {
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'cd ~/git/pebble-agent');
   context.off('request', captureDirectoryRequest);
   assert.equal(directoryRequests.length, 1, JSON.stringify(directoryRequests));
-  if (engine === 'client') assert.ok(directoryRequests[0].operations.some(operation => operation.kind === 'directory'));
+  if (engine === 'client') {
+    { assert.equal(directoryRequests[0].kind, 'repair'); assert.ok(directoryRequests[0].catalogKey); }
+  }
   else {
     assert.equal(workers.length, 0, 'Server mode must not start a repair worker');
     assert.ok(!requests.some(url => url.endsWith('/api/facts')), 'Server mode must not fetch host facts');
@@ -432,7 +436,14 @@ try {
   assert.equal(await page.evaluate(() => window.__paint.some(text => /[^\x20-\x7e]/.test(text))), false, 'Reset must not paint corrupted glyphs');
   assert.deepEqual(errors, []);
   // Live shell completion definitions supply both Git refs and generic names.
-  await command(page, `cd ${fixture}; source /usr/share/bash-completion/completions/git; git init -q; git symbolic-ref HEAD refs/heads/feat/elixir-worker; git -c user.name=Test -c user.email=test@example.test commit --allow-empty -qm initial; git remote add origin https://example.invalid/repo.git`);
+  const gitCompletion = [
+    process.env.TERMAI_GIT_COMPLETIONS_FILE,
+    '/usr/share/bash-completion/completions/git',
+    '/opt/homebrew/opt/git/etc/bash_completion.d/git-completion.bash',
+    '/usr/local/opt/git/etc/bash_completion.d/git-completion.bash',
+  ].find(file => file && existsSync(file));
+  assert.ok(gitCompletion, 'Install Git Bash completion for the live completion checks.');
+  await command(page, `cd ${fixture}; source '${gitCompletion.replace(/'/g, "'\\''")}'; git init -q; git symbolic-ref HEAD refs/heads/feat/elixir-worker; git -c user.name=Test -c user.email=test@example.test commit --allow-empty -qm initial; git remote add origin https://example.invalid/repo.git`);
   for (const [input, expected] of [
     ['git push dash u origin feet/elixir dash worker', 'git push -u origin feat/elixir-worker'],
     ['git checkout F E A T', 'git checkout feat/elixir-worker'],

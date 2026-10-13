@@ -1,12 +1,13 @@
+import { mergeFileSnapshot, packFileSnapshot, type FileSnapshot } from './plugin-file.ts';
 import type { HostProfile, TerminalTab } from './connections.ts';
 import type { PluginView, TabPlugin } from './plugins.ts';
 import { pluginRequest, type PluginPackage } from './plugin-package.ts';
 
 // The opaque frame receives only a private port, a display name and its own state.
-const sdk = String.raw`
+const sdk = `const mergeFileSnapshot = ${mergeFileSnapshot.toString()};` + String.raw`
 (() => {
   let port, next = 0, context, visible = false;
-  const pending = new Map(), listeners = new Set();
+  const pending = new Map(), listeners = new Set(); let file;
   let ready; const readyPromise = new Promise(resolve => ready = resolve);
   window.termai = Object.freeze({
     ready: readyPromise,
@@ -17,7 +18,7 @@ const sdk = String.raw`
       const id = ++next;
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => { pending.delete(id); reject(new Error('Plugin request timed out.')); }, 15000);
-        pending.set(id, { resolve, reject, timer }); port.postMessage({ id, method, params });
+        pending.set(id, { resolve, reject, timer, method }); port.postMessage({ id, method, params });
       });
     }
   });
@@ -28,7 +29,7 @@ const sdk = String.raw`
       if (data.type === 'visibility') { visible = data.visible === true; for (const fn of listeners) fn(visible); return; }
       const request = pending.get(data.id); if (!request) return;
       pending.delete(data.id); clearTimeout(request.timer);
-      if (data.error) request.reject(new Error(data.error)); else request.resolve(data.result);
+      if (data.error) request.reject(new Error(data.error)); else { try { const result = request.method === 'file.read' ? (file = mergeFileSnapshot(file, data.result)) : data.result; request.resolve(result); } catch (error) { request.reject(error); } }
     };
     port.start(); ready(Object.freeze(context));
   });
@@ -37,7 +38,7 @@ const sdk = String.raw`
 export interface ExternalServices {
   connect(host: HostProfile, plugin: PluginPackage): Promise<void>;
   close(tab: TerminalTab): Promise<void>;
-  read(tab: TerminalTab): Promise<{ text: string; path: string; truncated: boolean }>;
+  read(tab: TerminalTab): Promise<FileSnapshot>;
   store(): void;
 }
 export function externalPlugin(pkg: PluginPackage, s: ExternalServices): TabPlugin {
@@ -51,12 +52,17 @@ function externalView(pkg: PluginPackage, tab: TerminalTab, s: ExternalServices)
   const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'";
   frame.srcdoc = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="' + policy + '"><script>' + sdk + '</script>' + pkg.view;
   const channel = new MessageChannel(); let disposed = false, initialized = false, visible = false, active = 0;
+  let file: FileSnapshot | undefined; let reads: Promise<unknown> = Promise.resolve();
   channel.port1.onmessage = async ({ data }) => {
     if (disposed || !initialized || !data || !Number.isSafeInteger(data.id) || data.id < 1) return;
     if (active >= 4) { channel.port1.postMessage({ id: data.id, error: 'Too many pending plugin requests.' }); return; }
     active++;
     try {
-      const result = await pluginRequest(data.method, data.params, { read: () => s.read(tab), save: state => { if (!disposed) { tab.pluginState = state; s.store(); } } });
+      const read = () => {
+        const work = reads.then(async () => { const value = await s.read(tab); const packed = packFileSnapshot(file, value); file = value; return packed as FileSnapshot; });
+        reads = work.catch(() => {}); return work;
+      };
+      const result = await pluginRequest(data.method, data.params, { read, save: state => { if (!disposed) { tab.pluginState = state; s.store(); } } });
       if (!disposed) channel.port1.postMessage({ id: data.id, result });
     } catch (error: any) { if (!disposed) channel.port1.postMessage({ id: data.id, error: error.message || 'Plugin request failed.' }); }
     finally { active--; }

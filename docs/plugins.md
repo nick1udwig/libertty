@@ -22,7 +22,8 @@ The viewer refreshes every two seconds while visible with Follow enabled.
 It pauses when its tab, workspace or browser document is hidden.
 Filter and Follow preferences survive reloads.
 The backend accepts regular files up to 20 MB and returns the latest 256 Ki characters; the sample displays at most 2,000 matching lines.
-This is polling for small logs, rather than an efficient tail stream for large files.
+Unchanged reads omit the repeated body, and append updates use validated deltas when the previous bounded snapshot remains available.
+The host and private frame bridge reconstruct the complete text, so existing plugin views retain their API.
 
 ## Connect Herdr
 
@@ -90,6 +91,9 @@ const unsubscribe = termai.onVisibility(visible => {
 ```
 
 `file.read` accepts no arguments.
+Its optional `version` identifies the validated snapshot, and `unchanged: true` lets a view skip repeated filtering or rendering.
+The returned `text` is always complete even when the transport uses an append delta.
+Pause work when `termai.visible` is false and reuse derived display state while a result is unchanged.
 The host bridge chooses the backend, session and selected path; a plugin cannot widen its scope by passing another path or session.
 `state.save` accepts JSON up to 16 KB and stores it only on this tab.
 Read the restored value from `termai.ready`.

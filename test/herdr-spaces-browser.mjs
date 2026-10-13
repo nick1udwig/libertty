@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
 import { chromium } from 'playwright-core';
-import { herdrRequest, herdrSnapshot } from '../server/herdr.ts';
+import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 
-const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-spaces-');
+const root = new URL('../', import.meta.url).pathname, dir = await realpath(await mkdtemp('/tmp/termai-herdr-spaces-'));
 const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:3174';
 const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -19,7 +19,7 @@ try {
   desktop = pty.spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', [], { cwd: dir, env, cols: 150, rows: 45, name: 'xterm-256color' }); desktop.onData(() => {});
   const alpha = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/alpha', label: 'Alpha', focus: false })).workspace.workspace_id;
   const beta = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/beta project', label: 'Beta', focus: false })).workspace.workspace_id;
-  backend = spawn(process.execPath, ['server/index.ts'], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3174', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  backend = spawn(root + 'target/debug/termai', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3174', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
@@ -41,12 +41,21 @@ try {
   await page.evaluate(() => document.fonts.ready);
   const order = async () => (await herdrSnapshot(target)).spaces.map(space => space.id);
   const stripOrder = () => page.locator('.herdr-agent-strip:visible .herdr-agent-tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.terminal.slice(6)));
-  const bounds = async id => tab(id).evaluate(tab => {
-    const strip = tab.closest('.herdr-agent-strip'), area = strip.getBoundingClientRect(), initial = tab.getBoundingClientRect();
-    if (initial.left < area.left) strip.scrollLeft += initial.left - area.left;
-    if (initial.right > area.right) strip.scrollLeft += initial.right - area.right;
-    const rect = tab.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-  });
+  const bounds = async id => {
+    let rect;
+    await wait(async () => {
+      rect = await tab(id).evaluate(tab => {
+        const strip = tab.closest('.herdr-agent-strip');
+        if (!strip || !tab.isConnected) return null;
+        const area = strip.getBoundingClientRect(), initial = tab.getBoundingClientRect();
+        if (initial.left < area.left) strip.scrollLeft += initial.left - area.left;
+        if (initial.right > area.right) strip.scrollLeft += initial.right - area.right;
+        const rect = tab.getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+      });
+      return rect !== null;
+    }, 'space bounds after subscription refresh');
+    return rect;
+  };
   const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
   const drag = async (source, target, position, cancel = false) => {
     const { from, to } = await page.evaluate(([source, target]) => {

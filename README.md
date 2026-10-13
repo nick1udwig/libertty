@@ -27,17 +27,18 @@ After the first stable release has finished building, install the server and opt
 curl -fsSL https://github.com/nick1udwig/termai/releases/latest/download/install.sh | bash
 ```
 
-The installer bundles Node and asks before installing a user service or optional companions.
+The installer bundles the native Rust server and its setup runtime, and asks before installing a user service or optional companions.
 See the [setup guide](docs/setup.md) for supported platforms, upgrade behavior and options.
 Linux x86_64, Linux ARM64 and macOS Apple Silicon are release targets, with automatic Voxtype Mobile setup available on Linux.
 
 ## Build and run
 
-Requires **Node.js 22.18+**, **Bash 4.4+**, **Python 3.8+**, and `base64`.
+Building from source requires **Rust 1.89+**, the **wasm32-unknown-unknown** target, **Node.js 22.18+**, a native C/C++ build toolchain, **Bash 4.4+**, **Python 3.8+**, and `base64`.
 On macOS, install modern Bash with `brew install bash`.
-If `node-pty` has no prebuilt binary for your platform, you also need a C++ build toolchain.
+The Rust server uses a native PTY, and the same Rust engine runs natively or as browser WebAssembly.
 
 ```sh
+rustup target add wasm32-unknown-unknown
 npm ci
 npm run build
 npm start
@@ -51,6 +52,8 @@ Anyone with the token and network access can run commands as your host user.
 The shell starts in the checkout directory.
 Set `TERMAI_CWD=/path/to/project` to change it.
 For development, use `npm run dev`.
+Vite runs as a loopback frontend tool behind the Rust server's pairing gate, including authenticated hot reload.
+Rust is the only backend, while Node supports frontend builds, installation tools and test fixtures.
 
 ## Connect from your phone
 
@@ -95,6 +98,7 @@ Keep termai running; Tailscale Serve does not start it for you.
 - [Runtime plugin experiment](docs/plugins.md): loading packages, plugin API and connection lifetimes.
 - [Workspace architecture](docs/workspace.md), [shared engine](docs/shared-engine.md), and [client architecture](docs/client-architecture.md).
 - [Pairing security review](docs/pairing-security.md).
+- [Rust migration](docs/rust-migration.md): contracts, active regression coverage and platform verification.
 
 ## License
 
