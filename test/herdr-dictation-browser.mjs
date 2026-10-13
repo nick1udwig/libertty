@@ -49,8 +49,9 @@ try {
   async function dictate(text) {
     transcript = text;
     await page.evaluate(() => window.__messages = []);
-    await mic.click(); await page.waitForFunction(() => window.__messages.some(message => message.type === 'dictation' && message.state === 'ready'));
-    await delay(250); await mic.click();
+    // Lifecycle starts must not turn into hold-to-finish gestures on busy runners.
+    await mic.press('Enter'); await page.waitForFunction(() => window.__messages.some(message => message.type === 'dictation' && message.state === 'ready'));
+    await delay(250); await mic.press('Enter');
     await page.waitForFunction(() => window.__messages.some(message => message.type === 'dictation' && message.state === 'done'));
   }
   await dictate('C D work space');

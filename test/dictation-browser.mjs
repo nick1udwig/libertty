@@ -221,20 +221,21 @@ try {
   await page.mouse.move(36, dragFrom.y + 24, { steps: 5 }); await page.mouse.up();
   assert.equal(await mic.getAttribute('aria-pressed'), 'false');
   assert.equal((await mic.boundingBox()).x, 12);
-  await mic.click();
+  // Keyboard activation makes lifecycle starts independent of pointer hold duration.
+  await mic.press('Enter');
   assert.equal(await page.locator('.dictation-panel').evaluate(el => el.classList.contains('panel-right')), true);
   await page.getByLabel('Cancel dictation', { exact: true }).click();
   // Cancellation must not insert anything; editing during a recording rejects its late final.
   await page.waitForFunction(() => window.__state.ready);
   await page.evaluate(() => { window.__messages = []; });
-  await page.locator('#termai-dictation').click();
+  await mic.press('Enter');
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await page.getByLabel('Cancel dictation', { exact: true }).click();
   assert.equal(await page.locator('#termai-dictation').getAttribute('aria-pressed'), 'false');
   assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Cancellation releases wake locks');
   for (const interruption of ['suspend', 'ended', 'pagehide', 'denied', 'permission', 'disconnect']) {
     await page.evaluate(kind => { window.__messages = []; window.__denyWakeLock = kind === 'denied'; window.__denyMicrophone = kind === 'permission'; }, interruption);
-    await mic.click();
+    await mic.press('Enter');
     if (interruption === 'permission') {
       await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
     } else {
@@ -260,7 +261,7 @@ try {
     await page.evaluate(() => { window.__denyWakeLock = window.__denyMicrophone = false; });
   }
   await page.evaluate(() => { window.__messages = []; });
-  await page.locator('#termai-dictation').click();
+  await mic.press('Enter');
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo preserved');
   await page.locator('#termai-dictation').click();
@@ -277,7 +278,7 @@ try {
   }
   async function record() {
     await page.evaluate(() => { window.__messages = []; });
-    await mic.click();
+    await mic.press('Enter');
     await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
     await mic.click();
     await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'done'));
@@ -313,7 +314,7 @@ try {
     if (mode === 'plain') {
       // Leaving the program while transcription is pending must not paste into Bash.
       await page.evaluate(() => { window.__messages = []; });
-      await mic.click(); await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+      await mic.press('Enter'); await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
       await mic.click(); await quitProgram();
       await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'error' && m.message.includes('terminal changed')));
       assert.equal(await page.evaluate(() => window.__messages.some(m => m.type === 'pasted')), false);

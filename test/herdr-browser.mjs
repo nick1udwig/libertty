@@ -378,8 +378,8 @@ try {
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\x08'), 'customized shortcuts shared after reconnect');
   // Reconnecting an agent view starts a fresh input revision, so dictation still works.
   await terminal.evaluate(() => { window.__herdrMessages = []; });
-  await terminal.locator('#termai-dictation').click(); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
-  await terminal.locator('#termai-dictation').click(); await until(() => voiceAcks === 2, 'dictation after a hidden view reconnects');
+  await terminal.locator('#termai-dictation').press('Enter'); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
+  await terminal.locator('#termai-dictation').press('Enter'); await until(() => voiceAcks === 2, 'dictation after a hidden view reconnects');
   await swipeStrip('Agents');
   const [before, after] = await tabBounds(0, 2);
   await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2); await page.mouse.down();
