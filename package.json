@@ -24,7 +24,7 @@
     "build": "npm run build:backend && npm run build:frontend",
     "build:release": "cargo build --release --locked -p termai-server --bin termai && npm run build:frontend",
     "start": "cargo run --release --locked -p termai-server --bin termai",
-    "test": "node --test test/*.test.ts test/dependencies.test.mjs test/migration-contracts.test.mjs",
+    "test": "node --test test/*.test.ts test/dependencies.test.mjs test/migration-contracts.test.mjs test/ci-build.test.mjs",
     "test:browser": "node test/browser.mjs",
     "test:reconnect": "node test/reconnect-browser.mjs",
     "test:herdr-reopen": "node test/herdr-reopen-browser.mjs",

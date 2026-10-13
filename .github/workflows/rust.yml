@@ -1,9 +1,6 @@
 name: Rust contracts and regression checks
 
 on:
-  push:
-    # Master pushes already run this workflow through the Release verification gate.
-    branches: ["feat/rust-backend*", feat/cleanup-post-rust]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -17,11 +14,11 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-rust-${{ github.event.pull_request.number || github.ref }}-${{ inputs.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref != 'refs/heads/master') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   parity:
-    name: Native and Wasm parity on ${{ matrix.target }}
+    name: Native checks and builds on ${{ matrix.target }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -93,49 +90,6 @@ jobs:
         run: |
           npm test
           npm run test:install
-      - name: Install browser test prerequisites
-        run: |
-          npx --no-install playwright-core install --with-deps chromium
-          echo "CHROME_PATH=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
-          echo "CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
-      - name: Verify actual browser WebAssembly
-        run: npm run test:rust-browser
-      - name: Verify terminal, files and SSH browser workflows
-        run: |
-          TEST_ENGINE=server TEST_PORT=3137 npm run test:browser
-          TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
-          TEST_BASE_PATH=/terminal npm run test:reading
-          node test/files-browser.mjs
-          npm run test:workspace
-      - name: Verify Herdr protocol and plugin browser workflows
-        run: |
-          npm run test:herdr
-          npm run test:herdr-loading
-          npm run test:plugins
-          npm run test:rust-herdr
-      - name: Verify development pairing and reconnect
-        run: |
-          npm run test:pairing
-          npm run test:reconnect
-          npm run test:herdr-reopen
-      - name: Verify gestures and touch input
-        run: |
-          npm run test:gestures
-          npm run test:touch
-      - name: Verify dictation and file transfers
-        run: |
-          node test/dictation-browser.mjs
-          node test/transfers-browser.mjs
-      - name: Verify supported native Herdr integration
-        run: |
-          node scripts/install-test-herdr.mjs
-          export HERDR_BINARY="$PWD/.test-artifacts/bin/herdr"
-          export PATH="$PWD/.test-artifacts/bin:$PATH"
-          npm run test:herdr-dictation
-          npm run test:herdr-spaces
-          npm run test:herdr-resize
-          npm run test:herdr-flash
-          npm run test:herdr-scroll
       - name: Build optimized native benchmark host
         run: cargo build --locked --release -p termai-server --example engine_host
       - name: Verify architecture latency and foreground requests
@@ -147,24 +101,184 @@ jobs:
           BENCH_REPEATS: '3'
           BENCH_CPU_REPEATS: '31'
         run: npm run bench:architecture
+      - name: Build the optimized release backend
+        run: cargo build --locked --release -p termai-server --bin termai
+      - name: Record build provenance and checksums
+        run: |
+          node scripts/ci-build.mjs create browser .test-artifacts/browser-build.json
+          node scripts/ci-build.mjs create release .test-artifacts/release-build.json
       - name: Verify native packages and installation
         env:
           TERMAI_RELEASE_ALLOW_DIRTY: '1'
+          TERMAI_RELEASE_BUILD_MANIFEST: .test-artifacts/release-build.json
           TARGET: ${{ matrix.target }}
         run: |
           npm run release:package
           node scripts/smoke-release.mjs "release/termai-v$(node -p 'require("./package.json").version')-$TARGET.tar.gz"
           node scripts/smoke-install.mjs "release/termai-v$(node -p 'require("./package.json").version')-$TARGET.tar.gz"
-          package_directory=$(mktemp -d)
-          tar -xzf "release/termai-v$(node -p 'require("./package.json").version')-$TARGET.tar.gz" -C "$package_directory"
-          TEST_EXECUTABLE="$package_directory/bin/termai" TEST_ENGINE=server TEST_PORT=3137 TEST_BASE_PATH=/terminal npm run test:browser
-          TEST_EXECUTABLE="$package_directory/bin/termai" TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
-          rm -rf "$package_directory"
+      - name: Archive builds with executable permissions
+        run: |
+          tar -czf .test-artifacts/browser-build.tar.gz dist src/engine/termai-engine.wasm target/debug/termai .test-artifacts/browser-build.json
+          tar -czf .test-artifacts/release-build.tar.gz dist target/release/termai .test-artifacts/release-build.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: validated-browser-${{ matrix.target }}
+          path: .test-artifacts/browser-build.tar.gz
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
+      - uses: actions/upload-artifact@v7
+        with:
+          name: validated-release-${{ matrix.target }}
+          path: .test-artifacts/release-build.tar.gz
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 7
+          overwrite: true
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: rust-migration-${{ matrix.target }}
+          name: rust-migration-native-${{ matrix.target }}
           path: |
             .test-artifacts/*.json
             release/*.sha256
           if-no-files-found: ignore
+          include-hidden-files: true
+
+  browser:
+    needs: parity
+    name: Browser ${{ matrix.suite }} on ${{ matrix.target }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [terminal, herdr, input]
+        target: [linux-x64, linux-arm64, darwin-arm64]
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+          - target: darwin-arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.1'
+          cache: npm
+      - name: Install native test prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config openssh-server bash-completion
+          sudo mkdir -p /run/sshd
+      - name: Install modern Bash on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install bash git
+          echo "TERMAI_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
+          git_completion="$(brew --prefix git)/etc/bash_completion.d/git-completion.bash"
+          test -r "$git_completion"
+          echo "TERMAI_GIT_COMPLETIONS_FILE=$git_completion" >> "$GITHUB_ENV"
+      - name: Install test dependencies
+        run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v8
+        with:
+          name: validated-browser-${{ matrix.target }}
+          path: .test-artifacts
+      - name: Restore and verify the native and frontend build
+        run: |
+          tar -xzpf .test-artifacts/browser-build.tar.gz
+          node scripts/ci-build.mjs verify browser .test-artifacts/browser-build.json
+      - uses: actions/download-artifact@v8
+        if: matrix.suite == 'terminal'
+        with:
+          name: validated-release-${{ matrix.target }}
+          path: .test-artifacts
+      - name: Restore the release build
+        if: matrix.suite == 'terminal'
+        run: |
+          tar -xzpf .test-artifacts/release-build.tar.gz
+          node scripts/ci-build.mjs verify release .test-artifacts/release-build.json
+      - name: Install browser test prerequisites
+        run: |
+          npx --no-install playwright-core install --with-deps chromium
+          echo "CHROME_PATH=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+          echo "CHROMIUM=$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')" >> "$GITHUB_ENV"
+      - name: Verify actual browser WebAssembly
+        if: matrix.suite == 'terminal'
+        run: npm run test:rust-browser
+      - name: Verify terminal and SSH browser workflows
+        if: matrix.suite == 'terminal'
+        run: |
+          TEST_ENGINE=server TEST_PORT=3137 npm run test:browser
+          TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
+          TEST_BASE_PATH=/terminal npm run test:reading
+      - name: Verify Herdr protocol and plugin browser workflows
+        if: matrix.suite == 'herdr'
+        run: |
+          npm run test:herdr
+          npm run test:herdr-loading
+          npm run test:plugins
+          npm run test:rust-herdr
+      - name: Verify development pairing and reconnect
+        if: matrix.suite == 'input'
+        env:
+          TERMAI_DEV_BUILD_MANIFEST: .test-artifacts/browser-build.json
+        run: |
+          npm run test:pairing
+          npm run test:reconnect
+          npm run test:herdr-reopen
+      - name: Verify gestures and touch input
+        if: matrix.suite == 'input'
+        run: |
+          npm run test:gestures
+          npm run test:touch
+      - name: Verify dictation and file transfers
+        if: matrix.suite == 'input'
+        run: |
+          node test/dictation-browser.mjs
+          node test/transfers-browser.mjs
+      - name: Verify files and workspace browser workflows
+        if: matrix.suite == 'input'
+        run: |
+          node test/files-browser.mjs
+          npm run test:workspace
+      - name: Verify supported native Herdr integration
+        if: matrix.suite == 'herdr'
+        run: |
+          node scripts/install-test-herdr.mjs
+          export HERDR_BINARY="$PWD/.test-artifacts/bin/herdr"
+          export PATH="$PWD/.test-artifacts/bin:$PATH"
+          npm run test:herdr-dictation
+          npm run test:herdr-spaces
+          npm run test:herdr-resize
+          npm run test:herdr-flash
+          npm run test:herdr-scroll
+      - name: Verify both engine modes in the packaged executable
+        if: matrix.suite == 'terminal'
+        env:
+          TERMAI_RELEASE_ALLOW_DIRTY: '1'
+          TERMAI_RELEASE_BUILD_MANIFEST: .test-artifacts/release-build.json
+        run: |
+          npm run release:package
+          package_directory=$(mktemp -d)
+          trap 'rm -rf "$package_directory"' EXIT
+          tar -xzpf "release/termai-v$(node -p 'require("./package.json").version')-${{ matrix.target }}.tar.gz" -C "$package_directory"
+          TEST_EXECUTABLE="$package_directory/bin/termai" TEST_ENGINE=server TEST_PORT=3137 TEST_BASE_PATH=/terminal npm run test:browser
+          TEST_EXECUTABLE="$package_directory/bin/termai" TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: rust-migration-${{ matrix.target }}-${{ matrix.suite }}
+          path: .test-artifacts/*.json
+          if-no-files-found: ignore
+          include-hidden-files: true

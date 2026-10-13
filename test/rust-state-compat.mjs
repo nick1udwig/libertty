@@ -36,7 +36,7 @@ try {
   await writeFile(path.join(directory, 'fixture.json'), JSON.stringify(fixture), { mode: 0o600 });
   await writeFile(path.join(directory, 'vault.json'), JSON.stringify(fixture.vault.data), { mode: 0o600 });
   await writeFile(path.join(directory, 'paired-clients.json'), JSON.stringify(fixture.pairing.data), { mode: 0o600 });
-  const child = spawn('cargo', ['run', '--locked', '--release', '--package', 'termai-server', '--example', 'state_compat', '--', directory], { cwd: root, stdio: 'inherit' });
+  const child = spawn('cargo', ['run', '--locked', '--package', 'termai-server', '--example', 'state_compat', '--', directory], { cwd: root, stdio: 'inherit' });
   await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('Rust persisted-state compatibility failed: ' + code))); });
   const result = JSON.parse(await readFile(path.join(directory, 'rust-results.json'), 'utf8'));
   const vault = JSON.parse(await readFile(path.join(directory,'vault.json'),'utf8'));

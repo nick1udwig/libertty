@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
+import { verifyBuildManifest } from './ci-build.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const output = path.resolve(process.argv[2] || path.join(root, 'release'));
@@ -20,7 +21,10 @@ if (git('status', '--porcelain') && !localTest) throw new Error('Commit changes 
 if (process.versions.node !== config.node && !localTest) throw new Error('Release builds must use Node ' + config.node);
 if (process.platform === 'linux' && !process.env.VOXTYPE_MOBILE_CHECKOUT && !localTest) throw new Error('Linux releases must include the pinned Voxtype Mobile daemon.');
 await access(path.join(root, 'dist/index.html'));
-execFileSync('cargo', ['build', '--release', '--locked', '-p', 'termai-server', '--bin', 'termai'], { cwd: root, stdio: 'inherit' });
+const buildManifest = process.env.TERMAI_RELEASE_BUILD_MANIFEST
+  ? await verifyBuildManifest(root, 'release', path.resolve(process.env.TERMAI_RELEASE_BUILD_MANIFEST), { allowDirty: localTest })
+  : undefined;
+if (!buildManifest) execFileSync('cargo', ['build', '--release', '--locked', '-p', 'termai-server', '--bin', 'termai'], { cwd: root, stdio: 'inherit' });
 const temporary = await mkdtemp(path.join(os.tmpdir(), 'termai-release-'));
 try {
   for (const file of ['dist', 'install.sh', 'package.json', 'package-lock.json', 'LICENSE', 'examples/plugins', 'build/release-config.json']) {
@@ -41,7 +45,7 @@ try {
   await chmod(path.join(temporary, 'bin/termai-backend'), 0o755);
   await chmod(path.join(temporary, 'bin/node'), 0o755);
   await writeFile(path.join(temporary, 'bin/termai'), '#!/bin/sh\nset -eu\napp=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexport TERMAI_CWD="${TERMAI_CWD:-$HOME}"\ncd "$app"\nexec "$app/bin/termai-backend" "$@"\n', { mode: 0o755 });
-  const metadata = { version: pkg.version, tag, commit: git('rev-parse', 'HEAD'), dirty: !!git('status', '--porcelain'), platform, backend, node: process.version, rust: execFileSync('rustc', ['--version'], { encoding: 'utf8' }).trim() };
+  const metadata = { version: pkg.version, tag, commit: git('rev-parse', 'HEAD'), dirty: !!git('status', '--porcelain'), platform, backend, node: process.version, rust: buildManifest?.rust || execFileSync('rustc', ['--version'], { encoding: 'utf8' }).trim() };
   await writeFile(path.join(temporary, 'release.json'), JSON.stringify(metadata, null, 2) + '\n');
   if (process.env.VOXTYPE_MOBILE_CHECKOUT && process.platform === 'linux') {
     const source = path.resolve(process.env.VOXTYPE_MOBILE_CHECKOUT);
