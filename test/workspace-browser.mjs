@@ -92,6 +92,25 @@ try {
   assert.equal(await originalTerminal.evaluate(el => el.isConnected), true, 'pairing from Backends must revive the existing blank terminal');
   await page.locator('#nav-terminals').click();
   let frame = await activeFrame(page); assert.equal(await page.locator('[role=tab]').count(), 1);
+  await page.locator('#workspace-shortcuts').waitFor({ state: 'visible' });
+  assert.equal(await frame.locator('.input-dock').isVisible(), false, 'Embedded terminal does not duplicate the bottom shortcut bar');
+  const checkBottomControls = async () => {
+    const bounds = await page.evaluate(() => {
+      const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; };
+      return { terminal: box('#terminal-stack'), tabs: box('#terminal-header'), shortcuts: box('#workspace-shortcuts'), height: innerHeight, scroll: document.documentElement.scrollHeight };
+    });
+    assert.ok(bounds.terminal.top <= 1, 'Terminal fills the space above bottom controls');
+    assert.ok(bounds.terminal.bottom <= bounds.tabs.top + 1);
+    assert.ok(bounds.tabs.bottom <= bounds.shortcuts.top + 1, 'Tabs sit directly above configurable buttons');
+    assert.equal(bounds.shortcuts.bottom, bounds.height); assert.equal(bounds.scroll, bounds.height, 'Bottom controls introduce no page overflow');
+  };
+  await checkBottomControls();
+  const viewport = page.viewportSize(); await page.setViewportSize({ width: 390, height: 480 }); await delay(100); await checkBottomControls(); await page.setViewportSize(viewport);
+  const controlModifier = page.locator('#workspace-shortcuts').getByRole('button', { name: 'Ctrl', exact: true });
+  await controlModifier.click(); await until(async () => await controlModifier.getAttribute('aria-pressed') === 'true');
+  assert.equal(await frame.locator('[data-modifier]').getAttribute('aria-pressed'), 'true', 'Outer modifier state matches active terminal');
+  await controlModifier.click(); await until(async () => await controlModifier.getAttribute('aria-pressed') === 'false');
+  await page.screenshot({ path: '/tmp/termai-bottom-controls.png' });
   await frame.locator('#copy-selection').evaluate(el => el.click());
   await page.getByText('Select terminal text first.', { exact: true }).waitFor({ state: 'visible' });
   assert.equal(await frame.locator('#toast').isVisible(), false, 'Embedded notices must appear only in the workspace');

@@ -157,10 +157,20 @@ try {
   const idle = await tab(0).locator('.herdr-status-dot').evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderColor }));
   assert.equal(idle.fill, 'rgba(0, 0, 0, 0)'); assert.equal(idle.border, 'rgb(166, 227, 161)');
   assert.equal(await terminal.locator('#shortcut-buttons').textContent(), await shell.locator('#shortcut-buttons').textContent());
+  await page.locator('#workspace-shortcuts').waitFor({ state: 'visible' });
+  assert.equal(await terminal.locator('.input-dock').isVisible(), false, 'Embedded pane delegates shortcuts to the workspace');
+  const bottomControls = await page.evaluate(() => {
+    const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; };
+    return { screen: box('.herdr-screen'), spaces: box('.herdr-agent-strip'), tabs: box('#terminal-header'), shortcuts: box('#workspace-shortcuts'), height: innerHeight };
+  });
+  assert.ok(bottomControls.screen.bottom <= bottomControls.spaces.top + 1);
+  assert.ok(bottomControls.spaces.bottom <= bottomControls.tabs.top + 1, 'Herdr spaces sit above terminal tabs');
+  assert.ok(bottomControls.tabs.bottom <= bottomControls.shortcuts.top + 1, 'Terminal tabs sit above configurable buttons');
+  assert.equal(bottomControls.shortcuts.bottom, bottomControls.height);
   await terminal.locator('#terminal textarea').focus(); await page.keyboard.type('Split routes into handlers'); await page.keyboard.press('Enter');
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\r'), 'direct Enter delivery');
   assert.equal(fixture.actions.filter(a => a.method === 'pane.send_text').map(a => a.params.text).join(''), 'Split routes into handlers\r');
-  await terminal.getByRole('button', { name: 'Esc', exact: true }).click();
+  await page.locator('#workspace-shortcuts').getByRole('button', { name: 'Esc', exact: true }).click();
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\x1b'), 'shared Escape button');
   const mic = terminal.locator('#termai-dictation'); await mic.waitFor({ state: 'visible' });
   await mic.click(); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
@@ -353,7 +363,7 @@ try {
   await terminal.waitForFunction(() => document.querySelector('#shortcut-buttons').textContent.includes('Help'));
   await shell.waitForFunction(() => document.querySelector('#shortcut-buttons').textContent.includes('Help'));
   await page.locator('#nav-terminals').click(); terminal = await agentFrame();
-  await terminal.getByRole('button', { name: 'Help', exact: true }).click();
+  await page.locator('#workspace-shortcuts').getByRole('button', { name: 'Help', exact: true }).click();
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\x08'), 'customized shortcuts shared after reconnect');
   // Reconnecting an agent view starts a fresh input revision, so dictation still works.
   await terminal.evaluate(() => { window.__herdrMessages = []; });
@@ -377,7 +387,7 @@ try {
   await touch('touchMove', docsRect.x + docsRect.width - 5, docsRect.y + docsRect.height / 2); await touch('touchEnd');
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   await tab(2).click();
-  await page.waitForFunction(() => document.querySelector('[data-terminal=term_2]').getAttribute('aria-selected') === 'true'); terminal = await agentFrame();
+  await page.waitForFunction(() => document.querySelector('.herdr-agent-tab[data-terminal=term_2]').getAttribute('aria-selected') === 'true'); terminal = await agentFrame();
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   await page.locator('#tabs .tab').first().click();
   assert.equal(await page.locator('.herdr-agent-strip').isVisible(), false);

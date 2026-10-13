@@ -68,6 +68,8 @@ Anyone with the token and network access can run commands as your host user.
 ## Hosts, tabs and SSH
 
 The app opens your terminal workspace and restores saved tabs.
+Terminal tabs sit at the bottom above the configurable shortcut buttons, keeping both within reach of your thumbs.
+Herdr spaces or agents form a third row directly above the terminal tabs, and hold menus open upward.
 Use **+** to open Hosts, choose a saved HTTP or SSH host, or add one.
 Older saved Herdr profiles also remain available.
 The back button from Hosts opens the Vault, with Hosts, Keychain, Backends and Known hosts.

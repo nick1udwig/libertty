@@ -81,7 +81,7 @@ export class HerdrView {
     const spinner = node('span', 'terminal-loading-spinner'); spinner.setAttribute('aria-hidden', 'true');
     this.loading.append(spinner, this.loadingLabel);
     this.screen.append(this.status, this.empty, this.loading);
-    this.element.append(this.strip, this.screen, this.menu);
+    this.element.append(this.screen, this.strip, this.menu);
     const viewed = () => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     const messages = (event: MessageEvent) => {
       if (event.origin !== location.origin) return;
@@ -89,6 +89,7 @@ export class HerdrView {
       if (!entry) return;
       const active = entry.frame === this.frame;
       if (event.data.type === 'terminal-loaded') {
+        entry.frame.contentWindow?.postMessage({ type: 'shortcut-host' }, location.origin);
         entry.frame.contentWindow?.postMessage({ type:'herdr-present', presentation:entry.presentation },location.origin);
         entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
         entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible:this.visible },location.origin);
@@ -169,6 +170,7 @@ export class HerdrView {
     } else { frame.remove(); this.terminalFrames.delete(id); }
   }
   private post(message: object) { this.frame?.contentWindow?.postMessage(message, location.origin); }
+  get terminalFrame() { return this.frame; }
   private mountTerminal(force = false) {
     if (this.displayed && !this.terminals.some(agent => agent.terminalId === this.displayed!.dataset.terminal && agent.paneId === this.displayed!.dataset.pane)) { this.displayed.remove(); this.displayed = undefined; }
     for (const [id, entry] of this.terminalFrames) {
@@ -305,7 +307,7 @@ export class HerdrView {
     this.host.changed(this.tracker.attention);
     this.strip.setAttribute('aria-label', this.spaceMode ? 'Herdr spaces' : 'Herdr agents');
     this.empty.hidden = !!this.selected;
-    this.empty.textContent = this.spaceMode ? 'Create a space with + in the strip above.' : 'No agents are running. Use + to create a space.';
+    this.empty.textContent = this.spaceMode ? 'Create a space with + in the strip below.' : 'No agents are running. Use + to create a space.';
     if (this.held) {
       for (const tab of this.strip.querySelectorAll<HTMLElement>('.herdr-agent-tab')) {
         const agent = this.entries().find(agent => agent.terminalId === tab.dataset.terminal);
@@ -417,7 +419,7 @@ export class HerdrView {
     this.menu.hidden = false;
     const parent = this.element.getBoundingClientRect(), rect = anchor.getBoundingClientRect();
     this.menu.style.left = Math.max(8, Math.min(rect.left - parent.left, parent.width - this.menu.offsetWidth - 8)) + 'px';
-    this.menu.style.top = rect.bottom - parent.top + 5 + 'px';
+    this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 5) + 'px';
   }
   private openMenu(anchor: HTMLElement, agent: StripItem) {
     this.menu.replaceChildren();

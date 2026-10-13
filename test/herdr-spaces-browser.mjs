@@ -97,6 +97,8 @@ try {
   const rect = await bounds(beta); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2);
   assert.equal(await page.evaluate(() => window.__touchSource), 'space:' + beta); await delay(500); await touch('touchEnd');
   await page.locator('.herdr-tab-menu:visible').waitFor();
+  const popupBounds = await page.locator('.herdr-tab-menu:visible').boundingBox();
+  assert.ok(popupBounds.y + popupBounds.height < rect.y, 'The bottom space hold menu opens upward');
   assert.deepEqual(await page.locator('.herdr-tab-menu:visible [role=menuitem]').allTextContents(), ['Rename', 'New worktree', 'Open worktree', 'Split', 'Close']);
   await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Rename', exact: true }).click();
   await page.getByLabel('Space name', { exact: true }).fill('Review'); await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();

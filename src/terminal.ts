@@ -60,6 +60,7 @@ function persist(key: string, value: unknown) {
 }
 const transfersSeen = new Set<string>();
 let ctrl = false;
+let shortcutState = '';
 let toastTimer: ReturnType<typeof setTimeout>;
 const queue = new Queue<Extract<ServerMessage, { type: 'output' }>>();
 let frameQueued = false;
@@ -80,6 +81,13 @@ function updateRun() {
   const available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand;
   $('shell-status').textContent = state.exited ? 'Exited' : state.ready ? 'At prompt' : 'Running';
   for (const button of document.querySelectorAll<HTMLButtonElement>('.command-shortcut')) button.disabled = !available;
+  publishShortcuts(available);
+}
+function publishShortcuts(available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand) {
+  if (!embedded) return;
+  const snapshot = { shortcuts, ctrl, available }, serialized = JSON.stringify(snapshot);
+  if (serialized === shortcutState) return;
+  shortcutState = serialized; notify('terminal-shortcuts', snapshot);
 }
 async function api<T>(url: string, data?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(endpoint(url), { method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
@@ -221,7 +229,7 @@ function showReading(request: { path: string } | { capture: string; name: string
   location.assign(workspace.href);
 }
 term.onData(rawInput);
-function setCtrl(value: boolean) { ctrl = value; for (const button of document.querySelectorAll('[data-modifier]')) button.setAttribute('aria-pressed', String(value)); }
+function setCtrl(value: boolean) { ctrl = value; for (const button of document.querySelectorAll('[data-modifier]')) button.setAttribute('aria-pressed', String(value)); publishShortcuts(); }
 function renderShortcuts() {
   $('shortcut-buttons').replaceChildren();
   for (const shortcut of shortcuts) {
@@ -511,6 +519,11 @@ if (!embedded && import.meta.env.PROD && 'serviceWorker' in navigator) navigator
 if (embedded) {
   window.addEventListener('message', event => {
     if (event.source !== parent || event.origin !== location.origin) return;
+    if (event.data?.type === 'shortcut-host') { document.documentElement.classList.add('hosted-shortcuts'); shortcutState = ''; publishShortcuts(); sizeTerminal(); }
+    if (event.data?.type === 'terminal-shortcut' && tabVisible && !herdrParked) {
+      const index = event.data.index, shortcut = shortcuts[index];
+      if (Number.isInteger(index) && shortcut && shortcut.kind === event.data.kind && shortcut.value === event.data.value) $('shortcut-buttons').querySelectorAll<HTMLButtonElement>('button')[index]?.click();
+    }
     if (event.data?.type === 'herdr-present' && herdrTerminal && typeof event.data.presentation === 'string') {
       herdrPresentation = event.data.presentation; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0;
       notifyHerdrSizing();
@@ -533,7 +546,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible && herdrTerminal) { herdrPreserve = false; herdrLayoutPending = true; herdrLayoutMatched = false; terminalViewport.classList.add('awaiting-herdr-layout'); } dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); clearTimeout(outputTimer); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) sizeTerminal(); }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible && herdrTerminal) { herdrPreserve = false; herdrLayoutPending = true; herdrLayoutMatched = false; terminalViewport.classList.add('awaiting-herdr-layout'); } dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); clearTimeout(outputTimer); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);

@@ -4,7 +4,7 @@ import './workspace.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
 import { BrowserVault } from './browser-vault.ts';
 import type { BrowserKeyInfo } from './browser-key.ts';
-import { defaults, validateShortcuts } from './shortcuts.ts';
+import { defaults, validateShortcuts, type Shortcut } from './shortcuts.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { readingPhrases, defaultReadingPhrases } from './reading-request.ts';
 import { readingMessage } from './reading-view.ts';
@@ -45,6 +45,9 @@ try {
   }
 } catch { /* A corrupt plugin inventory cannot prevent terminal startup. */ }
 const herdrViews = new Map<string, HerdrView>(), herdrAttention = new Map<string, number>();
+const terminalShortcuts = new WeakMap<Window, { shortcuts: Shortcut[]; ctrl: boolean; available: boolean }>();
+let shortcutPresentation = '';
+let shortcutWindow: Window | null | undefined;
 const herdrSounds = new HerdrSounds();
 const herdrNotifications = new HerdrNotifications(<T>(id: string, name: string, data?: unknown) => api<T>(backendFor(id), name, data), () => {
   for (const [id, view] of herdrViews) {
@@ -60,7 +63,7 @@ for (const plugin of builtinPlugins({
   frame(tab, frame) { if (frame) frames.set(tab.id, frame); else frames.delete(tab.id); },
   herdr(tab, view) { if (view) herdrViews.set(tab.id, view); else { herdrViews.delete(tab.id); herdrAttention.delete(tab.id); } },
   ready(tab) { if (tab.id === active) updateViewVisibility(); },
-  attention(tab, count) { herdrAttention.set(tab.id, count); const badge = $('tabs').querySelector<HTMLElement>('[aria-controls="herdr-' + tab.id + '"] .herdr-attention'); if (badge) { badge.textContent = String(count); badge.hidden = !count; badge.setAttribute('aria-label', count + ' agents need attention'); } },
+  attention(tab, count) { herdrAttention.set(tab.id, count); const badge = $('tabs').querySelector<HTMLElement>('[aria-controls="herdr-' + tab.id + '"] .herdr-attention'); if (badge) { badge.textContent = String(count); badge.hidden = !count; badge.setAttribute('aria-label', count + ' agents need attention'); } if (tab.id === active) queueMicrotask(renderWorkspaceShortcuts); },
   notification: (connection, event) => herdrSounds.play(connection, event), notificationDevice: id => herdrNotifications.device(id),
   watch: tab => herdrNotifications.watch(tab.backendId, tab.id, herdrSession(tab.herdrSession), tab.herdrSource), unwatch: tab => herdrNotifications.unwatch(tab.backendId, tab.id),
 })) plugins.register(plugin);
@@ -241,7 +244,7 @@ function openTabMenu(tab: TerminalTab, anchor: HTMLElement) {
   tabMenu.append(rename, close); tabMenu.hidden = false;
   tabMenu.setAttribute('aria-label', tab.name + ' tab actions');
   const rect = anchor.getBoundingClientRect();
-  tabMenu.style.left = Math.max(8, Math.min(rect.left, innerWidth - tabMenu.offsetWidth - 8)) + 'px'; tabMenu.style.top = rect.bottom + 5 + 'px';
+  tabMenu.style.left = Math.max(8, Math.min(rect.left, innerWidth - tabMenu.offsetWidth - 8)) + 'px'; tabMenu.style.top = Math.max(8, rect.top - tabMenu.offsetHeight - 5) + 'px';
   rename.focus({ preventScroll: true });
 }
 function renameTab(tab: TerminalTab) {
@@ -322,6 +325,27 @@ function updateViewVisibility() {
   }
   $('terminal-stack').setAttribute('aria-busy', String(preparing));
   updateTerminalLoading();
+  renderWorkspaceShortcuts();
+}
+function shortcutFrame() { return frames.get(active) || herdrViews.get(active)?.terminalFrame; }
+function renderWorkspaceShortcuts() {
+  const frame = shortcutFrame(), source = frame?.contentWindow, state = source && terminalShortcuts.get(source);
+  $('workspace-shortcuts').hidden = page !== 'terminal' || !state;
+  const presentation = JSON.stringify(state);
+  if (source === shortcutWindow && presentation === shortcutPresentation) return;
+  shortcutWindow = source; shortcutPresentation = presentation || '';
+  const buttons = $('workspace-shortcut-buttons'), scroll = buttons.scrollLeft; buttons.replaceChildren();
+  if (!state) return;
+  state.shortcuts.forEach((shortcut, index) => {
+    const control = button(shortcut.label, () => {
+      if (shortcutFrame()?.contentWindow !== source) return;
+      source!.postMessage({ type: 'terminal-shortcut', index, kind: shortcut.kind, value: shortcut.value }, location.origin);
+    }, shortcut.kind === 'command' ? 'command-shortcut' : '');
+    control.title = shortcut.value; control.disabled = shortcut.kind === 'command' && !state.available;
+    if (shortcut.kind === 'keys' && shortcut.value === 'Ctrl') { control.dataset.modifier = ''; control.setAttribute('aria-pressed', String(state.ctrl)); }
+    control.addEventListener('pointerdown', event => event.preventDefault()); buttons.append(control);
+  });
+  buttons.scrollLeft = scroll;
 }
 function showTerminalLoading(id: string, waitForPrompt = false) { terminalLoading = { id, waitForPrompt }; updateTerminalLoading(); }
 function hideTerminalLoading(id: string) { if (terminalLoading?.id === id) { terminalLoading = undefined; updateTerminalLoading(); } }
@@ -435,12 +459,20 @@ async function recoverTerminal(tab: TerminalTab, backend: BackendProfile) {
 }
 window.addEventListener('message', event => {
   if (event.origin !== location.origin) return;
+  if (event.data?.type === 'terminal-shortcuts') {
+    const source = event.source as Window;
+    const known = [...frames.values()].some(frame => frame.contentWindow === source) || [...herdrViews.values()].some(view => [...view.element.querySelectorAll('iframe')].some(frame => frame.contentWindow === source));
+    if (known) {
+      try { terminalShortcuts.set(source, { shortcuts: validateShortcuts(event.data.shortcuts), ctrl: event.data.ctrl === true, available: event.data.available === true }); renderWorkspaceShortcuts(); } catch { /* Ignore malformed state from a stale terminal. */ }
+    }
+    return;
+  }
   const entry = [...frames].find(([, frame]) => frame.contentWindow === event.source); if (!entry) return;
   const tab = tabs.find(tab => tab.id === entry[0]); if (!tab) return;
   if (event.data?.session !== tab.session) return;
   const backend = backendFor(tab.backendId), frame = entry[1];
   if (event.data?.type === 'terminal-authorized' && typeof event.data.accessToken === 'string' && /^[a-f0-9]{64}$/.test(event.data.accessToken)) authorizeTerminals(backend, event.data.accessToken);
-  if (event.data?.type === 'terminal-loaded') { frame.contentWindow!.postMessage({ type: 'authorize', accessToken: tokenFor(backend) }, location.origin); frame.contentWindow!.postMessage({ type: 'tab-visibility', visible: tab.id === active && page === 'terminal' }, location.origin); }
+  if (event.data?.type === 'terminal-loaded') { frame.contentWindow!.postMessage({ type: 'shortcut-host' }, location.origin); frame.contentWindow!.postMessage({ type: 'authorize', accessToken: tokenFor(backend) }, location.origin); frame.contentWindow!.postMessage({ type: 'tab-visibility', visible: tab.id === active && page === 'terminal' }, location.origin); }
   if (event.data?.type === 'terminal-locked') {
     hideTerminalLoading(tab.id);
     lockedTerminals.add(tab.id);

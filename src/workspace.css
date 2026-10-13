@@ -12,3 +12,11 @@
 #terminal-loading.has-previous .terminal-loading-spinner{width:18px;height:18px;border-width:2px;flex:none}
 
 .plugin-entry{border:1px solid #44485e;border-radius:12px;padding:14px;margin:12px 0}.plugin-entry strong{display:block}.plugin-entry .actions{flex-wrap:wrap}.plugin-entry .toggle{margin:10px 0!important}.plugin-entry p{overflow-wrap:anywhere}
+#workspace-shortcuts{flex:none;background:#141f19;border-top:1px solid #2c3c30;padding:2px 8px}
+@font-face{font-family:'JetBrains Mono';src:url('./fonts/JetBrainsMono-Regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+#workspace-shortcut-buttons{display:flex;gap:5px;overflow-x:auto;scrollbar-width:none;min-width:0}
+#workspace-shortcut-buttons::-webkit-scrollbar{display:none}
+#workspace-shortcut-buttons button{flex:none;min-width:44px;min-height:36px;border:1px solid #36483b;border-radius:5px;background:#1c2a20;color:#b8cabc;font:12px "JetBrains Mono",ui-monospace,monospace;padding:0 10px;white-space:nowrap}
+#workspace-shortcut-buttons button:hover,#workspace-shortcut-buttons button[aria-pressed=true]{border-color:#bbf6b4;color:#bbf6b4;background:#263e2a}
+#workspace-shortcut-buttons button.command-shortcut{color:#bbf6b4}
+.terminal-header{border-top:1px solid #2c3046}

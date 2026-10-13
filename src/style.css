@@ -48,6 +48,7 @@ dialog{color:#e4eee6;background:#17251c;border:1px solid #3d5343;border-radius:1
 
 .embedded-terminal .floating-menu{display:none}
 .embedded-terminal #app{padding:0}
+.hosted-shortcuts .input-dock{display:none}
 .alternative-loading{min-height:44px;display:flex;align-items:center;gap:10px;padding:8px;color:#a8c6a8;font-size:13px}.alternative-loading .spinner{width:15px;height:15px;border:2px solid #385940;border-top-color:#c3f6b6;border-radius:50%;animation:spin .75s linear infinite;flex:none}
 
 .transfer-dialog{color:#ececf4;background:#24263d;border:1px solid #3c4058;border-radius:18px;width:min(460px,calc(100% - 24px));padding:22px;box-shadow:0 25px 100px #0007}.transfer-dialog::backdrop{background:#080b15bc}.transfer-dialog h2{font:600 20px system-ui;margin:0 0 14px}.transfer-dialog p{font:14px system-ui;line-height:1.5;overflow-wrap:anywhere}.transfer-dialog .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.transfer-dialog button{padding:12px 18px;border-radius:9px;color:inherit;border:0;font:14px system-ui;background:#3a3e56}.transfer-dialog .primary{background:#268dde}.transfer-dialog button:disabled{opacity:.5}
