@@ -6,12 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
-import { compoundRepairRecommended } from '../src/compound-repair.ts';
 import { rustArchitectureAdapter } from './rust-architecture-adapter.mjs';
 import { latencyStatistics, latencyRegressed, type LatencyStatistics } from './architecture-stats.ts';
 import type { Catalog } from '../src/protocol.ts';
 
 const shared = process.env.BENCH_SUITE === 'shared';
+const benchmarkProfile = process.env.BENCH_PROFILE === 'debug' ? 'debug' : 'release';
 const variants = [
   { name: 'master before', ref: process.env.BENCH_BEFORE_MASTER || '0e0646c', client: false, optimized: true },
   { name: 'master after', ref: process.env.BENCH_AFTER || '.', client: false, optimized: true },
@@ -41,6 +41,8 @@ const rows: { variant: string; case: string; rtt: number; coldMs: number; warmMs
 const measurements = new WeakMap<object, { cold: number; warm: LatencyStatistics }>();
 let comparisons = 0;
 const rustPeers: (Awaited<ReturnType<typeof rustArchitectureAdapter>> | undefined)[] = [];
+const built = spawnSync('cargo', ['build', '--locked', '--offline', ...(benchmarkProfile === 'release' ? ['--release'] : []), '-p', 'termai-server', '--example', 'engine_host'], { cwd: new URL('../', import.meta.url), stdio: 'inherit' });
+if (built.status !== 0) throw new Error('Build the benchmark host before measuring its current implementation.');
 try {
   await mkdir(cwd);
   await mkdir(path.join(cwd, 'git', 'pebble-agent'), { recursive: true });
@@ -84,13 +86,13 @@ esac
   }
   if (process.env.BENCH_REVERSE === '1') loaded.reverse();
   for (const variant of loaded) {
-    const adapter = variant.rust ? await rustArchitectureAdapter(catalog, env, variant.client, variant.modules.WasmEngine) : undefined;
+    const adapter = variant.rust ? await rustArchitectureAdapter(catalog, env, false, variant.modules.WasmEngine) : undefined;
     rustPeers.push(adapter);
     Object.assign(variant, { adapter });
   }
   for (const rtt of rtts) for (const [name, text] of cases.filter(([name]) => !selectedCases || selectedCases.includes(name))) {
     const warmRepeats = rtt === 0 ? Math.max(repeats, cpuRepeats) : repeats;
-    let expected: unknown;
+    const expected = new Map<boolean, unknown>();
     for (const variant of loaded) {
       const coldTimes: number[] = [], coldCounts: number[] = [], coldSizes: number[] = [];
       // Recreate application caches for each cold trial; report the first call separately.
@@ -116,15 +118,15 @@ esac
         };
         const times: number[] = [], counts: number[] = [], sizes: number[] = [], hostTimes: number[] = [], idleBytes: number[] = [], idleTimes: number[] = [];
         const nativeEngineTimes: number[] = [];
-        let nativeDelegated = false;
+
         try {
           for (let i = 0; i <= (coldTrial === coldRepeats - 1 ? warmRepeats : 0); i++) {
             // Model an already delivered periodic idle push for warm optimized-client trials.
             // Both its host time and wire bytes are recorded outside the foreground interval.
-            if (i && variant.client && variant.optimized) {
+            if (i && variant.client && variant.optimized && !rust) {
               const start = performance.now();
               const context = await facts.context(pushKey, false); pushKey = context.catalogKey;
-              const snapshot = rust ? await rust.directory(cwd) : await m.directorySnapshot(cwd, 10000);
+              const snapshot = await m.directorySnapshot(cwd, 10000);
               const prefetch = snapshot.version === pushDirectoryVersion ? [] : [{ path: cwd, snapshot }]; pushDirectoryVersion = snapshot.version;
               const wire = JSON.stringify({ context, directories: prefetch });
               idleBytes.push(Buffer.byteLength(wire));
@@ -135,7 +137,7 @@ esac
             requests = bytes = hostMs = 0;
             const begin = performance.now(), signal = AbortSignal.timeout(5000);
             let actual;
-            if (!variant.client) {
+            if (!variant.client || rust) {
               requests = 1; await delay(rtt / 2);
               const start = performance.now();
               if (rust) {
@@ -145,32 +147,26 @@ esac
               bytes = Buffer.byteLength(JSON.stringify({ text })) + Buffer.byteLength(JSON.stringify({ candidates: actual }));
               await delay(rtt / 2);
             } else {
-              const includePaths = !(rust && compoundRepairRecommended(text, { compoundRepair: true } as any)) && (!variant.optimized || !(rust ? rust.directoryInput(text) : m.directoryInput(text)));
+              const includePaths = !variant.optimized || !m.directoryInput(text);
               const snapshot = await cache.get(transport, signal, includePaths, variant.optimized ? 1 : undefined);
-              if (rust && compoundRepairRecommended(text, snapshot)) {
-                nativeDelegated = true;
-                requests++; bytes += Buffer.byteLength(JSON.stringify({ kind: 'repair', key: snapshot.key, catalogKey: snapshot.catalogKey, text }));
-                await delay(rtt / 2); const start = performance.now();
-                actual = await rust.repair(text,snapshot,signal); hostMs += performance.now()-start;
-                bytes += Buffer.byteLength(JSON.stringify(actual)); await delay(rtt / 2);
-              } else for (let attempt = 0; ; attempt++) {
+              for (let attempt = 0; ; attempt++) {
                 host = new m.RemoteHost(transport, snapshot, signal, syntax, directories);
                 try {
                   const requestHost = host;
                   const metadata = (discovery as any).forHost ? (discovery as any).forHost({ help: (command: string, route: string[]) => requestHost.help(command, route), describe: (command: string) => requestHost.describe(command) }) : discovery;
-                  actual = rust ? await rust.suggest(text, snapshot, host, signal) : await variant.engine!.suggest(text, snapshot.catalog, { HOME: snapshot.home, HOST_CONTEXT: snapshot.discoveryKey }, metadata, host, undefined, signal);
+                  actual = await variant.engine!.suggest(text, snapshot.catalog, { HOME: snapshot.home, HOST_CONTEXT: snapshot.discoveryKey }, metadata, host, undefined, signal);
                   if (variant.optimized) await host.verify();
                   break;
                 } catch (error) { if (!variant.optimized || !(error instanceof m.DirectoryChanged) || attempt >= 2) throw error; }
               }
             }
             times.push(performance.now() - begin); counts.push(requests); sizes.push(bytes); hostTimes.push(hostMs);
-            if (expected === undefined) expected = actual;
-            assert.deepEqual(actual, expected, `${variant.name}: ${name}, RTT=${rtt}, iteration=${i}`); comparisons++;
+            if (!expected.has(variant.rust)) expected.set(variant.rust, actual);
+            assert.deepEqual(actual, expected.get(variant.rust), `${variant.name}: ${name}, RTT=${rtt}, iteration=${i}`); comparisons++;
           }
           coldTimes.push(times[0]); coldCounts.push(counts[0]); coldSizes.push(sizes[0]);
           if (coldTrial < coldRepeats - 1) continue;
-          const row = { variant: variant.name, case: name, rtt, coldMs: rounded(median(coldTimes)), firstColdMs: rounded(coldTimes[0]), coldSamplesMs: coldTimes.map(rounded), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: Math.max(...coldCounts), warmRequests: median(counts.slice(1)), coldBytes: median(coldSizes), warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), engine: rust ? variant.client ? nativeDelegated ? 'rust-client-native' : 'rust-wasm' : 'rust-native' : 'typescript', initializationMs: rust?.initializationMs || 0, idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
+          const row = { variant: variant.name, case: name, rtt, coldMs: rounded(median(coldTimes)), firstColdMs: rounded(coldTimes[0]), coldSamplesMs: coldTimes.map(rounded), warmMs: rounded(median(times.slice(1))), warmSamplesMs: times.slice(1).map(rounded), coldRequests: Math.max(...coldCounts), warmRequests: median(counts.slice(1)), coldBytes: median(coldSizes), warmBytes: median(sizes.slice(1)), warmHostMs: rounded(median(hostTimes.slice(1))), engine: rust ? 'rust-native' : 'typescript', initializationMs: rust?.initializationMs || 0, idlePushBytesTotal: idleBytes.reduce((a, b) => a + b, 0), idlePushHostMsTotal: rounded(idleTimes.reduce((a, b) => a + b, 0)) };
           const warm = latencyStatistics(times.slice(1));
           measurements.set(row, { cold: median(coldTimes), warm });
           Object.assign(row, { warmRepeats, warmP95Ms: rounded(warm.p95), ...(warm.lower95 !== undefined ? { warmMedian95Ms: [rounded(warm.lower95), rounded(warm.upper95!)] } : {}), ...(nativeEngineTimes.length ? { nativeEngineWarmMs: rounded(median(nativeEngineTimes.slice(1))), nativeEngineWarmP95Ms: rounded(latencyStatistics(nativeEngineTimes.slice(1)).p95) } : {}) });

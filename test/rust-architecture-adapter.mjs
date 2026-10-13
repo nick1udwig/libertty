@@ -7,7 +7,8 @@ import { DirectoryChanged } from '../src/directory-cache.ts';
 
 const root = new URL('../', import.meta.url).pathname;
 export async function rustArchitectureAdapter(catalog, environment, client, bridge = WasmEngine) {
-  const process = spawn(root + 'target/release/examples/engine_host', [], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
+  const profile = globalThis.process.env.BENCH_PROFILE === 'debug' ? 'debug' : 'release';
+  const process = spawn(root + 'target/' + profile + '/examples/engine_host', [], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
   const pending = []; let errors = '';
   process.stderr.on('data', bytes => errors += bytes);
   const lines = createInterface({ input: process.stdout });
