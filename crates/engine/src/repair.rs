@@ -1004,7 +1004,7 @@ struct State<'a> {
     index: usize,
     score: f64,
     confidence: f64,
-    unresolved: bool,
+    unresolved: usize,
     changes: Option<Trail<Change>>,
     value_next: bool,
     value_remaining: usize,
@@ -1044,7 +1044,7 @@ fn push<'a>(
     }
     new.index += opts.consumed.max(1);
     new.score += opts.score;
-    new.unresolved |= opts.unresolved;
+    new.unresolved += usize::from(opts.unresolved);
     if let Some(confidence) = opts.confidence {
         new.confidence = new.confidence.min(confidence);
     }
@@ -1135,7 +1135,7 @@ fn repair_one(
                 score: item.score,
                 confidence: (item.score - item.consumed.saturating_sub(1) as f64 * 8.0)
                     .clamp(0.0, 100.0),
-                unresolved: false,
+                unresolved: 0,
                 changes: if item.value != text {
                     Some(Trail::new(Change::Command(item.value.clone())))
                 } else {
@@ -1494,7 +1494,9 @@ fn repair_one(
                     word.value.clone(),
                     Push {
                         unresolved: !["echo", "printf"].contains(&state.args.first().as_str())
-                            && file_matches.is_empty(),
+                            && !file_matches.iter().any(|matched| {
+                                matched.consumed == 1 && matched.value == word.value
+                            }),
                         ..Default::default()
                     },
                     script_flags,
@@ -1537,7 +1539,8 @@ fn repair_one(
             unique.push(Candidate {
                 command,
                 evidence: Evidence {
-                    resolved: !state.unresolved,
+                    resolved: state.unresolved == 0,
+                    unresolved: state.unresolved,
                     ..Evidence::new(CandidateSource::Repair, state.confidence)
                 },
                 score: state.score + history_boost,

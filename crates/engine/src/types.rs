@@ -189,6 +189,7 @@ pub struct Evidence {
     pub confidence: f64,
     pub validated: bool,
     pub resolved: bool,
+    pub unresolved: usize,
 }
 impl Default for Evidence {
     fn default() -> Self {
@@ -197,6 +198,7 @@ impl Default for Evidence {
             confidence: 100.0,
             validated: false,
             resolved: true,
+            unresolved: 0,
         }
     }
 }
@@ -207,6 +209,7 @@ impl Evidence {
             confidence: confidence.clamp(0.0, 100.0),
             validated: false,
             resolved: source != CandidateSource::Literal,
+            unresolved: 0,
         }
     }
 }

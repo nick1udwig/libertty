@@ -17,6 +17,7 @@ struct Inner {
     prompt: u64,
     prompt_revision: u64,
     editable: Option<Editable>,
+    repair: Option<(String, CancellationToken)>,
 }
 #[derive(Clone)]
 struct Editable {
@@ -54,6 +55,7 @@ pub struct View {
     baseline: Mutex<Option<Size>>,
     frame_ready: tokio::sync::Notify,
     cancel: CancellationToken,
+    services: crate::host::HostServices,
 }
 fn integer(value: &Value) -> Option<f64> {
     value
@@ -97,8 +99,10 @@ impl View {
                 prompt: 1,
                 prompt_revision: 0,
                 editable: None,
+                repair: None,
             }),
             capacity: Arc::new(Semaphore::new(128)),
+            services: crate::host::HostServices::new(),
             pending_input,
             send,
             terminal,
@@ -473,8 +477,149 @@ impl View {
             recording.audio(bytes);
         }
     }
+    fn start_repair(
+        self: &Arc<Self>,
+        id: String,
+        text: String,
+        intent: crate::alternatives::Intent,
+        prompt: u64,
+        revision: u64,
+        backend: bool,
+    ) {
+        let cancel = self.cancel.child_token();
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.revision != revision || inner.prompt != prompt {
+                return;
+            }
+            inner.dictation_id = id.clone();
+            if let Some((_, previous)) = inner.repair.replace((id.clone(), cancel.clone())) {
+                previous.cancel();
+            }
+        }
+        let view = self.clone();
+        tokio::spawn(async move {
+            let target = &view.target;
+            let terminal = view.agent["terminalId"].as_str().unwrap_or("");
+            let services = &view.services;
+            let repair_cancel = &cancel;
+            let result = tokio::select! { biased;
+                _ = cancel.cancelled() => Err("Repair cancelled.".to_owned()),
+                result = tokio::time::timeout(std::time::Duration::from_secs(10), crate::alternatives::prepare(&text, &intent, |query| Box::pin(async move { target.suggest(terminal, &query, services.clone(), repair_cancel).await }))) => result.unwrap_or_else(|_| Err("Repair timed out.".into())),
+            };
+            let mut reply = json!({"type":"repair-result","id":id,"prompt":prompt,"accepted":false,"original":text,"selected":text,"candidates":[]});
+            match result {
+                Ok(prepared) => {
+                    let applied = async {
+                        view.guard(revision, &id)?;
+                        if cancel.is_cancelled() {
+                            return Err("Repair cancelled.".to_owned());
+                        }
+                        let replacement = {
+                            let mut inner = view.inner.lock().unwrap();
+                            let previous = inner
+                                .editable
+                                .clone()
+                                .ok_or("Only the latest dictated text can be replaced.")?;
+                            let shell = inner
+                                .shell
+                                .clone()
+                                .ok_or("The shell is no longer at the prompt.")?;
+                            if prepared.selected == previous.text {
+                                return Ok(());
+                            }
+                            inner.revision += 1;
+                            Replacement {
+                                previous,
+                                shell,
+                                revision: inner.revision,
+                                edit_id: None,
+                            }
+                        };
+                        let next = replacement.revision;
+                        view.input(
+                            &prepared.selected,
+                            false,
+                            Some((next, &id)),
+                            Some(replacement),
+                        )
+                        .await?;
+                        let screen = view.editable_screen(&prepared.selected).await?;
+                        view.guard(next, &id)?;
+                        view.inner.lock().unwrap().editable = Some(Editable {
+                            text: prepared.selected.clone(),
+                            screen,
+                        });
+                        Ok::<_, String>(())
+                    }
+                    .await;
+                    reply["accepted"] = json!(applied.is_ok());
+                    if let Err(error) = applied {
+                        reply["error"] = json!(error);
+                    }
+                    reply["selected"] = json!(prepared.selected);
+                    reply["candidates"] = json!(prepared.candidates);
+                }
+                Err(error) => {
+                    reply["error"] = json!(error);
+                }
+            }
+            let mut inner = view.inner.lock().unwrap();
+            reply["revision"] = json!(inner.revision);
+            if backend {
+                reply["source"] = json!("dictation");
+            }
+            if inner
+                .repair
+                .as_ref()
+                .is_some_and(|(active, _)| active == &id)
+            {
+                inner.repair.take();
+            }
+            view.send(reply);
+        });
+    }
     pub fn receive(self: &Arc<Self>, message: Value) -> Result<(), String> {
         match message["type"].as_str().unwrap_or("") {
+            "repair-cancel" => {
+                let inner = self.inner.lock().unwrap();
+                if let Some((id, cancel)) = &inner.repair
+                    && message["id"].as_str() == Some(id)
+                {
+                    cancel.cancel();
+                }
+                Ok(())
+            }
+            "repair" => {
+                let id = message["id"]
+                    .as_str()
+                    .filter(|id| id.len() <= 100)
+                    .ok_or("Invalid repair")?
+                    .to_owned();
+                let text = message["text"]
+                    .as_str()
+                    .filter(|text| text.encode_utf16().count() <= 2000 && !controls(text))
+                    .ok_or("Invalid repair")?
+                    .to_owned();
+                let intent = message
+                    .get("intent")
+                    .map(|value| serde_json::from_value(value.clone()))
+                    .transpose()
+                    .map_err(|_| "Invalid repair intent")?
+                    .unwrap_or_default();
+                let (prompt, revision) = {
+                    let inner = self.inner.lock().unwrap();
+                    if integer(&message["prompt"]) != Some(inner.prompt as f64)
+                        || integer(&message["revision"]) != Some(inner.revision as f64)
+                    {
+                        self.send(json!({"type":"repair-result","id":id,"accepted":false,"revision":inner.revision,"prompt":inner.prompt,"original":text,"selected":text,"candidates":[]}));
+                        return Ok(());
+                    }
+                    (inner.prompt, inner.revision)
+                };
+                self.start_repair(id, text, intent, prompt, revision, false);
+                Ok(())
+            }
             "ack" => Ok(()),
             "herdr-frame-request" => {
                 self.terminal.refresh();
@@ -736,9 +881,11 @@ impl View {
                         let shell = inner.shell.is_some();
                         let weak = Arc::downgrade(self);
                         let result_id = id.clone();
+                        let phrases = message["readingPhrases"].clone();
                         let result = Arc::new(move |text: String| {
                             let weak = weak.clone();
                             let id = result_id.clone();
+                            let phrases = phrases.clone();
                             Box::pin(async move {
                                 let view=weak.upgrade().ok_or("Terminal input changed during dictation. No text was inserted.".to_owned())?;
                                 view.guard(revision, &id)?;
@@ -765,7 +912,19 @@ impl View {
                                     });
                                     inner.revision
                                 };
-                                view.send(json!({"type":"pasted","text":text,"replace":false,"prompt":prompt,"revision":new_revision,"source":"dictation"}));
+                                view.send(json!({"type":"pasted","text":text,"replace":false,"prompt":prompt,"revision":new_revision,"source":"dictation","repairing":shell && text.encode_utf16().count() <= 2000}));
+                                if shell && text.encode_utf16().count() <= 2000 {
+                                    let intent =
+                                        crate::alternatives::Intent::detect(&text, &phrases);
+                                    view.start_repair(
+                                        crate::storage::random_hex(16),
+                                        text,
+                                        intent,
+                                        prompt,
+                                        new_revision,
+                                        true,
+                                    );
+                                }
                                 Ok(())
                             })
                                 as futures::future::BoxFuture<'static, Result<(), String>>
@@ -833,6 +992,7 @@ impl View {
                     (inner.revision, inner.prompt, id, replacement, shell)
                 };
                 let applied = message["applied"] == true;
+                let phrases = message["readingPhrases"].clone();
                 let view = self.clone();
                 tokio::spawn(async move {
                     let work = async {
@@ -865,7 +1025,16 @@ impl View {
                             });
                             inner.revision
                         };
-                        view.send(json!({"type":"pasted","text":text,"replace":false,"source":"dictation","prompt":prompt,"revision":revision}));
+                        view.send(json!({"type":"pasted","text":text,"replace":false,"source":"dictation","repairing":true,"prompt":prompt,"revision":revision}));
+                        let intent = crate::alternatives::Intent::detect(&text, &phrases);
+                        view.start_repair(
+                            crate::storage::random_hex(16),
+                            text,
+                            intent,
+                            prompt,
+                            revision,
+                            true,
+                        );
                         Ok(())
                     };
                     if let Err(error) = work.await {

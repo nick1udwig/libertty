@@ -187,6 +187,14 @@ async fn compound_repairs_bind_saved_catalogs_to_the_live_session_context() {
         .await
         .unwrap();
     assert_eq!(python[0]["command"], "python3 hello_world.py --myarg food");
+    let coarse = session
+        .suggest("Python three hello world dot py myarg food", &cancel)
+        .await
+        .unwrap();
+    assert_eq!(
+        coarse["candidates"][0]["command"], "python3 hello_world.py --myarg food",
+        "{coarse}"
+    );
     assert!(
         session
             .repair("stale", catalog, "cd work space", &cancel)
@@ -372,6 +380,57 @@ async fn pty_contract_child() {
     assert!(catalog.history.contains(&"echo remembered-command".into()));
     assert!(catalog.history.contains(&"git init".into()));
     assert!(catalog.paths.contains(&"subfolder/".into()));
+
+    let repair_state = session.state();
+    browser.send(json!({"type":"repair","id":"fused","text":"Get in it.","prompt":repair_state.prompt,"revision":repair_state.input_revision}));
+    let repaired = browser
+        .until(|value| value["type"] == "repair-result" && value["id"] == "fused")
+        .await;
+    assert_eq!(repaired["accepted"], true, "{repaired}");
+    assert_eq!(repaired["selected"], "git init");
+    assert_eq!(repaired["original"], "Get in it.");
+    assert!(
+        !std::path::Path::new(&cwd).join(".git").exists(),
+        "Repair must never submit the line"
+    );
+    browser.send(json!({"type":"input-line","id":"fused-line","prompt":session.state().prompt,"revision":session.state().input_revision}));
+    assert_eq!(
+        browser
+            .until(|value| value["type"] == "input-line" && value["id"] == "fused-line")
+            .await["text"],
+        "git init"
+    );
+    browser.send(json!({"type":"repair","id":"stale-repair","text":"echo wrong","prompt":repair_state.prompt,"revision":repair_state.input_revision}));
+    assert_eq!(
+        browser
+            .until(|value| value["type"] == "repair-result" && value["id"] == "stale-repair")
+            .await["accepted"],
+        false
+    );
+    let repair_state = session.state();
+    browser.send(json!({"type":"repair","id":"cancel-repair","text":"echo wrong","prompt":repair_state.prompt,"revision":repair_state.input_revision}));
+    browser.send(json!({"type":"repair-cancel","id":"cancel-repair"}));
+    assert_eq!(
+        browser
+            .until(|value| value["type"] == "repair-result" && value["id"] == "cancel-repair")
+            .await["accepted"],
+        false
+    );
+    browser.send(json!({"type":"repair","id":"edited-repair","text":"echo wrong","prompt":repair_state.prompt,"revision":repair_state.input_revision}));
+    browser.send(json!({"type":"input","data":"X"}));
+    assert_eq!(
+        browser
+            .until(|value| value["type"] == "repair-result" && value["id"] == "edited-repair")
+            .await["accepted"],
+        false
+    );
+    browser.send(json!({"type":"replace","id":"clear-repair","text":"","prompt":session.state().prompt,"revision":session.state().input_revision}));
+    assert_eq!(
+        browser
+            .until(|value| value["type"] == "edit-result" && value["id"] == "clear-repair")
+            .await["accepted"],
+        true
+    );
 
     browser.send(json!({"type":"input","data":"echo Unicode🌱"}));
     let state = session.state();

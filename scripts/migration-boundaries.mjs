@@ -145,6 +145,7 @@ export const lifecycle = {
       acknowledgement: 'safe-integer-not-greater-than-last-sent-sequence' },
     command: { require: ['ready', 'not-exited', 'no-capture', 'matching-prompt'], maxUTF16: 4000, forbidControls: true, deduplication: 'command-ID', maxCachedResults: 1000, editsThenSubmits: true },
     replace: { require: ['ready', 'not-exited', 'no-capture', 'matching-prompt', 'matching-input-revision'], maxUTF16: 4000, forbidControls: true, submits: false },
+    repair: { require: ['ready', 'not-exited', 'no-capture', 'matching-prompt', 'matching-input-revision', 'matching-attachment', 'not-cancelled'], maxUTF16: 2000, timeoutMs: 10000, submits: false, result: 'repair-result', cancellation: 'repair-cancel', readingIntent: 'explicit' },
     input: { maxUTF16: 65536, require: ['not-exited', 'no-capture'], incrementsInputRevision: true },
     inputLine: { timeoutMs: 2000, require: ['ready', 'not-exited', 'no-capture', 'no-pending-input-line', 'matching-prompt', 'matching-input-revision'], cursorEncoding: 'UTF-16-prefix-length' },
     resize: { type: 'integer', clamp: { cols: [2, 300], rows: [2, 120] } },

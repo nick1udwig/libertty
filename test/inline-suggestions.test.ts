@@ -121,3 +121,31 @@ test('typing while suggestions load preserves the pending transcript and ignores
   finish({ candidates: [{ command: 'git init', score: 100, changes: [] }] }); await pending;
   assert.deepEqual(f.replacements, ['Get in it.']);
 });
+
+test('fused repair avoids separate replacements and cancellation waits for its authoritative result', async () => {
+  const f = fixture('git init'); f.inline.latency = 700;
+  const sent: string[] = [], raw: string[] = [];
+  let finish!: (result: any) => void;
+  f.inline.host.repair = (text: string, intent: any, signal: AbortSignal) => {
+    sent.push(text); assert.equal(intent.kind, 'shell');
+    signal.addEventListener('abort', () => sent.push('cancel'));
+    return new Promise(resolve => finish = resolve);
+  };
+  f.inline.host.raw = (input: string) => raw.push(input);
+  const pending = f.inline.dictate('Get in it.', false);
+  assert.deepEqual(f.replacements, []);
+  assert.equal(f.inline.raw('x'), false);
+  assert.deepEqual(sent, ['Get in it.', 'cancel']);
+  assert.deepEqual(f.replacements, [], 'Wait for the transaction result before restoring at its resulting revision');
+  finish({ accepted: false, candidates: [], original: 'Get in it.', selected: 'Get in it.', revision: 0, prompt: 1 });
+  await pending; await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.replacements, ['Get in it.']);
+  f.acknowledge(true); await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(raw, ['x']);
+  const g = fixture('git init');
+  g.inline.host.repair = async () => ({ accepted: true, candidates: [{ command: 'git init', changes: [], score: 100 }], original: 'Get in it.', selected: 'git init', revision: 1, prompt: 1 });
+  await g.inline.dictate('Get in it.', false);
+  assert.deepEqual(g.replacements, []);
+  assert.deepEqual(g.inline.choices, ['git init']);
+  assert.equal(g.inline.selected, 'git init');
+});

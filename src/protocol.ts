@@ -3,6 +3,8 @@ import type { ContextReply } from './facts.ts';
 import type { DirectorySnapshot } from './directory-data.ts';
 export type EngineMode = 'server' | 'client';
 export type DictationTarget = 'shell' | 'program';
+export type RepairIntent = { kind: 'shell' } | { kind: 'reading-file'; phrase: string; operand: string } | { kind: 'reading-pipeline'; phrase: string; command: string };
+export interface RepairResult { candidates: import('./engine/types.ts').Candidate[]; original: string; selected: string; accepted: boolean; revision: number; prompt: number; error?: string }
 export type { Flag, Catalog, Candidate } from './engine/types.ts';
 export interface ShellState {
   cwd: string; inputRevision: number; promptRevision: number; ready: boolean; prompt: number; exited: boolean; exitCode?: number;
@@ -17,9 +19,10 @@ export function dictationTarget(state: ShellState): DictationTarget | undefined 
   if (state.inputTarget === 'program') return 'program';
 }
 export type ServerMessage =
+  | ({ type: 'repair-result'; id: string; source?: 'dictation' } & RepairResult)
   | { type: 'input-line'; id: string; prompt: number; revision: number; text?: string; cursor?: number }
   | { type: 'transfer'; request: TransferRequest }
-  | { type: 'pasted'; text: string; replace: boolean; prompt: number; revision: number; source?: 'dictation' }
+  | { type: 'pasted'; text: string; replace: boolean; prompt: number; revision: number; source?: 'dictation'; repairing?: boolean }
   | { type: 'dictation'; id: string; state: 'ready' | 'done' | 'error'; message?: string }
   | { type: 'reading-file'; path: string }
   | { type: 'reading-capture'; id: string; name: string; exitCode: number }
@@ -37,11 +40,13 @@ export type ServerMessage =
   | { type: 'edit-result'; id: string; accepted: boolean; revision: number }
   | { type: 'result'; id: string; accepted: boolean; message?: string };
 export type ClientMessage =
+  | { type: 'repair'; id: string; text: string; prompt: number; revision: number; intent?: RepairIntent }
+  | { type: 'repair-cancel'; id: string }
   | { type: 'input-line'; id: string; prompt: number; revision: number }
-  | { type: 'dictation'; id: string; action: 'start' | 'finish' | 'cancel'; prompt?: number; revision?: number; target?: DictationTarget }
+  | { type: 'dictation'; id: string; action: 'start' | 'finish' | 'cancel'; prompt?: number; revision?: number; target?: DictationTarget; readingPhrases?: string[] }
   | { type: 'input'; data: string }
   | { type: 'paste'; text: string }
-  | { type: 'dictation-paste'; text: string; applied: boolean; replace: boolean; prompt: number; revision: number }
+  | { type: 'dictation-paste'; text: string; applied: boolean; replace: boolean; prompt: number; revision: number; readingPhrases?: string[] }
   | { type: 'replace'; text: string; id: string; prompt: number; revision: number }
   | { type: 'command'; command: string; id: string; prompt: number }
   | { type: 'resize'; cols: number; rows: number; mobile?: boolean }

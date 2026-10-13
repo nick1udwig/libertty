@@ -1,7 +1,7 @@
 import { uploadIcon, downloadIcon } from './icons.ts';
 import { transferAction, downloadPipeline } from './transfer-command.ts';
 import type { Terminal } from 'ghostty-web';
-import type { Candidate, ShellState } from './protocol.ts';
+import type { Candidate, ShellState, RepairIntent, RepairResult } from './protocol.ts';
 import { InputLine } from './input-line.ts';
 import { cursorSteps } from './touch-cursor.ts';
 import { defaultReadingPhrases, readingPath, readingPhrases, readingPipeline, readingRequest, readingSuggestionChoice, readingSuggestionInput } from './reading-request.ts';
@@ -11,6 +11,7 @@ interface Host {
   replace(text: string): Promise<boolean>;
   readLine?(): Promise<{ text: string; cursor: number } | undefined>;
   suggest(text: string, signal: AbortSignal): Promise<{ candidates: Candidate[] }>;
+  repair?(text: string, intent: RepairIntent, signal: AbortSignal): Promise<RepairResult>;
   raw(data: string): void;
   execute(text: string): void;
   dictate?(text: string, applied: boolean, replace: boolean): void;
@@ -32,6 +33,7 @@ export class InlineSuggestions {
   private showOriginal = false;
   private latency = 0;
   private literalReplacement?: Promise<boolean>;
+  private application?: Promise<RepairResult>;
   private flushing?: string[];
   private suspendedRevision: number | undefined;
   private retryOnResume = false;
@@ -245,6 +247,24 @@ export class InlineSuggestions {
     if (replace) this.line.reset(text);
     else if (this.line.known) this.line.insert(text);
   }
+  backendLoading(text: string, isolated = false) {
+    this.externalPaste(text, false, false, isolated);
+    if (isolated) this.line.reset(text);
+    this.literal = this.line.known ? this.line.text : text;
+    this.speech = text; this.selected = this.literal;
+    const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true), pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
+    this.reading = pipeline?.command || reading?.path;
+    this.loading = true; this.open = this.autoOpen; this.showOriginal = true;
+    this.status.textContent = 'Finding alternatives'; this.render();
+  }
+  backendResult(result: RepairResult) {
+    if (!result.accepted) { this.clear(); return; }
+    this.literal = result.original; this.selected = result.selected; this.line.reset(result.selected);
+    this.choices = [...new Set(result.candidates.filter(candidate => !candidate.literal && candidate.command !== this.literal).map(candidate => candidate.command))].slice(0, 3);
+    const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true), pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
+    this.reading = pipeline?.command || reading?.path;
+    this.loading = false; this.open = this.autoOpen; this.status.textContent = 'Alternatives ready'; this.render();
+  }
   suspend() {
     if (!this.literal) { this.disconnect(); return; }
     if (this.suspendedRevision !== undefined) return;
@@ -263,9 +283,10 @@ export class InlineSuggestions {
     if (data === '\x1b[I' || data === '\x1b[O') return true;
     if (this.flushing) { this.flushing.push(data); return false; }
     if (this.loading) {
-      const literal = this.literal, pending = this.literalReplacement;
+      const literal = this.literal, pending = this.literalReplacement, application = this.application;
       this.flushing = [data]; this.clear();
-      void (pending || this.host.replace(literal)).then(accepted => {
+      const restored = application ? application.catch(() => undefined).then(() => this.host.replace(literal)) : pending || this.host.replace(literal);
+      void restored.then(accepted => {
         const input = this.flushing?.join('') || ''; this.flushing = undefined;
         if (accepted) { this.line.reset(literal); this.host.raw(input); }
         else this.disconnect();
@@ -287,6 +308,7 @@ export class InlineSuggestions {
     this.clear(); this.line.feed(data); return true;
   }
   private clear() {
+    this.application = undefined;
     this.literalReplacement = undefined; this.showOriginal = false;
     const visible = !!this.literal || this.loading || this.open || !!this.choices.length;
     ++this.generation; this.controller?.abort(); this.literal = ''; this.speech = ''; this.choices = []; this.reading = undefined;
@@ -330,8 +352,19 @@ export class InlineSuggestions {
     // midway through a request: it could finish immediately after that reveal.
     this.showOriginal = this.latency >= 500;
     this.line.reset(this.literal); this.status.textContent = 'Finding alternatives'; this.render();
-    if (this.showOriginal && !alreadyApplied) this.literalReplacement = this.host.replace(this.literal).catch(() => false);
+    if (this.showOriginal && !alreadyApplied && !this.host.repair) this.literalReplacement = this.host.replace(this.literal).catch(() => false);
     try {
+      if (this.host.repair) {
+        const intent: RepairIntent = pipeline ? { kind: 'reading-pipeline', ...pipeline } : reading ? { kind: 'reading-file', phrase: reading.phrase, operand: reading.operand } : { kind: 'shell' };
+        this.application = this.host.repair(this.literal, intent, this.controller.signal);
+        const result = await this.application;
+        if (request !== this.generation || prompt !== this.host.state().prompt || !this.host.state().ready) return;
+        this.application = undefined;
+        if (!result.accepted) { if (result.error) throw new Error(result.error); this.disconnect(); return; }
+        this.backendResult(result);
+        this.recordLatency(started);
+        return;
+      }
       const suggestion = this.host.suggest(pipeline ? pipeline.command : reading ? readingSuggestionInput(reading) : this.literal, this.controller.signal).then(result => ({ result }), error => ({ error }));
       const outcome = await suggestion;
       if ('error' in outcome) throw outcome.error;
@@ -353,9 +386,7 @@ export class InlineSuggestions {
       this.line.reset(top);
       if ((!replacement || top !== this.literal) && !await this.host.replace(top)) { if (request === this.generation) this.disconnect(); return; }
       if (request !== this.generation) return;
-      const elapsed = performance.now() - started;
-      this.latency = this.latency ? this.latency * .6 + elapsed * .4 : elapsed;
-      try { if (this.host.latencyKey) localStorage.setItem('termai.suggestionLatency:' + this.host.latencyKey, String(this.latency)); } catch {}
+      this.recordLatency(started);
       this.selected = top; this.line.reset(top); this.loading = false;
       this.status.textContent = 'Alternatives ready'; this.render();
     } catch (error: any) {
@@ -365,6 +396,11 @@ export class InlineSuggestions {
       this.loading = false; this.open = true;
       this.status.textContent = 'Alternatives unavailable. Original text kept.'; this.render();
     }
+  }
+  private recordLatency(started: number) {
+    const elapsed = performance.now() - started;
+    this.latency = this.latency ? this.latency * .6 + elapsed * .4 : elapsed;
+    try { if (this.host.latencyKey) localStorage.setItem('termai.suggestionLatency:' + this.host.latencyKey, String(this.latency)); } catch {}
   }
   private async choose(text: string) {
     if (this.reading) {

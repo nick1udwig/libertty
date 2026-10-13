@@ -184,6 +184,23 @@
       "forbidControls": true,
       "submits": false
     },
+    "repair": {
+      "require": [
+        "ready",
+        "not-exited",
+        "no-capture",
+        "matching-prompt",
+        "matching-input-revision",
+        "matching-attachment",
+        "not-cancelled"
+      ],
+      "maxUTF16": 2000,
+      "timeoutMs": 10000,
+      "submits": false,
+      "result": "repair-result",
+      "cancellation": "repair-cancel",
+      "readingIntent": "explicit"
+    },
     "input": {
       "maxUTF16": 65536,
       "require": [

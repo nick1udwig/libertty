@@ -297,17 +297,24 @@ fn raw_words(input: &str) -> Arc<Vec<String>> {
 }
 pub fn expand_symbols(input: &str, general: bool) -> String {
     memo(&EXPANDED, input, u8::from(general), || {
-        expand(input, general)
+        expand(input, general, false)
     })
 }
-fn expand(input: &str, general: bool) -> String {
+pub(crate) fn expand_repair_symbols(input: &str) -> String {
+    memo(&EXPANDED, input, 2, || expand(input, true, true))
+}
+fn expand(input: &str, general: bool, keep_flag_names: bool) -> String {
     let words = raw_words(input);
     let mut units = Vec::new();
     let mut at = 0;
     while at < words.len() {
         let matched = symbol_matches(&words, at, false, general)
             .into_iter()
-            .next();
+            .next()
+            .filter(|matched| {
+                !keep_flag_names
+                    || !["-", "--"].contains(&vocabulary().symbol_names[&matched.name].as_str())
+            });
         let count = matched.as_ref().map_or(1, |item| item.count);
         units.push(Unit {
             word: words[at].clone(),

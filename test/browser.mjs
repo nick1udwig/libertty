@@ -31,7 +31,6 @@ const port = Number(process.env.TEST_PORT || 3123);
 const origin = `http://127.0.0.1:${port}`;
 const engine = process.env.TEST_ENGINE || 'server';
 assert.ok(['server', 'client'].includes(engine));
-const repairEndpoint = `**/api/${engine === 'server' ? 'suggest' : 'facts'}`;
 const mount = process.env.TEST_BASE_PATH || '';
 const base = origin + mount;
 const pairingToken = 'test-local-pairing-token-123456789';
@@ -63,8 +62,8 @@ try {
     CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'context') window.__shellContext = message.context; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
-      send(data) { const message = window.__wireSent(data); if (message.type === 'resize') window.__terminalSize = message; super.send(data); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'repair-result') window.__lastRepairResult = message; if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'context') window.__shellContext = message.context; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
+      send(data) { const message = window.__wireSent(data); (window.__sent ||= []).push(message); if (message.type === 'resize') window.__terminalSize = message; if (['repair', 'repair-cancel'].includes(message.type) && window.__repairDelay) setTimeout(() => { if (this.readyState === 1) super.send(data); }, window.__repairDelay); else super.send(data); }
     };
   });
   const workers = []; page.on('worker', worker => workers.push(worker));
@@ -153,7 +152,7 @@ try {
   assert.equal(await page.locator('#tap-alternate-send').isChecked(), true);
   await page.locator('#tap-alternate-send').uncheck();
   await page.getByRole('button', { name: 'Close session options' }).click();
-  await context.route(repairEndpoint, async route => { await delay(900); await route.continue().catch(() => {}); });
+  await page.evaluate(() => window.__repairDelay = 900);
   await dictate(page, 'Python three hello world dot py myarg food');
   await page.waitForSelector('#alternatives-toggle.loading');
   await page.waitForTimeout(80);
@@ -163,7 +162,7 @@ try {
   assert.equal(await page.locator('.literal-choice').count(), 0, 'A predicted fast request must not reveal the transcript partway through');
   assert.equal(await page.locator('#alternatives-toggle.loading').count(), 1);
   await page.screenshot({ path: path.join(root, '.test-artifacts/inline-loading.png') });
-  await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'python3 hello_world.py --myarg food');
+  await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'python3 hello_world.py --myarg food').catch(async error => { throw new Error(JSON.stringify(await page.evaluate(() => ({ result: window.__lastRepairResult, state: window.__shellState, sent: window.__sent.slice(-8), choices: [...document.querySelectorAll('.choice-command')].map(el => el.textContent) }))), { cause: error }); });
   assert.equal(existsSync(path.join(fixture, 'executions.txt')), false, 'Discovery and selection must not execute the line');
   assert.equal(await page.locator('.literal-choice .choice-command').textContent(), 'Python three hello world dot py myarg food');
   await page.screenshot({ path: path.join(root, '.test-artifacts/inline-ready.png') });
@@ -171,7 +170,7 @@ try {
   let before = await shellPrompt(page);
   await page.keyboard.press('Enter'); await ready(page, before);
   assert.equal(await readFile(path.join(fixture, 'executions.txt'), 'utf8'), 'food\n');
-  await context.unroute(repairEndpoint);
+  await page.evaluate(() => window.__repairDelay = 0);
   await page.locator('#menu-button').click();
   await page.locator('#tap-alternate-send').check();
   await page.getByRole('button', { name: 'Close session options' }).click();
@@ -222,7 +221,7 @@ try {
   assert.equal(await readFile(path.join(fixture, 'auto-runs.txt'), 'utf8'), 'say literal\n--say hello\n');
   assert.equal(await readFile(path.join(fixture, 'help-probes.txt'), 'utf8'), 'probe\n', 'Background help is cached');
   // A late response cannot replace text the user has edited or submitted.
-  await context.route(repairEndpoint, async route => { await delay(500); await route.continue().catch(() => {}); });
+  await page.evaluate(() => window.__repairDelay = 500);
   await dictate(page, 'echo original');
   await page.waitForSelector('#alternatives-toggle.loading');
   await page.keyboard.type(' edited');
@@ -230,7 +229,7 @@ try {
   await delay(650);
   assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo original edited');
   assert.equal(await page.locator('#alternatives-toggle').isVisible(), false);
-  await context.unroute(repairEndpoint);
+  await page.evaluate(() => window.__repairDelay = 0);
   // Composition commits are inserted once even if the browser follows with beforeinput.
   await focusTerminal(page);
   await page.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new CompositionEvent('compositionstart', { data: '', bubbles: true })));
@@ -315,14 +314,14 @@ try {
   before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
   assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo dictated');
   // Backspace cancels an in-flight repair instead of allowing the deleted text back in.
-  await context.route(repairEndpoint, async route => { await delay(400); await route.continue().catch(() => {}); });
+  await page.evaluate(() => window.__repairDelay = 400);
   await dictate(page, 'echo pendingX');
   await page.waitForSelector('#alternatives-toggle.loading');
   await page.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true })));
   await delay(500);
   before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
   assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo pending');
-  await context.unroute(repairEndpoint);
+  await page.evaluate(() => window.__repairDelay = 0);
   // Exact flag case can remain the top hit while offering its lowercase alternative.
   await dictate(page, 'ls -L');
   await page.waitForFunction(() => !document.querySelector('#alternatives-toggle').classList.contains('loading'));
@@ -345,7 +344,7 @@ try {
   ]) {
     await dictate(page, input);
     await page.waitForFunction(expected => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === expected, expected)
-      .catch(async error => { throw new Error(`${input}: expected ${expected}; choices: ${JSON.stringify(await page.locator('.alternative-choice .choice-command').allTextContents())}`, { cause: error }); });
+      .catch(async error => { throw new Error(`${input}: expected ${expected}; choices: ${JSON.stringify(await page.locator('.alternative-choice .choice-command').allTextContents())}; result: ${JSON.stringify(await page.evaluate(() => window.__lastRepairResult))}; selected: ${JSON.stringify(await page.locator('.alternative-choice.selected').allTextContents())}`, { cause: error }); });
     assert.ok((await page.locator('.alternative-choice .choice-command').allTextContents()).includes(input));
     if (input === 'c D ops semicolon ls') {
       await page.locator('#alternatives-toggle').click();
@@ -370,21 +369,15 @@ try {
   // After the first repair, fresh pushed context and verified directory snapshots
   // reduce the next repair to one foreground fact batch in the real worker.
   before = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, before);
-  const directoryRequests = [];
-  const captureDirectoryRequest = request => { if (request.url().endsWith(engine === 'client' ? '/api/facts' : '/api/suggest')) directoryRequests.push(request.postDataJSON()); };
-  context.on('request', captureDirectoryRequest);
+  await page.evaluate(() => window.__sent = []);
   await dictate(page, 'Cd ~ fas get fas pebble agent');
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'cd ~/git/pebble-agent');
-  context.off('request', captureDirectoryRequest);
+  const directoryRequests = await page.evaluate(() => window.__sent.filter(message => ['repair', 'replace'].includes(message.type)));
   assert.equal(directoryRequests.length, 1, JSON.stringify(directoryRequests));
-  if (engine === 'client') {
-    { assert.equal(directoryRequests[0].kind, 'repair'); assert.equal(directoryRequests[0].catalogKey, undefined, 'Coarse repair must acquire context on the backend'); }
-  }
-  else {
-    assert.equal(workers.length, 0, 'Server mode must not start a repair worker');
-    assert.ok(!requests.some(url => url.endsWith('/api/facts')), 'Server mode must not fetch host facts');
-    assert.equal(await page.evaluate(() => window.__shellContext), undefined, 'Server mode must not push catalogs');
-  }
+  assert.equal(directoryRequests[0].type, 'repair', 'Repair and guarded application require one request');
+  assert.equal(workers.length, 0, 'Production repair stays on the backend in both coordinators');
+  assert.ok(!requests.some(url => /\/api\/(facts|suggest)$/.test(url)), 'Dictation must not relay host facts or request separate repair HTTP calls');
+  assert.equal(await page.evaluate(() => window.__shellContext), undefined, 'Repair must not push catalogs');
   before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
   assert.equal(await page.locator('#cwd').textContent(), path.join(fixture, 'git', 'pebble-agent'));
   await command(page, `cd ${fixture}`);
@@ -451,7 +444,7 @@ try {
   ]) {
     await dictate(page, input);
     await page.waitForFunction(expected => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === expected, expected)
-      .catch(async error => { throw new Error(`${input}: expected ${expected}; choices: ${JSON.stringify(await page.locator('.alternative-choice .choice-command').allTextContents())}`, { cause: error }); });
+      .catch(async error => { throw new Error(`${input}: expected ${expected}; choices: ${JSON.stringify(await page.locator('.alternative-choice .choice-command').allTextContents())}; result: ${JSON.stringify(await page.evaluate(() => window.__lastRepairResult))}; selected: ${JSON.stringify(await page.locator('.alternative-choice.selected').allTextContents())}`, { cause: error }); });
     assert.ok((await page.locator('.alternative-choice .choice-command').allTextContents()).includes(input));
     assert.equal((await readFile(path.join(fixture, '.git', 'HEAD'), 'utf8')).trim(), 'ref: refs/heads/feat/elixir-worker');
     before = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, before);

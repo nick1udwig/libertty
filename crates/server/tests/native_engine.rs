@@ -121,11 +121,12 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
     let cwd = root.path().to_str().unwrap();
     std::fs::create_dir(root.path().join("docs")).unwrap();
     std::fs::write(root.path().join("docs/My Notes.txt"), "notes").unwrap();
+    std::fs::write(root.path().join("SKILL.md"), "skill").unwrap();
     std::fs::write(root.path().join("tool.py"), "import argparse\nfrom pathlib import Path\np=argparse.ArgumentParser()\np.add_argument('--config', type=Path)\np.add_argument('--mode', choices=['east-zone','west-zone'])\np.add_argument('--pair', nargs=2)\np.add_argument('--tag', nargs='+')\np.add_argument('--force', action='store_true')\nsubs=p.add_subparsers()\nchild=subs.add_parser('child')\nchild.add_argument('--child-only')\n").unwrap();
     let services = HostServices::new();
     let host = NativeHost::new(
         services.clone(),
-        catalog(cwd, &["cat", "less", "head", "ls", "python3"]),
+        catalog(cwd, &["cat", "less", "head", "ls", "python3", "vi"]),
         BTreeMap::from([
             ("HOME".into(), cwd.into()),
             ("PATH".into(), "/usr/bin:/bin".into()),
@@ -133,7 +134,23 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
         HelpProvider::new(services.pool.clone()),
     );
     let engine = NativeEngine::new().unwrap();
+    let symbols = engine
+        .suggest(
+            "echo dollar sign HOME",
+            &NativeHost::new(
+                services.clone(),
+                catalog(cwd, &["echo"]),
+                BTreeMap::new(),
+                HelpProvider::new(services.pool.clone()),
+            ),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(symbols[0]["command"], "echo $HOME", "{symbols}");
     for (input, expected) in [
+        ("vi skill dot md", "vi SKILL.md"),
+        ("ls dash all", "ls --all"),
         ("cat docs slash My Notes dot txt", "cat 'docs/My Notes.txt'"),
         (
             "cat -n docs slash My Notes dot txt",
@@ -180,6 +197,9 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
                 .any(|c| c["command"] == expected && c["literal"] != true),
             "{input}: {result}"
         );
+        if input == "vi skill dot md" || input == "ls dash all" {
+            assert_eq!(result[0]["command"], expected, "{result}");
+        }
     }
     for input in [
         "python3 tool.py --pair one --force",
@@ -740,6 +760,23 @@ async fn native_completion_and_suggestions_preserve_ambiguity_quotes_and_operand
     let host = NativeHost::new(services, catalog.clone(), env.clone(), help.clone());
     let engine = NativeEngine::new().unwrap();
     let cancel = CancellationToken::new();
+    let mut function_catalog = catalog.clone();
+    function_catalog.functions = Some(vec!["orchard".into()].into());
+    let mut function_host = host.clone();
+    function_host.catalog = function_catalog;
+    let function_result = NativeEngine::new()
+        .unwrap()
+        .suggest(
+            "orchard deploy release slash east dash zone",
+            &function_host,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        function_result[0]["command"], "orchard deploy release/east-zone",
+        "{function_result}"
+    );
     for input in [
         "orchard deploy release slash east dash zone",
         "orchard deploy R E L E A S E slash east dash zone",

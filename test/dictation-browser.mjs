@@ -209,6 +209,8 @@ try {
   assert.deepEqual(await page.locator('.alternative-choice .choice-command').allTextContents(), ['git init', 'Get in it.']);
   assert.equal(await access(path.join(fixture, '.git')).then(() => true, () => false), false, 'Repair must not execute a command');
   assert.equal(await page.evaluate(() => window.__sent.some(m => m.type === 'replace' && m.text === 'Get in it.' || m.type === 'input' && m.data.includes('Get in it.'))), false, 'Transcript must not be sent back for duplicate insertion');
+  assert.equal(await page.evaluate(() => window.__sent.some(message => ['repair', 'replace'].includes(message.type))), false, 'Backend dictation must repair and apply without a browser relay');
+  assert.ok(await page.evaluate(() => window.__messages.some(message => message.type === 'repair-result' && message.source === 'dictation' && message.accepted)));
   await page.screenshot({ path: '/tmp/termai-voxtype-web-alternatives.png' });
   await page.locator('.alternative-choice').filter({ hasText: 'git init' }).click();
   await page.waitForFunction(() => window.__out.includes('Initialized empty Git repository'));
@@ -339,7 +341,8 @@ try {
   await page.evaluate(() => { window.__sent = []; });
   await nativeDictation('Get in it.');
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'git init');
-  assert.ok(repairRequests.length > 0);
+  assert.equal(repairRequests.length, 0, 'Native dictation uses one repair transaction on the terminal connection');
+  assert.ok(await page.evaluate(() => window.__sent.some(message => message.type === 'repair')));
   const outer = await page.context().newPage(); outer.setDefaultTimeout(15000); await outer.goto(base);
   if (await outer.locator('#backend-login').isVisible()) { await outer.locator('#backend-token').fill('feature-test-pairing-token-123456789'); await outer.locator('#backend-login-form button[type=submit]').click(); }
   await outer.locator('#terminal-stack > iframe').waitFor();

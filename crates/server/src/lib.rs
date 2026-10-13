@@ -1,3 +1,4 @@
+pub mod alternatives;
 pub mod assets;
 pub mod catalog;
 pub mod completion;

@@ -3,7 +3,7 @@ import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
 import { imagePicker, uploadImage } from './image-upload.ts';
 import { Ghostty, Terminal, FitAddon } from 'ghostty-web';
-import type { ClientMessage, ServerMessage, ShellState } from './protocol.ts';
+import type { ClientMessage, ServerMessage, ShellState, RepairResult } from './protocol.ts';
 import './style.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
 import { Queue } from './queue.ts';
@@ -51,6 +51,7 @@ let capturedConnection: string | undefined;
 let pendingCommand: { id: string } | undefined;
 const edits = new Map<string, (accepted: boolean) => void>();
 const inputLines = new Map<string, (line?: { text: string; cursor: number }) => void>();
+const repairs = new Map<string, (result: RepairResult) => void>();
 let shortcuts: Shortcut[] = structuredClone(defaults);
 try {
   const saved = localStorage.getItem('termai.shortcuts');
@@ -100,6 +101,9 @@ async function api<T>(url: string, data?: unknown, signal?: AbortSignal): Promis
   return result;
 }
 function send(message: ClientMessage): boolean {
+  if ((message.type === 'dictation' && message.action === 'start') || message.type === 'dictation-paste') {
+    try { message.readingPhrases = readingPhrases(JSON.parse(localStorage.getItem('termai.readingPhrases') || 'null')); } catch { message.readingPhrases = ['look at']; }
+  }
   if (transport.socket?.readyState !== WebSocket.OPEN) return false;
   transport.socket.send(encodeWire(message, transport.socket.protocol)); return true;
 }
@@ -213,6 +217,16 @@ function replaceLine(text: string): Promise<boolean> {
 }
 const suggestions = new SuggestionClient(baseURL.href, session, () => accessToken);
 const inline = new InlineSuggestions(term, { latencyKey: baseURL.href, state: () => state, replace: replaceLine,
+  repair: (text, intent, signal) => {
+    if (capturedConnection || !state.ready || state.exited || transport.socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Terminal input changed.'));
+    const id = crypto.randomUUID(), prompt = state.prompt, revision = state.inputRevision;
+    return new Promise(resolve => {
+      const cancel = () => send({ type: 'repair-cancel', id });
+      const finish = (result: RepairResult) => { signal.removeEventListener('abort', cancel); repairs.delete(id); resolve(result); };
+      repairs.set(id, finish); signal.addEventListener('abort', cancel, { once: true });
+      if (!send({ type: 'repair', id, text, intent, prompt, revision })) finish({ accepted: false, candidates: [], original: text, selected: text, prompt, revision });
+    });
+  },
   ...(herdrTerminal ? { dictate: (text: string, applied: boolean, replace: boolean) => { send({ type: 'dictation-paste', text, applied, replace, prompt: state.prompt, revision: state.inputRevision }); } } : {}),
   readLine: () => {
     const id = crypto.randomUUID(), prompt = state.prompt, revision = state.inputRevision;
@@ -402,11 +416,22 @@ function socketMessage(event: MessageEvent) {
     inputLines.get(message.id)?.(intact && typeof message.text === 'string' && typeof message.cursor === 'number' ? { text: message.text, cursor: message.cursor } : undefined);
     inputLines.delete(message.id); return;
   }
+  if (message.type === 'repair-result') {
+    const intact = message.prompt === state.prompt && state.ready && !state.exited;
+    if (intact && message.accepted && [state.inputRevision, state.inputRevision + 1].includes(message.revision)) state.inputRevision = message.revision;
+    else if (message.accepted) message.accepted = false;
+    if (message.source === 'dictation') {
+      if (intact && message.revision === state.inputRevision) inline.backendResult(message);
+    } else repairs.get(message.id)?.(message);
+    if (message.accepted) term.scrollToBottom();
+    return;
+  }
   if (message.type === 'pasted') {
     if (message.prompt === state.prompt && message.revision === state.inputRevision + 1) {
       state.inputRevision = message.revision;
       term.scrollToBottom();
-      inline.externalPaste(message.text, message.replace, message.source === 'dictation', !!herdrTerminal);
+      if (message.repairing) inline.backendLoading(message.text, !!herdrTerminal);
+      else inline.externalPaste(message.text, message.replace, message.source === 'dictation', !!herdrTerminal);
     }
     else inline.disconnect();
     return;
@@ -483,6 +508,7 @@ function socketClosed(event?: CloseEvent) {
   dictation.connected(false);
   for (const resolve of edits.values()) resolve(false); edits.clear();
   for (const resolve of inputLines.values()) resolve(); inputLines.clear();
+  for (const resolve of repairs.values()) resolve({ accepted: false, candidates: [], original: '', selected: '', prompt: state.prompt, revision: state.inputRevision }); repairs.clear();
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) { pendingCommand = undefined; toast('Connection lost before acknowledgement. Check the terminal before running again.'); }
   if (event?.code === 4001) { connection('Other tab'); toast(event.reason); return false; }

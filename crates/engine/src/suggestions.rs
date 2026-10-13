@@ -32,10 +32,15 @@ fn unique(candidates: impl IntoIterator<Item = Candidate>) -> Vec<Candidate> {
 fn sort(candidates: &mut [Candidate]) {
     candidates.sort_by(|a, b| {
         b.evidence.resolved.cmp(&a.evidence.resolved).then_with(|| {
-            b.evidence
-                .confidence
-                .total_cmp(&a.evidence.confidence)
-                .then_with(|| b.score.total_cmp(&a.score))
+            a.evidence
+                .unresolved
+                .cmp(&b.evidence.unresolved)
+                .then_with(|| {
+                    b.evidence
+                        .confidence
+                        .total_cmp(&a.evidence.confidence)
+                        .then_with(|| b.score.total_cmp(&a.score))
+                })
         })
     });
 }
@@ -112,6 +117,7 @@ async fn check(
                     .unwrap_or(false)
             {
                 c.evidence.resolved = true;
+                c.evidence.unresolved = 0;
             }
             valid.then_some(c)
         })
@@ -491,9 +497,13 @@ fn suggest_unchecked<'a>(
     stage: &'a RefCell<Option<String>>,
 ) -> LocalBoxFuture<'a, Result<Vec<Candidate>, String>> {
     Box::pin(async move {
-        let texts: Vec<_> = std::iter::once(input.to_owned())
-            .chain(symbol_alternatives(input))
-            .collect();
+        let primary = crate::speech::expand_repair_symbols(input);
+        let mut texts = vec![primary.clone()];
+        for text in std::iter::once(input.to_owned()).chain(symbol_alternatives(input)) {
+            if !texts.contains(&text) {
+                texts.push(text);
+            }
+        }
         let groups = join_all(
             texts
                 .iter()
@@ -511,6 +521,8 @@ fn suggest_unchecked<'a>(
                     candidate.score -= 12.0;
                     candidate.evidence.confidence = (candidate.evidence.confidence - 12.0).max(0.0);
                     candidate.changes.insert(0, Change::SymbolAlternative);
+                } else if primary != input {
+                    candidate.changes.insert(0, Change::Symbols);
                 }
                 candidates.push(candidate);
             }
@@ -640,12 +652,22 @@ async fn suggest_one(
     sort(&mut preliminary);
     let roots = discovery_targets(&expand_symbols(input, true), &catalog);
     let mut targets: Vec<_> = Vec::new();
-    for target in preliminary
-        .first()
-        .map(|c| c.command.clone())
-        .into_iter()
-        .chain(roots)
-    {
+    let script_targets = preliminary
+        .iter()
+        .filter(|candidate| {
+            let words = tokens(&candidate.command);
+            script_operand(&words.iter().map(|word| &word.value).collect::<Vec<_>>())
+                .is_some_and(|index| words[index].value.ends_with(".py"))
+        })
+        .take(3)
+        .map(|candidate| candidate.command.clone());
+    for target in script_targets.chain(
+        preliminary
+            .first()
+            .map(|c| c.command.clone())
+            .into_iter()
+            .chain(roots),
+    ) {
         if !targets.contains(&target) {
             targets.push(target);
         }
