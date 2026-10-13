@@ -92,6 +92,7 @@ try {
   await page.locator('#dictation-install').waitFor({ state: 'visible' });
   await page.locator('#dictation-install input').check();
   await page.locator('[data-install]').click();
+  await page.locator('#dictation-install').waitFor({ state: 'hidden' });
   await page.waitForFunction(() => window.__out.includes('/scripts/install'));
   assert.equal(await access(path.join(fixture, 'installed')).then(() => true, () => false), false, 'Install must not execute');
   let prompt = await page.evaluate(() => window.__state.prompt);
@@ -128,6 +129,7 @@ try {
   assert.match(await page.locator('#dictation-install [data-explanation]').textContent(), /unavailable|updat/);
   assert.equal(await page.locator('#termai-dictation').isVisible(), false);
   await page.locator('[data-install]').click();
+  await page.locator('#dictation-install').waitFor({ state: 'hidden' });
   await page.waitForFunction(() => window.__out.includes('/scripts/install'));
   assert.equal(await access(path.join(fixture, 'installed')).then(() => true, () => false), false, 'Update must not execute');
   prompt = await page.evaluate(() => window.__state.prompt);
