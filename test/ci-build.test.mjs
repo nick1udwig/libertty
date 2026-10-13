@@ -20,7 +20,7 @@ async function fixture(t) {
   await writeFile(path.join(directory, '.gitignore'), 'dist/\ntarget/\n.test-artifacts/\nnode_modules/\nrelease/\n.release-companions/\n');
   await writeFile(path.join(directory, 'source.txt'), 'source revision');
   commit(directory);
-  for (const file of ['dist/index.html', 'dist/assets/app.js', 'src/engine/termai-engine.wasm', 'target/debug/termai', 'target/release/termai']) {
+  for (const file of ['dist/index.html', 'dist/assets/app.js', 'src/engine/termai-engine.wasm', 'target/debug/termai', 'target/debug/examples/herdr_snapshot', 'target/release/termai']) {
     await mkdir(path.dirname(path.join(directory, file)), { recursive: true });
     await writeFile(path.join(directory, file), file, { mode: file.startsWith('target/') ? 0o755 : 0o644 });
   }
@@ -40,7 +40,7 @@ test('browser and release builds survive artifact transport with checksums and e
     const mode = (await stat(executable)).mode & 0o777;
     execFileSync('tar', ['-czf', archive, ...Object.keys(manifest.files), '.test-artifacts/build.json'], { cwd: directory });
     await rm(path.join(directory, 'dist'), { recursive: true });
-    await rm(path.join(directory, kind === 'release' ? 'target/release/termai' : 'target/debug/termai'));
+    for (const input of Object.keys(manifest.files).filter(input => !input.startsWith('dist/'))) await rm(path.join(directory, input));
     execFileSync('tar', ['-xzf', archive], { cwd: directory });
     assert.deepEqual(await verifyBuildManifest(directory, kind, file), manifest);
     assert.equal((await stat(executable)).mode & 0o777, mode);

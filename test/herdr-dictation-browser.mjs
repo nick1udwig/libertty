@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { chromium } from 'playwright-core';
@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 import { herdrRequest } from './support/herdr.ts';
 import { installWireObserver } from './wire-observer.mjs';
 
-const root = new URL('../', import.meta.url).pathname, directory = await mkdtemp('/tmp/termai-herdr-dictation-');
+const root = new URL('../', import.meta.url).pathname, directory = await realpath(await mkdtemp('/tmp/termai-herdr-dictation-'));
 const target = { session: '', socketPath: directory + '/herdr.sock' }, base = 'http://127.0.0.1:3191/';
 const env = { ...process.env, HOME: directory, XDG_CONFIG_HOME: directory + '/config', XDG_DATA_HOME: directory + '/data', XDG_STATE_HOME: directory + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -22,7 +22,7 @@ daemon.on('connection', (socket, request) => {
 let herdr, backend, browser;
 try {
   await mkdir(directory + '/work-space'); await mkdir(directory + '/config');
-  await writeFile(directory + '/token', 'fixture-secret-'.repeat(8));
+  await writeFile(directory + '/token', 'fixture-secret-'.repeat(8), { mode: 0o600 });
   await writeFile(directory + '/.bashrc', "PS1='fixture> '\n");
   await writeFile(directory + '/program.mjs', "process.stdin.setRawMode(true); process.stdin.resume(); process.stdout.write('PROGRAM_READY'); process.stdin.on('data', bytes => { if (bytes.includes(3)) process.exit(); });");
   herdr = spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server'], { cwd: directory, env, stdio: 'ignore' });

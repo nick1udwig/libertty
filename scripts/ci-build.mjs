@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '..');
 const inputs = {
-  browser: ['dist', 'src/engine/termai-engine.wasm', 'target/debug/termai'],
+  browser: ['dist', 'src/engine/termai-engine.wasm', 'target/debug/termai', 'target/debug/examples/herdr_snapshot'],
   release: ['dist', 'target/release/termai'],
 };
 const git = (directory, ...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();

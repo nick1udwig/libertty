@@ -288,7 +288,12 @@ async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
     let services = HostServices::new();
     let host = NativeHost::new(
         services.clone(),
-        catalog(cwd, &["git", "cat", "cd", "echo", "orchard", "sudo", "env"]),
+        catalog(
+            cwd,
+            &[
+                "git", "cat", "cd", "echo", "orchard", "sudo", "env", "ls", "grep",
+            ],
+        ),
         BTreeMap::from([
             ("HOME".into(), cwd.into()),
             ("PATH".into(), format!("{cwd}:/usr/bin:/bin")),
@@ -297,6 +302,7 @@ async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
     );
     let engine = NativeEngine::new().unwrap();
     for (input, expected) in [
+        ("Ls pipe through Grepp hello_world", "ls | grep hello_world"),
         ("Get status pipe cat", "git status | cat"),
         ("Get status pype cat", "git status | cat"),
         ("Get status; echo done", "git status; echo done"),
@@ -333,6 +339,9 @@ async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
             "{input}: {result}"
         );
         assert_eq!(result.as_array().unwrap().last().unwrap()["command"], input);
+        if input == "Ls pipe through Grepp hello_world" {
+            assert_eq!(result[0]["command"], expected, "{result}");
+        }
     }
     let candidate = termai_engine::types::Candidate {
         command: "unknown | cat".into(),

@@ -939,6 +939,12 @@ fn repair_normalized(
                 candidate.score = spelling.map_or(candidate.score - 8.0, |item| {
                     (candidate.score - 8.0).min(item.score - 6.0)
                 });
+                if let Some(spelling) = spelling {
+                    candidate.evidence.confidence = candidate
+                        .evidence
+                        .confidence
+                        .min((spelling.evidence.confidence - 6.0).max(0.0));
+                }
                 candidate.changes.insert(0, Change::Boundary);
                 candidates.push(candidate);
             }

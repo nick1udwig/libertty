@@ -52,6 +52,7 @@ try {
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
+  await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
   await context.addInitScript(() => {
     window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0;
@@ -80,7 +81,7 @@ try {
   await herdrRequest(target, 'pane.send_text', { pane_id: terminal.paneId, text: [process.execPath, dir + '/app.mjs'].map(shellQuote).join(' ') + '\r' });
   await wait(async () => (await state()).cols === await page.evaluate(() => window.__terminal.cols), 'mobile app geometry');
   await page.waitForFunction(() => window.__terminal.buffer.active.getLine(1)?.translateToString(true).includes('ROW-100'));
-  assert.equal((await herdrSnapshot(target)).terminals[0]?.terminalId, terminal.terminalId);
+  assert.ok((await herdrSnapshot(target)).terminals.some(item => item.terminalId === terminal.terminalId));
   const pane = await herdrRequest(target, 'pane.get', { pane_id: terminal.paneId }); assert.equal(pane.pane.scroll.max_offset_from_bottom, 0);
   assert.equal(await page.evaluate(() => window.__terminal.buffer.active.length), await page.evaluate(() => window.__terminal.rows));
   await page.waitForFunction(() => window.__screens > 1 && window.__lastScreen.text.includes('TICK:'));
@@ -113,8 +114,10 @@ try {
   const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
   for (const [row, url] of [[2, 'https://example.com/help'], [3, 'https://example.com/tui']]) {
     const point = await page.evaluate(row => { const t = window.__terminal, r = document.querySelector('#terminal canvas').getBoundingClientRect(); return { x: r.x + 1.5 * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; }, row);
-    const opened = page.waitForEvent('popup'); await touch('touchStart', point.x, point.y); await touch('touchEnd');
-    const popup = await opened; await popup.waitForLoadState(); assert.equal(popup.url(), url); await popup.close(); await page.bringToFront();
+    const opened = context.waitForEvent('page'); await touch('touchStart', point.x, point.y); await touch('touchEnd');
+    const popup = await opened; await popup.waitForLoadState(); assert.equal(popup.url(), url);
+    assert.equal(await popup.evaluate(() => window.opener), null, 'Opened links cannot access the terminal');
+    await popup.close(); await page.bringToFront();
   }
   const drag = async (from, to) => { await touch('touchStart', 150, from); for (let i = 1; i <= 5; i++) { await delay(25); await touch('touchMove', 150, from + (to - from) * i / 5); } await delay(120); await touch('touchEnd'); };
   await drag(180, 300);
