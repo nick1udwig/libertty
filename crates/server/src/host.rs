@@ -115,7 +115,26 @@ impl NativeHost {
         operations: &[termai_engine::host::HostOperation],
         cancel: &CancellationToken,
     ) -> Vec<Result<termai_engine::host::FactValue, String>> {
+        self.engine_operations_until(operations, cancel, None).await
+    }
+    pub async fn engine_operations_until(
+        &self,
+        operations: &[termai_engine::host::HostOperation],
+        cancel: &CancellationToken,
+        deadline: Option<tokio::time::Instant>,
+    ) -> Vec<Result<termai_engine::host::FactValue, String>> {
         use termai_engine::host::{FactValue, HostOperation};
+        async fn bounded<T>(
+            deadline: Option<tokio::time::Instant>,
+            work: impl std::future::Future<Output = Result<T, String>>,
+        ) -> Result<T, String> {
+            match deadline {
+                Some(deadline) => tokio::time::timeout_at(deadline, work)
+                    .await
+                    .map_err(|_| "Repair budget exhausted.".to_owned())?,
+                None => work.await,
+            }
+        }
         let stats: Vec<_> = operations
             .iter()
             .enumerate()
@@ -130,20 +149,28 @@ impl NativeHost {
             return futures::future::join_all(
                 operations
                     .iter()
-                    .map(|op| self.engine_operation(op, cancel)),
+                    .map(|op| bounded(deadline, self.engine_operation(op, cancel))),
             )
             .await;
         }
         let (stat_results, others) = futures::join!(
-            self.services
-                .directories
-                .stat_many(stats.iter().map(|(_, file)| file.clone()).collect(), cancel),
+            bounded(
+                deadline,
+                self.services
+                    .directories
+                    .stat_many(stats.iter().map(|(_, file)| file.clone()).collect(), cancel)
+            ),
             futures::future::join_all(
                 operations
                     .iter()
                     .enumerate()
                     .filter(|(i, _)| !stats.iter().any(|(at, _)| at == i))
-                    .map(|(i, op)| async move { (i, self.engine_operation(op, cancel).await) })
+                    .map(|(i, op)| async move {
+                        (
+                            i,
+                            bounded(deadline, self.engine_operation(op, cancel)).await,
+                        )
+                    })
             )
         );
         let mut results = vec![Err(ABORTED.into()); operations.len()];
@@ -210,6 +237,11 @@ impl NativeHost {
         }
         let value = match operation {
             HostOperation::Scoped { .. } => unreachable!("Scoped operations are handled above"),
+            HostOperation::Version { command } => FactValue::from(json!(
+                self.help
+                    .version(command, &self.catalog, &self.environment)
+                    .await?
+            )),
             HostOperation::Lookup { path } => FactValue::Lookup(Arc::new(
                 self.services.directories.lookup(path, cancel).await?,
             )),
@@ -326,6 +358,11 @@ impl NativeHost {
                 .ok_or_else(|| format!("Invalid host field {field}."))
         };
         let value = match text("kind")? {
+            "version" => json!(
+                self.help
+                    .version(text("command")?, &self.catalog, &self.environment)
+                    .await?
+            ),
             "stat" => json!(
                 self.services
                     .directories

@@ -20,7 +20,10 @@ Retain the shared Rust engine, original transcript choices, non-executing valida
   Shared traversal covers input commands and schema-declared path values, including misspelled intermediate directories.
   Option schemas carry cardinality, choices, and path roles, and Python inspection excludes child-parser options from the root schema.
   Engine, native, filesystem, schema-contract, and TypeScript checks pass.
-- [ ] Separate typed candidate changes, discovery completeness, cache invalidation, budgets, and partial results.
+- [x] Separate typed candidate changes, discovery completeness, cache invalidation, budgets, and partial results.
+  Typed changes preserve existing wire explanations, while ranking uses normalized match evidence and unresolved operands.
+  Learned schemas retain completeness and executable versions, and independent failures leave validated alternatives available.
+  Engine, native, completion, fact-contract, and TypeScript checks pass, including executable replacement and slow-probe deadline regressions.
 - [ ] Combine repair and guarded line application, including backend dictation.
 - [ ] Verify end-to-end behavior and network request budgets, then evaluate whether additional SSH infrastructure is warranted.
 - [ ] Keep the old screen visible with a loading bar when returning to the app, and replace it only when the new screen is ready.

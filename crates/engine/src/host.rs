@@ -7,6 +7,9 @@ use std::sync::Arc;
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase", deny_unknown_fields)]
 pub enum HostOperation {
+    Version {
+        command: String,
+    },
     Scoped {
         cwd: String,
         operation: Box<HostOperation>,
@@ -69,6 +72,9 @@ impl Host for ScopedHost<'_> {
     fn supports_completion(&self) -> bool {
         self.inner.supports_completion()
     }
+    fn deadline_ms(&self) -> f64 {
+        self.inner.deadline_ms()
+    }
 }
 fn serialize_timeout<S: serde::Serializer>(bits: &u64, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_f64(f64::from_bits(*bits))
@@ -101,8 +107,25 @@ pub trait Host {
         self.request(serde_json::to_value(operation).expect("host operation"))
     }
     fn now_ms(&self) -> f64;
+    fn deadline_ms(&self) -> f64 {
+        f64::INFINITY
+    }
     fn supports_completion(&self) -> bool {
         true
+    }
+}
+pub async fn version(host: &dyn Host, command: &str) -> Result<String, String> {
+    match host
+        .fact(HostOperation::Version {
+            command: command.into(),
+        })
+        .await?
+    {
+        FactValue::Json(value) => value
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "Invalid schema version.".into()),
+        _ => Err("Invalid schema version.".into()),
     }
 }
 

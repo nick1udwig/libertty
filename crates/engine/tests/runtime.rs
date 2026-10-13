@@ -5,6 +5,94 @@ use termai_engine::{
 };
 
 #[test]
+fn failed_candidate_facts_leave_independently_validated_alternatives_available() {
+    let mut runtime = Runtime::default();
+    let request = Request {
+        operation: "suggest".into(),
+        args: vec![
+            json!("cat my notes"),
+            json!({"cwd":"/fixture","commands":["cat"],"paths":["my-notes","my_notes"],"history":[]}),
+            json!({}),
+            json!(false),
+        ],
+    };
+    let Step::Pending { callbacks, .. } = runtime.start(1, request, 0.0) else {
+        panic!("Expected validation facts");
+    };
+    let replies = callbacks
+        .into_iter()
+        .map(|callback| Reply::Results {
+            request: callback.request,
+            results: callback
+                .operations
+                .into_iter()
+                .map(|operation| {
+                    use termai_engine::{host::HostOperation, runtime::HostResult};
+                    match operation {
+                        HostOperation::Syntax { command } if command == "cat my-notes" => {
+                            HostResult::Error {
+                                error: "Probe unavailable".into(),
+                            }
+                        }
+                        HostOperation::Syntax { .. } => HostResult::Value { value: json!(true) },
+                        HostOperation::Stat { path, .. } => HostResult::Value {
+                            value: if path.ends_with("my-notes") || path.ends_with("my_notes") {
+                                json!({"file":true,"directory":false,"executable":false})
+                            } else {
+                                Value::Null
+                            },
+                        },
+                        _ => panic!("Unexpected fact: {operation:?}"),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    let Step::Complete { value, .. } = runtime.resume(1, replies, 150.0) else {
+        panic!("Validated alternative must survive");
+    };
+    assert_eq!(value[0]["command"], "cat my_notes");
+}
+
+#[test]
+fn exhausted_request_budget_does_not_start_more_fact_waves() {
+    let mut runtime = Runtime::default();
+    let request = Request {
+        operation: "suggest".into(),
+        args: vec![
+            json!("orbit target value"),
+            json!({"cwd":"/fixture","commands":["orbit"],"paths":[],"history":[]}),
+            json!({}),
+            json!(false),
+        ],
+    };
+    let Step::Pending { callbacks, .. } = runtime.start(1, request, 0.0) else {
+        panic!("Expected discovery");
+    };
+    let replies = callbacks
+        .into_iter()
+        .map(|callback| Reply::Values {
+            request: callback.request,
+            values: callback
+                .operations
+                .iter()
+                .map(|_| json!({"flags":[{"name":"--target","takesValue":true}],"subcommands":[]}))
+                .collect(),
+        })
+        .collect();
+    let Step::Complete { value, .. } = runtime.resume(1, replies, 4501.0) else {
+        panic!("Budget exhaustion must finish without another wave");
+    };
+    assert!(
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|candidate| candidate["literal"] == true)
+    );
+}
+
+#[test]
 fn independent_operand_validation_uses_one_callback_wave() {
     let mut runtime = Runtime::default();
     let request = Request {

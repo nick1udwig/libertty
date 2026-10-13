@@ -175,7 +175,7 @@ pub fn validate(operations: &Value) -> Result<&[Value], String> {
                 }
                 expensive += 1;
             }
-            Some("syntax" | "help" | "describe") => {
+            Some("syntax" | "help" | "describe" | "version") => {
                 if !op["command"].as_str().is_some_and(|c| {
                     c.encode_utf16().count() <= 4000
                         && !c.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
@@ -197,7 +197,7 @@ pub fn validate(operations: &Value) -> Result<&[Value], String> {
                         return Err("Invalid help route.".into());
                     }
                     expensive += 1;
-                } else if op["kind"] == "describe" {
+                } else if op["kind"] == "describe" || op["kind"] == "version" {
                     expensive += 1;
                 }
             }

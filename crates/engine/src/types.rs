@@ -164,7 +164,9 @@ pub struct Catalog {
 pub struct Candidate {
     pub command: String,
     pub score: f64,
-    pub changes: Vec<String>,
+    pub changes: Vec<Change>,
+    #[serde(skip)]
+    pub evidence: Evidence,
     #[serde(
         default,
         deserialize_with = "present",
@@ -172,12 +174,131 @@ pub struct Candidate {
     )]
     pub literal: Option<bool>,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum CandidateSource {
+    Literal,
+    #[default]
+    Repair,
+    History,
+    Path,
+    Compound,
+}
+#[derive(Debug, Clone, PartialEq)]
+pub struct Evidence {
+    pub source: CandidateSource,
+    pub confidence: f64,
+    pub validated: bool,
+    pub resolved: bool,
+}
+impl Default for Evidence {
+    fn default() -> Self {
+        Self {
+            source: CandidateSource::Repair,
+            confidence: 100.0,
+            validated: false,
+            resolved: true,
+        }
+    }
+}
+impl Evidence {
+    pub fn new(source: CandidateSource, confidence: f64) -> Self {
+        Self {
+            source,
+            confidence: confidence.clamp(0.0, 100.0),
+            validated: false,
+            resolved: source != CandidateSource::Literal,
+        }
+    }
+}
+/// Semantic change kinds serialize to the existing user-facing explanation strings.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Change {
+    Command(String),
+    Subcommand(String),
+    Flag(String),
+    File(String),
+    Completion(String),
+    History,
+    Symbols,
+    SymbolAlternative,
+    Separator,
+    Pipeline,
+    SentencePunctuation,
+    Boundary,
+    VerifiedFile,
+    VerifiedDirectory,
+    Other(String),
+}
+impl std::fmt::Display for Change {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Command(value) => write!(f, "Command → {value}"),
+            Self::Subcommand(value) => write!(f, "Subcommand → {value}"),
+            Self::Flag(value) => write!(f, "Flag → {value}"),
+            Self::File(value) => write!(f, "File → {value}"),
+            Self::Completion(value) => write!(f, "Completion → {value}"),
+            Self::History => f.write_str("Matches shell history"),
+            Self::Symbols => f.write_str("Spoken symbols"),
+            Self::SymbolAlternative => f.write_str("Spoken symbol alternative"),
+            Self::Separator => f.write_str("Spoken command separator"),
+            Self::Pipeline => f.write_str("Pipeline commands"),
+            Self::SentencePunctuation => f.write_str("Remove dictation sentence punctuation"),
+            Self::Boundary => f.write_str("Restore command/flag boundary"),
+            Self::VerifiedFile => f.write_str("File path verified against the filesystem"),
+            Self::VerifiedDirectory => f.write_str("Path verified against existing directories"),
+            Self::Other(text) => f.write_str(text),
+        }
+    }
+}
+impl Serialize for Change {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+impl<'de> Deserialize<'de> for Change {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+impl From<String> for Change {
+    fn from(text: String) -> Self {
+        for (prefix, make) in [
+            ("Command → ", Self::Command as fn(String) -> Self),
+            ("Subcommand → ", Self::Subcommand),
+            ("Flag → ", Self::Flag),
+            ("File → ", Self::File),
+            ("Completion → ", Self::Completion),
+        ] {
+            if let Some(value) = text.strip_prefix(prefix) {
+                return make(value.into());
+            }
+        }
+        match text.as_str() {
+            "Matches shell history" => Self::History,
+            "Spoken symbols" => Self::Symbols,
+            "Spoken symbol alternative" => Self::SymbolAlternative,
+            "Spoken command separator" => Self::Separator,
+            "Pipeline commands" => Self::Pipeline,
+            "Remove dictation sentence punctuation" => Self::SentencePunctuation,
+            "Restore command/flag boundary" => Self::Boundary,
+            "File path verified against the filesystem" => Self::VerifiedFile,
+            "Path verified against existing directories" => Self::VerifiedDirectory,
+            _ => Self::Other(text),
+        }
+    }
+}
+impl From<&str> for Change {
+    fn from(text: &str) -> Self {
+        Self::from(text.to_owned())
+    }
+}
 impl Candidate {
     pub fn literal(input: &str) -> Self {
         Self {
             command: input.trim().into(),
             score: 0.0,
             changes: vec![],
+            evidence: Evidence::new(CandidateSource::Literal, 0.0),
             literal: Some(true),
         }
     }
@@ -205,6 +326,25 @@ pub struct CommandMetadata {
         skip_serializing_if = "Option::is_none"
     )]
     pub argument_values: Option<BTreeMap<String, Vec<String>>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub versions: Option<BTreeMap<String, String>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub schemas: Option<BTreeMap<String, SchemaState>>,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SchemaState {
+    Complete,
+    Partial,
+    Unavailable,
 }
 
 impl CommandMetadata {
@@ -217,6 +357,12 @@ impl CommandMetadata {
     pub fn merge(&mut self, other: Self) {
         self.flags.extend(other.flags);
         self.subcommands.extend(other.subcommands);
+        self.versions
+            .get_or_insert_with(BTreeMap::new)
+            .extend(other.versions.unwrap_or_default());
+        self.schemas
+            .get_or_insert_with(BTreeMap::new)
+            .extend(other.schemas.unwrap_or_default());
         self.required_positionals
             .get_or_insert_with(BTreeMap::new)
             .extend(other.required_positionals.unwrap_or_default());
@@ -252,6 +398,12 @@ pub struct Help {
         skip_serializing_if = "Option::is_none"
     )]
     pub aliases: Option<BTreeMap<String, String>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

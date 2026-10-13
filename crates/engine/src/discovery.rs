@@ -2,7 +2,7 @@ use crate::{
     command_policy::{option_arity, script_operand, vocabulary},
     host::{self, Host},
     repair::{matches, tokens},
-    types::{Catalog, CommandMetadata, Flag, Help},
+    types::{Catalog, CommandMetadata, Flag, Help, SchemaState, SharedList},
     util::{locale_cmp, test},
     validation::Environment,
 };
@@ -15,11 +15,18 @@ struct Snapshot {
     until: f64,
     metadata: CommandMetadata,
 }
+type DiscoveryContext = (
+    String,
+    Environment,
+    SharedList<String>,
+    Option<SharedList<String>>,
+    String,
+);
 #[derive(Default)]
 pub struct Discovery {
     snapshots: RefCell<VecDeque<Snapshot>>,
     warmed: RefCell<VecDeque<(String, f64)>>,
-    context: RefCell<Option<(String, Environment, String)>>,
+    context: RefCell<Option<DiscoveryContext>>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,7 +48,8 @@ fn context(catalog: &Catalog, env: &Environment) -> String {
         .filter(|(key, _)| !test("^(?:_|PWD|OLDPWD|SHLVL|LINES|COLUMNS|TERMAI_.*)$", key))
         .collect();
     stable.sort_by(|(a, _), (b, _)| locale_cmp(a, b));
-    serde_json::to_string(&(&catalog.cwd, stable)).expect("metadata context")
+    serde_json::to_string(&(&catalog.cwd, stable, &catalog.commands, &catalog.functions))
+        .expect("metadata context")
 }
 fn merge(base: &[Flag], discovered: &[Flag]) -> Vec<Flag> {
     let mut result = base.to_vec();
@@ -76,6 +84,23 @@ fn record(
         ),
         &help.flags,
     );
+    let state = if help.flags.is_empty() && help.subcommands.is_empty() && help.required.is_none() {
+        SchemaState::Unavailable
+    } else {
+        SchemaState::Partial
+    };
+    metadata
+        .schemas
+        .get_or_insert_with(Default::default)
+        .insert(scope.clone(), state);
+    if route.is_empty()
+        && let Some(version) = &help.version
+    {
+        metadata
+            .versions
+            .get_or_insert_with(Default::default)
+            .insert(command.into(), version.clone());
+    }
     metadata.flags.insert(scope.clone(), flags);
     let mut commands = vocabulary()
         .subcommands
@@ -99,14 +124,22 @@ fn record(
 impl Discovery {
     fn context(&self, catalog: &Catalog, env: &Environment) -> String {
         let mut cached = self.context.borrow_mut();
-        if let Some((cwd, environment, key)) = cached.as_ref()
+        if let Some((cwd, environment, commands, functions, key)) = cached.as_ref()
             && *cwd == catalog.cwd
             && environment == env
+            && commands == &catalog.commands
+            && functions == &catalog.functions
         {
             return key.clone();
         }
         let key = context(catalog, env);
-        *cached = Some((catalog.cwd.clone(), env.clone(), key.clone()));
+        *cached = Some((
+            catalog.cwd.clone(),
+            env.clone(),
+            catalog.commands.clone(),
+            catalog.functions.clone(),
+            key.clone(),
+        ));
         key
     }
     pub fn seed(&self, metadata: &CommandMetadata, catalog: &Catalog, env: &Environment, now: f64) {
@@ -187,6 +220,64 @@ impl Discovery {
             warmed.pop_front();
         }
     }
+    pub async fn verify_versions(
+        &self,
+        input: &str,
+        catalog: &Catalog,
+        env: &Environment,
+        host: &dyn Host,
+    ) -> bool {
+        let protected = crate::shell_structure::protect(input);
+        let text = protected.as_ref().map(|p| p.text.as_str()).unwrap_or(input);
+        let metadata = self.cached(catalog, env, host.now_ms());
+        let mut roots = Vec::new();
+        for target in crate::repair::discovery_targets(text, catalog) {
+            if let Some(word) = tokens(&target).first()
+                && metadata
+                    .versions
+                    .as_ref()
+                    .is_some_and(|versions| versions.contains_key(&word.value))
+                && !roots.contains(&word.value)
+            {
+                roots.push(word.value.clone());
+            }
+        }
+        let facts = join_all(roots.iter().map(|root| host::version(host, root))).await;
+        let key = self.context(catalog, env);
+        let mut changed = false;
+        for (root, version) in roots.iter().zip(facts) {
+            if version.ok().as_ref()
+                == metadata
+                    .versions
+                    .as_ref()
+                    .and_then(|versions| versions.get(root))
+            {
+                continue;
+            }
+            changed = true;
+            if let Some(snapshot) = self
+                .snapshots
+                .borrow_mut()
+                .iter_mut()
+                .find(|entry| entry.key == key)
+            {
+                let keep =
+                    |scope: &String| scope != root && !scope.starts_with(&format!("{root} "));
+                snapshot.metadata.flags.retain(|scope, _| keep(scope));
+                snapshot.metadata.subcommands.retain(|scope, _| keep(scope));
+                if let Some(required) = &mut snapshot.metadata.required_positionals {
+                    required.retain(|scope, _| keep(scope));
+                }
+                if let Some(schemas) = &mut snapshot.metadata.schemas {
+                    schemas.retain(|scope, _| keep(scope));
+                }
+                if let Some(versions) = &mut snapshot.metadata.versions {
+                    versions.remove(root);
+                }
+            }
+        }
+        !changed
+    }
     pub fn cached(&self, catalog: &Catalog, env: &Environment, now: f64) -> CommandMetadata {
         let key = self.context(catalog, env);
         self.snapshots
@@ -223,7 +314,7 @@ impl Discovery {
         env: &Environment,
         host: &dyn Host,
     ) -> Result<Discovered, String> {
-        let deadline = host.now_ms() + 2500.0;
+        let deadline = (host.now_ms() + 2500.0).min(host.deadline_ms());
         let mut metadata = CommandMetadata::empty();
         if crate::validation::simple_words(command_line).is_none() {
             return Ok(Discovered {
@@ -360,7 +451,8 @@ impl Discovery {
             }))
             .await
             .into_iter()
-            .collect::<Result<Vec<_>, String>>()?;
+            .map(|result| result.unwrap_or_default())
+            .collect::<Vec<_>>();
             for (branch, help) in branches.iter().zip(children) {
                 let parent = std::iter::once(command.as_str())
                     .chain(

@@ -104,6 +104,10 @@ impl NativeEngine {
                                     pending => pending,
                                 };
                                 let reset = generation.clone();
+                                let deadline = tokio::time::Instant::now()
+                                    + std::time::Duration::from_millis(
+                                        termai_engine::runtime::REPAIR_BUDGET_MS as u64,
+                                    );
                                 let runtime = runtime.clone();
                                 tokio::task::spawn_local(async move {
                                     let _request = EngineRequest {
@@ -123,9 +127,10 @@ impl NativeEngine {
                                                         callbacks.into_iter().map(
                                                             |callback| async move {
                                                                 let results = host
-                                                                    .engine_operations(
+                                                                    .engine_operations_until(
                                                                         &callback.operations,
                                                                         cancel,
+                                                                        Some(deadline),
                                                                     )
                                                                     .await;
                                                                 Reply::Native {

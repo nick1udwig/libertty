@@ -174,8 +174,9 @@ pub fn history_candidates(input: &str, catalog: &Catalog) -> Vec<Candidate> {
             };
             candidates.push(Candidate {
                 command: line.clone(),
+                evidence: Evidence::new(CandidateSource::History, score),
                 score: score + 8.0 + cwd_boost,
-                changes: vec!["Matches shell history".into()],
+                changes: vec![Change::History],
                 literal: None,
             });
         }

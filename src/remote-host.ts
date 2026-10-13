@@ -114,6 +114,7 @@ export class RemoteHost implements EngineHost {
   async help(command: string, route: string[]): Promise<Help> {
     return await this.request({ kind: 'help', command, route }) as Help;
   }
+  async version(command: string): Promise<string> { return await this.request({ kind: 'version', command }) as string; }
   async describe(command: string): Promise<Flag[] | undefined> {
     return await this.request({ kind: 'describe', command }) as Flag[] | null || undefined;
   }

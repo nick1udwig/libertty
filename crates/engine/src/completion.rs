@@ -67,7 +67,7 @@ pub async fn complete_arguments(
     }
     let mut learned = metadata.clone();
     learned.argument_values = Some(BTreeMap::new());
-    let deadline = host.now_ms() + 1500.0;
+    let deadline = (host.now_ms() + 1500.0).min(host.deadline_ms());
     let requests = std::cell::Cell::new(0usize);
     // Independent contexts share a callback wave; a second pass can use earlier corrections.
     for _ in 0..2 {
@@ -102,10 +102,18 @@ pub async fn complete_arguments(
                 if !operand_position(&args, metadata) {
                     continue;
                 }
-                let script_option = crate::command_policy::script_operand(&args).is_some()
-                    && script_flags.is_some_and(|flags| {
-                        flags.iter().any(|flag| key(&word.value) == key(&flag.name))
-                    });
+                let mut scope = args[0].clone();
+                for arg in args.iter().skip(1) {
+                    scope = child_scope(&scope, arg, metadata).unwrap_or(scope);
+                }
+                let options = if crate::command_policy::script_operand(&args).is_some() {
+                    script_flags.map(<[Flag]>::to_vec).unwrap_or_default()
+                } else {
+                    flags_for(&scope, metadata)
+                };
+                let named_option = options.iter().any(|flag| {
+                    !key(&word.value).is_empty() && key(&word.value) == key(&flag.name)
+                });
                 let option = repair(
                     &format!("{} {}", candidate.command, word.value),
                     catalog,
@@ -119,7 +127,7 @@ pub async fn complete_arguments(
                         .last()
                         .is_some_and(|w| w.value.starts_with('-'))
                 });
-                if script_option || option {
+                if named_option || option {
                     continue;
                 }
                 let context = serde_json::to_string(&args).expect("completion context");
@@ -197,7 +205,7 @@ pub async fn complete_arguments(
         .filter(|c| {
             c.changes
                 .iter()
-                .any(|change| change.starts_with("Completion →"))
+                .any(|change| matches!(change, crate::types::Change::Completion(_)))
         })
         .collect())
 }

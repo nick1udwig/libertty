@@ -188,7 +188,17 @@ impl CatalogHost {
         let Some(info) = info.filter(|m| m.is_file() && m.len() <= 1024 * 1024) else {
             return Ok(None);
         };
-        let stamp = format!("{:?}", info.modified().ok());
+        use std::os::unix::fs::MetadataExt;
+        let stamp = format!(
+            "{}:{}:{}:{}:{}:{}:{}",
+            info.dev(),
+            info.ino(),
+            info.mtime(),
+            info.mtime_nsec(),
+            info.ctime(),
+            info.ctime_nsec(),
+            info.len()
+        );
         let task = {
             let mut cache = self.flags.lock().await;
             if let Some((_, _, task)) = cache.iter().find(|(old, old_stamp, task)| {

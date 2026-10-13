@@ -107,7 +107,7 @@ pub async fn repair_option_paths(
     script_flags: Option<&[Flag]>,
 ) -> Result<Vec<Candidate>, String> {
     let mut result = Vec::new();
-    let deadline = host.now_ms() + 1500.0;
+    let deadline = (host.now_ms() + 1500.0).min(host.deadline_ms());
     for candidate in crate::repair::repair_candidates(input, catalog, script_flags, metadata)
         .into_iter()
         .filter(|c| !c.is_literal())

@@ -279,6 +279,14 @@ fn render(units: &[Unit]) -> String {
 thread_local! { static WORDS: RefCell<TextMemo<Arc<Vec<String>>>> = RefCell::new(TextMemo::default()); static EXPANDED: RefCell<TextMemo<String>> = RefCell::new(TextMemo::default()); }
 fn raw_words(input: &str) -> Arc<Vec<String>> {
     memo(&WORDS, input, 0, || {
+        if let Some(spans) = crate::shell_structure::word_spans(input) {
+            return Arc::new(
+                spans
+                    .into_iter()
+                    .map(|span| input[span].to_owned())
+                    .collect(),
+            );
+        }
         Arc::new(
             crate::util::quoted_words(input)
                 .into_iter()

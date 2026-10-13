@@ -32,6 +32,90 @@ fn executable(file: &std::path::Path, content: &str) {
 }
 
 #[tokio::test]
+async fn fact_deadlines_preserve_fast_results_when_an_optional_probe_is_slow() {
+    use termai_engine::host::HostOperation;
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    executable(
+        &root.path().join("orbit"),
+        "#!/bin/sh\n/bin/sleep 2\nprintf '  --slow VALUE\\n'\n",
+    );
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(cwd, &["orbit"]),
+        BTreeMap::from([("HOME".into(), cwd.into()), ("PATH".into(), cwd.into())]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let start = tokio::time::Instant::now();
+    let results = host
+        .engine_operations_until(
+            &[
+                HostOperation::Entries {
+                    path: cwd.into(),
+                    limit: 100,
+                },
+                HostOperation::Help {
+                    command: "orbit".into(),
+                    route: vec![],
+                },
+            ],
+            &CancellationToken::new(),
+            Some(start + Duration::from_millis(150)),
+        )
+        .await;
+    assert!(results[0].is_ok(), "{results:?}");
+    assert_eq!(results[1].as_ref().unwrap_err(), "Repair budget exhausted.");
+    assert!(start.elapsed() < Duration::from_secs(1));
+}
+
+#[tokio::test]
+async fn learned_schema_is_replaced_when_the_executable_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    let file = root.path().join("orbit");
+    executable(&file, "#!/bin/sh\nprintf '  --first VALUE  First\\n'\n");
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(cwd, &["orbit"]),
+        BTreeMap::from([("HOME".into(), cwd.into()), ("PATH".into(), cwd.into())]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    assert_eq!(
+        engine
+            .suggest("orbit first value", &host, &CancellationToken::new())
+            .await
+            .unwrap()[0]["command"],
+        "orbit --first value"
+    );
+    let replacement = root.path().join("replacement");
+    executable(
+        &replacement,
+        "#!/bin/sh\nprintf '  --other VALUE  Other\\n'\n",
+    );
+    std::fs::rename(replacement, &file).unwrap();
+    let result = engine
+        .suggest("orbit other value", &host, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(result[0]["command"], "orbit --other value", "{result}");
+    let result = engine
+        .suggest("orbit first value", &host, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(
+        !result
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["command"] == "orbit --first value"),
+        "{result}"
+    );
+}
+
+#[tokio::test]
 async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();
@@ -195,6 +279,7 @@ async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
         score: 90.0,
         changes: vec![],
         literal: None,
+        evidence: Default::default(),
     };
     let result = engine
         .invoke(

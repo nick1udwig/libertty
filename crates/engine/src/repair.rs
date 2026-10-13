@@ -14,6 +14,25 @@ pub fn tokens(input: &str) -> SharedList<Token> {
     memo(&TOKENS, input, 0, || parsed_tokens(input))
 }
 fn parsed_tokens(input: &str) -> SharedList<Token> {
+    if let Some(spans) = crate::shell_structure::word_spans(input) {
+        let parsed: Option<Vec<_>> = spans
+            .iter()
+            .map(|span| {
+                let text = &input[span.clone()];
+                let words = crate::validation::simple_words(text)?;
+                if words.len() != 1 {
+                    return None;
+                }
+                Some(Token {
+                    value: words[0].value.clone(),
+                    quoted: text.starts_with(['\'', '"']),
+                })
+            })
+            .collect();
+        if let Some(parsed) = parsed {
+            return parsed.into();
+        }
+    }
     quoted_words(input)
         .into_iter()
         .map(|text| {
@@ -812,9 +831,7 @@ pub(crate) fn repair_candidates(
                 let mut result: Vec<_> = clean
                     .into_iter()
                     .map(|mut candidate| {
-                        candidate
-                            .changes
-                            .push("Remove dictation sentence punctuation".into());
+                        candidate.changes.push(Change::SentencePunctuation);
                         candidate
                     })
                     .collect();
@@ -832,7 +849,7 @@ pub(crate) fn repair_candidates(
         .into_iter()
         .filter(|candidate| !candidate.is_literal())
         .map(|mut candidate| {
-            candidate.changes.insert(0, "Spoken symbols".into());
+            candidate.changes.insert(0, Change::Symbols);
             candidate
         })
         .collect();
@@ -849,8 +866,9 @@ pub(crate) fn repair_candidates(
                     format!("{name}{}", &expanded[first.len()..])
                 }),
                 score: 90.0,
-                changes: vec!["Spoken symbols".into()],
+                changes: vec![Change::Symbols],
                 literal: None,
+                evidence: Evidence::default(),
             },
             Candidate::literal(input),
         ];
@@ -921,9 +939,7 @@ fn repair_normalized(
                 candidate.score = spelling.map_or(candidate.score - 8.0, |item| {
                     (candidate.score - 8.0).min(item.score - 6.0)
                 });
-                candidate
-                    .changes
-                    .insert(0, "Restore command/flag boundary".into());
+                candidate.changes.insert(0, Change::Boundary);
                 candidates.push(candidate);
             }
         }
@@ -939,21 +955,21 @@ fn repair_normalized(
 }
 
 #[derive(Clone)]
-struct Trail(Rc<TrailNode>);
-struct TrailNode {
-    parent: Option<Trail>,
-    value: String,
+struct Trail<T: Clone>(Rc<TrailNode<T>>);
+struct TrailNode<T: Clone> {
+    parent: Option<Trail<T>>,
+    value: T,
     len: usize,
 }
-impl Trail {
-    fn new(value: String) -> Self {
+impl<T: Clone> Trail<T> {
+    fn new(value: T) -> Self {
         Self(Rc::new(TrailNode {
             parent: None,
             value,
             len: 1,
         }))
     }
-    fn push(&mut self, value: String) {
+    fn push(&mut self, value: T) {
         *self = Self(Rc::new(TrailNode {
             parent: Some(self.clone()),
             value,
@@ -963,14 +979,14 @@ impl Trail {
     fn len(&self) -> usize {
         self.0.len
     }
-    fn first(&self) -> &str {
+    fn first(&self) -> &T {
         let mut node = self;
         while let Some(parent) = &node.0.parent {
             node = parent;
         }
         &node.0.value
     }
-    fn values(&self) -> Vec<&String> {
+    fn values(&self) -> Vec<&T> {
         let mut values = Vec::with_capacity(self.len());
         let mut node = Some(self);
         while let Some(current) = node {
@@ -983,11 +999,13 @@ impl Trail {
 }
 #[derive(Clone)]
 struct State<'a> {
-    args: Trail,
+    args: Trail<String>,
     scope: String,
     index: usize,
     score: f64,
-    changes: Option<Trail>,
+    confidence: f64,
+    unresolved: bool,
+    changes: Option<Trail<Change>>,
     value_next: bool,
     value_remaining: usize,
     value_limit: Option<usize>,
@@ -1003,11 +1021,13 @@ struct State<'a> {
 struct Push {
     consumed: usize,
     score: f64,
-    change: Option<String>,
+    confidence: Option<f64>,
+    change: Option<Change>,
     flag: Option<Flag>,
     quoted: bool,
     subcommand: bool,
     value: bool,
+    unresolved: bool,
 }
 fn push<'a>(
     next: &mut Vec<State<'a>>,
@@ -1024,6 +1044,10 @@ fn push<'a>(
     }
     new.index += opts.consumed.max(1);
     new.score += opts.score;
+    new.unresolved |= opts.unresolved;
+    if let Some(confidence) = opts.confidence {
+        new.confidence = new.confidence.min(confidence);
+    }
     if let Some(change) = opts.change {
         if let Some(changes) = &mut new.changes {
             changes.push(change);
@@ -1051,7 +1075,7 @@ fn push<'a>(
         new.active_value = None;
     }
     new.value_next = new.value_remaining > 0;
-    new.script_scope |= ["python", "python3"].contains(&new.args.first())
+    new.script_scope |= ["python", "python3"].contains(&new.args.first().as_str())
         && value.ends_with(".py")
         && script_operand(&new.args.values()) == Some(new.args.len() - 1);
     new.flags = if new.script_scope {
@@ -1109,8 +1133,11 @@ fn repair_one(
                 scope: item.value.clone(),
                 index: item.consumed,
                 score: item.score,
+                confidence: (item.score - item.consumed.saturating_sub(1) as f64 * 8.0)
+                    .clamp(0.0, 100.0),
+                unresolved: false,
                 changes: if item.value != text {
-                    Some(Trail::new(format!("Command → {}", item.value)))
+                    Some(Trail::new(Change::Command(item.value.clone())))
                 } else {
                     None
                 },
@@ -1169,21 +1196,21 @@ fn repair_one(
                                 matched.value.clone(),
                                 Push {
                                     consumed: matched.consumed,
+                                    confidence: Some(
+                                        matched.score
+                                            - matched.consumed.saturating_sub(1) as f64 * 8.0,
+                                    ),
                                     score: if matched.value == spoken {
                                         0.0
                                     } else {
                                         12.0 + matched.score / 10.0
                                     },
                                     change: (matched.value != spoken).then(|| {
-                                        format!(
-                                            "{} → {}",
-                                            if schema.kind == ValueKind::Choice {
-                                                "Completion"
-                                            } else {
-                                                "File"
-                                            },
-                                            matched.value
-                                        )
+                                        if schema.kind == ValueKind::Choice {
+                                            Change::Completion(matched.value.clone())
+                                        } else {
+                                            Change::File(matched.value.clone())
+                                        }
                                     }),
                                     value: true,
                                     ..Default::default()
@@ -1241,13 +1268,16 @@ fn repair_one(
                 );
                 for sub in choices {
                     let change =
-                        (sub.value != word.value).then(|| format!("Subcommand → {}", sub.value));
+                        (sub.value != word.value).then(|| Change::Subcommand(sub.value.clone()));
                     push(
                         &mut next,
                         state,
                         sub.value,
                         Push {
                             consumed: sub.consumed,
+                            confidence: Some(
+                                sub.score - sub.consumed.saturating_sub(1) as f64 * 8.0,
+                            ),
                             score: if sub.score >= 94.0 { 40.0 } else { 24.0 },
                             change,
                             subcommand: true,
@@ -1316,13 +1346,14 @@ fn repair_one(
                         8.0
                     };
                     let change =
-                        (value != word.value || consumed > 1).then(|| format!("Flag → {value}"));
+                        (value != word.value || consumed > 1).then(|| Change::Flag(value.clone()));
                     push(
                         &mut next,
                         state,
                         value.clone(),
                         Push {
                             consumed,
+                            confidence: Some(if value == word.value { 100.0 } else { 98.0 }),
                             score,
                             change,
                             flag: Some(Flag {
@@ -1374,8 +1405,9 @@ fn repair_one(
                     file.value.clone(),
                     Push {
                         consumed: file.consumed,
+                        confidence: Some(file.score - file.consumed.saturating_sub(1) as f64 * 8.0),
                         score: file.score / 10.0,
-                        change: (file.value != spoken).then(|| format!("File → {}", file.value)),
+                        change: (file.value != spoken).then(|| Change::File(file.value.clone())),
                         ..Default::default()
                     },
                     script_flags,
@@ -1409,8 +1441,9 @@ fn repair_one(
                             flag.name.clone(),
                             Push {
                                 consumed: n,
+                                confidence: Some(94.0),
                                 score: 14.0 + n as f64,
-                                change: Some(format!("Flag → {}", flag.name)),
+                                change: Some(Change::Flag(flag.name.clone())),
                                 flag: Some(flag.clone()),
                                 ..Default::default()
                             },
@@ -1431,13 +1464,16 @@ fn repair_one(
                         .collect::<Vec<_>>()
                         .join(" ");
                     let changed = matched.value != spoken;
-                    let change = changed.then(|| format!("Completion → {}", matched.value));
+                    let change = changed.then(|| Change::Completion(matched.value.clone()));
                     push(
                         &mut next,
                         state,
                         matched.value,
                         Push {
                             consumed: matched.consumed,
+                            confidence: Some(
+                                matched.score - matched.consumed.saturating_sub(1) as f64 * 8.0,
+                            ),
                             score: if changed {
                                 20.0 + matched.score / 10.0
                             } else {
@@ -1456,7 +1492,11 @@ fn repair_one(
                     &mut next,
                     state,
                     word.value.clone(),
-                    Push::default(),
+                    Push {
+                        unresolved: !["echo", "printf"].contains(&state.args.first().as_str())
+                            && file_matches.is_empty(),
+                        ..Default::default()
+                    },
                     script_flags,
                     metadata,
                 );
@@ -1496,6 +1536,10 @@ fn repair_one(
         if seen.insert(command.clone()) {
             unique.push(Candidate {
                 command,
+                evidence: Evidence {
+                    resolved: !state.unresolved,
+                    ..Evidence::new(CandidateSource::Repair, state.confidence)
+                },
                 score: state.score + history_boost,
                 changes: state
                     .changes

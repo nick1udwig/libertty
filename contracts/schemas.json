@@ -1124,6 +1124,26 @@
             "command"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "version",
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 4000,
+              "x-utf16MaxLength": 4000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "command"
+          ],
+          "additionalProperties": true
         }
       ]
     },
@@ -1131,6 +1151,9 @@
       "anyOf": [
         {
           "type": "null"
+        },
+        {
+          "type": "string"
         },
         {
           "const": false,
@@ -1898,6 +1921,9 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "version": {
+          "type": "string"
         }
       },
       "required": [
@@ -1940,6 +1966,31 @@
             "items": {
               "type": "string"
             }
+          }
+        },
+        "versions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "schemas": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "const": "complete",
+                "type": "string"
+              },
+              {
+                "const": "partial",
+                "type": "string"
+              },
+              {
+                "const": "unavailable",
+                "type": "string"
+              }
+            ]
           }
         }
       },

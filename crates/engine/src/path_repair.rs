@@ -3,7 +3,9 @@ use crate::{
     host::{self, Host},
     path,
     repair::{directory_scores, shell_quote, tokens},
-    types::{Candidate, Catalog, DirectoryEntry, FileInfo, SharedList},
+    types::{
+        Candidate, CandidateSource, Catalog, Change, DirectoryEntry, Evidence, FileInfo, SharedList,
+    },
     util::locale_cmp,
 };
 use crate::{
@@ -67,20 +69,25 @@ fn make_candidate(request: &PathInput, branch: Branch, expected: ExpectedType) -
         shell_quote(rendered)
     };
     Candidate {
+        evidence: Evidence::new(
+            CandidateSource::Path,
+            if request.parts.is_empty() {
+                100.0
+            } else {
+                branch.score / request.parts.len() as f64
+            },
+        ),
         command: format!("{} {}{}", request.command, request.options, argument),
         score: if expected == ExpectedType::Directory {
             110.0
         } else {
             130.0
         } + branch.score / request.parts.len().max(1) as f64,
-        changes: vec![
-            if expected == ExpectedType::Directory {
-                "Path verified against existing directories"
-            } else {
-                "File path verified against the filesystem"
-            }
-            .into(),
-        ],
+        changes: vec![if expected == ExpectedType::Directory {
+            Change::VerifiedDirectory
+        } else {
+            Change::VerifiedFile
+        }],
         literal: None,
     }
 }
@@ -131,8 +138,7 @@ pub async fn resolve_path(
             host::stat(host, &whole_path, false),
             host::lookup(host, &first_path)
         );
-        let whole = whole?;
-        first?;
+        let whole = whole.unwrap_or(None);
         if let Some(whole) = whole {
             return Ok(Some(if expected.accepts(&whole) {
                 let spelling: Vec<_> = whole
@@ -148,7 +154,7 @@ pub async fn resolve_path(
                     })
                     .unwrap_or_else(|| parts.iter().map(String::as_str).collect());
                 vec![make_candidate(
-                    &request,
+                    request,
                     Branch {
                         actual: String::new(),
                         rendered: request.prefix.clone() + &spelling.join("/"),
@@ -160,13 +166,15 @@ pub async fn resolve_path(
                 vec![]
             }));
         }
+        first?;
     }
-    let deadline = host.now_ms()
+    let deadline = (host.now_ms()
         + if expected == ExpectedType::Directory {
             1000.0
         } else {
             1500.0
-        };
+        })
+    .min(host.deadline_ms());
     let reads = std::cell::Cell::new(0usize);
     for (index, part) in parts.iter().enumerate() {
         let groups = join_all(branches.iter().map(|branch| {

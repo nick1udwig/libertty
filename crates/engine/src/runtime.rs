@@ -13,6 +13,7 @@ use std::{
     sync::Arc,
     task::{Context, Poll},
 };
+pub const REPAIR_BUDGET_MS: f64 = 4500.0;
 pub enum Call {
     Json(Request),
     Suggest {
@@ -26,6 +27,7 @@ type Slot = Rc<RefCell<Option<Result<FactValue, String>>>>;
 #[derive(Default)]
 struct RequestHost {
     now: Cell<f64>,
+    deadline: Cell<f64>,
     completion: Cell<bool>,
     queue: RefCell<VecDeque<(HostOperation, Slot)>>,
     cache: RefCell<HashMap<HostOperation, Slot>>,
@@ -38,6 +40,9 @@ impl Host for RequestHost {
     fn now_ms(&self) -> f64 {
         self.now.get()
     }
+    fn deadline_ms(&self) -> f64 {
+        self.deadline.get()
+    }
     fn request(&self, operation: Value) -> LocalBoxFuture<'_, Result<FactValue, String>> {
         match crate::deserialize(&operation) {
             Ok(operation) => self.fact(operation),
@@ -45,6 +50,9 @@ impl Host for RequestHost {
         }
     }
     fn fact(&self, operation: HostOperation) -> LocalBoxFuture<'_, Result<FactValue, String>> {
+        if self.deadline.get() > 0.0 && self.now.get() >= self.deadline.get() {
+            return Box::pin(async { Err("Repair budget exhausted.".into()) });
+        }
         let key = operation.clone();
         // A successful completion is independent of the subscriber's remaining budget.
         // Failed and pending calls retain their original timeout identity.
@@ -399,6 +407,7 @@ impl Runtime {
         self.highest_request = id;
         let host = Rc::new(RequestHost::default());
         host.now.set(now);
+        host.deadline.set(now + REPAIR_BUDGET_MS);
         host.completion.set(match &call {
             Call::Suggest { .. } => true,
             Call::Json(request) => request

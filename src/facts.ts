@@ -11,8 +11,9 @@ export type Fact =
   | { kind: 'syntax'; command: string }
   | { kind: 'completion'; words: string[] }
   | { kind: 'help'; command: string; route: string[] }
-  | { kind: 'describe'; command: string };
-export type FactValue = DirectoryUpdate | DirectoryLookup | FileInfo | DirectoryEntry[] | string[] | boolean | Help | Flag[] | null;
+  | { kind: 'describe'; command: string }
+  | { kind: 'version'; command: string };
+export type FactValue = string | DirectoryUpdate | DirectoryLookup | FileInfo | DirectoryEntry[] | string[] | boolean | Help | Flag[] | null;
 export interface Snapshot { prompt: number; pathsIncluded: boolean; key: string; catalogKey: string; catalog: Catalog; home: string; discoveryKey: string; compoundRepair?: boolean }
 export interface ContextReply extends Omit<Snapshot, 'catalog'> { catalog?: Catalog; patch?: Partial<Catalog>; base?: string }
 

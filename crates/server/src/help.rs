@@ -50,6 +50,89 @@ impl HelpProvider {
     pub fn help_probes(&self) -> usize {
         self.probes.load(Ordering::SeqCst)
     }
+    async fn resolve(
+        &self,
+        command: &str,
+        catalog: &Catalog,
+        env: &BTreeMap<String, String>,
+    ) -> Result<Option<(String, String)>, String> {
+        use std::os::unix::fs::MetadataExt;
+        if !valid_name(command)
+            || !catalog.commands.iter().any(|name| name == command)
+            || catalog
+                .functions
+                .iter()
+                .flatten()
+                .any(|name| name == command)
+        {
+            return Ok(None);
+        }
+        let paths = if BUILTINS.contains(&command) {
+            vec![local_bash(&std::env::vars().collect())?]
+        } else {
+            env.get("PATH")
+                .map(String::as_str)
+                .unwrap_or("")
+                .split(':')
+                .map(|dir| {
+                    path::resolve(&[
+                        &catalog.cwd,
+                        if dir.is_empty() { "." } else { dir },
+                        command,
+                    ])
+                })
+                .collect()
+        };
+        let facts = futures::future::join_all(paths.iter().map(tokio::fs::metadata)).await;
+        let Some((file, info)) = paths.into_iter().zip(facts).find_map(|(file, info)| {
+            info.ok()
+                .filter(|info| info.is_file() && executable(&file))
+                .map(|info| (file, info))
+        }) else {
+            return Ok(None);
+        };
+        let mut stamp = format!(
+            "{file}:{}:{}:{}:{}:{}:{}:{}:{}",
+            info.dev(),
+            info.ino(),
+            info.mtime(),
+            info.mtime_nsec(),
+            info.ctime(),
+            info.ctime_nsec(),
+            info.mode(),
+            info.len()
+        );
+        if command == "git" {
+            let home = env.get("HOME").map(String::as_str).unwrap_or("");
+            for config in [
+                path::join(&[home, ".gitconfig"]),
+                path::join(&[&catalog.cwd, ".git/config"]),
+            ] {
+                if let Ok(info) = tokio::fs::metadata(&config).await {
+                    stamp.push_str(&format!(
+                        ":{config}:{}:{}:{}:{}",
+                        info.ino(),
+                        info.mtime_nsec(),
+                        info.mtime(),
+                        info.len()
+                    ));
+                }
+            }
+        }
+        Ok(Some((file, stamp)))
+    }
+    pub async fn version(
+        &self,
+        command: &str,
+        catalog: &Catalog,
+        env: &BTreeMap<String, String>,
+    ) -> Result<String, String> {
+        Ok(self
+            .resolve(command, catalog, env)
+            .await?
+            .map(|(_, stamp)| stamp)
+            .unwrap_or_else(|| format!("unavailable:{command}")))
+    }
     pub async fn read(
         &self,
         command: &str,
@@ -112,29 +195,7 @@ impl HelpProvider {
         {
             return Ok(Help::default());
         }
-        let builtin = BUILTINS.contains(&command);
-        let mut file = None;
-        let mut stamp = String::new();
-        if builtin {
-            file = Some(local_bash(&std::env::vars().collect())?);
-        } else {
-            for dir in env.get("PATH").map(String::as_str).unwrap_or("").split(':') {
-                let candidate = path::resolve(&[
-                    &catalog.cwd,
-                    if dir.is_empty() { "." } else { dir },
-                    command,
-                ]);
-                if executable(&candidate)
-                    && let Ok(info) = tokio::fs::metadata(&candidate).await
-                    && info.is_file()
-                {
-                    stamp = format!("{:?}:{}", info.modified().ok(), info.len());
-                    file = Some(candidate);
-                    break;
-                }
-            }
-        }
-        let Some(file) = file else {
+        let Some((file, stamp)) = self.resolve(command, catalog, env).await? else {
             return Ok(Help::default());
         };
         if cancel.is_cancelled() {
@@ -165,10 +226,11 @@ impl HelpProvider {
                 let route = route.to_vec();
                 let catalog = catalog.clone();
                 let env = env.clone();
+                let version = stamp.clone();
                 let task = SharedTask::new(move |cancel| {
                     Box::pin(async move {
                         provider.probes.fetch_add(1, Ordering::SeqCst);
-                        tokio::select! { biased; _ = provider.lifetime.cancelled() => Err(ABORTED.into()), result = provider.collect(&file, &command, &route, &catalog, &env, &cancel) => result }
+                        tokio::select! { biased; _ = provider.lifetime.cancelled() => Err(ABORTED.into()), result = provider.collect(&file, &command, &route, &catalog, &env, &cancel) => result.map(|mut help| { help.version = Some(version); help }) }
                     })
                 });
                 cache.push_back((key, Instant::now() + Duration::from_secs(600), task.clone()));

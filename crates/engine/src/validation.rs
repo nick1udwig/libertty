@@ -75,8 +75,10 @@ async fn policy_valid(
                 env,
                 metadata,
                 host,
-                script_flags,
-                &opaque,
+                PolicyScope {
+                    script_flags,
+                    opaque: &opaque,
+                },
             )
             .await
         }))
@@ -102,8 +104,10 @@ async fn policy_valid(
             env,
             metadata,
             host,
-            script_flags,
-            &opaque,
+            PolicyScope {
+                script_flags,
+                opaque: &opaque,
+            },
         )
         .await;
     }
@@ -114,10 +118,16 @@ async fn policy_valid(
         env,
         metadata,
         host,
-        script_flags,
-        &[],
+        PolicyScope {
+            script_flags,
+            opaque: &[],
+        },
     )
     .await
+}
+struct PolicyScope<'a> {
+    script_flags: Option<&'a [Flag]>,
+    opaque: &'a [&'a str],
 }
 async fn policy_plain(
     input: &str,
@@ -126,9 +136,12 @@ async fn policy_plain(
     env: &Environment,
     metadata: &CommandMetadata,
     host: &dyn Host,
-    script_flags: Option<&[Flag]>,
-    opaque: &[&str],
+    scope: PolicyScope<'_>,
 ) -> Result<bool, String> {
+    let PolicyScope {
+        script_flags,
+        opaque,
+    } = scope;
     let Some(words) = simple_words(&candidate.command) else {
         return Ok(false);
     };
@@ -276,10 +289,12 @@ async fn policy_plain(
         || input_file_command(command)
         || command == "git" && scope == "git add"
         || editor_command(command)
-            && candidate
-                .changes
-                .iter()
-                .any(|change| change.starts_with("File →"));
+            && candidate.changes.iter().any(|change| {
+                matches!(
+                    change,
+                    crate::types::Change::File(_) | crate::types::Change::VerifiedFile
+                )
+            });
     let count = if check_all {
         operands.len()
     } else if script {

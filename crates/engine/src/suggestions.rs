@@ -13,7 +13,7 @@ use crate::{
     repair::{discovery_target, discovery_targets, repair_candidates as repair, tokens},
     speech::{expand_symbols, symbol_alternatives},
     transfer_command::download_pipeline,
-    types::{Candidate, Catalog, CommandMetadata, Flag},
+    types::{Candidate, CandidateSource, Catalog, Change, CommandMetadata, Evidence, Flag},
     util::{regex, test},
     validation::{Environment, candidate_valid, simple_words},
 };
@@ -30,7 +30,14 @@ fn unique(candidates: impl IntoIterator<Item = Candidate>) -> Vec<Candidate> {
     result
 }
 fn sort(candidates: &mut [Candidate]) {
-    candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
+    candidates.sort_by(|a, b| {
+        b.evidence.resolved.cmp(&a.evidence.resolved).then_with(|| {
+            b.evidence
+                .confidence
+                .total_cmp(&a.evidence.confidence)
+                .then_with(|| b.score.total_cmp(&a.score))
+        })
+    });
 }
 fn covered(candidate: &Candidate, metadata: &CommandMetadata) -> bool {
     let Some(words) = simple_words(&candidate.command).filter(|words| !words.is_empty()) else {
@@ -54,7 +61,12 @@ fn covered(candidate: &Candidate, metadata: &CommandMetadata) -> bool {
         }
         i += 1;
     }
-    metadata.flags.contains_key(&scope)
+    (metadata.flags.contains_key(&scope)
+        && metadata
+            .schemas
+            .as_ref()
+            .and_then(|schemas| schemas.get(&scope))
+            != Some(&crate::types::SchemaState::Unavailable))
         || vocabulary().common_flags.contains_key(&scope)
         || (scope != words[0].value
             && vocabulary()
@@ -82,16 +94,33 @@ async fn check(
     )
     .await
     .into_iter()
-    .collect::<Result<Vec<_>, String>>()?;
-    let valid: Vec<_> = ranked
+    .map(|result| result.unwrap_or(false))
+    .collect::<Vec<_>>();
+    let mut valid: Vec<_> = ranked
         .into_iter()
         .zip(valid)
-        .filter_map(|(c, valid)| valid.then_some(c))
+        .filter_map(|(mut c, valid)| {
+            c.evidence.validated = valid;
+            if valid
+                && simple_words(&c.command)
+                    .and_then(|words| {
+                        words.first().map(|word| {
+                            crate::command_policy::input_file_command(&word.value)
+                                || crate::command_policy::directory_command(&word.value)
+                        })
+                    })
+                    .unwrap_or(false)
+            {
+                c.evidence.resolved = true;
+            }
+            valid.then_some(c)
+        })
         .collect();
-    let top = valid.first().map_or(0.0, |c| c.score);
+    sort(&mut valid);
+    let top = valid.first().map_or(0.0, |c| c.evidence.confidence);
     Ok(valid
         .into_iter()
-        .filter(|c| c.score >= top - 18.0)
+        .filter(|c| c.evidence.confidence >= top - 18.0)
         .take(3)
         .collect())
 }
@@ -177,7 +206,7 @@ async fn nearby_file_paths(
                         | crate::types::ValueKind::InputFile
                 )
             })
-        }) && !is_path_position(&[command.clone()])
+        }) && !is_path_position(std::slice::from_ref(command))
             && !is_path_position(&[command.clone(), words[1].value.clone()])
         || !words[1..]
             .iter()
@@ -217,6 +246,7 @@ fn part_choices<'a>(
                 score: 110.0,
                 changes: vec![],
                 literal: None,
+                evidence: Evidence::default(),
             };
             let metadata = discovery.cached(catalog, env, host.now_ms());
             if candidate_valid(input, &literal, catalog, env, &metadata, host, None).await? {
@@ -299,15 +329,13 @@ fn suggest_text<'a>(
                 Candidate {
                     command: String::new(),
                     score: 110.0,
-                    changes: vec![
-                        if pipes {
-                            "Pipeline commands"
-                        } else {
-                            "Spoken command separator"
-                        }
-                        .into(),
-                    ],
+                    changes: vec![if pipes {
+                        Change::Pipeline
+                    } else {
+                        Change::Separator
+                    }],
                     literal: None,
+                    evidence: Evidence::default(),
                 },
                 catalog.clone(),
             )];
@@ -354,6 +382,13 @@ fn suggest_text<'a>(
                             Candidate {
                                 command,
                                 score: prefix.score.min(candidate.score),
+                                evidence: Evidence::new(
+                                    CandidateSource::Compound,
+                                    prefix
+                                        .evidence
+                                        .confidence
+                                        .min(candidate.evidence.confidence),
+                                ),
                                 changes,
                                 literal: None,
                             },
@@ -361,7 +396,12 @@ fn suggest_text<'a>(
                         ));
                     }
                 }
-                next.sort_by(|a, b| b.0.score.total_cmp(&a.0.score));
+                next.sort_by(|a, b| {
+                    b.0.evidence
+                        .confidence
+                        .total_cmp(&a.0.evidence.confidence)
+                        .then_with(|| b.0.score.total_cmp(&a.0.score))
+                });
                 next.truncate(3);
                 combined = next;
             }
@@ -429,6 +469,28 @@ pub fn suggest<'a>(
     stage: &'a RefCell<Option<String>>,
 ) -> LocalBoxFuture<'a, Result<Vec<Candidate>, String>> {
     Box::pin(async move {
+        for _ in 0..2 {
+            let (result, valid) = futures::join!(
+                suggest_unchecked(input, catalog, env, discovery, host, stage),
+                discovery.verify_versions(input, catalog, env, host)
+            );
+            if valid {
+                return result;
+            }
+        }
+        Ok(vec![Candidate::literal(input)])
+    })
+}
+
+fn suggest_unchecked<'a>(
+    input: &'a str,
+    catalog: &'a Catalog,
+    env: &'a Environment,
+    discovery: &'a Discovery,
+    host: &'a dyn Host,
+    stage: &'a RefCell<Option<String>>,
+) -> LocalBoxFuture<'a, Result<Vec<Candidate>, String>> {
+    Box::pin(async move {
         let texts: Vec<_> = std::iter::once(input.to_owned())
             .chain(symbol_alternatives(input))
             .collect();
@@ -439,15 +501,16 @@ pub fn suggest<'a>(
         )
         .await
         .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
+        .enumerate()
+        .filter_map(|(index, result)| result.ok().map(|group| (index, group)))
+        .collect::<Vec<_>>();
         let mut candidates = Vec::new();
-        for (index, group) in groups.into_iter().enumerate() {
+        for (index, group) in groups {
             for mut candidate in group.into_iter().filter(|c| !c.is_literal()) {
                 if index > 0 {
                     candidate.score -= 12.0;
-                    candidate
-                        .changes
-                        .insert(0, "Spoken symbol alternative".into());
+                    candidate.evidence.confidence = (candidate.evidence.confidence - 12.0).max(0.0);
+                    candidate.changes.insert(0, Change::SymbolAlternative);
                 }
                 candidates.push(candidate);
             }
@@ -598,7 +661,8 @@ async fn suggest_one(
     )
     .await
     .into_iter()
-    .collect::<Result<Vec<_>, String>>()?;
+    .filter_map(Result::ok)
+    .collect::<Vec<_>>();
     let mut script_flags = None;
     for found in discoveries {
         metadata.merge(found.metadata);

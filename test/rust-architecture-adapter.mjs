@@ -60,6 +60,7 @@ export async function rustArchitectureAdapter(catalog, environment, client, brid
             case 'syntax': value = await host.syntax(operation.command); break;
             case 'completion': value = await host.complete(operation.words, AbortSignal.any([abort, AbortSignal.timeout(Math.max(0, Math.ceil(operation.timeoutMs)))])); break;
             case 'help': value = await host.help(operation.command, operation.route); break;
+            case 'version': value = await host.version(operation.command); break;
             case 'describe': value = await host.describe(operation.command); break;
             default: throw new Error('Unknown Rust host operation.');
           }

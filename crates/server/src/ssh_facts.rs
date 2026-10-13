@@ -38,6 +38,84 @@ impl Drop for DirectoryGuard {
     }
 }
 impl SSHHost {
+    async fn schema_version(
+        &self,
+        command: &str,
+        catalog: &Catalog,
+        env: &Environment,
+        cancel: &CancellationToken,
+    ) -> Result<String, String> {
+        if !valid_name(command)
+            || !catalog.commands.iter().any(|name| name == command)
+            || catalog
+                .functions
+                .iter()
+                .flatten()
+                .any(|name| name == command)
+        {
+            return Ok(format!("unavailable:{command}"));
+        }
+        let paths: Vec<_> = env
+            .get("PATH")
+            .map(String::as_str)
+            .unwrap_or("")
+            .split(':')
+            .map(|dir| {
+                path::resolve(&[
+                    &catalog.cwd,
+                    if dir.is_empty() { "." } else { dir },
+                    command,
+                ])
+            })
+            .collect();
+        let facts = bounded(cancel, async {
+            Ok(futures::future::join_all(paths.iter().map(|file| self.files.metadata(file))).await)
+        })
+        .await?;
+        let mut version = paths
+            .into_iter()
+            .zip(facts)
+            .find_map(|(file, info)| {
+                info.ok()
+                    .filter(|info| {
+                        info.file_type().is_file()
+                            && info.permissions.unwrap_or_default() & 0o111 != 0
+                    })
+                    .map(|info| {
+                        format!(
+                            "{file}:{}:{}:{}",
+                            info.mtime.unwrap_or_default(),
+                            info.len(),
+                            info.permissions.unwrap_or_default()
+                        )
+                    })
+            })
+            .unwrap_or_else(|| format!("builtin:{command}"));
+        if command == "git" {
+            let home = env.get("HOME").map(String::as_str).unwrap_or(&self.home);
+            let paths = [
+                path::join(&[home, ".gitconfig"]),
+                path::join(&[&catalog.cwd, ".git/config"]),
+            ];
+            let facts = bounded(cancel, async {
+                Ok(
+                    futures::future::join_all(paths.iter().map(|file| self.files.metadata(file)))
+                        .await,
+                )
+            })
+            .await?;
+            for (file, info) in paths.iter().zip(facts) {
+                if let Ok(info) = info {
+                    version.push_str(&format!(
+                        ":{file}:{}:{}",
+                        info.mtime.unwrap_or_default(),
+                        info.len()
+                    ));
+                }
+            }
+        }
+        Ok(version)
+    }
     pub async fn snapshot(
         &self,
         directory: &str,
@@ -174,6 +252,10 @@ impl SSHHost {
                 .ok_or_else(|| format!("Invalid host field {key}."))
         };
         match text("kind")? {
+            "version" => Ok(json!(
+                self.schema_version(text("command")?, catalog, env, cancel)
+                    .await?
+            )),
             "stat" => Ok(json!(
                 self.stat(
                     text("path")?,
@@ -360,6 +442,15 @@ impl SSHHost {
         env: &Environment,
         cancel: &CancellationToken,
     ) -> Result<Help, String> {
+        if catalog
+            .functions
+            .iter()
+            .flatten()
+            .any(|name| name == command)
+        {
+            return Ok(Help::default());
+        }
+        let version = self.schema_version(command, catalog, env, cancel).await?;
         let key = serde_json::to_string(&(
             command,
             route,
@@ -367,6 +458,7 @@ impl SSHHost {
             env.get("HOME"),
             env.get("PATH"),
             &catalog.functions,
+            &version,
         ))
         .unwrap();
         let task = {
@@ -389,7 +481,7 @@ impl SSHHost {
                 let task = SharedTask::new(move |cancel| {
                     Box::pin(async move {
                         let host = host.upgrade().ok_or("SSH connection closed.")?;
-                        tokio::select! { biased; _=host.lifetime.cancelled()=>Err(ABORTED.into()),result=host.probe_help(&command,&route,&catalog,&env,&cancel)=>result }
+                        tokio::select! { biased; _=host.lifetime.cancelled()=>Err(ABORTED.into()),result=host.probe_help(&command,&route,&catalog,&env,&cancel)=>result.map(|mut help| { help.version = Some(version); help }) }
                     })
                 });
                 cache.push_back((
