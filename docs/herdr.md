@@ -17,6 +17,8 @@ OpenSSH must allow Unix socket forwarding.
 Keep that source terminal open while using its Herdr view.
 After a backend restart, reconnect the source host and run `herdr` again; the saved host is reused.
 Connections opened with **Connect Herdr** own their SSH transport, so closing other terminals does not disconnect them.
+Reopening the app automatically restores expired Herdr source connections through their saved host and refreshes the connection when the app returns to the foreground.
+If an SSH key needs unlocking, the app opens its credential dialog during restoration.
 Closing their top-level tab releases that transport and its notification watches.
 After a backend restart, close the ended tab and connect again from its host menu.
 

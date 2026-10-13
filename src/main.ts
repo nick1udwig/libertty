@@ -46,6 +46,7 @@ try {
   }
 } catch { /* A corrupt plugin inventory cannot prevent terminal startup. */ }
 const herdrViews = new Map<string, HerdrView>(), herdrAttention = new Map<string, number>();
+const herdrReconnects = new Map<string, { promise: Promise<void>; resolve(): void; reject(error: unknown): void }>();
 const terminalShortcuts = new WeakMap<Window, { shortcuts: Shortcut[]; ctrl: boolean; available: boolean; imageAvailable: boolean }>();
 let shortcutPresentation = '';
 let shortcutWindow: Window | null | undefined;
@@ -438,6 +439,7 @@ async function closeTab(tab: TerminalTab) {
   if (plugin) { if (!await plugin.close(tab)) return; }
   else if (tab.ownsSession ?? !['herdr', 'reading'].includes(tabPluginId(tab))) await closeTabSession(tab);
   const wasActive = active === tab.id;
+  herdrReconnects.get(tab.id)?.reject(Object.assign(new Error('Connection closed.'), { cancelled: true }));
   unmount(tab); lockedTerminals.delete(tab.id); handledEnds.delete(tab.id); const index = tabs.indexOf(tab); tabs = tabs.filter(t => t.id !== tab.id);
   hideTerminalLoading(tab.id);
   if (active === tab.id) active = tabs.find(t => t.id === tab.parentTabId)?.id || tabs[Math.min(index, tabs.length - 1)]?.id || '';
@@ -668,6 +670,7 @@ async function finishConnection(host: HostProfile, backend: BackendProfile, sess
       connected = request.herdrTab; tab.name = connected.name; unmount(connected); Object.assign(connected, tab, { ended: false });
     } else tabs.push(tab);
     active = connected.id; store(); show('terminal'); await mount(connected);
+    if (request.herdrTab) herdrReconnects.get(connected.id)?.resolve();
   } catch (error) { await api(backend, 'api/sessions/close', {}, session).catch(() => {}); throw error; }
 }
 async function resumeHerdr(tab: TerminalTab) {
@@ -679,7 +682,15 @@ async function resumeHerdr(tab: TerminalTab) {
   if (tab.ended) await reconnectHerdr(tab);
   else activate(tab.id);
 }
-async function reconnectHerdr(tab: TerminalTab) {
+function reconnectHerdr(tab: TerminalTab): Promise<void> {
+  const existing = herdrReconnects.get(tab.id); if (existing) return existing.promise;
+  let resolve!: () => void, reject!: (error: unknown) => void;
+  const promise = new Promise<void>((done, fail) => { resolve = done; reject = fail; }).finally(() => herdrReconnects.delete(tab.id));
+  herdrReconnects.set(tab.id, { promise, resolve, reject });
+  void restoreHerdr(tab).then(() => { if (!tab.ended) resolve(); }, reject);
+  return promise;
+}
+async function restoreHerdr(tab: TerminalTab) {
   if (!tabs.includes(tab)) return;
   const host = hosts.find(host => host.id === tab.hostId);
   if (!host) throw new Error('This connection has no saved host. Open Herdr from its host again.');
@@ -875,6 +886,9 @@ $<HTMLFormElement>('key-form').onsubmit = async event => {
 };
 for (const element of document.querySelectorAll<HTMLElement>('[data-close]')) element.onclick = () => dialog(element.dataset.close!).close();
 for (const id of ['ssh-dialog', 'key-dialog', 'backend-login', 'key-transfer']) dialog(id).addEventListener('close', () => { for (const secret of dialog(id).querySelectorAll<HTMLInputElement>('input[type=password]')) secret.value = ''; input('ssh-secret').value = ''; $<HTMLTextAreaElement>('key-import').value = ''; input('key-import-file').value = ''; });
+dialog('ssh-dialog').addEventListener('close', () => {
+  if (sshRequest.herdrTab && !$<HTMLButtonElement>('ssh-connect').disabled) herdrReconnects.get(sshRequest.herdrTab.id)?.reject(Object.assign(new Error('Connection cancelled.'), { cancelled: true }));
+});
 $('terminal-back').onclick = $('add-tab').onclick = $('empty-open').onclick = () => show('hosts');
 $('page-back').onclick = () => show(['vault', 'settings'].includes(page) ? 'terminal' : 'vault');
 $('nav-vault').onclick = () => show('vault'); $('nav-terminals').onclick = () => show('terminal');

@@ -113,6 +113,14 @@ export class HerdrView {
     const presence = () => this.updatePresence();
     document.addEventListener('visibilitychange', presence); window.addEventListener('focus', presence); window.addEventListener('blur', presence);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', presence), () => window.removeEventListener('focus', presence), () => window.removeEventListener('blur', presence));
+    const resume = () => {
+      if (this.disposed || document.hidden || !navigator.onLine) return;
+      clearTimeout(this.reconnect);
+      const ws = this.ws; this.ws = undefined; this.connected = false; ws?.close();
+      void this.connect();
+    };
+    document.addEventListener('visibilitychange', resume); window.addEventListener('online', resume); window.addEventListener('pageshow', resume);
+    this.unsubscribers.push(() => document.removeEventListener('visibilitychange', resume), () => window.removeEventListener('online', resume), () => window.removeEventListener('pageshow', resume));
     this.presenceTimer = setInterval(presence, 15000);
     const outside = (event: PointerEvent) => { if (!this.menu.contains(event.target as Node) && !(event.target as HTMLElement).closest('.herdr-agent-tab')) this.menu.hidden = true; };
     document.addEventListener('pointerdown', outside); this.unsubscribers.push(() => document.removeEventListener('pointerdown', outside));
@@ -141,6 +149,7 @@ export class HerdrView {
       if (entry) this.prepare(entry);
     }
     for (const entry of this.terminalFrames.values()) entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible },location.origin);
+    if (visible && !this.connected) void this.connect();
   }
   get ready() { return this.rendered || !!this.status.textContent || this.connected && !this.selected; }
   setHeld(held: boolean) {
@@ -210,10 +219,11 @@ export class HerdrView {
   }
   private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
   private async connect() {
-    if (this.disposed || this.connecting) return; this.connecting = true;
+    if (this.disposed || this.connecting || this.ws?.readyState === WebSocket.OPEN || document.hidden || !navigator.onLine) return;
+    clearTimeout(this.reconnect); this.connecting = true;
     try {
       const { ticket, wire } = await this.host.api<{ ticket: string; wire?: string[] }>('api/herdr/ticket', {});
-      if (this.disposed) return;
+      if (this.disposed || document.hidden || !navigator.onLine) return;
       const url = this.endpoint('herdr/ws'); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
       const ws = new WebSocket(url, wireProtocols(wire)); ws.binaryType = 'arraybuffer'; this.ws = ws; let decoded = Promise.resolve();
       ws.onopen = () => { if (this.ws !== ws) return; this.connected = true; this.quietSnapshot = true; this.status.textContent = ''; this.updatePresence(); this.render(); };
@@ -227,9 +237,10 @@ export class HerdrView {
     } catch (error: any) { if (!this.disposed) {
       this.status.textContent = error.message; this.setLoading(false); this.host.ready?.();
       if (error.status === 404 && this.host.source && this.host.reconnect) {
-        const reconnect = node('button', 'secondary', 'Reconnect'); reconnect.type = 'button';
-        reconnect.onclick = async () => { reconnect.disabled = true; try { await this.host.reconnect!(); } catch (error: any) { this.host.notice(error.message); } finally { reconnect.disabled = false; } };
-        this.status.append(document.createElement('br'), reconnect);
+        if (!this.visible) return;
+        this.status.textContent = 'Reconnecting to Herdr…';
+        try { await this.host.reconnect(); }
+        catch (reason: any) { if (!this.disposed) { this.status.textContent = reason.message; if (!reason.cancelled) this.reconnect = setTimeout(() => void this.connect(), 3000); } }
       } else this.reconnect = setTimeout(() => void this.connect(), 3000);
     } }
     finally { this.connecting = false; }

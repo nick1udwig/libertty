@@ -26,6 +26,7 @@
     "test": "node --test test/*.test.ts test/dependencies.test.mjs test/migration-contracts.test.mjs",
     "test:browser": "node test/browser.mjs",
     "test:reconnect": "node test/reconnect-browser.mjs",
+    "test:herdr-reopen": "node test/herdr-reopen-browser.mjs",
     "test:gestures": "node test/terminal-gestures-browser.mjs",
     "test:touch": "node test/terminal-touch-browser.mjs",
     "test:reading": "node test/reading-browser.mjs",

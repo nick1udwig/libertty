@@ -735,6 +735,11 @@
       ]
     },
     {
+      "source": "test/herdr-reopen-browser.mjs",
+      "owner": "integration",
+      "assertions": []
+    },
+    {
       "source": "test/herdr-resize-native.mjs",
       "owner": "integration",
       "assertions": []

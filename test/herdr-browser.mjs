@@ -451,13 +451,9 @@ try {
   });
   await page.reload(); await tab(0).waitFor();
   await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, localHerdr.session);
-  await page.getByRole('button', { name: 'Reconnect', exact: true }).waitFor();
-  await page.locator('#terminal-back').click();
-  await page.getByRole('button', { name: /^Terminals for This machine / }).click();
-  await page.getByRole('menuitem', { name: 'Connect Herdr', exact: true }).click();
-  await page.locator('#plugin-connect-form').getByRole('button', { name: 'Connect', exact: true }).click();
   await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.session !== previous.session && tab.herdrSource === tab.session && !tab.ended), localHerdr);
   await tab(0).waitFor(); assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the local Herdr tab');
+  assert.equal(await page.getByRole('button', { name: 'Reconnect', exact: true }).count(), 0, 'An expired source restores without a manual reconnect');
   await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
   const controlsBeforeSSH = fixture.actions.filter(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control').length;
   // A real disposable SSH server exercises command capture and Unix socket forwarding.
@@ -499,7 +495,6 @@ try {
   }, identity.private);
   const remoteHerdrTab = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.mode === 'herdr'));
   await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, remote.id);
-  await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
   await page.locator('#ssh-dialog').waitFor({ state: 'visible' });
   await page.locator('#ssh-key').selectOption(reconnectKey.fingerprint); await page.locator('#ssh-secret').fill('fixture-passphrase'); await page.locator('#ssh-connect').click();
   await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.herdrSource !== previous.herdrSource && tab.herdrSource === tab.session && tab.ownsSession && !tab.ended), remoteHerdrTab);
