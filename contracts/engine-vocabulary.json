@@ -426,6 +426,74 @@
         "name": "--preserve-status",
         "takesValue": false
       }
+    ],
+    "cat": [
+      {
+        "name": "-n",
+        "takesValue": false
+      },
+      {
+        "name": "-b",
+        "takesValue": false
+      },
+      {
+        "name": "-s",
+        "takesValue": false
+      },
+      {
+        "name": "-A",
+        "takesValue": false
+      },
+      {
+        "name": "-E",
+        "takesValue": false
+      },
+      {
+        "name": "-T",
+        "takesValue": false
+      },
+      {
+        "name": "-v",
+        "takesValue": false
+      },
+      {
+        "name": "--number",
+        "takesValue": false
+      },
+      {
+        "name": "--number-nonblank",
+        "takesValue": false
+      }
+    ],
+    "less": [
+      {
+        "name": "-N",
+        "takesValue": false
+      },
+      {
+        "name": "-n",
+        "takesValue": false
+      },
+      {
+        "name": "-R",
+        "takesValue": false
+      },
+      {
+        "name": "-r",
+        "takesValue": false
+      },
+      {
+        "name": "-S",
+        "takesValue": false
+      },
+      {
+        "name": "-F",
+        "takesValue": false
+      },
+      {
+        "name": "-X",
+        "takesValue": false
+      }
     ]
   },
   "subcommands": {

@@ -166,6 +166,7 @@ pub async fn dispatch_with_discovery(
                     &argument::<String>(request, 2)?,
                     host,
                     optional::<String>(request, 3)?.as_deref().unwrap_or(&input),
+                    &types::CommandMetadata::default(),
                 )
                 .await?,
             )

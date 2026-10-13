@@ -5,7 +5,7 @@ use crate::{
     },
     completion::complete_arguments,
     discovery::Discovery,
-    file_repair::repair_input_file,
+    file_repair::{repair_input_file, repair_option_paths},
     history::history_candidates,
     host::{self, Host},
     path,
@@ -104,7 +104,10 @@ async fn referenced_paths(
     let expanded = expand_symbols(input, true);
     let mut prefixes = Vec::new();
     for word in &tokens(&expanded) {
-        if let Some(matched) = regex(r"^((?:~/|/|\.\.?/)[^\s]*/)").captures(&word.value) {
+        if word.quoted || word.value.contains(['*', '?', '$']) {
+            continue;
+        }
+        if let Some(matched) = regex(r"^([^\s]*/)").captures(&word.value) {
             let prefix = matched[1].to_owned();
             if !prefixes.contains(&prefix) {
                 prefixes.push(prefix);
@@ -142,7 +145,12 @@ async fn referenced_paths(
     }
     Ok(expanded)
 }
-async fn nearby_file_paths(input: &str, catalog: &Catalog, host: &dyn Host) -> Catalog {
+async fn nearby_file_paths(
+    input: &str,
+    catalog: &Catalog,
+    host: &dyn Host,
+    metadata: &CommandMetadata,
+) -> Catalog {
     if !catalog.paths.is_empty() {
         return catalog.clone();
     }
@@ -160,7 +168,16 @@ async fn nearby_file_paths(input: &str, catalog: &Catalog, host: &dyn Host) -> C
         return catalog.clone();
     };
     if words.len() < 2
-        || !is_path_position(&[command.clone()])
+        || !flags_for(command, metadata).iter().any(|flag| {
+            flag.value.as_ref().is_some_and(|value| {
+                matches!(
+                    value.kind,
+                    crate::types::ValueKind::Path
+                        | crate::types::ValueKind::Directory
+                        | crate::types::ValueKind::InputFile
+                )
+            })
+        }) && !is_path_position(&[command.clone()])
             && !is_path_position(&[command.clone(), words[1].value.clone()])
         || !words[1..]
             .iter()
@@ -455,7 +472,9 @@ async fn suggest_one(
     let literal = Candidate::literal(input);
     let mut metadata = discovery.cached(catalog, env, host.now_ms());
     let home = env.get("HOME").map(String::as_str).unwrap_or_default();
-    if let Some(mut files) = repair_input_file(input, catalog, home, host, spoken_input).await? {
+    if let Some(mut files) =
+        repair_input_file(input, catalog, home, host, spoken_input, &metadata).await?
+    {
         *stage.borrow_mut() = Some("directory".into());
         files.push(literal);
         return Ok(files);
@@ -467,7 +486,7 @@ async fn suggest_one(
         valid.push(literal);
         return Ok(valid);
     }
-    let catalog = nearby_file_paths(input, catalog, host).await;
+    let catalog = nearby_file_paths(input, catalog, host, &metadata).await;
     let cheap: Vec<_> = repair(input, &catalog, None, &metadata)
         .into_iter()
         .filter(|c| !c.is_literal())
@@ -572,7 +591,6 @@ async fn suggest_one(
     if targets.is_empty() {
         targets.push(discovery_target(input, &catalog));
     }
-    let previous_metadata = metadata.clone();
     let discoveries = join_all(
         targets
             .iter()
@@ -589,17 +607,41 @@ async fn suggest_one(
         }
     }
     *stage.borrow_mut() = Some("discovery".into());
-    let repairs = if script_flags.is_none() && previous_metadata == metadata {
-        preliminary_repairs
-    } else {
-        repair(input, &catalog, script_flags.as_deref(), &metadata)
-    };
+    if let Some(files) =
+        repair_input_file(input, &catalog, home, host, spoken_input, &metadata).await?
+    {
+        let mut candidates = check(
+            input,
+            files,
+            &catalog,
+            env,
+            &metadata,
+            host,
+            script_flags.as_deref(),
+        )
+        .await?;
+        candidates.push(literal);
+        return Ok(candidates);
+    }
+    let catalog = nearby_file_paths(input, &catalog, host, &metadata).await;
+    let catalog = referenced_paths(input, &catalog, env, host).await?;
+    let repairs = repair(input, &catalog, script_flags.as_deref(), &metadata);
+    let path_values = repair_option_paths(
+        input,
+        &catalog,
+        home,
+        host,
+        &metadata,
+        script_flags.as_deref(),
+    )
+    .await?;
     let completed =
         complete_arguments(input, &catalog, &metadata, host, script_flags.as_deref()).await?;
     let mut candidates = check(
         input,
         completed
             .into_iter()
+            .chain(path_values)
             .chain(repairs)
             .chain(historic)
             .collect(),

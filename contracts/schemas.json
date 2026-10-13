@@ -1699,6 +1699,59 @@
         }
       ]
     },
+    "ValueKind": {
+      "anyOf": [
+        {
+          "const": "text",
+          "type": "string"
+        },
+        {
+          "const": "path",
+          "type": "string"
+        },
+        {
+          "const": "directory",
+          "type": "string"
+        },
+        {
+          "const": "inputFile",
+          "type": "string"
+        },
+        {
+          "const": "outputPath",
+          "type": "string"
+        },
+        {
+          "const": "choice",
+          "type": "string"
+        }
+      ]
+    },
+    "ValueSchema": {
+      "type": "object",
+      "properties": {
+        "minimum": {
+          "type": "number"
+        },
+        "maximum": {
+          "type": "number"
+        },
+        "kind": {
+          "$ref": "#/$defs/ValueKind"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "minimum",
+        "kind"
+      ],
+      "additionalProperties": true
+    },
     "Flag": {
       "type": "object",
       "properties": {
@@ -1719,6 +1772,9 @@
               "type": "boolean"
             }
           ]
+        },
+        "value": {
+          "$ref": "#/$defs/ValueSchema"
         }
       },
       "required": [

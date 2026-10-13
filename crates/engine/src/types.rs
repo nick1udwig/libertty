@@ -90,6 +90,53 @@ pub struct Flag {
         skip_serializing_if = "Option::is_none"
     )]
     pub optional_value: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub value: Option<ValueSchema>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ValueKind {
+    #[default]
+    Text,
+    Path,
+    Directory,
+    InputFile,
+    OutputPath,
+    Choice,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ValueSchema {
+    pub minimum: usize,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub maximum: Option<usize>,
+    pub kind: ValueKind,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub choices: Option<Vec<String>>,
+}
+impl Flag {
+    pub fn value_bounds(&self) -> (usize, Option<usize>) {
+        self.value
+            .as_ref()
+            .map(|value| (value.minimum, value.maximum))
+            .unwrap_or((
+                usize::from(self.takes_value),
+                Some(usize::from(self.takes_value)),
+            ))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]

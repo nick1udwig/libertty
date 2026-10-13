@@ -989,6 +989,9 @@ struct State<'a> {
     score: f64,
     changes: Option<Trail>,
     value_next: bool,
+    value_remaining: usize,
+    value_limit: Option<usize>,
+    active_value: Option<Flag>,
     flags: &'a [Flag],
     literal_rest: bool,
     quoted: Vec<usize>,
@@ -1004,6 +1007,7 @@ struct Push {
     flag: Option<Flag>,
     quoted: bool,
     subcommand: bool,
+    value: bool,
 }
 fn push<'a>(
     next: &mut Vec<State<'a>>,
@@ -1028,7 +1032,25 @@ fn push<'a>(
         }
         new.repaired_flag |= opts.flag.is_some();
     }
-    new.value_next = opts.flag.as_ref().is_some_and(|flag| flag.takes_value);
+    if let Some(flag) = &opts.flag {
+        (new.value_remaining, new.value_limit) = flag.value_bounds();
+        if flag.name.contains('=') {
+            new.value_remaining = new.value_remaining.saturating_sub(1);
+            new.value_limit = new.value_limit.map(|maximum| maximum.saturating_sub(1));
+        }
+        new.active_value = (new.value_limit != Some(0)).then(|| flag.clone());
+    } else if opts.value {
+        new.value_remaining = new.value_remaining.saturating_sub(1);
+        new.value_limit = new.value_limit.map(|maximum| maximum.saturating_sub(1));
+        if new.value_limit == Some(0) {
+            new.active_value = None;
+        }
+    } else {
+        new.value_remaining = 0;
+        new.value_limit = Some(0);
+        new.active_value = None;
+    }
+    new.value_next = new.value_remaining > 0;
     new.script_scope |= ["python", "python3"].contains(&new.args.first())
         && value.ends_with(".py")
         && script_operand(&new.args.values()) == Some(new.args.len() - 1);
@@ -1093,6 +1115,9 @@ fn repair_one(
                     None
                 },
                 value_next: false,
+                value_remaining: 0,
+                value_limit: Some(0),
+                active_value: None,
                 flags: flags_ref(&item.value, metadata, &[]),
                 literal_rest: false,
                 quoted: vec![],
@@ -1119,6 +1144,72 @@ fn repair_one(
                 continue;
             }
             let word = &words[state.index];
+            if let Some(flag) = &state.active_value {
+                let boundary = !word.quoted && option_arity(&word.value, state.flags).is_some();
+                if !boundary {
+                    if !word.quoted
+                        && let Some(schema) = &flag.value
+                    {
+                        let choices = match schema.kind {
+                            ValueKind::Choice => schema.choices.clone().unwrap_or_default(),
+                            ValueKind::Path | ValueKind::Directory | ValueKind::InputFile => {
+                                catalog.paths.to_vec()
+                            }
+                            _ => vec![],
+                        };
+                        for matched in argument_matches(&words, state.index, &choices) {
+                            let spoken = words[state.index..state.index + matched.consumed]
+                                .iter()
+                                .map(|w| w.value.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            push(
+                                &mut next,
+                                state,
+                                matched.value.clone(),
+                                Push {
+                                    consumed: matched.consumed,
+                                    score: if matched.value == spoken {
+                                        0.0
+                                    } else {
+                                        12.0 + matched.score / 10.0
+                                    },
+                                    change: (matched.value != spoken).then(|| {
+                                        format!(
+                                            "{} → {}",
+                                            if schema.kind == ValueKind::Choice {
+                                                "Completion"
+                                            } else {
+                                                "File"
+                                            },
+                                            matched.value
+                                        )
+                                    }),
+                                    value: true,
+                                    ..Default::default()
+                                },
+                                script_flags,
+                                metadata,
+                            );
+                        }
+                    }
+                    push(
+                        &mut next,
+                        state,
+                        word.value.clone(),
+                        Push {
+                            quoted: word.quoted,
+                            value: true,
+                            ..Default::default()
+                        },
+                        script_flags,
+                        metadata,
+                    );
+                }
+                if state.value_next {
+                    continue;
+                }
+            }
             if word.quoted || state.value_next || state.literal_rest {
                 push(
                     &mut next,
@@ -1235,9 +1326,14 @@ fn repair_one(
                             score,
                             change,
                             flag: Some(Flag {
-                                name: value,
+                                name: value.clone(),
                                 takes_value,
                                 optional_value: None,
+                                value: state
+                                    .flags
+                                    .iter()
+                                    .find(|flag| flag.name == flag_name)
+                                    .and_then(|flag| flag.value.clone()),
                             }),
                             ..Default::default()
                         },

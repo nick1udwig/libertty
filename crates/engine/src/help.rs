@@ -1,5 +1,5 @@
 use crate::{
-    types::Flag,
+    types::{Flag, ValueKind, ValueSchema},
     util::{regex, replace, test},
 };
 fn clean(text: &str) -> String {
@@ -143,7 +143,7 @@ pub fn required_from_help(text: &str, command: &str) -> Option<usize> {
         || operands.iter().any(|word| {
             !test(
                 "^(?:[A-Z][A-Z_0-9-]*|database|key|file|directory|pattern)$",
-                word,
+                word.trim_start_matches('<').trim_end_matches('>'),
             )
         })
     {
@@ -164,17 +164,49 @@ pub fn flags_from_help(help: &str) -> Vec<Flag> {
             .unwrap_or("");
         let declaration = replace(r"--\[no-\]([a-zA-Z][\w-]*)", declaration, "--$1, --no-$1");
         let mut entries = Vec::new();
-        for entry in regex(r"(?:^|[\s,|])(--?[a-zA-Z][\w-]*)(?:(?:[ =]|\[=)([A-Z][A-Z_0-9-]*|strings?|ints?|floats?|duration|<[^>]+>|\{[^}]+\}))?").captures_iter(&declaration) {
+        for entry in regex(r"(?:^|[\s,|])(--?[a-zA-Z][\w-]*)(?:(?:[ =]|\[=)([A-Z][A-Z_0-9-]*|strings?|ints?|floats?|duration|filename|file|path|directory|number|value|\[-\][A-Z][A-Z_0-9-]*|<[^>]+>|\{[^}]+\}))?").captures_iter(&declaration) {
             let mut takes=entry.get(2).is_some();
             if let Some(value)=entry.get(2)&& declaration[value.end()..].chars().next().is_some_and(|ch| !ch.is_whitespace() && ch!=',' && ch!=']') {takes=false;}
-            let optional=takes && entry[0].contains("[=");entries.push((entry[1].to_owned(),takes && !optional,optional));
+            let optional=takes && entry[0].contains("[=");entries.push((entry[1].to_owned(),takes && !optional,optional,entry.get(2).map(|value| value.as_str().to_owned())));
         }
         let takes_value = entries.iter().any(|entry| entry.1);
-        for (name, _, optional) in entries {
+        let placeholder = entries
+            .iter()
+            .find_map(|entry| entry.3.as_deref())
+            .unwrap_or("");
+        let normalized = placeholder.trim_matches(['<', '>']).to_lowercase();
+        let kind = if normalized.contains("dir") {
+            ValueKind::Directory
+        } else if ["path", "file", "filename"].contains(&normalized.as_str()) {
+            ValueKind::Path
+        } else if normalized.starts_with('{') {
+            ValueKind::Choice
+        } else {
+            ValueKind::Text
+        };
+        let choices = (kind == ValueKind::Choice).then(|| {
+            placeholder
+                .trim_matches(['{', '}'])
+                .split(',')
+                .map(|value| value.trim().to_owned())
+                .take(256)
+                .collect()
+        });
+        for (name, _, optional, _) in entries {
             let flag = Flag {
                 name: name.clone(),
                 takes_value,
                 optional_value: optional.then_some(true),
+                value: (kind != ValueKind::Text).then(|| ValueSchema {
+                    minimum: usize::from(!optional),
+                    maximum: Some(usize::from(!optional)),
+                    kind: if name.contains("output") && kind == ValueKind::Path {
+                        ValueKind::OutputPath
+                    } else {
+                        kind
+                    },
+                    choices: choices.clone(),
+                }),
             };
             if let Some(previous) = flags.iter_mut().find(|flag| flag.name == name) {
                 *previous = flag;

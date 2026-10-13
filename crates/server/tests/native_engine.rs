@@ -32,6 +32,106 @@ fn executable(file: &std::path::Path, content: &str) {
 }
 
 #[tokio::test]
+async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    std::fs::create_dir(root.path().join("docs")).unwrap();
+    std::fs::write(root.path().join("docs/My Notes.txt"), "notes").unwrap();
+    std::fs::write(root.path().join("tool.py"), "import argparse\nfrom pathlib import Path\np=argparse.ArgumentParser()\np.add_argument('--config', type=Path)\np.add_argument('--mode', choices=['east-zone','west-zone'])\np.add_argument('--pair', nargs=2)\np.add_argument('--tag', nargs='+')\np.add_argument('--force', action='store_true')\nsubs=p.add_subparsers()\nchild=subs.add_parser('child')\nchild.add_argument('--child-only')\n").unwrap();
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(cwd, &["cat", "less", "head", "ls", "python3"]),
+        BTreeMap::from([
+            ("HOME".into(), cwd.into()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    for (input, expected) in [
+        ("cat docs slash My Notes dot txt", "cat 'docs/My Notes.txt'"),
+        (
+            "cat -n docs slash My Notes dot txt",
+            "cat -n 'docs/My Notes.txt'",
+        ),
+        (
+            "less docs slash My Notes dot txt",
+            "less 'docs/My Notes.txt'",
+        ),
+        (
+            "head -n 1 docs slash My Notes dot txt",
+            "head -n 1 'docs/My Notes.txt'",
+        ),
+        (
+            "python3 tool.py config docs slash My Notes dot txt force",
+            "python3 tool.py --config 'docs/My Notes.txt' --force",
+        ),
+        (
+            "python3 tool.py config dcos slash My Notes dot txt force",
+            "python3 tool.py --config 'docs/My Notes.txt' --force",
+        ),
+        (
+            "python3 tool.py mode east zone force",
+            "python3 tool.py --mode east-zone --force",
+        ),
+        (
+            "python3 tool.py pair one two force",
+            "python3 tool.py --pair one two --force",
+        ),
+        (
+            "python3 tool.py --tag one two --force",
+            "python3 tool.py --tag one two --force",
+        ),
+    ] {
+        let result = engine
+            .suggest(input, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            result
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["command"] == expected && c["literal"] != true),
+            "{input}: {result}"
+        );
+    }
+    for input in [
+        "python3 tool.py --pair one --force",
+        "python3 tool.py --mode nowhere",
+        "python3 tool.py --child-only value",
+    ] {
+        let result = engine
+            .suggest(input, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            result
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|c| c["literal"] == true),
+            "{input}: {result}"
+        );
+    }
+    let help = engine
+        .invoke(
+            request(
+                "flagsFromHelp",
+                json!(["  --output filename  Output file\n  --count number  Count\n"]),
+            ),
+            &host,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(help[0]["takesValue"], true);
+    assert_eq!(help[0]["value"]["kind"], "outputPath");
+    assert_eq!(help[1]["takesValue"], true);
+}
+
+#[tokio::test]
 async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();

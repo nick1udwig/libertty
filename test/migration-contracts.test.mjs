@@ -13,7 +13,7 @@ ajv.addKeyword({ keyword: 'x-utf8MaxBytes', type: 'string', schemaType: 'number'
 ajv.addKeyword({ keyword: 'x-decodedBytes', type: 'string', schemaType: 'number', validate: (length, value) => Buffer.from(value, 'base64').length === length });
 const validate = name => ajv.compile({ $defs: schemas.$defs, $ref: '#/$defs/' + name });
 
-test('Rust shell utilities and pairing assets retain their pre-cleanup bytes', async () => {
+test('Rust shell utilities and pairing assets match their declared byte checksums', async () => {
   const assets = JSON.parse(await readFile(new URL('../contracts/assets.json', import.meta.url), 'utf8'));
   for (const [file, digest] of Object.entries(assets)) {
     assert.equal(createHash('sha256').update(await readFile(new URL('../'+file, import.meta.url))).digest('hex'), digest, file);

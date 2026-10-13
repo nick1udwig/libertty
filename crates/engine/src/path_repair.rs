@@ -3,7 +3,7 @@ use crate::{
     host::{self, Host},
     path,
     repair::{directory_scores, shell_quote, tokens},
-    types::{Candidate, Catalog, DirectoryEntry, SharedList},
+    types::{Candidate, Catalog, DirectoryEntry, FileInfo, SharedList},
     util::locale_cmp,
 };
 use crate::{
@@ -19,14 +19,42 @@ struct Branch {
     rendered: String,
     score: f64,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExpectedType {
+    Directory,
+    File,
+    Any,
+}
+impl ExpectedType {
+    fn accepts(self, info: &FileInfo) -> bool {
+        match self {
+            Self::Directory => info.directory,
+            Self::File => info.file,
+            Self::Any => info.file || info.directory,
+        }
+    }
+}
 fn components<'a>(
     spoken: &str,
     entries: &'a SharedList<DirectoryEntry>,
     complete: bool,
+    expected: ExpectedType,
 ) -> Vec<(&'a DirectoryEntry, f64)> {
-    directory_scores(spoken, entries, true, complete, true)
+    let mut scores = if expected == ExpectedType::File {
+        Vec::new()
+    } else {
+        directory_scores(spoken, entries, true, complete, true)
+    };
+    if expected != ExpectedType::Directory {
+        for value in directory_scores(spoken, entries, false, complete, true) {
+            if !scores.iter().any(|(entry, _)| entry.name == value.0.name) {
+                scores.push(value);
+            }
+        }
+    }
+    scores
 }
-fn make_candidate(request: &DirectoryInput, branch: Branch) -> Candidate {
+fn make_candidate(request: &PathInput, branch: Branch, expected: ExpectedType) -> Candidate {
     let rendered = if branch.rendered == "/" {
         "/"
     } else {
@@ -40,8 +68,19 @@ fn make_candidate(request: &DirectoryInput, branch: Branch) -> Candidate {
     };
     Candidate {
         command: format!("{} {}{}", request.command, request.options, argument),
-        score: 110.0 + branch.score / request.parts.len().max(1) as f64,
-        changes: vec!["Path verified against existing directories".into()],
+        score: if expected == ExpectedType::Directory {
+            110.0
+        } else {
+            130.0
+        } + branch.score / request.parts.len().max(1) as f64,
+        changes: vec![
+            if expected == ExpectedType::Directory {
+                "Path verified against existing directories"
+            } else {
+                "File path verified against the filesystem"
+            }
+            .into(),
+        ],
         literal: None,
     }
 }
@@ -54,7 +93,20 @@ pub async fn repair_directory(
     let Some(request) = directory_input(input) else {
         return Ok(None);
     };
-    if !catalog.commands.contains(&request.command) || request.from_home && home.is_empty() {
+    if !catalog.commands.contains(&request.command) {
+        return Ok(None);
+    }
+    resolve_path(&request, catalog, home, host, ExpectedType::Directory).await
+}
+
+pub async fn resolve_path(
+    request: &PathInput,
+    catalog: &Catalog,
+    home: &str,
+    host: &dyn Host,
+    expected: ExpectedType,
+) -> Result<Option<Vec<Candidate>>, String> {
+    if request.from_home && home.is_empty() {
         return Ok(None);
     }
     let start = if request.from_home {
@@ -70,7 +122,9 @@ pub async fn repair_directory(
         rendered: request.prefix.clone(),
         score: 0.0,
     }];
-    if parts.len() > 1 && !parts.iter().any(|part| part == "." || part == "..") {
+    if (parts.len() > 1 || expected != ExpectedType::Directory)
+        && !parts.iter().any(|part| part == "." || part == "..")
+    {
         let whole_path = path::join(&[start, &parts.join("/")]);
         let first_path = path::join(&[start, &parts[0]]);
         let (whole, first) = futures::join!(
@@ -80,7 +134,7 @@ pub async fn repair_directory(
         let whole = whole?;
         first?;
         if let Some(whole) = whole {
-            return Ok(Some(if whole.directory {
+            return Ok(Some(if expected.accepts(&whole) {
                 let spelling: Vec<_> = whole
                     .spelling
                     .as_deref()
@@ -100,13 +154,19 @@ pub async fn repair_directory(
                         rendered: request.prefix.clone() + &spelling.join("/"),
                         score: 100.0 * parts.len() as f64,
                     },
+                    expected,
                 )]
             } else {
                 vec![]
             }));
         }
     }
-    let deadline = host.now_ms() + 1000.0;
+    let deadline = host.now_ms()
+        + if expected == ExpectedType::Directory {
+            1000.0
+        } else {
+            1500.0
+        };
     let reads = std::cell::Cell::new(0usize);
     for (index, part) in parts.iter().enumerate() {
         let groups = join_all(branches.iter().map(|branch| {
@@ -118,7 +178,15 @@ pub async fn repair_directory(
                 if host.now_ms() > deadline || read >= 48 {
                     return Ok(vec![]);
                 }
+                let kind = if index == parts.len() - 1 {
+                    expected
+                } else {
+                    ExpectedType::Directory
+                };
                 if part == "." || part == ".." {
+                    if kind == ExpectedType::File {
+                        return Ok(vec![]);
+                    }
                     return Ok(vec![Branch {
                         actual: path::resolve(&[&branch.actual, part]),
                         rendered: branch.rendered.clone() + part + "/",
@@ -134,7 +202,7 @@ pub async fn repair_directory(
                         .and_then(|value| value.rsplit('/').next())
                         .filter(|value| !value.is_empty())
                         .unwrap_or(part);
-                    return Ok(if info.directory {
+                    return Ok(if kind.accepts(&info) {
                         vec![Branch {
                             actual: path::join(&[&branch.actual, name]),
                             rendered: branch.rendered.clone() + name + "/",
@@ -150,7 +218,10 @@ pub async fn repair_directory(
                     .unwrap_or_default();
                 let exact = entries.iter().find(|entry| entry.name == *part);
                 let mut matches = if let Some(exact) = exact {
-                    if exact.directory || exact.symlink {
+                    if exact.symlink
+                        || (exact.directory && kind != ExpectedType::File)
+                        || (!exact.directory && kind != ExpectedType::Directory)
+                    {
                         vec![(exact, 100.0)]
                     } else {
                         vec![]
@@ -158,7 +229,7 @@ pub async fn repair_directory(
                 } else if request.quoted {
                     vec![]
                 } else {
-                    components(part, &entries, index == parts.len() - 1)
+                    components(part, &entries, index == parts.len() - 1, kind)
                 };
                 matches.retain(|(_, score)| *score > 0.0);
                 matches.sort_by(|(a, ascore), (b, bscore)| {
@@ -169,11 +240,10 @@ pub async fn repair_directory(
                 matches.truncate(8);
                 let found = join_all(matches.into_iter().map(|(entry, score)| async move {
                     let actual = path::join(&[&branch.actual, &entry.name]);
-                    if !entry.directory
-                        && !(entry.symlink
-                            && host::stat(host, &actual, false)
-                                .await?
-                                .is_some_and(|info| info.directory))
+                    if !(entry.directory && kind != ExpectedType::File)
+                        && !host::stat(host, &actual, false)
+                            .await?
+                            .is_some_and(|info| kind.accepts(&info))
                     {
                         return Ok(None);
                     }
@@ -200,6 +270,7 @@ pub async fn repair_directory(
         }
     }
     if branches.is_empty()
+        && expected == ExpectedType::Directory
         && request.from_home
         && !request.quoted
         && parts.len() == 1
@@ -238,7 +309,7 @@ pub async fn repair_directory(
                 let Ok(entries) = host::entries(host, &parent_path, 256).await else {
                     return Ok(vec![]);
                 };
-                let mut matches = components(&parts[0], &entries, false);
+                let mut matches = components(&parts[0], &entries, false, ExpectedType::Directory);
                 matches.retain(|(_, score)| *score >= 64.0);
                 matches.sort_by(|(_, a), (_, b)| b.total_cmp(a));
                 matches.truncate(3);
@@ -283,7 +354,7 @@ pub async fn repair_directory(
         return Ok(Some(
             found
                 .into_iter()
-                .map(|branch| make_candidate(&request, branch))
+                .map(|branch| make_candidate(request, branch, expected))
                 .collect(),
         ));
     }
@@ -291,14 +362,14 @@ pub async fn repair_directory(
         branches
             .into_iter()
             .take(3)
-            .map(|branch| make_candidate(&request, branch))
+            .map(|branch| make_candidate(request, branch, expected))
             .collect(),
     ))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DirectoryInput {
+pub struct PathInput {
     pub command: String,
     pub options: String,
     pub quoted: bool,
@@ -307,7 +378,9 @@ pub struct DirectoryInput {
     pub prefix: String,
     pub parts: Vec<String>,
 }
-pub fn directory_input(input: &str) -> Option<DirectoryInput> {
+pub type DirectoryInput = PathInput;
+
+pub fn directory_input(input: &str) -> Option<PathInput> {
     let expanded = expand_symbols(input, true);
     let expanded = expanded.trim();
     let direct = regex("(?i)^(cd|pushd|upload)\\s+(.*)$").captures(expanded);
@@ -372,7 +445,7 @@ pub fn directory_input(input: &str) -> Option<DirectoryInput> {
     if parts.len() > 16 || utf16_len(&target) > 2000 {
         return None;
     }
-    Some(DirectoryInput {
+    Some(PathInput {
         command,
         options,
         quoted,

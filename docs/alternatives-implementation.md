@@ -16,7 +16,10 @@ Retain the shared Rust engine, original transcript choices, non-executing valida
   SSH placement, HTTP prompt guards, Herdr context isolation, native integrations, the frontend build, and browser regressions in both modes pass.
 - [x] Compose repair over shared shell structure, preserving opaque quoted syntax and supporting command lists and wrappers.
   Engine, native, fact-boundary, schema-contract, and TypeScript checks pass for shared operators, nested help, wrappers, opaque expressions, and directory-dependent commands.
-- [ ] Share path traversal and schema evidence across commands and option values.
+- [x] Share path traversal and schema evidence across commands and option values.
+  Shared traversal covers input commands and schema-declared path values, including misspelled intermediate directories.
+  Option schemas carry cardinality, choices, and path roles, and Python inspection excludes child-parser options from the root schema.
+  Engine, native, filesystem, schema-contract, and TypeScript checks pass.
 - [ ] Separate typed candidate changes, discovery completeness, cache invalidation, budgets, and partial results.
 - [ ] Combine repair and guarded line application, including backend dictation.
 - [ ] Verify end-to-end behavior and network request budgets, then evaluate whether additional SSH infrastructure is warranted.

@@ -4,7 +4,7 @@ use crate::{
     host::{self, Host},
     path,
     repair::command_available,
-    types::{Candidate, Catalog, CommandMetadata, Flag},
+    types::{Candidate, Catalog, CommandMetadata, Flag, ValueKind},
     util::test,
 };
 use std::collections::BTreeMap;
@@ -153,6 +153,7 @@ async fn policy_plain(
     let mut literal = false;
     let mut value_flags = Vec::new();
     let mut operands = Vec::new();
+    let mut option_paths = Vec::new();
     let mut index = 1;
     while index < words.len() {
         let word = &words[index];
@@ -173,14 +174,59 @@ async fn policy_plain(
             {
                 return Ok(false);
             }
-            if takes {
-                let Some(value) = words.get(index) else {
-                    return Ok(false);
-                };
+            let descriptor = flags
+                .iter()
+                .find(|flag| flag.name == arg.split('=').next().unwrap());
+            let (mut minimum, mut maximum) = descriptor
+                .map(Flag::value_bounds)
+                .unwrap_or((usize::from(takes), Some(usize::from(takes))));
+            let mut supplied = Vec::new();
+            if let Some((_, value)) = arg.split_once('=') {
+                supplied.push(Word {
+                    value: value.into(),
+                    home: false,
+                });
+                minimum = minimum.saturating_sub(1);
+                maximum = maximum.map(|n| n.saturating_sub(1));
+            }
+            let mut count = 0;
+            while maximum.is_none_or(|maximum| count < maximum) && index < words.len() {
+                let value = &words[index];
+                if value.value == "--" || option_arity(&value.value, &flags).is_some() {
+                    break;
+                }
+                supplied.push(value.clone());
+                count += 1;
                 index += 1;
+            }
+            if count < minimum {
+                return Ok(false);
+            }
+            if !supplied.is_empty() {
                 value_flags.push(arg.as_str());
                 if command == "git" && arg == "-C" {
-                    cwd = resolve(value, &cwd, env);
+                    cwd = resolve(&supplied[0], &cwd, env);
+                }
+            }
+            if let Some(schema) = descriptor.and_then(|flag| flag.value.as_ref()) {
+                for value in supplied {
+                    if opaque.contains(&value.value.as_str()) {
+                        continue;
+                    }
+                    if schema.kind == ValueKind::Choice
+                        && schema
+                            .choices
+                            .as_ref()
+                            .is_some_and(|choices| !choices.contains(&value.value))
+                    {
+                        return Ok(false);
+                    }
+                    if matches!(
+                        schema.kind,
+                        ValueKind::Path | ValueKind::Directory | ValueKind::InputFile
+                    ) {
+                        option_paths.push((value, schema.kind));
+                    }
                 }
             }
             continue;
@@ -241,20 +287,35 @@ async fn policy_plain(
     } else {
         0
     };
-    let checked = futures::future::join_all(operands.into_iter().take(count).map(|operand| {
+    let mut paths = option_paths;
+    for operand in operands.into_iter().take(count) {
+        if operand.value == "-" && command != "download" && command != "upload"
+            || opaque.contains(&operand.value.as_str())
+        {
+            continue;
+        }
+        paths.push((
+            operand.clone(),
+            if directory_only {
+                ValueKind::Directory
+            } else if script || command == "download" {
+                ValueKind::InputFile
+            } else {
+                ValueKind::Path
+            },
+        ));
+    }
+    let checked = futures::future::join_all(paths.into_iter().map(|(operand, kind)| {
         let cwd = &cwd;
         async move {
-            if operand.value == "-" && command != "download" && command != "upload" {
-                return true;
-            }
-            if opaque.contains(&operand.value.as_str()) {
-                return true;
-            }
-            let Ok(Some(info)) = host::stat(host, &resolve(operand, cwd, env), false).await else {
+            let Ok(Some(info)) = host::stat(host, &resolve(&operand, cwd, env), false).await else {
                 return false;
             };
-            !((directory_only && !info.directory)
-                || ((script || command == "download") && !info.file))
+            match kind {
+                ValueKind::Directory => info.directory,
+                ValueKind::InputFile => info.file,
+                _ => info.file || info.directory,
+            }
         }
     }))
     .await;
