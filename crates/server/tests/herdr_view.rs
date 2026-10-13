@@ -107,17 +107,20 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
     )
     .unwrap();
     let mut messages: Vec<Value> = vec![];
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    while let Ok(item) = receive.try_recv() {
-        if let Transport::Message(value) = item.message {
-            messages.push(value);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let item = receive.recv().await.unwrap();
+            if let Transport::Message(value) = item.message {
+                let mobile = value["type"] == "herdr-frame" && value["width"] == 40;
+                messages.push(value);
+                if mobile {
+                    break;
+                }
+            }
         }
-    }
-    assert!(
-        messages
-            .iter()
-            .any(|value| value["type"] == "herdr-frame" && value["width"] == 40)
-    );
+    })
+    .await
+    .expect("A mobile-sized Herdr frame must arrive before checking the redraw barrier");
     assert!(
         !messages
             .iter()
