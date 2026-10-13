@@ -20,8 +20,12 @@ try {
   herdr = spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server'], { cwd: dir, env, stdio: 'ignore' });
   await wait(async () => { try { await herdrSnapshot(target); return true; } catch { return false; } }, 'isolated Herdr');
   desktop = pty.spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', [], { cwd: dir, env, cols: 150, rows: 45, name: 'xterm-256color' }); desktop.onData(() => {});
+  await wait(async () => (await herdrSnapshot(target)).spaces.length > 0, 'desktop startup workspace');
+  const startupSpaces = (await herdrSnapshot(target)).spaces;
   const alpha = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/alpha', label: 'Alpha', focus: false })).workspace.workspace_id;
   const beta = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/beta project', label: 'Beta', focus: false })).workspace.workspace_id;
+  // The desktop can create its initial workspace before either fixture request.
+  for (const space of startupSpaces) await herdrRequest(target, 'workspace.close', { workspace_id: space.id, close_group: false });
   backend = spawn(process.env.TEST_EXECUTABLE || root + 'target/debug/termai', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3174', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();

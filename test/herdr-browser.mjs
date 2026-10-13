@@ -183,7 +183,8 @@ try {
   await page.locator('#workspace-shortcuts').getByRole('button', { name: 'Esc', exact: true }).click();
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\x1b'), 'shared Escape button');
   const mic = terminal.locator('#termai-dictation'); await mic.waitFor({ state: 'visible' });
-  await mic.click(); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
+  // Keyboard activation keeps this lifecycle check independent of the hold-to-finish gesture.
+  await mic.press('Enter'); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
   assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Embedded dictation holds a lock owned by the outer page');
   assert.equal(await terminal.evaluate(() => window.__wakeLocks.length), 0, 'The iframe uses the eligible outer document');
   const beforeHiddenVoice = voiceBytes;
@@ -194,7 +195,7 @@ try {
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await terminal.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await until(async () => await page.evaluate(() => window.__wakeLocks.length === 2 && !window.__wakeLocks.at(-1).released), 'outer wake lock restored');
-  await mic.click(); await until(() => fixture.actions.some(a => a.method === 'pane.send_input' && a.params.text === 'Dictated directly into Herdr'), 'direct dictation delivery');
+  await mic.press('Enter'); await until(() => fixture.actions.some(a => a.method === 'pane.send_input' && a.params.text === 'Dictated directly into Herdr'), 'direct dictation delivery');
   assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Herdr finish releases the outer wake lock');
   await until(() => voiceAcks === 1, 'acknowledge after insertion'); assert.ok(voiceBytes > 0);
   assert.equal(fixture.actions.filter(a => a.method === 'pane.send_input').length, 1, 'Dictation inserts once without pressing Enter');

@@ -82,6 +82,8 @@ try {
   await online(); await connected(states);
   assert.equal(await page.evaluate(() => window.__sent.filter(message => message.type === 'input').length), inputs);
   await page.keyboard.press('Control+c');
+  // Flush input queued by this reconnect before observing the next replay.
+  await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
 
   // Input after acknowledgement waits for the retained screen's final paint.
   await page.evaluate(() => {
