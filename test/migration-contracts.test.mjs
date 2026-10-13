@@ -73,11 +73,7 @@ test('persisted pairing credentials require hashed version-one records and bound
     { version: 1, tokenHash: hash, credentials: Array(257).fill(hash) }, { version: 1, tokenHash: hash, credentials: [null] }]) assert.equal(pairings(value), false);
 });
 
-test('synthetic saved data and asynchronous native/Wasm messages obey their contracts', async () => {
-  const state = JSON.parse(await readFile(new URL('./fixtures/rust-migration/state.json', import.meta.url), 'utf8'));
-  assert.equal(state.synthetic, true);
-  assert.ok(validate('VaultData')(state.vault.data));
-  assert.ok(validate('PairingsData')(state.pairing.data));
+test('asynchronous native/Wasm messages obey their contracts', () => {
   const request = validate('AsyncEngineRequest');
   assert.ok(request({ request: 1, operation: 'tokens', args: ['echo hello'], now: 0 }));
   assert.equal(request({ request: 0, operation: 'tokens', args: ['echo hello'], now: 0 }), false);
@@ -92,14 +88,4 @@ test('synthetic saved data and asynchronous native/Wasm messages obey their cont
   const pins = validate('EngineDirectoryPins');
   assert.ok(pins({ request: 1, directories: [{ directory: 2, entries: [{ name: '🌍', directory: true, symlink: false }] }, { directory: 3 }] }));
   for (const directories of [[{ directory: 0 }], [{ directory: 2, entries: null }], Array(33).fill({ directory: 2 })]) assert.equal(pins({ request: 1, directories }), false);
-  const fact = validate('Fact');
-  const engineRequest = validate('EngineRequest'), engineReply = validate('EngineOperationReply');
-  for (const name of ['engine', 'host', 'native-host']) {
-    const corpus = JSON.parse(await readFile(new URL('./fixtures/rust-migration/' + name + '.json', import.meta.url), 'utf8'));
-    for (const row of corpus.fixtures) {
-      assert.ok(engineRequest({ operation: row.operation, args: row.args }), JSON.stringify(engineRequest.errors));
-      if (!row.expected?.error) assert.ok(engineReply({ operation: row.operation, value: name === 'engine' ? row.result : row.expected.value }), JSON.stringify({ operation: row.operation, errors: engineReply.errors }));
-      for (const item of row.facts || []) assert.ok(fact(item.operation), JSON.stringify(item.operation));
-    }
-  }
 });

@@ -1,37 +1,5 @@
 use serde_json::{Value, json};
-use termai_engine::{Request, dispatch, exchange};
-mod common;
-use common::same_json;
-
-#[test]
-fn reference_corpus_preserves_complete_outputs() {
-    let corpus: Value = serde_json::from_str(include_str!(
-        "../../../test/fixtures/rust-migration/engine.json"
-    ))
-    .unwrap();
-    let lexical: Value = serde_json::from_str(include_str!(
-        "../../../test/fixtures/rust-migration/lexical.json"
-    ))
-    .unwrap();
-    let mut failures = Vec::new();
-    for (index, row) in corpus["fixtures"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .chain(lexical["fixtures"].as_array().unwrap())
-        .enumerate()
-    {
-        let request: Request = serde_json::from_value(row.clone()).unwrap();
-        let actual = dispatch(&request).unwrap_or_else(|error| json!({"error":error}));
-        if !same_json(&actual, &row["result"]) && failures.len() < 30 {
-            failures.push(format!(
-                "fixture {index}: {} {:?}\nexpected={}\nactual={actual}",
-                request.operation, request.args, row["result"]
-            ));
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n\n"));
-}
+use termai_engine::exchange;
 
 #[test]
 fn malformed_requests_are_errors_and_do_not_corrupt_subsequent_requests() {

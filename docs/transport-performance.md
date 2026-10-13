@@ -113,10 +113,18 @@ Those deployment measurements should supplement these reproducible gates before 
 
 Reproduce the encrypted-hop comparisons with `cargo test -p termai-server --test ssh transport_ssh_benchmark -- --ignored --nocapture`.
 Use `WIRE_VARIANTS`, `WIRE_PROFILES`, `WIRE_SAMPLES` and `WIRE_OUTPUT` to retain separate browser verification runs.
-Run `node test/transport-budgets.mjs` against the final artifacts to check the selected typing, bulk-transfer and incompressible-traffic budgets.
+Generate fresh selected-profile reports before running `node test/transport-budgets.mjs` to check typing, bulk-transfer and incompressible-traffic budgets.
+The budget check reads `.test-artifacts` by default, or an alternative directory supplied through `WIRE_RESULTS_DIR`.
 
-Raw experiment, isolated verification, noisy repeat and encrypted-hop samples are checked in under [docs/benchmarks/transport](benchmarks/transport).
-The benchmark-generated working copies remain in `.test-artifacts`.
+```sh
+cargo build --locked --release -p termai-server --example wire
+WIRE_PROFILES=fast WIRE_VARIANTS=json,gzip-fast WIRE_OUTPUT=transport-selected-fast-final.json node test/transport-benchmark.mjs
+WIRE_PROFILES=mobile WIRE_VARIANTS=json,gzip WIRE_OUTPUT=transport-selected-constrained.json node test/transport-benchmark.mjs
+node test/transport-budgets.mjs
+```
+
+Recorded experiment reports are available in Git history rather than the working tree.
+Fresh benchmark reports are written to ignored `.test-artifacts` files.
 
 ## Herdr space switching
 
@@ -129,7 +137,7 @@ Older servers without `initialGeometry` retain their existing client path.
 The first fix waited two animation frames after a matching grid, but a correctly sized grid can still contain the application's desktop content.
 A responsive application delaying its SIGWINCH redraw by 200 ms reproduced approximately 166 ms of visible desktop content with that fix.
 The original animation-frame assertions inspected terminal buffers and missed some composited pixels and parent-iframe visibility transitions.
-The failed slow-redraw trial is retained under [docs/benchmarks/herdr](benchmarks/herdr).
+The failed slow-redraw trial remains available in Git history.
 
 The new layout barrier records Herdr's native content revision before acquiring or changing mobile geometry.
 Herdr 0.9.3 [advances that revision twice for a resize and twice for each processed PTY read](https://github.com/herdrdev/herdr/blob/v0.9.3/src/pane.rs), so a geometry-only revision cannot certify application output.
@@ -165,7 +173,8 @@ The normal run's three top-level returns took 193.9–404.4 ms, with a median of
 With a 600 ms redraw delay, gzip and sixfold CPU throttling, nine warm switches measured 142.3 ms median and 180.6 ms p95, the cold switch took 1,460.3 ms, and three top-level returns had a 1,058 ms median.
 Delayed returns wait for the application to redraw instead of exposing desktop content during that interval.
 Across these four final runs, 36 space switches and 10 top-level returns passed, and none of the 550 captured composited frames contained desktop pixels while the mobile view was active.
-The normal, delayed, throttled and six-space eviction samples are retained as `space-flash-final-*.json` under [docs/benchmarks/herdr](benchmarks/herdr), alongside a representative composited mobile image.
+The historical normal, delayed, throttled and six-space eviction samples remain available in Git history.
+Fresh Herdr test reports and composited images are written to ignored `.test-artifacts` files.
 
 Run `npm run test:herdr-flash` for the default case, and use `TEST_REDRAW_DELAY=600 TEST_CPU=6 TEST_WIRE=gzip` for the slow-redraw case.
 Use `TEST_SPACES=6 TEST_SWITCHES=6 TEST_RETURNS=1 TEST_REDRAW_DELAY=200` to verify cache eviction and controller release.

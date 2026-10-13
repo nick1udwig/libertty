@@ -98,7 +98,7 @@ Keep termai running; Tailscale Serve does not start it for you.
 - [Runtime plugin experiment](docs/plugins.md): loading packages, plugin API and connection lifetimes.
 - [Workspace architecture](docs/workspace.md), [shared engine](docs/shared-engine.md), and [client architecture](docs/client-architecture.md).
 - [Pairing security review](docs/pairing-security.md).
-- [Rust migration](docs/rust-migration.md): contracts, reference fixtures, regression coverage and platform verification.
+- [Rust migration](docs/rust-migration.md): contracts, active regression coverage and platform verification.
 
 ## License
 

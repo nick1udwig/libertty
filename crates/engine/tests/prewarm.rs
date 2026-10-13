@@ -4,31 +4,41 @@ use termai_engine::{
     runtime::{Runtime, Step, message},
 };
 #[test]
-fn prewarm_targets_and_context_expiration_match_the_reference_without_host_effects() {
-    let corpus: Value = serde_json::from_str(include_str!(
-        "../../../test/fixtures/rust-migration/prewarm.json"
-    ))
-    .unwrap();
+fn prewarm_targets_expire_and_remain_scoped_to_their_context_without_host_effects() {
     let mut runtime = Runtime::default();
-    for (index, step) in corpus["steps"].as_array().unwrap().iter().enumerate() {
-        let call: Request = serde_json::from_value(step.clone()).unwrap();
-        match runtime.start(index as u32 + 1, call, step["now"].as_f64().unwrap()) {
-            Step::Complete { value, .. } => {
-                assert_eq!(value, step["expected"], "prewarm step {index}")
-            }
-            _ => panic!("Prewarm target selection must not perform host operations"),
-        }
-    }
+    let catalog = json!({"cwd":"/fixture","commands":["git","ls"],"paths":[],"history":["git status","rm -rf /"]});
+    let env = json!({"HOME":"/fixture"});
+    let targets = || Request {
+        operation: "prewarmTargets".into(),
+        args: vec![catalog.clone(), env.clone()],
+    };
+    let complete =
+        |runtime: &mut Runtime, request, call, now| match runtime.start(request, call, now) {
+            Step::Complete { value, .. } => value,
+            _ => panic!("Prewarm selection must complete without host operations"),
+        };
+    let expected = json!([
+        "git",
+        "git status",
+        "git init",
+        "git add",
+        "git commit",
+        "ls"
+    ]);
+    assert_eq!(complete(&mut runtime, 1, targets(), 0.0), expected);
+    let mark = Request {
+        operation: "markWarmed".into(),
+        args: vec![json!("git"), catalog.clone(), env.clone()],
+    };
+    assert_eq!(complete(&mut runtime, 2, mark, 1.0), Value::Null);
+    let warm = json!(["git status", "git init", "git add", "git commit", "ls"]);
+    assert_eq!(complete(&mut runtime, 3, targets(), 600000.0), warm);
+    assert_eq!(complete(&mut runtime, 4, targets(), 600001.0), expected);
+    let mut changed = targets();
+    changed.args[0]["cwd"] = json!("/other");
+    assert_eq!(complete(&mut runtime, 5, changed, 2.0), expected);
     runtime.reset();
-    let first = &corpus["steps"][0];
-    match runtime.start(
-        corpus["steps"].as_array().unwrap().len() as u32 + 1,
-        serde_json::from_value(first.clone()).unwrap(),
-        600003.0,
-    ) {
-        Step::Complete { value, .. } => assert_eq!(value, first["expected"]),
-        _ => panic!("Reset must forget warmed contexts"),
-    }
+    assert_eq!(complete(&mut runtime, 6, targets(), 2.0), expected);
 }
 #[test]
 fn integral_json_numbers_accept_decimal_notation_and_reject_fractional_identifiers() {

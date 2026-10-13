@@ -4,10 +4,33 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import ssh2 from 'ssh2';
-import { createDecipheriv, createHash, scryptSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, scryptSync } from 'node:crypto';
 
 const root = path.resolve(import.meta.dirname, '..');
-const fixture = JSON.parse(await readFile(new URL('./fixtures/rust-migration/state.json', import.meta.url), 'utf8'));
+const digest = value => createHash('sha256').update(value).digest('hex');
+const cases = [], records = [];
+for (const encrypted of [false, true]) {
+  const passphrase = 'synthetic-passphrase-' + encrypted;
+  const pair = ssh2.utils.generateKeyPairSync('ed25519', encrypted ? { passphrase, cipher: 'aes256-ctr', rounds: 4 } : {});
+  const parsed = ssh2.utils.parseKey(pair.private, passphrase);
+  assert.ok(!(parsed instanceof Error));
+  const wire = parsed.getPublicSSH(), id = randomUUID();
+  const publicKey = 'ssh-ed25519 ' + wire.toString('base64');
+  const fingerprint = 'SHA256:' + createHash('sha256').update(wire).digest('base64').replace(/=+$/, '');
+  const salt = randomBytes(16), iv = randomBytes(12);
+  const secret = scryptSync(passphrase, salt, 32, { N: 32768, maxmem: 64 * 1024 * 1024 });
+  try {
+    const cipher = createCipheriv('aes-256-gcm', secret, iv);
+    const ciphertext = Buffer.concat([cipher.update(pair.private, 'utf8'), cipher.final()]);
+    records.push({ id, name: 'Synthetic key ' + encrypted, publicKey, fingerprint, createdAt: new Date().toISOString(),
+      salt: salt.toString('base64'), iv: iv.toString('base64'), tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') });
+  } finally { secret.fill(0); }
+  cases.push({ id, passphrase, privateKey: pair.private, publicKey, fingerprint });
+}
+const token = randomBytes(32).toString('hex'), credential = randomBytes(32).toString('hex');
+const fixture = { synthetic: true, vault: { cases, data: { keys: records, futureField: 'retained',
+  knownHosts: [{ host: 'fixture.example', port: 22, fingerprint: 'SHA256:synthetic-host-pin', futureHostField: { retained: true } }] } },
+  pairing: { token, credential, data: { version: 1, tokenHash: digest(token), credentials: [digest(credential)] } } };
 const directory = await mkdtemp(path.join(os.tmpdir(), 'termai-state-compat-'));
 try {
   await writeFile(path.join(directory, 'fixture.json'), JSON.stringify(fixture), { mode: 0o600 });
@@ -17,7 +40,6 @@ try {
   await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('Rust persisted-state compatibility failed: ' + code))); });
   const result = JSON.parse(await readFile(path.join(directory, 'rust-results.json'), 'utf8'));
   const vault = JSON.parse(await readFile(path.join(directory,'vault.json'),'utf8'));
-  const digest = value => createHash('sha256').update(value).digest('hex');
   for (const key of result.keys) {
     const record = vault.keys.find(record => record.id === key.id);
     const secret = scryptSync(key.passphrase,Buffer.from(record.salt,'base64'),32,{N:32768,maxmem:64*1024*1024});
@@ -36,5 +58,7 @@ try {
   assert.ok(registry.credentials.includes(digest(fixture.pairing.credential)));
   assert.ok(registry.credentials.includes(digest(result.credential)));
   assert.equal(vault.knownHosts[0].fingerprint,'SHA256:synthetic-host-pin');
-  console.log('PASS saved-state compatibility: archived Node-written data opens in Rust; an independent crypto reader verifies encrypted imports, generated keys, host pins and pairing digests.');
+  assert.equal(vault.futureField, 'retained');
+  assert.deepEqual(vault.knownHosts[0].futureHostField, { retained: true });
+  console.log('PASS saved-state compatibility: generated Node-written data opens in Rust; an independent crypto reader verifies encrypted imports, generated keys, host pins, unknown fields and pairing digests.');
 } finally { await rm(directory, { recursive: true, force: true }); }

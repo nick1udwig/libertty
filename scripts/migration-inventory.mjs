@@ -26,13 +26,8 @@ for (const source of await files('test/',/\.(?:test\.ts|mjs)$/)) {
   } walk(tree);
   tests.push({source,owner:source.endsWith('.test.ts')?'frontend':'integration',assertions});
 }
-const retired=JSON.parse(await readFile(new URL('contracts/retired-regressions.json',root),'utf8'));
-for (const assertion of retired.assertions) for (const target of assertion.equivalent) {
-  const [file,symbol]=target.split('#'),text=await readFile(new URL(file,root),'utf8');
-  if (symbol&&!text.includes('fn '+symbol+'(')) throw new Error('Missing native assertion: '+target);
-}
 const output=new URL('contracts/regression-inventory.json',root);
-const content=JSON.stringify({version:4,retired:'retired-regressions.json',modules,tests},null,2)+'\n';
+const content=JSON.stringify({version:5,modules,tests},null,2)+'\n';
 if (process.argv.includes('--check')) { if (await readFile(output,'utf8')!==content) throw new Error('Regression inventory is stale.'); }
 else await writeFile(output,content);
-console.log(`Inventoried ${modules.length} Rust modules and ${tests.length} harnesses; verified ${retired.assertions.length} retired reference assertions.`);
+console.log(`Inventoried ${modules.length} Rust modules and ${tests.length} active harnesses.`);

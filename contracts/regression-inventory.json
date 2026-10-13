@@ -1,6 +1,5 @@
 {
-  "version": 4,
-  "retired": "retired-regressions.json",
+  "version": 5,
   "modules": [
     {
       "source": "crates/engine/src/command_policy.rs"
@@ -250,28 +249,11 @@
       ]
     },
     {
-      "source": "crates/engine/tests/host_reference.rs",
-      "owner": "rust",
-      "assertions": [
-        "asynchronous_operations_match_reference_results_and_host_operations",
-        "native_bash_and_filesystem_reference_results_match"
-      ]
-    },
-    {
       "source": "crates/engine/tests/prewarm.rs",
       "owner": "rust",
       "assertions": [
-        "prewarm_targets_and_context_expiration_match_the_reference_without_host_effects",
+        "prewarm_targets_expire_and_remain_scoped_to_their_context_without_host_effects",
         "integral_json_numbers_accept_decimal_notation_and_reject_fractional_identifiers"
-      ]
-    },
-    {
-      "source": "crates/engine/tests/reference.rs",
-      "owner": "rust",
-      "assertions": [
-        "reference_corpus_preserves_complete_outputs",
-        "malformed_requests_are_errors_and_do_not_corrupt_subsequent_requests",
-        "optional_wire_fields_reject_null_and_preserve_omission"
       ]
     },
     {
@@ -286,6 +268,14 @@
         "request_limits_do_not_replace_existing_work_and_host_failures_propagate",
         "invalid_and_backwards_host_clocks_release_pending_requests",
         "separate_engine_instances_never_share_learned_command_metadata"
+      ]
+    },
+    {
+      "source": "crates/engine/tests/wire.rs",
+      "owner": "rust",
+      "assertions": [
+        "malformed_requests_are_errors_and_do_not_corrupt_subsequent_requests",
+        "optional_wire_fields_reject_null_and_preserve_omission"
       ]
     },
     {
@@ -438,8 +428,6 @@
       "source": "crates/server/tests/herdr.rs",
       "owner": "rust",
       "assertions": [
-        "boundaries_match_unchanged_reference_fixtures",
-        "notification_histories_match_reference_checkpoints_and_transitions",
         "rpc_actions_preserve_labels_and_reject_stale_or_refused_changes",
         "chunked_lines_keep_partial_frames_across_cancelled_reads_and_bound_memory"
       ]
@@ -578,7 +566,7 @@
       "source": "crates/server/tests/system_ssh.rs",
       "owner": "rust",
       "assertions": [
-        "literal_commands_addresses_and_legacy_keys_match_reference_results",
+        "addresses_reject_shell_controls_and_invalid_ports",
         "config_resolution_external_references_and_locked_keys_preserve_identity",
         "configured_agent_keys_keep_preference_and_agent_order"
       ]
@@ -590,7 +578,7 @@
         "keychain_encrypts_keys_and_survives_restarts_without_exposing_private_metadata",
         "pins_and_serialized_concurrent_changes_are_retained",
         "backups_and_references_preserve_identity_and_inspection_does_not_persist",
-        "existing_typescript_vault_and_pairings_are_readable_and_writes_preserve_unknown_fields"
+        "persisted_data_writes_preserve_unknown_fields"
       ]
     },
     {
@@ -797,7 +785,7 @@
         "request contracts reject malformed objects, UTF-16 overflow, invalid fact variants and numeric bounds",
         "optional properties remain distinct from null and file editing measures encoded bytes",
         "persisted pairing credentials require hashed version-one records and bounded arrays",
-        "synthetic saved data and asynchronous native/Wasm messages obey their contracts"
+        "asynchronous native/Wasm messages obey their contracts"
       ]
     },
     {
@@ -939,7 +927,8 @@
       "source": "test/shell-words.test.ts",
       "owner": "frontend",
       "assertions": [
-        "frontend shell helpers preserve complete archived reference outputs"
+        "shell quoting and parsing preserve literal arguments and reject expansion",
+        "transfer helpers recognize actions without interpreting quoted commands or pipes"
       ]
     },
     {
