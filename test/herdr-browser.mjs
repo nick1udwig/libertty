@@ -185,12 +185,13 @@ try {
   const mic = terminal.locator('#termai-dictation'); await mic.waitFor({ state: 'visible' });
   // Keyboard activation keeps this lifecycle check independent of the hold-to-finish gesture.
   await mic.press('Enter'); await terminal.waitForFunction(() => window.__herdrMessages.some(m => m.type === 'dictation' && m.state === 'ready')); await delay(350);
+  await until(() => voiceBytes > 0, 'embedded audio capture starts');
   assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Embedded dictation holds a lock owned by the outer page');
   assert.equal(await terminal.evaluate(() => window.__wakeLocks.length), 0, 'The iframe uses the eligible outer document');
   const beforeHiddenVoice = voiceBytes;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); void window.__wakeLocks.at(-1).release(); });
   await terminal.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
-  await delay(400); assert.equal(await mic.getAttribute('aria-pressed'), 'true', 'Hiding the page does not switch away from the recording pane');
+  await until(() => voiceBytes > beforeHiddenVoice, 'embedded audio continues while hidden'); assert.equal(await mic.getAttribute('aria-pressed'), 'true', 'Hiding the page does not switch away from the recording pane');
   assert.ok(voiceBytes > beforeHiddenVoice, 'Embedded audio transport continues during simulated lock');
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await terminal.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });

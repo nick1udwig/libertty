@@ -39,6 +39,13 @@ trust_level = "trusted"
 }
 const daemon = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(daemon, 'listening');
 let audioBytes = 0, capabilities = true, recordingSocket;
+async function waitForAudioAfter(previous) {
+  for (const deadline = Date.now() + 5000; Date.now() < deadline;) {
+    if (audioBytes > previous) return;
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+  throw new Error('Audio transport did not deliver another frame within five seconds');
+}
 daemon.on('connection', (socket, request) => {
   assert.equal(request.headers.authorization, 'Bearer ' + 'secret'.repeat(8));
   assert.equal(request.headers.origin, undefined);
@@ -165,6 +172,7 @@ try {
   await page.mouse.move(heldMic.x + heldMic.width / 2, heldMic.y + heldMic.height / 2);
   await page.mouse.down();
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+  await waitForAudioAfter(0);
   assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Recording holds a screen wake lock');
   assert.deepEqual(await mic.boundingBox(), micPosition, 'Expanding controls must keep the button under the finger');
   assert.equal(await mic.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(112, 67, 154)');
@@ -183,7 +191,7 @@ try {
     document.querySelector('#termai-dictation').dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
   });
   await page.mouse.up();
-  await page.waitForTimeout(500);
+  await waitForAudioAfter(bytesBeforeLock);
   assert.equal(await mic.getAttribute('aria-pressed'), 'true', 'Lock must preserve held dictation after pointer cancellation');
   assert.equal(await page.locator('#connection-label').textContent(), 'Connected', 'Lock must keep the audio socket open');
   assert.ok(audioBytes > bytesBeforeLock, 'Audio must continue streaming while hidden');
@@ -349,12 +357,14 @@ try {
   await outer.locator('#terminal-stack > iframe').waitFor();
   const embedded = await (await outer.locator('#terminal-stack > iframe').elementHandle()).contentFrame();
   const embeddedMic = embedded.locator('#termai-dictation'); await embeddedMic.waitFor({ state: 'visible' });
-  await embeddedMic.click(); await embedded.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+  const bytesBeforeEmbedded = audioBytes;
+  await embeddedMic.press('Enter'); await embedded.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+  await waitForAudioAfter(bytesBeforeEmbedded);
   assert.equal(await outer.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Ordinary embedded terminal requests from outer document');
   const bytesBeforeBackground = audioBytes;
   await outer.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); void window.__wakeLocks.at(-1).release(); });
   await embedded.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
-  await outer.waitForTimeout(400); assert.equal(await embeddedMic.getAttribute('aria-pressed'), 'true'); assert.ok(audioBytes > bytesBeforeBackground);
+  await waitForAudioAfter(bytesBeforeBackground); assert.equal(await embeddedMic.getAttribute('aria-pressed'), 'true'); assert.ok(audioBytes > bytesBeforeBackground);
   await outer.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await embedded.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await outer.waitForFunction(() => window.__wakeLocks.length === 2 && !window.__wakeLocks.at(-1).released);
