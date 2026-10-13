@@ -99,7 +99,17 @@ pub async fn repair_input_file(
         changes: vec!["File path verified against the filesystem".into()],
         literal: None,
     };
-    let exact = host::stat(host, &path::join(&[start, &parts.join("/")]), true).await?;
+    let whole = path::join(&[start, &parts.join("/")]);
+    let first = path::join(&[start, parts[0]]);
+    let (exact, initial) = futures::join!(host::stat(host, &whole, false), async {
+        if quoted || parts.len() == 1 {
+            Ok(None)
+        } else {
+            host::lookup(host, &first).await.map(Some)
+        }
+    });
+    let exact = exact?;
+    initial?;
     if let Some(exact) = &exact {
         if !exact.file {
             return Ok(Some(vec![]));
@@ -182,7 +192,7 @@ pub async fn repair_input_file(
                     let append = &append;
                     async move {
                         let info =
-                            host::stat(host, &path::join(&[&branch.actual, name]), true).await?;
+                            host::stat(host, &path::join(&[&branch.actual, name]), false).await?;
                         Ok(info
                             .filter(|info| if last { info.file } else { info.directory })
                             .map(|_| append(name, score)))

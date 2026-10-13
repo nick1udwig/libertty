@@ -56,7 +56,37 @@ impl Host for RequestHost {
             .as_ref()
             .and_then(|words| self.completions.borrow().get(words).cloned())
             .filter(|slot| matches!(slot.borrow().as_ref(), Some(Ok(_))));
-        let slot = if let Some(slot) = completed {
+        let weaker_stat = if let HostOperation::Stat {
+            path,
+            executable: false,
+        } = &key
+        {
+            let cache = self.cache.borrow();
+            cache
+                .get(&HostOperation::Stat {
+                    path: path.clone(),
+                    executable: true,
+                })
+                .filter(|slot| matches!(slot.borrow().as_ref(), Some(Ok(_))))
+                .cloned()
+                .or_else(|| {
+                    let slot = cache.get(&HostOperation::Lookup { path: path.clone() })?;
+                    let result = slot.borrow();
+                    let info = match result.as_ref()? {
+                        Ok(FactValue::Lookup(lookup)) => lookup.info.clone(),
+                        Ok(FactValue::Json(value)) => {
+                            crate::deserialize::<crate::types::DirectoryLookup>(value)
+                                .ok()?
+                                .info
+                        }
+                        _ => return None,
+                    };
+                    Some(Rc::new(RefCell::new(Some(Ok(FactValue::Stat(info))))))
+                })
+        } else {
+            None
+        };
+        let slot = if let Some(slot) = completed.or(weaker_stat) {
             slot
         } else {
             match self.cache.borrow_mut().entry(key) {
@@ -83,6 +113,38 @@ impl Host for RequestHost {
 #[cfg(test)]
 mod completion_cache_tests {
     use super::*;
+    #[test]
+    fn stronger_stats_and_successful_lookups_satisfy_operand_checks() {
+        let host = RequestHost::default();
+        drop(host.fact(HostOperation::Stat {
+            path: "/one".into(),
+            executable: true,
+        }));
+        let (_, slot) = host.queue.borrow_mut().pop_front().unwrap();
+        *slot.borrow_mut() = Some(Ok(FactValue::Stat(None)));
+        drop(host.fact(HostOperation::Stat {
+            path: "/one".into(),
+            executable: false,
+        }));
+        assert!(host.queue.borrow().is_empty());
+        drop(host.fact(HostOperation::Lookup {
+            path: "/two".into(),
+        }));
+        let (_, slot) = host.queue.borrow_mut().pop_front().unwrap();
+        *slot.borrow_mut() = Some(Ok(FactValue::Lookup(Arc::new(
+            crate::types::DirectoryLookup::default(),
+        ))));
+        drop(host.fact(HostOperation::Stat {
+            path: "/two".into(),
+            executable: false,
+        }));
+        assert!(host.queue.borrow().is_empty());
+        drop(host.fact(HostOperation::Stat {
+            path: "/two".into(),
+            executable: true,
+        }));
+        assert_eq!(host.queue.borrow().len(), 1);
+    }
     #[test]
     fn successful_completion_reuses_results_across_budgets_but_errors_retry() {
         let host = RequestHost::default();

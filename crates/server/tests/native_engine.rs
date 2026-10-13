@@ -537,6 +537,12 @@ async fn native_completion_and_suggestions_preserve_ambiguity_quotes_and_operand
     .unwrap();
     assert!(!sentinel.exists());
     assert!(!ambiguous.to_string().contains("private chatter"));
+    std::fs::write(&definitions, "_orchard(){ if [[ ${COMP_WORDS[COMP_CWORD]} == ea ]]; then COMPREPLY=('eager'); else COMPREPLY=('east-zone'); fi; }; complete -F _orchard orchard\n").unwrap();
+    let broad = engine
+        .suggest("orchard deploy east zone", &host, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(broad[0]["command"], "orchard deploy east-zone", "{broad}");
     let other = NativeEngine::new().unwrap();
     let cached = other
         .invoke(

@@ -3,6 +3,53 @@ use termai_engine::{
     Request,
     runtime::{Reply, Runtime, Step},
 };
+
+#[test]
+fn independent_operand_validation_uses_one_callback_wave() {
+    let mut runtime = Runtime::default();
+    let request = Request {
+        operation: "suggest".into(),
+        args: vec![
+            json!("ls alpha beta gamma"),
+            json!({"cwd":"/fixture","commands":["ls"],"paths":["alpha","beta","gamma"],"history":[]}),
+            json!({"HOME":"/fixture"}),
+            json!(false),
+        ],
+    };
+    let Step::Pending { callbacks, .. } = runtime.start(1, request, 0.0) else {
+        panic!("Expected fact wave");
+    };
+    let operations: Vec<_> = callbacks.iter().flat_map(|c| &c.operations).collect();
+    assert_eq!(
+        operations
+            .iter()
+            .filter(|op| matches!(op, termai_engine::host::HostOperation::Stat { .. }))
+            .count(),
+        3
+    );
+    let replies = callbacks
+        .into_iter()
+        .map(|callback| Reply::Values {
+            request: callback.request,
+            values: callback
+                .operations
+                .iter()
+                .map(|op| match op {
+                    termai_engine::host::HostOperation::Syntax { .. } => json!(true),
+                    termai_engine::host::HostOperation::Stat { executable, .. } => {
+                        assert!(!executable);
+                        json!({"file":true,"directory":false,"executable":false})
+                    }
+                    _ => panic!("Unexpected operation: {op:?}"),
+                })
+                .collect(),
+        })
+        .collect();
+    assert!(matches!(
+        runtime.resume(1, replies, 150.0),
+        Step::Complete { .. }
+    ));
+}
 #[test]
 fn prepared_contexts_preserve_pending_snapshots_reject_stale_ids_and_reset() {
     use termai_engine::types::Catalog;

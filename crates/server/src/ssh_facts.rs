@@ -195,7 +195,7 @@ impl SSHHost {
             )),
             "lookup" => {
                 let file = text("path")?;
-                Ok(if let Some(info) = self.stat(file, true, cancel).await? {
+                Ok(if let Some(info) = self.stat(file, false, cancel).await? {
                     json!({"info":info})
                 } else {
                     json!({"listing":self.snapshot(&path::dirname(file),10000,cancel).await?})

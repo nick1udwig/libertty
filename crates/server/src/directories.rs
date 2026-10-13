@@ -374,7 +374,7 @@ impl Directories {
         file: &str,
         cancel: &CancellationToken,
     ) -> Result<DirectoryLookup, String> {
-        let info = self.stat(file, true, cancel).await?;
+        let info = self.stat(file, false, cancel).await?;
         Ok(if info.is_some() {
             DirectoryLookup {
                 info,

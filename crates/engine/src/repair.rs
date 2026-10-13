@@ -707,7 +707,7 @@ pub fn discovery_targets(input: &str, catalog: &Catalog) -> Vec<String> {
         })
         .collect()
 }
-fn argument_matches(words: &[Token], start: usize, values: &[String]) -> Vec<Match> {
+pub(crate) fn argument_matches(words: &[Token], start: usize, values: &[String]) -> Vec<Match> {
     if values.contains(&words[start].value) {
         return vec![Match {
             value: words[start].value.clone(),

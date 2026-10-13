@@ -74,7 +74,7 @@ pub async fn repair_directory(
         let whole_path = path::join(&[start, &parts.join("/")]);
         let first_path = path::join(&[start, &parts[0]]);
         let (whole, first) = futures::join!(
-            host::stat(host, &whole_path, true),
+            host::stat(host, &whole_path, false),
             host::lookup(host, &first_path)
         );
         let whole = whole?;
@@ -171,7 +171,7 @@ pub async fn repair_directory(
                     let actual = path::join(&[&branch.actual, &entry.name]);
                     if !entry.directory
                         && !(entry.symlink
-                            && host::stat(host, &actual, true)
+                            && host::stat(host, &actual, false)
                                 .await?
                                 .is_some_and(|info| info.directory))
                     {
@@ -211,7 +211,7 @@ pub async fn repair_directory(
         && host.now_ms() < deadline
     {
         let requested = path::join(&[home, &parts[0]]);
-        if host::stat(host, &requested, true).await?.is_some() {
+        if host::stat(host, &requested, false).await?.is_some() {
             return Ok(Some(vec![]));
         }
         let root = host::lookup(host, &requested).await?;
@@ -248,7 +248,7 @@ pub async fn repair_directory(
                         let actual = path::join(&[parent_path, &entry.name]);
                         if !entry.directory
                             && !(entry.symlink
-                                && host::stat(host, &actual, true)
+                                && host::stat(host, &actual, false)
                                     .await?
                                     .is_some_and(|info| info.directory))
                         {

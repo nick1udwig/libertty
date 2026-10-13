@@ -8,7 +8,9 @@ Retain the shared Rust engine, original transcript choices, non-executing valida
   Canonical vocabulary contract checks pass.
 - [x] Retain candidates through validation and combine history with relevant alternatives.
   Engine and native regression suites pass, including stale catalog refill and history ambiguity.
-- [ ] Batch independent facts and reduce redundant filesystem and completion work.
+- [x] Batch independent facts and reduce redundant filesystem and completion work.
+  A runtime regression verifies that three independent operands require one callback wave.
+  Engine, native, filesystem, and completion suites pass, including broader completion fallback after unrelated narrow matches.
 - [ ] Use coarse backend repair for network-dependent work and retain Herdr metadata.
 - [ ] Compose repair over shared shell structure, preserving opaque quoted syntax and supporting command lists and wrappers.
 - [ ] Share path traversal and schema evidence across commands and option values.

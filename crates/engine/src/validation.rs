@@ -163,18 +163,21 @@ async fn policy_valid(
     } else {
         0
     };
-    for operand in operands.into_iter().take(count) {
-        if operand.value == "-" && command != "download" && command != "upload" {
-            continue;
+    let checked = futures::future::join_all(operands.into_iter().take(count).map(|operand| {
+        let cwd = &cwd;
+        async move {
+            if operand.value == "-" && command != "download" && command != "upload" {
+                return true;
+            }
+            let Ok(Some(info)) = host::stat(host, &resolve(operand, cwd, env), false).await else {
+                return false;
+            };
+            !((directory_only && !info.directory)
+                || ((script || command == "download") && !info.file))
         }
-        let Ok(Some(info)) = host::stat(host, &resolve(operand, &cwd, env), false).await else {
-            return Ok(false);
-        };
-        if directory_only && !info.directory || (script || command == "download") && !info.file {
-            return Ok(false);
-        }
-    }
-    Ok(true)
+    }))
+    .await;
+    Ok(checked.into_iter().all(|valid| valid))
 }
 
 /// Parse plain shell arguments without expansion or execution.
