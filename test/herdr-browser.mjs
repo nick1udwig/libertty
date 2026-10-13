@@ -403,6 +403,25 @@ try {
   assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control'));
   assert.equal(await page.locator('.herdr-view').count(), 0); assert.equal(fixture.snapshot.agents.length, 3);
   await page.setViewportSize({ width: 390, height: 844 });
+  // Reopening a dedicated local Herdr transport reuses its tab after the source closes.
+  const localHerdr = await page.evaluate(async () => {
+    const api = async (name, data) => { const response = await fetch(new URL('api/' + name, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); return result; };
+    const source = await api('sessions', { files: true, name: 'Dedicated Herdr' });
+    const target = await api('herdr/connect', { source: source.id, session: '' });
+    const tab = { id: crypto.randomUUID(), session: source.id, backendId: 'primary', hostId: 'local', pluginId: 'herdr', pluginVersion: '1', mode: 'herdr', ownsSession: true, name: 'Dedicated Herdr', ...target };
+    const tabs = JSON.parse(localStorage.getItem('termai.tabs')); tabs.push(tab); localStorage.setItem('termai.tabs', JSON.stringify(tabs)); localStorage.setItem('termai.activeTab', JSON.stringify(tab.id));
+    return tab;
+  });
+  await page.reload(); await tab(0).waitFor();
+  await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, localHerdr.session);
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).waitFor();
+  await page.locator('#terminal-back').click();
+  await page.getByRole('button', { name: /^Terminals for This machine / }).click();
+  await page.getByRole('menuitem', { name: 'Connect Herdr', exact: true }).click();
+  await page.locator('#plugin-connect-form').getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.session !== previous.session && tab.herdrSource === tab.session && !tab.ended), localHerdr);
+  await tab(0).waitFor(); assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the local Herdr tab');
+  await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
   const controlsBeforeSSH = fixture.actions.filter(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control').length;
   // A real disposable SSH server exercises command capture and Unix socket forwarding.
   await mkdir(fixture.directory + '/remote');
@@ -436,6 +455,22 @@ try {
   assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Explicit terminal focus must enable SSH input');
   await page.keyboard.type('SSH input');
   await until(() => fixture.actions.filter(a => a.method === 'pane.send_text').map(a => a.params.text).join('').includes('SSH input'), 'input through SSH Unix forwarding');
+  // A captured SSH profile reconnects through its saved source host with fresh credentials.
+  const reconnectKey = await page.evaluate(async privateKey => {
+    const response = await fetch(new URL('api/keychain', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create', name: 'Reconnect fixture', privateKey, passphrase: 'fixture-passphrase' }) });
+    const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
+  }, identity.private);
+  const remoteHerdrTab = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.mode === 'herdr'));
+  await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, remote.id);
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
+  await page.locator('#ssh-dialog').waitFor({ state: 'visible' });
+  await page.locator('#ssh-key').selectOption(reconnectKey.fingerprint); await page.locator('#ssh-secret').fill('fixture-passphrase'); await page.locator('#ssh-connect').click();
+  await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.herdrSource !== previous.herdrSource && tab.herdrSource === tab.session && tab.ownsSession && !tab.ended), remoteHerdrTab);
+  await tab(0).waitFor(); terminal = await agentFrame();
+  assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the captured SSH Herdr tab');
+  const restoredSource = await page.evaluate(hostId => JSON.parse(localStorage.getItem('termai.hosts')).find(host => host.id === hostId).herdrSource, remoteHost.id);
+  assert.notEqual(restoredSource, remote.id, 'The captured host must save its refreshed source');
+  assert.equal((await request('herdr/ticket?herdrSource=' + restoredSource, {}, bearer)).status, 404, 'Reconnection retains owner isolation');
   const standalone = await context.newPage(); await standalone.goto(base + '/terminal.html');
   await standalone.waitForFunction(() => window.__state?.ready);
   await standalone.locator('#terminal textarea').focus(); await standalone.keyboard.type('herdr'); await standalone.keyboard.press('Enter');

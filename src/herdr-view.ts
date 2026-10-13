@@ -11,6 +11,7 @@ interface Host {
   api<T>(path: string, data?: unknown): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
   notice(message: string): void;
+  reconnect?(): Promise<void>;
   ready?(): void;
   notificationDevice?(): string | undefined;
 }
@@ -220,7 +221,14 @@ export class HerdrView {
         this.setLoading(false); this.host.ready?.();
         this.reconnect = setTimeout(() => void this.connect(), 2000);
       };
-    } catch (error: any) { if (!this.disposed) { this.status.textContent = error.message; this.setLoading(false); this.host.ready?.(); this.reconnect = setTimeout(() => void this.connect(), 3000); } }
+    } catch (error: any) { if (!this.disposed) {
+      this.status.textContent = error.message; this.setLoading(false); this.host.ready?.();
+      if (error.status === 404 && this.host.source && this.host.reconnect) {
+        const reconnect = node('button', 'secondary', 'Reconnect'); reconnect.type = 'button';
+        reconnect.onclick = async () => { reconnect.disabled = true; try { await this.host.reconnect!(); } catch (error: any) { this.host.notice(error.message); } finally { reconnect.disabled = false; } };
+        this.status.append(document.createElement('br'), reconnect);
+      } else this.reconnect = setTimeout(() => void this.connect(), 3000);
+    } }
     finally { this.connecting = false; }
   }
   private receive(message: HerdrMessage) {

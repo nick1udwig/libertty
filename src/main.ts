@@ -56,7 +56,7 @@ const herdrNotifications = new HerdrNotifications(<T>(id: string, name: string, 
 for (const plugin of builtinPlugins({
   active: tab => tabs.includes(tab),
   backend: tab => backendFor(tab.backendId), host: id => hosts.find(host => host.id === id), authenticate, token: tokenFor, api,
-  connect: (host, id) => configureConnection(host, id), closeSession: closeTabSession, store, notice, terminalURL, openReading,
+  connect: (host, id) => configureConnection(host, id), closeSession: closeTabSession, reconnectHerdr, store, notice, terminalURL, openReading,
   frame(tab, frame) { if (frame) frames.set(tab.id, frame); else frames.delete(tab.id); },
   herdr(tab, view) { if (view) herdrViews.set(tab.id, view); else { herdrViews.delete(tab.id); herdrAttention.delete(tab.id); } },
   ready(tab) { if (tab.id === active) updateViewVisibility(); },
@@ -575,7 +575,7 @@ const keyValue = (key: KeyInfo) => key.reference ? 'backend:' + key.id : key.fin
 const selectedBackendKey = () => vaults.get(sshHost?.backendId || '')?.keys.find(key => keyValue(key) === select('ssh-key').value);
 let selectedRoute: { backend: BackendProfile; keyId?: string; compression?: boolean } | undefined, routeGeneration = 0;
 const openingHosts = new Map<string, Promise<void>>();
-interface ConnectionRequest { pluginId: string; pluginVersion?: string; readPath?: string; herdrSession?: string }
+interface ConnectionRequest { pluginId: string; pluginVersion?: string; readPath?: string; herdrSession?: string; herdrTab?: TerminalTab; herdrHost?: HostProfile }
 let sshRequest: ConnectionRequest = { pluginId: 'terminal' };
 let pendingConnection: { host: HostProfile; request: ConnectionRequest } | undefined;
 function configureConnection(host: HostProfile, pluginId: string, pkg?: PluginPackage): Promise<void> {
@@ -604,7 +604,7 @@ $<HTMLFormElement>('plugin-connect-form').onsubmit = event => {
 async function openHost(host: HostProfile, createNew = false, request: ConnectionRequest = { pluginId: host.kind === 'herdr' ? 'herdr' : 'terminal' }) {
   if (!createNew) {
     const open = hostTabs(host).filter(tab => tabPluginId(tab) === request.pluginId), existing = open.find(tab => tab.id === active) || open.sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))[0];
-    if (existing) { activate(existing.id); return; }
+    if (existing) { if (request.pluginId === 'herdr') await resumeHerdr(existing); else activate(existing.id); return; }
   }
   if (openingHosts.has(host.id)) return openingHosts.get(host.id);
   const work = connectHost(host, request).finally(() => openingHosts.delete(host.id)); openingHosts.set(host.id, work); return work;
@@ -616,24 +616,54 @@ async function finishConnection(host: HostProfile, backend: BackendProfile, sess
     const read = request.readPath ? await api<{ path: string }>(backend, 'api/plugins/read?' + new URLSearchParams({ path: request.readPath, session })) : undefined;
     const plugin = plugins.get(request.pluginId, request.pluginVersion);
     if (!plugin) throw new Error('This plugin is no longer available.');
-    const tab: TerminalTab = { id: crypto.randomUUID(), pluginId: plugin.id, pluginVersion: plugin.version, pluginState: null, readPath: read?.path, ownsSession: true,
+    const tab: TerminalTab = { id: request.herdrTab?.id || crypto.randomUUID(), pluginId: plugin.id, pluginVersion: plugin.version, pluginState: null, readPath: read?.path, ownsSession: true,
       session, backendId: backend.id, hostId: host.id, name: plugin.name + ' · ' + host.name + (target?.herdrSession ? ' · ' + target.herdrSession : ''), lastUsed: Date.now(),
       ...(target ? { mode: 'herdr', herdrSession: target.herdrSession, herdrSource: target.herdrSource } : {}) };
-    tabs.push(tab); active = tab.id; store(); show('terminal'); await mount(tab);
+    if (request.herdrTab && !tabs.includes(request.herdrTab)) { await api(backend, 'api/sessions/close', {}, session); return; }
+    if (target && request.herdrHost) {
+      const saved = request.herdrHost; saved.backendId = backend.id; saved.herdrSource = target.herdrSource;
+      tab.hostId = saved.id; tab.name = saved.name;
+    }
+    let connected = tab;
+    if (request.herdrTab) {
+      connected = request.herdrTab; tab.name = connected.name; unmount(connected); Object.assign(connected, tab, { ended: false });
+    } else tabs.push(tab);
+    active = connected.id; store(); show('terminal'); await mount(connected);
   } catch (error) { await api(backend, 'api/sessions/close', {}, session).catch(() => {}); throw error; }
+}
+async function resumeHerdr(tab: TerminalTab) {
+  const backend = backendFor(tab.backendId); await authenticate(backend);
+  if (!tab.ended) {
+    try { await api(backend, 'api/herdr/snapshot?' + new URLSearchParams({ herdrSession: tab.herdrSession || '', ...(tab.herdrSource ? { herdrSource: tab.herdrSource } : {}) })); }
+    catch (error: any) { if (error.status !== 404 || !tab.herdrSource) throw error; tab.ended = true; store(); }
+  }
+  if (tab.ended) await reconnectHerdr(tab);
+  else activate(tab.id);
+}
+async function reconnectHerdr(tab: TerminalTab) {
+  if (!tabs.includes(tab)) return;
+  const host = hosts.find(host => host.id === tab.hostId);
+  if (!host) throw new Error('This connection has no saved host. Open Herdr from its host again.');
+  if (host.kind === 'herdr' && !tab.herdrSource) {
+    unmount(tab); tab.ended = false; store(); activate(tab.id); await mount(tab); return;
+  }
+  const source = host.kind === 'herdr' ? hosts.find(source => source.id === host.herdrSourceHostId) : host;
+  if (!source || source.kind === 'herdr') throw new Error('The source host for this Herdr connection is missing. Add the host again and connect Herdr from its menu.');
+  if (tab.ownsSession) await api(backendFor(tab.backendId), 'api/sessions/close', {}, tab.session);
+  await connectHost(source, { pluginId: 'herdr', herdrSession: tab.herdrSession, herdrTab: tab, ...(host.kind === 'herdr' ? { herdrHost: host } : {}) });
 }
 async function connectHost(host: HostProfile, request: ConnectionRequest) {
   const backend = backendFor(host.backendId); await authenticate(backend);
   // Older captured Herdr profiles retain their original transport descriptor.
   if (host.kind === 'herdr') {
     const existing = tabs.find(tab => tabPluginId(tab) === 'herdr' && tab.backendId === host.backendId && (tab.herdrSession || '') === (host.herdrSession || '') && tab.herdrSource === host.herdrSource);
-    if (existing) { activate(existing.id); return; }
+    if (existing) { await resumeHerdr(existing); return; }
     const tab: TerminalTab = { id: crypto.randomUUID(), session: crypto.randomUUID(), name: host.name, backendId: backend.id, hostId: host.id, pluginId: 'herdr', pluginVersion: '1', mode: 'herdr', herdrSession: host.herdrSession, herdrSource: host.herdrSource, lastUsed: Date.now() };
     tabs.push(tab); active = tab.id; store(); show('terminal'); await mount(tab); return;
   }
-  if (request.pluginId === 'herdr') {
+  if (request.pluginId === 'herdr' && !request.herdrTab) {
     const existing = tabs.find(tab => tabPluginId(tab) === 'herdr' && tab.hostId === host.id && (tab.herdrSession || '') === (request.herdrSession || ''));
-    if (existing) { activate(existing.id); return; }
+    if (existing) { await resumeHerdr(existing); return; }
   }
   if (host.kind === 'http') { const result = await api<{ id: string }>(backend, 'api/sessions', { name: host.name, files: request.pluginId !== 'terminal' }); await finishConnection(host, backend, result.id, request); return; }
   const vault = await api<{ keys: KeyInfo[]; knownHosts: KnownHost[] }>(backend, 'api/keychain'); vaults.set(backend.id, vault); sshHost = host; sshRequest = request;
