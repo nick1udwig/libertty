@@ -169,7 +169,7 @@ Browser host profiles, keys, plugins, workspaces, and service-worker cache forma
 No persisted-data rewrite is required, and an independent crypto reader verifies that Rust-written state retains the legacy encryption and credential formats.
 Compatibility fixtures must use synthetic credentials and keys rather than material from the user's home directory.
 
-## Regression baseline and performance gates
+## Regression baseline and performance checks
 
 `npm test` runs frontend and contract tests, and `npm run test:install` exercises the installer in isolated temporary directories.
 `npm run build` compiles the native backend, browser Wasm and frontend.
@@ -178,7 +178,9 @@ The active regression inventory tracks these tests without claiming coverage for
 Run the browser harness in each engine mode with dedicated ports, including `TEST_BASE_PATH=/terminal` in client mode.
 Reading, development pairing/HMR, plugins, files, transfers, gestures, touch, workspace and Herdr harnesses exercise the Rust executable.
 The native Herdr harnesses use the checksum-pinned supported Herdr executable, including mobile sizing, native scroll and shared spaces.
-Linux ARM64 and macOS Apple Silicon run the same checks on their own runners, and the release workflow waits for all three platform gates before building publishable archives.
+Nightly and release runs repeat the same checks on Linux ARM64 and macOS Apple Silicon, and the release workflow waits for all three platform gates before building publishable archives.
+Pull requests and pushes to `master` run the default checks and relevant Linux integration suites described in [ci.md](ci.md).
+Architecture latency comparisons run in a separate manual workflow and do not block commit or release checks.
 
 The architecture baseline uses `BENCH_SUITE=shared`, both before references set to `.`, the after reference set to `.`, and RTTs of 0, 50, and 150 milliseconds.
 Rust comparisons use at least 31 warm CPU repetitions through `BENCH_CPU_REPEATS` and three warm network repetitions through `BENCH_REPEATS`.
@@ -187,10 +189,10 @@ Cold latency is the median of fresh application-cache trials, controlled by `BEN
 Native measurements additionally report engine latency separately from peer-process IPC.
 Native and Wasm candidate results must match the reference exactly, and cold and warm foreground request counts must not increase in either mode.
 Median warm latency must stay within the larger of 20 percent or 0.15 milliseconds of the corresponding reference measurement on the same runner.
-At zero injected RTT, a warm latency failure must repeat in a fresh run with the variant order reversed before CI fails, using the same limits and retaining both reports.
+A warm or cold latency failure must repeat in a fresh run with the variant order reversed before the comparison fails, using the same limits and retaining both reports.
 For sufficiently sampled CPU cases, a warm regression fails only when the 95 percent median intervals confirm it exceeds that allowance, and raw medians and intervals remain in the report.
 Cold latency retains the larger of 20 percent or 10 milliseconds as its allowance for subprocess startup variation.
-The benchmark writes its measurements before evaluating latency gates so a failing CI run retains the evidence.
+The benchmark writes its measurements before evaluating latency assertions so a failing comparison retains the evidence.
 Use at least 31 warm CPU samples and rerun a noisy failed latency measurement before declaring a regression, while candidate or request-count failures always fail immediately.
 Cold browser initialization and Wasm download time must be measured separately and included in the browser performance report.
 

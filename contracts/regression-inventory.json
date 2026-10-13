@@ -666,6 +666,17 @@
       ]
     },
     {
+      "source": "test/ci-suites.test.mjs",
+      "owner": "integration",
+      "assertions": [
+        "documentation, unit tests and performance changes need only the default checks",
+        "feature changes select their consumers without the complete platform matrix",
+        "shared inputs and unknown changes retain all integration coverage",
+        "every selected browser harness exists and belongs to one targeted suite",
+        "push and pull request diffs cover deletions and renames without base-branch changes"
+      ]
+    },
+    {
       "source": "test/compound-repair.test.ts",
       "owner": "frontend",
       "assertions": [

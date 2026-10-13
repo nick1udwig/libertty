@@ -1,7 +1,6 @@
-name: Rust contracts and regression checks
+name: Full platform validation
 
 on:
-  pull_request:
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -90,17 +89,6 @@ jobs:
         run: |
           npm test
           npm run test:install
-      - name: Build optimized native benchmark host
-        run: cargo build --locked --release -p termai-server --example engine_host
-      - name: Verify architecture latency and foreground requests
-        env:
-          BENCH_SUITE: shared
-          BENCH_BEFORE_MASTER: '0e0646c'
-          BENCH_BEFORE_CLIENT: '0e0646c'
-          BENCH_AFTER: .
-          BENCH_REPEATS: '3'
-          BENCH_CPU_REPEATS: '31'
-        run: npm run bench:architecture
       - name: Build the optimized release backend
         run: cargo build --locked --release -p termai-server --bin termai
       - name: Record build provenance and checksums

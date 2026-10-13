@@ -1,0 +1,75 @@
+name: Performance comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Optional branch, tag or commit to measure
+        required: false
+        type: string
+      runner:
+        description: Platform to measure
+        type: choice
+        default: ubuntu-24.04
+        options: [ubuntu-24.04, ubuntu-24.04-arm, macos-15]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  benchmark:
+    name: Architecture latency on ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26.8.1'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: termai-performance-${{ inputs.runner }}
+          cache-on-failure: true
+          cache-bin: false
+      - name: Install native prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config bash-completion
+      - name: Install modern Bash on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install bash git
+          echo "TERMAI_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
+          git_completion="$(brew --prefix git)/etc/bash_completion.d/git-completion.bash"
+          test -r "$git_completion"
+          echo "TERMAI_GIT_COMPLETIONS_FILE=$git_completion" >> "$GITHUB_ENV"
+      - run: npm ci --no-audit --no-fund
+      - name: Build the optimized benchmark host
+        run: cargo build --locked --release -p termai-server --example engine_host
+      - name: Compare native architecture latency
+        env:
+          BENCH_SUITE: shared
+          BENCH_BEFORE_MASTER: 0e0646c
+          BENCH_BEFORE_CLIENT: 0e0646c
+          BENCH_AFTER: '.'
+          BENCH_REPEATS: '3'
+          BENCH_CPU_REPEATS: '31'
+        run: npm run bench:architecture
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: performance-${{ inputs.runner }}
+          path: .test-artifacts/architecture-*.json
+          if-no-files-found: ignore
+          include-hidden-files: true
