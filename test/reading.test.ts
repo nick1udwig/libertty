@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultReadingPhrases, readingPath, readingPhrases, readingRequest, readingPipeline, readingSuggestionInput, readingSuggestionChoice } from '../src/reading-request.ts';
 import { nativeSuggest } from './support/engine.ts';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, stat, link } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -37,16 +37,32 @@ test('reading alternatives use the command engine’s verified file and director
     await writeFile(path.join(cwd, 'README.md'), '# Read me');
     await writeFile(path.join(cwd, 'docs', 'Guide.md'), '# Guide');
     const catalog = { cwd, commands: ['cat', 'ls'], paths: ['README.md', 'docs/', 'docs/Guide.md'], history: [] };
-    for (const [spoken, expected] of [
-      ['look at readme dot md', 'look at README.md'],
-      ['look at docs slash guide dot md', 'look at docs/Guide.md'],
-      ['inspect readme dot md', 'inspect README.md'],
-    ]) {
-      const request = readingRequest(spoken, ['look at', 'inspect'], true)!;
-      const candidates = await nativeSuggest(readingSuggestionInput(request), catalog, { HOME: cwd, PATH: process.env.PATH! });
-      const choices = candidates.filter(candidate => !candidate.literal)
-        .map(candidate => readingSuggestionChoice(candidate.command, request.phrase)).filter(Boolean);
-      assert.equal(choices[0], expected, JSON.stringify(candidates));
+    for (const aliases of [false, true]) {
+      if (aliases) {
+        // Matching inodes reproduce case-insensitive lookups on Linux too.
+        for (const [actual, alias] of [['README.md', 'readme.md'], ['docs/Guide.md', 'docs/guide.md']]) {
+          if (!await stat(path.join(cwd, alias)).catch(() => undefined)) await link(path.join(cwd, actual), path.join(cwd, alias));
+        }
+      }
+      for (const [spoken, expected] of [
+        ['look at readme dot md', 'look at README.md'],
+        ['look at docs slash guide dot md', 'look at docs/Guide.md'],
+        ['inspect readme dot md', 'inspect README.md'],
+      ]) {
+        const request = readingRequest(spoken, ['look at', 'inspect'], true)!;
+        const candidates = await nativeSuggest(readingSuggestionInput(request), catalog, { HOME: cwd, PATH: process.env.PATH! });
+        const choices = candidates.filter(candidate => !candidate.literal)
+          .map(candidate => readingSuggestionChoice(candidate.command, request.phrase)).filter(Boolean);
+        assert.ok(choices.length, JSON.stringify(candidates));
+        const selected = readingPath(choices[0]!, [request.phrase]);
+        assert.ok(selected, JSON.stringify(candidates));
+        const target = readingPath(expected, [request.phrase])!;
+        const [selectedFile, targetFile] = await Promise.all([stat(path.resolve(cwd, selected)), stat(path.resolve(cwd, target))]);
+        assert.equal(selectedFile.dev, targetFile.dev, JSON.stringify(candidates));
+        assert.equal(selectedFile.ino, targetFile.ino, JSON.stringify(candidates));
+        const lowerCaseFile = await stat(path.resolve(cwd, target.toLowerCase())).catch(() => undefined);
+        if (lowerCaseFile?.dev !== targetFile.dev || lowerCaseFile?.ino !== targetFile.ino) assert.equal(choices[0], expected, JSON.stringify(candidates));
+      }
     }
     assert.equal(readingSuggestionChoice("cat 'note with spaces.md'", 'look at'), "look at 'note with spaces.md'");
     assert.equal(readingSuggestionChoice('ls README.md', 'look at'), undefined);
