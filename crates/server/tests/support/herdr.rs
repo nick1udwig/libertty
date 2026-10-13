@@ -128,6 +128,18 @@ impl Fixture {
                                 actions.lock().unwrap().push(request.clone());
                                 json!({"type":"ok"})
                             }
+                            "worktree.list" => {
+                                actions.lock().unwrap().push(request.clone());
+                                json!({"source":{"repo_name":"repo","repo_root":"/workspace"},"worktrees":[{"path":"/workspace","label":"main","is_bare":false,"is_prunable":false},{"path":"/worktrees/repo/review","label":"review","is_bare":false,"is_prunable":false},{"path":"/pruned","is_prunable":true}]})
+                            }
+                            "worktree.create" | "worktree.open" => {
+                                actions.lock().unwrap().push(request.clone());
+                                json!({"workspace":{"workspace_id":"w2"},"root_pane":{"terminal_id":"term_1"}})
+                            }
+                            "pane.split" => {
+                                actions.lock().unwrap().push(request.clone());
+                                json!({"pane":{"terminal_id":"term_split"}})
+                            }
                             "pane.send_text" | "pane.send_input" => {
                                 actions.lock().unwrap().push(request.clone());
                                 screen

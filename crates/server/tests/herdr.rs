@@ -4,6 +4,82 @@ use termai_server::herdr;
 mod support;
 
 #[tokio::test]
+async fn worktrees_and_splits_are_scoped_to_the_held_space() {
+    let fixture = support::Fixture::new().await;
+    for input in [
+        json!({"action":"list-worktrees","workspaceId":"missing"}),
+        json!({"action":"split","workspaceId":"w1","terminalId":"other-space-pane","direction":"right"}),
+        json!({"action":"split","workspaceId":"w1","terminalId":"term_0","direction":"invalid"}),
+        json!({"action":"new-worktree","workspaceId":"w1","branch":"bad\nbranch"}),
+        json!({"action":"open-worktree","workspaceId":"w1","path":"/unlisted"}),
+        json!({"action":"open-worktree","workspaceId":"w1","path":"/pruned"}),
+    ] {
+        assert!(fixture.target.action(&input).await.is_err());
+    }
+    assert!(
+        fixture
+            .actions
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|a| a["method"] == "worktree.list")
+    );
+    let created = fixture
+        .target
+        .action(&json!({"action":"new-worktree","workspaceId":"w1","branch":"review/mobile"}))
+        .await
+        .unwrap();
+    assert_eq!(created, json!({"workspaceId":"w2","terminalId":"term_1"}));
+    fixture
+        .target
+        .action(
+            &json!({"action":"open-worktree","workspaceId":"w1","path":"/worktrees/repo/review"}),
+        )
+        .await
+        .unwrap();
+    fixture
+        .target
+        .action(
+            &json!({"action":"split","workspaceId":"w1","terminalId":"term_0","direction":"down"}),
+        )
+        .await
+        .unwrap();
+    let actions = fixture.actions.lock().unwrap();
+    assert_eq!(
+        actions
+            .iter()
+            .find(|a| a["method"] == "worktree.create")
+            .unwrap()["params"],
+        json!({"workspace_id":"w1","branch":"review/mobile","base":"HEAD","focus":false,"trust_repository":false})
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .find(|a| a["method"] == "worktree.open")
+            .unwrap()["params"],
+        json!({"workspace_id":"w1","path":"/worktrees/repo/review","focus":false,"trust_repository":false})
+    );
+    assert_eq!(
+        actions
+            .iter()
+            .find(|a| a["method"] == "pane.split")
+            .unwrap()["params"],
+        json!({"workspace_id":"w1","target_pane_id":"w1:p0","direction":"down","focus":false})
+    );
+    drop(actions);
+    fixture.snapshot.lock().unwrap()["workspaces"][0]["worktree"] =
+        json!({"is_linked_worktree":true});
+    assert!(
+        fixture
+            .target
+            .action(&json!({"action":"list-worktrees","workspaceId":"w1"}))
+            .await
+            .unwrap_err()
+            .contains("parent space")
+    );
+}
+
+#[tokio::test]
 async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
     let fixture = support::Fixture::new().await;
     assert_eq!(

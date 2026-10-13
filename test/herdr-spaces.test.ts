@@ -1,6 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spaceLayout, dropSpace } from '../src/herdr-spaces.ts';
+import { spaceLayout, dropSpace, spaceTerminal, worktreePath } from '../src/herdr-spaces.ts';
+
+test('held-space actions use its remembered pane, then desktop selection, then first pane', () => {
+  const space = { id: 'held', name: 'Held', terminalIds: ['original', 'split'], selectedTerminalId: 'original' };
+  assert.equal(spaceTerminal(space, 'split'), 'split');
+  assert.equal(spaceTerminal(space, 'other-space-pane'), 'original');
+  assert.equal(spaceTerminal({ ...space, selectedTerminalId: undefined }), 'original');
+  assert.equal(spaceTerminal({ ...space, terminalIds: [], selectedTerminalId: undefined }), '');
+});
+
+test('checkout preview follows Herdr desktop branch slug rules', () => {
+  assert.equal(worktreePath('/worktrees/', 'repo', 'issue/137 Worktree_Spaces'), '/worktrees/repo/issue-137-worktree-spaces');
+  assert.equal(worktreePath('/worktrees', 'repo', '///'), '/worktrees/repo/worktree');
+});
 
 test('space stacks support edge reordering, joining, extraction and closed members without losing spaces', () => {
   let layout = spaceLayout(['a', 'b', 'c', 'd'], []);

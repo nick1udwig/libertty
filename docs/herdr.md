@@ -83,7 +83,13 @@ Tap a selected space again to choose one of its terminals or create an agent wit
 Agent creation lets you choose a name, agent type and directory; the type must be installed on that host.
 
 Swipe left or right to scroll the strip in either Spaces or Agents mode.
-Hold a space for Rename and Close.
+Hold a space for Rename, New worktree, Open worktree, Split and Close.
+Worktree actions use the held space’s repository, including when another space is selected, and start from the repository’s parent space just as on desktop.
+New worktree creates a branch from `HEAD` in Herdr’s configured worktree directory, while Open worktree lists existing usable checkouts.
+Split offers Right and Down and targets the held space’s remembered terminal, falling back to its desktop-selected terminal.
+The refreshed terminal dropdown immediately includes the new pane, and both desktop and mobile see the same worktrees and splits.
+The dialogs show progress and errors, prevent repeated submissions, and preserve selection on cancellation or failure.
+Local and SSH connections route these actions through their selected Herdr server and session, with update guidance if its API is unavailable.
 Hold, then drag onto the left or right edge of another space to reorder; drop on its middle to stack the spaces.
 The count button expands or collapses a stack.
 Expand it and drag a member to an edge to remove it.

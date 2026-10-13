@@ -4,8 +4,13 @@ export interface HerdrAgent {
   workspaceId?: string; tabId?: string;
   status: HerdrStatus; sequence: number; completion?: number; cwd: string;
 }
-export interface HerdrSpace { id: string; name: string; terminalIds: string[]; selectedTerminalId?: string; cwd?: string }
-export interface HerdrSnapshot { version: string; protocol: number; agents: HerdrAgent[]; terminals?: HerdrAgent[]; spaces?: HerdrSpace[] }
+export interface HerdrSpace { id: string; name: string; terminalIds: string[]; selectedTerminalId?: string; cwd?: string; linkedWorktree?: boolean }
+export interface HerdrSnapshot { version: string; protocol: number; agents: HerdrAgent[]; terminals?: HerdrAgent[]; spaces?: HerdrSpace[]; worktreeDirectory?: string }
+export interface HerdrWorktrees {
+  source: { repo_name: string; repo_root: string };
+  worktrees: { path: string; branch?: string; label: string; is_bare: boolean; is_prunable: boolean; open_workspace_id?: string }[];
+  directory?: string;
+}
 export type HerdrMessage =
   | { type: 'snapshot'; snapshot: HerdrSnapshot }
   | { type: 'error'; message: string; terminalId?: string };

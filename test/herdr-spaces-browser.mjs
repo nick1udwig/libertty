@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, realpath, rm } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
 import { chromium } from 'playwright-core';
@@ -14,6 +14,9 @@ const wait = async (check, label) => { for (let end = Date.now() + 15000; Date.n
 let herdr, desktop, backend, browser;
 try {
   await mkdir(dir + '/alpha', { recursive: true }); await mkdir(dir + '/beta project');
+  execFileSync('git', ['init', '-b', 'main', dir + '/alpha'], { stdio: 'ignore' });
+  execFileSync('git', ['-C', dir + '/alpha', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
+  execFileSync('git', ['-C', dir + '/alpha', 'worktree', 'add', '-b', 'existing-review', dir + '/existing-review'], { stdio: 'ignore' });
   herdr = spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server'], { cwd: dir, env, stdio: 'ignore' });
   await wait(async () => { try { await herdrSnapshot(target); return true; } catch { return false; } }, 'isolated Herdr');
   desktop = pty.spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', [], { cwd: dir, env, cols: 150, rows: 45, name: 'xterm-256color' }); desktop.onData(() => {});
@@ -94,12 +97,62 @@ try {
   const rect = await bounds(beta); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2);
   assert.equal(await page.evaluate(() => window.__touchSource), 'space:' + beta); await delay(500); await touch('touchEnd');
   await page.locator('.herdr-tab-menu:visible').waitFor();
-  assert.deepEqual(await page.locator('.herdr-tab-menu:visible [role=menuitem]').allTextContents(), ['Rename', 'Close']);
+  assert.deepEqual(await page.locator('.herdr-tab-menu:visible [role=menuitem]').allTextContents(), ['Rename', 'New worktree', 'Open worktree', 'Split', 'Close']);
   await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Rename', exact: true }).click();
   await page.getByLabel('Space name', { exact: true }).fill('Review'); await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
   await wait(async () => (await herdrSnapshot(target)).spaces.find(space => space.id === beta)?.name === 'Review', 'shared space rename');
   await tab(beta).click();
   await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Create agent', exact: true }).waitFor();
+  const hold = async id => { const rect = await bounds(id); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd'); await page.locator('.herdr-tab-menu:visible').waitFor(); };
+  const menuAction = name => page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name, exact: true }).click();
+  const selected = () => page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal');
+  await hold(alpha); await menuAction('New worktree'); await page.getByLabel('Branch', { exact: true }).waitFor();
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.equal(await selected(), 'space:' + beta, 'Cancelling on an inactive held space preserves selection');
+  await hold(beta); await menuAction('New worktree'); await page.locator('.herdr-space-action .form-error').filter({ hasText: /Git|repo/i }).waitFor();
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.equal(await selected(), 'space:' + beta, 'Discovery failure preserves selection');
+  const alphaBefore = (await herdrSnapshot(target)).spaces.find(space => space.id === alpha);
+  await hold(alpha); await menuAction('Split');
+  let splitRequests = 0;
+  await page.route('**/api/herdr/action*', async route => {
+    if (route.request().postDataJSON()?.action !== 'split') return route.continue();
+    splitRequests++; await route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Split refused; retry on this host.' }) });
+  });
+  await page.getByRole('dialog').getByRole('button', { name: 'Split', exact: true }).click();
+  await page.locator('.herdr-space-action .form-error').filter({ hasText: 'Split refused' }).waitFor();
+  assert.equal(await selected(), 'space:' + beta, 'Split errors preserve the active space');
+  await page.unroute('**/api/herdr/action*');
+  await page.route('**/api/herdr/action*', async route => {
+    if (route.request().postDataJSON()?.action !== 'split') return route.continue();
+    splitRequests++; await delay(300); await route.continue();
+  });
+  await page.getByLabel('Split direction').selectOption('down');
+  await page.locator('.herdr-space-action form').evaluate(form => { form.requestSubmit(); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
+  assert.equal(splitRequests, 2, 'Only one successful split request despite duplicate form submission');
+  await page.unroute('**/api/herdr/action*');
+  const alphaSplit = (await herdrSnapshot(target)).spaces.find(space => space.id === alpha);
+  assert.equal(alphaSplit.terminalIds.length, alphaBefore.terminalIds.length + 1, 'A real split is created in the held space');
+  assert.equal(await selected(), 'space:' + beta, 'Splitting an inactive held space preserves selection');
+  await tab(alpha).click(); await tab(alpha).click();
+  const newPane = alphaSplit.terminalIds.find(id => !alphaBefore.terminalIds.includes(id));
+  const newTerminal = (await herdrSnapshot(target)).terminals.find(t => t.terminalId === newPane);
+  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: newTerminal.name + ' · ' + newTerminal.workspace, exact: true }).last().click();
+  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === newPane || await page.locator('.herdr-terminal:visible').getAttribute('src').then(src => src?.includes(encodeURIComponent(newPane))), 'new split is accessible in dropdown');
+  await tab(beta).click(); await hold(alpha); await menuAction('New worktree');
+  await page.getByLabel('Branch', { exact: true }).fill('mobile-review');
+  await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
+  await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
+  const worktreeSpace = (await herdrSnapshot(target)).spaces.find(space => !before.includes(space.id) && space.id !== created);
+  assert.ok(worktreeSpace, 'Worktree creation adds a shared native space');
+  assert.match(execFileSync('git', ['-C', dir + '/alpha', 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }), /refs\/heads\/mobile-review/);
+  await tab(beta).click(); await hold(alpha); await menuAction('Open worktree');
+  await page.getByLabel('Worktree', { exact: true }).selectOption(dir + '/existing-review');
+  await page.getByRole('dialog').getByRole('button', { name: 'Open', exact: true }).click();
+  await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
+  const openedSpaceId = (await selected()).slice(6);
+  assert.equal((await herdrSnapshot(target)).spaces.find(space => space.id === openedSpaceId)?.cwd, dir + '/existing-review');
   await tab(created).click(); await wait(async () => await tab(created).getAttribute('aria-selected') === 'true', 'selected created space');
   const close = await bounds(created); await touch('touchStart', close.x + close.width / 2, close.y + close.height / 2); await delay(500); await touch('touchEnd');
   await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close', exact: true }).click();
@@ -108,7 +161,7 @@ try {
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces'); await page.locator('#herdr-strip').selectOption('agents'); await page.reload(); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'agents', 'Explicit agent mode survives reload');
   assert.deepEqual(errors, []);
-  console.log('PASS: real Herdr defaults to spaces, creates in the selected directory without a popup, shares native order/rename/close, and supports touch edge drops, persistent collapsible stacks, extraction and cancelled drags.');
+  console.log('PASS: real Herdr space actions create/open Git worktrees and pane splits in the held space, preserve selection on cancellation/errors, reject duplicate submissions, refresh the dropdown, and preserve rename/close/reorder/stacks.');
 } catch (error) {
   await browser?.contexts()[0]?.pages()[0]?.screenshot({ path: '/tmp/termai-herdr-spaces-failure.png' }).catch(() => {}); throw error;
 } finally {

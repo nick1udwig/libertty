@@ -152,7 +152,12 @@ impl Target {
                 return Ok(reply.get("result").cloned().unwrap_or(Value::Null));
             }
         };
-        tokio::time::timeout(Duration::from_secs(5), work)
+        let timeout = if method.starts_with("worktree.") {
+            60
+        } else {
+            5
+        };
+        tokio::time::timeout(Duration::from_secs(timeout), work)
             .await
             .map_err(|_| "Herdr did not respond.".to_owned())?
     }
@@ -181,6 +186,70 @@ impl Target {
             .iter()
             .find(|s| s.get("id") == input.get("workspaceId"));
         match input["action"].as_str().unwrap_or("") {
+            "list-worktrees" | "new-worktree" | "open-worktree" => {
+                let space = space.ok_or("This space has closed.")?;
+                if space["linkedWorktree"] == true {
+                    return Err(
+                        "New and open worktree actions start from the repo parent space.".into(),
+                    );
+                }
+                let params = json!({"workspace_id":space["id"],"trust_repository":false});
+                let mut listing = self.space_request("worktree.list", params.clone()).await?;
+                if !listing["worktrees"].is_array() || !listing["source"]["repo_name"].is_string() {
+                    return Err("This Herdr server does not provide worktree discovery. Update Herdr on this host.".into());
+                }
+                if input["action"] == "list-worktrees" {
+                    if let Some(directory) = snapshot.get("worktreeDirectory") {
+                        listing["directory"] = directory.clone();
+                    }
+                    return Ok(listing);
+                }
+                let mut params = params;
+                params["focus"] = json!(false);
+                let method = if input["action"] == "new-worktree" {
+                    params["branch"] = json!(name(&input["branch"])?);
+                    params["base"] = json!("HEAD");
+                    "worktree.create"
+                } else {
+                    let path = input["path"]
+                        .as_str()
+                        .ok_or("Choose an existing worktree.")?;
+                    if !array(&listing, "worktrees").iter().any(|entry| {
+                        entry["path"] == path
+                            && entry["is_bare"] != true
+                            && entry["is_prunable"] != true
+                    }) {
+                        return Err(
+                            "This worktree is no longer available. Reopen the worktree picker."
+                                .into(),
+                        );
+                    }
+                    params["path"] = json!(path);
+                    "worktree.open"
+                };
+                let created = self.space_request(method, params).await?;
+                if !created["workspace"]["workspace_id"].is_string() {
+                    return Err("Herdr changed the worktree but did not return its identity. Refresh spaces before retrying.".into());
+                }
+                Ok(
+                    json!({"workspaceId":created["workspace"]["workspace_id"],"terminalId":created["root_pane"]["terminal_id"]}),
+                )
+            }
+            "split" => {
+                let space = space.ok_or("This space has closed.")?;
+                let terminal = terminals
+                    .iter()
+                    .find(|t| {
+                        t.get("terminalId") == input.get("terminalId")
+                            && t.get("workspaceId") == space.get("id")
+                    })
+                    .ok_or("Choose a running terminal in this space.")?;
+                if !matches!(input["direction"].as_str(), Some("right" | "down")) {
+                    return Err("Choose a right or down split.".into());
+                }
+                let created = self.space_request("pane.split", json!({"workspace_id":space["id"],"target_pane_id":terminal["paneId"],"direction":input["direction"],"focus":false})).await?;
+                Ok(json!({"workspaceId":space["id"],"terminalId":created["pane"]["terminal_id"]}))
+            }
             "create-space" => {
                 if input.get("workspaceId").is_some() && space.is_none() {
                     return Err("This space has closed.".into());
@@ -310,6 +379,13 @@ impl Target {
                 }
             }
         }
+    }
+    async fn space_request(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.request(method, params).await.map_err(|error| {
+            if error.to_lowercase().contains("unknown method") || error.to_lowercase().contains("unsupported") {
+                format!("This Herdr server does not support {method}. Update Herdr on this host. ({error})")
+            } else { error }
+        })
     }
     pub async fn ensure(&self, cwd: &str) -> Result<(), String> {
         if self.request("session.snapshot", json!({})).await.is_ok() {
@@ -710,9 +786,15 @@ pub fn normalize(raw: &Value) -> Result<Value, String> {
         if let Some(id) = selected {
             space["selectedTerminalId"] = id.clone();
         }
+        if let Some(linked) = workspace["worktree"].get("is_linked_worktree") {
+            space["linkedWorktree"] = linked.clone();
+        }
         spaces.push(space);
     }
     let mut result = json!({"agents":agents,"terminals":terminals,"spaces":spaces});
+    if let Some(directory) = snapshot.get("worktree_directory") {
+        result["worktreeDirectory"] = directory.clone();
+    }
     for field in ["version", "protocol"] {
         if let Some(value) = snapshot.get(field) {
             result[field] = value.clone();

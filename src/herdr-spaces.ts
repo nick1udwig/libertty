@@ -1,6 +1,16 @@
 export interface SpaceLayout { order: string[]; groups: string[][] }
 export type SpaceDrop = 'before' | 'after' | 'group';
 
+export function spaceTerminal(space: import('./herdr-protocol.ts').HerdrSpace, remembered?: string): string {
+  return (remembered && space.terminalIds.includes(remembered) ? remembered : space.selectedTerminalId) || space.terminalIds[0] || '';
+}
+
+/** Match Herdr's desktop checkout preview; the server chooses the actual path. */
+export function worktreePath(directory: string, repo: string, branch: string): string {
+  const slug = branch.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'worktree';
+  return directory.replace(/\/$/, '') + '/' + repo + '/' + slug;
+}
+
 /** Stacks keep their Herdr spaces separate; only their strip presentation groups. */
 export function spaceLayout(order: string[], groups: string[][], live = order): SpaceLayout {
   const ids = [...new Set([...order.filter(id => live.includes(id)), ...live])];
