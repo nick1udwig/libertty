@@ -1,5 +1,4 @@
 use crate::{
-    dictation::Recording,
     herdr::Target,
     herdr_terminal_stream::{Hub, Size, Subscription},
     protocol::{ClientMessage, controls},
@@ -10,6 +9,11 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
+#[derive(Clone, Copy)]
+enum LayoutUpdate {
+    Reclaim,
+    Resize,
+}
 struct Inner {
     revision: u64,
     input: crate::input_controller::Controller,
@@ -29,6 +33,12 @@ struct Replacement {
     revision: u64,
     shell: crate::herdr::ShellInput,
     edit_id: Option<String>,
+}
+#[derive(Clone)]
+pub(crate) struct DictationGuard {
+    prompt: u64,
+    revision: u64,
+    shell: bool,
 }
 struct Input {
     text: String,
@@ -477,126 +487,69 @@ impl View {
         revision: u64,
         backend: bool,
     ) {
-        let cancel = self.cancel.child_token();
-        {
-            let mut inner = self.inner.lock().unwrap();
-            if inner.revision != revision || inner.prompt != prompt {
+        crate::input_coordinator::repair(
+            self.clone(),
+            crate::protocol::InputStamp { prompt, revision },
+            crate::protocol::Repair {
+                id,
+                text,
+                intent,
+                prompt,
+                revision,
+            },
+            backend,
+        );
+    }
+    fn refresh_layout(self: &Arc<Self>, size: Size, epoch: u64, update: LayoutUpdate) {
+        *self.baseline.lock().unwrap() = None;
+        self.send(json!({"type":"herdr-layout","cols":size.cols,"rows":size.rows,"ready":false}));
+        let weak = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let Some(view) = weak.upgrade() else { return };
+            // Reclaiming preserves an unfinished resize fence across rapid switches.
+            let pending = match update {
+                LayoutUpdate::Reclaim => *view.redraw_before.lock().unwrap(),
+                LayoutUpdate::Resize => None,
+            };
+            let revision = match pending {
+                Some(_) => pending,
+                None => {
+                    crate::herdr_redraw::revision(&view.target, &view.agent["paneId"], &view.cancel)
+                        .await
+                }
+            };
+            if view.cancel.is_cancelled()
+                || *view.layout.borrow() != epoch
+                || *view.size.lock().unwrap() != Some(size)
+                || (matches!(update, LayoutUpdate::Reclaim) && !*view.active.borrow())
+            {
                 return;
             }
-            inner.dictation_id = id.clone();
-            inner.input.replace_repair(id.clone(), cancel.clone());
-        }
-        let view = self.clone();
-        tokio::spawn(async move {
-            let target = &view.target;
-            let terminal = view.agent["terminalId"].as_str().unwrap_or("");
-            let services = &view.services;
-            let repair_cancel = &cancel;
-            let result = tokio::select! { biased;
-                _ = cancel.cancelled() => Err("Repair cancelled.".to_owned()),
-                result = tokio::time::timeout(std::time::Duration::from_secs(10), crate::alternatives::prepare(&text, &intent, |query| Box::pin(async move { target.suggest(terminal, &query, services.clone(), repair_cancel).await }))) => result.unwrap_or_else(|_| Err("Repair timed out.".into())),
-            };
-            let mut reply = json!({"type":"repair-result","id":id,"prompt":prompt,"accepted":false,"original":text,"selected":text,"candidates":[]});
-            match result {
-                Ok(prepared) => {
-                    let applied = async {
-                        view.guard(revision, &id)?;
-                        if cancel.is_cancelled() {
-                            return Err("Repair cancelled.".to_owned());
-                        }
-                        let replacement = {
-                            let mut inner = view.inner.lock().unwrap();
-                            let previous = inner
-                                .editable
-                                .clone()
-                                .ok_or("Only the latest dictated text can be replaced.")?;
-                            let shell = inner
-                                .shell
-                                .clone()
-                                .ok_or("The shell is no longer at the prompt.")?;
-                            if prepared.selected == previous.text {
-                                return Ok(());
-                            }
-                            inner.revision += 1;
-                            Replacement {
-                                previous,
-                                shell,
-                                revision: inner.revision,
-                                edit_id: None,
-                            }
-                        };
-                        let next = replacement.revision;
-                        view.input(
-                            &prepared.selected,
-                            false,
-                            Some((next, &id)),
-                            Some(replacement),
-                        )
-                        .await?;
-                        let screen = view.editable_screen(&prepared.selected).await?;
-                        view.guard(next, &id)?;
-                        view.inner.lock().unwrap().editable = Some(Editable {
-                            text: prepared.selected.clone(),
-                            screen,
-                        });
-                        Ok::<_, String>(())
+            *view.redraw_before.lock().unwrap() = revision;
+            match update {
+                LayoutUpdate::Reclaim => view.terminal.claim(),
+                LayoutUpdate::Resize => {
+                    if view.terminal.resize(Some(size)).is_err() {
+                        return;
                     }
-                    .await;
-                    reply["accepted"] = json!(applied.is_ok());
-                    if let Err(error) = applied {
-                        reply["error"] = json!(error);
-                    }
-                    reply["selected"] = json!(prepared.selected);
-                    reply["candidates"] = json!(prepared.candidates);
-                }
-                Err(error) => {
-                    reply["error"] = json!(error);
                 }
             }
-            let mut inner = view.inner.lock().unwrap();
-            reply["revision"] = json!(inner.revision);
-            if backend {
-                reply["source"] = json!("dictation");
-            }
-            if inner
-                .input
-                .repair
-                .as_ref()
-                .is_some_and(|(active, _)| active == &id)
-            {
-                inner.input.repair.take();
-            }
-            view.send(reply);
+            view.confirm_layout(size, revision, epoch);
         });
     }
     pub fn receive(self: &Arc<Self>, message: Value) -> Result<(), String> {
         let message: ClientMessage = serde_json::from_value(message)
             .map_err(|error| format!("Invalid terminal action: {error}"))?;
-        if message.edits_input() {
-            self.inner.lock().unwrap().input.cancel_repair(None);
+        if self.inner.lock().unwrap().input.intercept(&message) {
+            return Ok(());
         }
         match message {
-            ClientMessage::RepairCancel { id } => {
-                self.inner.lock().unwrap().input.cancel_repair(Some(&id));
-                Ok(())
-            }
             ClientMessage::Repair(request) => {
-                let crate::protocol::Repair {
-                    id,
-                    text,
-                    intent,
-                    prompt,
-                    revision,
-                } = request;
-                let (prompt, revision) = {
-                    let inner = self.inner.lock().unwrap();
-                    if prompt != inner.prompt || revision != inner.revision {
-                        self.send(json!({"type":"repair-result","id":id,"accepted":false,"revision":inner.revision,"prompt":inner.prompt,"original":text,"selected":text,"candidates":[]}));
-                        return Ok(());
-                    }
-                    (inner.prompt, inner.revision)
+                let guard = crate::protocol::InputStamp {
+                    prompt: request.prompt,
+                    revision: request.revision,
                 };
-                self.start_repair(id, text, intent, prompt, revision, false);
+                crate::input_coordinator::repair(self.clone(), guard, request, false);
                 Ok(())
             }
             ClientMessage::Ack { .. } => Ok(()),
@@ -621,35 +574,7 @@ impl View {
                 if active && changed {
                     let size = *self.size.lock().unwrap();
                     if let Some(size) = size {
-                        *self.baseline.lock().unwrap() = None;
-                        self.send(json!({"type":"herdr-layout","cols":size.cols,"rows":size.rows,"ready":false}));
-                        let weak = Arc::downgrade(self);
-                        tokio::spawn(async move {
-                            let Some(view) = weak.upgrade() else { return };
-                            // Preserve an unfinished resize fence across rapid switches.
-                            let pending = *view.redraw_before.lock().unwrap();
-                            let revision = match pending {
-                                Some(_) => pending,
-                                None => {
-                                    crate::herdr_redraw::revision(
-                                        &view.target,
-                                        &view.agent["paneId"],
-                                        &view.cancel,
-                                    )
-                                    .await
-                                }
-                            };
-                            if view.cancel.is_cancelled()
-                                || !*view.active.borrow()
-                                || *view.layout.borrow() != epoch
-                                || *view.size.lock().unwrap() != Some(size)
-                            {
-                                return;
-                            }
-                            *view.redraw_before.lock().unwrap() = revision;
-                            view.terminal.claim();
-                            view.confirm_layout(size, revision, epoch);
-                        });
+                        self.refresh_layout(size, epoch, LayoutUpdate::Reclaim);
                     } else {
                         self.terminal.refresh();
                     }
@@ -686,28 +611,7 @@ impl View {
                     *self.layout.borrow()
                 };
                 if changed && let Some(size) = size {
-                    *self.baseline.lock().unwrap() = None;
-                    self.send(json!({"type":"herdr-layout","cols":size.cols,"rows":size.rows,"ready":false}));
-                    let weak = Arc::downgrade(self);
-                    tokio::spawn(async move {
-                        let Some(view) = weak.upgrade() else { return };
-                        let revision = crate::herdr_redraw::revision(
-                            &view.target,
-                            &view.agent["paneId"],
-                            &view.cancel,
-                        )
-                        .await;
-                        if view.cancel.is_cancelled()
-                            || *view.layout.borrow() != epoch
-                            || *view.size.lock().unwrap() != Some(size)
-                        {
-                            return;
-                        }
-                        *view.redraw_before.lock().unwrap() = revision;
-                        if view.terminal.resize(Some(size)).is_ok() {
-                            view.confirm_layout(size, revision, epoch);
-                        }
-                    });
+                    self.refresh_layout(size, epoch, LayoutUpdate::Resize);
                     Ok(())
                 } else {
                     self.terminal.resize(size)
@@ -831,73 +735,19 @@ impl View {
                     inner.editable = None;
                     let prompt = inner.prompt;
                     let shell = inner.shell.is_some();
-                    let weak = Arc::downgrade(self);
-                    let result_id = id.clone();
-                    let phrases = request.reading_phrases.clone();
-                    let result = Arc::new(move |text: String| {
-                        let weak = weak.clone();
-                        let id = result_id.clone();
-                        let phrases = phrases.clone();
-                        Box::pin(async move {
-                            let view = weak.upgrade().ok_or(
-                                "Terminal input changed during dictation. No text was inserted."
-                                    .to_owned(),
-                            )?;
-                            view.guard(revision, &id)?;
-                            if text.is_empty() {
-                                return Ok(());
-                            }
-                            view.input(&text, true, Some((revision, &id)), None).await?;
-                            let screen = if shell {
-                                view.editable_screen(&text).await.ok()
-                            } else {
-                                None
-                            };
-                            let new_revision = {
-                                let mut inner = view.inner.lock().unwrap();
-                                if inner.revision != revision {
-                                    return Err("Terminal input changed during dictation.".into());
-                                }
-                                inner.revision += 1;
-                                inner.editable = screen.map(|screen| Editable {
-                                    text: text.clone(),
-                                    screen,
-                                });
-                                inner.revision
-                            };
-                            view.send(json!({"type":"pasted","text":text,"replace":false,"prompt":prompt,"revision":new_revision,"source":"dictation","repairing":shell && text.encode_utf16().count() <= 2000}));
-                            if shell && text.encode_utf16().count() <= 2000 {
-                                let intent = crate::alternatives::Intent::detect(&text, &phrases);
-                                view.start_repair(
-                                    crate::storage::random_hex(16),
-                                    text,
-                                    intent,
-                                    prompt,
-                                    new_revision,
-                                    true,
-                                );
-                            }
-                            Ok(())
-                        })
-                            as futures::future::BoxFuture<'static, Result<(), String>>
-                    });
-                    let weak = Arc::downgrade(self);
-                    let status = Arc::new(move |state: &str, reason: Option<String>| {
-                        if let Some(view) = weak.upgrade() {
-                            if !view.inner.lock().unwrap().input.status(&id, serial, state) {
-                                return;
-                            }
-                            let mut message = json!({"type":"dictation","id":id,"state":state});
-                            if let Some(reason) = reason {
-                                message["message"] = json!(reason);
-                            }
-                            view.send(message);
-                        }
-                    });
-                    inner.input.dictation = Some((
-                        request.id,
-                        Recording::start_async(std::env::vars().collect(), result, status),
-                    ));
+                    let guard = DictationGuard {
+                        prompt,
+                        revision,
+                        shell,
+                    };
+                    let recording = crate::input_coordinator::recording(
+                        self,
+                        guard,
+                        id.clone(),
+                        serial,
+                        request.reading_phrases,
+                    );
+                    inner.input.dictation = Some((id, recording));
                 }
                 Ok(())
             }
@@ -993,5 +843,181 @@ impl Drop for View {
     fn drop(&mut self) {
         self.cancel.cancel();
         self.inner.get_mut().unwrap().input.dictation.take();
+    }
+}
+
+impl crate::input_coordinator::RepairTarget for View {
+    type Guard = crate::protocol::InputStamp;
+    fn lifetime(&self) -> &CancellationToken {
+        &self.cancel
+    }
+    fn begin_repair(
+        &self,
+        guard: &Self::Guard,
+        reply: &mut crate::input_coordinator::RepairReply,
+        cancel: CancellationToken,
+    ) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.prompt != guard.prompt || inner.revision != guard.revision {
+            if !reply.backend() {
+                reply.prompt = inner.prompt;
+                reply.revision = inner.revision;
+                self.send(reply.value());
+            }
+            return false;
+        }
+        inner.dictation_id = reply.id.clone();
+        inner.input.replace_repair(reply.id.clone(), cancel);
+        true
+    }
+    async fn suggest(&self, text: &str, cancel: &CancellationToken) -> Result<Value, String> {
+        self.target
+            .suggest(
+                self.agent["terminalId"].as_str().unwrap_or(""),
+                text,
+                self.services.clone(),
+                cancel,
+            )
+            .await
+    }
+    async fn complete_repair(
+        &self,
+        guard: Self::Guard,
+        mut reply: crate::input_coordinator::RepairReply,
+        cancel: CancellationToken,
+    ) {
+        if reply.error.is_none() {
+            let applied = async {
+                self.guard(guard.revision, &reply.id)?;
+                if cancel.is_cancelled() {
+                    return Err("Repair cancelled.".to_owned());
+                }
+                let replacement = {
+                    let mut inner = self.inner.lock().unwrap();
+                    if inner.prompt != guard.prompt
+                        || inner.revision != guard.revision
+                        || inner.dictation_id != reply.id
+                        || cancel.is_cancelled()
+                    {
+                        return Err(
+                            "Terminal input changed during repair. No text was replaced.".into(),
+                        );
+                    }
+                    let previous = inner
+                        .editable
+                        .clone()
+                        .ok_or("Only the latest dictated text can be replaced.")?;
+                    let shell = inner
+                        .shell
+                        .clone()
+                        .ok_or("The shell is no longer at the prompt.")?;
+                    if reply.prepared.selected == previous.text {
+                        return Ok(());
+                    }
+                    inner.revision += 1;
+                    Replacement {
+                        previous,
+                        shell,
+                        revision: inner.revision,
+                        edit_id: None,
+                    }
+                };
+                let next = replacement.revision;
+                self.input(
+                    &reply.prepared.selected,
+                    false,
+                    Some((next, &reply.id)),
+                    Some(replacement),
+                )
+                .await?;
+                let screen = self.editable_screen(&reply.prepared.selected).await?;
+                let mut inner = self.inner.lock().unwrap();
+                if inner.revision != next || inner.dictation_id != reply.id || cancel.is_cancelled()
+                {
+                    return Err("Terminal input changed during repair.".into());
+                }
+                inner.editable = Some(Editable {
+                    text: reply.prepared.selected.clone(),
+                    screen,
+                });
+                Ok::<_, String>(())
+            }
+            .await;
+            reply.accepted = applied.is_ok();
+            reply.error = applied.err();
+        }
+        let mut inner = self.inner.lock().unwrap();
+        reply.revision = inner.revision;
+        inner.input.finish_repair(&reply.id);
+        self.send(reply.value());
+    }
+}
+impl crate::input_coordinator::RecordingTarget for View {
+    type Guard = DictationGuard;
+    const CHANGED: &'static str = "Terminal input changed during dictation. No text was inserted.";
+    async fn dictated(
+        self: &Arc<Self>,
+        guard: DictationGuard,
+        id: String,
+        _serial: u64,
+        text: String,
+        phrases: Value,
+    ) -> Result<(), String> {
+        let DictationGuard {
+            prompt,
+            revision,
+            shell,
+        } = guard;
+        self.guard(revision, &id)?;
+        if text.is_empty() {
+            return Ok(());
+        }
+        self.input(&text, true, Some((revision, &id)), None).await?;
+        let screen = if shell {
+            self.editable_screen(&text).await.ok()
+        } else {
+            None
+        };
+        let new_revision = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.revision != revision
+                || inner.prompt != prompt
+                || inner.dictation_id != id
+                || self.cancel.is_cancelled()
+            {
+                return Err("Terminal input changed during dictation.".into());
+            }
+            inner.revision += 1;
+            inner.editable = screen.map(|screen| Editable {
+                text: text.clone(),
+                screen,
+            });
+            inner.revision
+        };
+        self.send(json!({"type":"pasted","text":text,"replace":false,"prompt":prompt,"revision":new_revision,"source":"dictation","repairing":shell && text.encode_utf16().count() <= 2000}));
+        if shell && text.encode_utf16().count() <= 2000 {
+            let intent = crate::alternatives::Intent::detect(&text, &phrases);
+            self.start_repair(
+                crate::storage::random_hex(16),
+                text,
+                intent,
+                prompt,
+                new_revision,
+                true,
+            );
+        }
+        Ok(())
+    }
+    fn recording_status(
+        &self,
+        _guard: &DictationGuard,
+        id: &str,
+        serial: u64,
+        state: &str,
+        reply: Value,
+    ) {
+        if self.inner.lock().unwrap().input.status(id, serial, state) {
+            self.send(reply);
+        }
     }
 }

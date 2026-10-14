@@ -1,7 +1,7 @@
 //! Lifecycle and stale-result guards shared by shell and Herdr input adapters.
 use crate::{
     dictation::Recording,
-    protocol::{Dictation, DictationAction},
+    protocol::{ClientMessage, Dictation, DictationAction},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -12,6 +12,22 @@ pub struct Controller {
     pub serial: u64,
 }
 impl Controller {
+    /// Consume shared lifecycle actions before the terminal-specific dispatch.
+    pub fn intercept(&self, message: &ClientMessage) -> bool {
+        if message.edits_input() {
+            self.cancel_repair(None);
+        }
+        if let ClientMessage::RepairCancel { id } = message {
+            self.cancel_repair(Some(id));
+            return true;
+        }
+        false
+    }
+    pub fn finish_repair(&mut self, id: &str) {
+        if self.repair.as_ref().is_some_and(|(active, _)| active == id) {
+            self.repair.take();
+        }
+    }
     pub fn cancel_repair(&self, id: Option<&str>) {
         if let Some((current, cancel)) = &self.repair
             && id.is_none_or(|id| id == current)
@@ -98,6 +114,8 @@ mod tests {
         controller.replace_repair("first".into(), first.clone());
         controller.replace_repair("second".into(), second.clone());
         assert!(first.is_cancelled());
+        controller.finish_repair("first");
+        assert_eq!(controller.repair.as_ref().unwrap().0, "second");
         controller.cancel_repair(Some("first"));
         assert!(!second.is_cancelled());
         controller.cancel_repair(Some("second"));

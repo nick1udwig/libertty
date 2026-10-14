@@ -13,13 +13,20 @@ export async function until(check, label = 'condition', timeout = 15000) {
   }
   throw new Error('Timed out waiting for ' + label);
 }
+const issuedPorts = new Set();
 export async function freePort() {
-  const listener = net.createServer();
-  listener.listen(0, '127.0.0.1');
-  await once(listener, 'listening');
-  const port = listener.address().port;
-  await new Promise((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
-  return port;
+  // Releasing ephemeral listeners can immediately recycle a port within one fixture.
+  // Keep each allocation distinct until this test process exits.
+  for (;;) {
+    const listener = net.createServer();
+    listener.listen(0, '127.0.0.1');
+    await once(listener, 'listening');
+    const port = listener.address().port;
+    await new Promise((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
+    if (issuedPorts.has(port)) continue;
+    issuedPorts.add(port);
+    return port;
+  }
 }
 export function startBackend(options = {}) {
   return spawn(root + 'target/debug/termai', [], { cwd: root, ...options });

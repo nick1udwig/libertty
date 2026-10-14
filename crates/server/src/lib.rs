@@ -23,6 +23,7 @@ pub mod history;
 pub mod host;
 pub mod http;
 pub mod input_controller;
+mod input_coordinator;
 pub mod markers;
 pub mod notifications;
 pub mod pairing;
