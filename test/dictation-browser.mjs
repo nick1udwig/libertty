@@ -91,9 +91,26 @@ try {
       window.__wakeLocks.push(lock); return lock;
     } } });
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-    navigator.mediaDevices.getUserMedia = async constraints => { if (window.__denyMicrophone) throw new DOMException('Microphone denied', 'NotAllowedError'); window.__captureConstraints = constraints; const stream = await capture(constraints); window.__captureStream = stream; return stream; };
+    navigator.mediaDevices.getUserMedia = async constraints => {
+      if (window.__denyMicrophone) throw new DOMException('Microphone denied', 'NotAllowedError');
+      window.__captureConstraints = constraints; const stream = await capture(constraints); window.__captureStream = stream;
+      if (window.__suspendDuringPermission) { window.__suspendDuringPermission = false; await window.__captureContext.suspend(); }
+      return stream;
+    };
     const Audio = window.AudioContext;
-    window.AudioContext = class extends Audio { constructor(...args) { super(...args); window.__captureContext = this; } };
+    window.AudioContext = class extends Audio {
+      constructor(...args) { super(...args); window.__captureContext = this; }
+      createMediaStreamSource(stream) {
+        const source = super.createMediaStreamSource(stream), connect = source.connect.bind(source);
+        source.connect = (...args) => {
+          if (window.__stallCapture) { if (window.__stallCapture === 'once') window.__stallCapture = false; return args[0]; }
+          return connect(...args);
+        };
+        return source;
+      }
+    };
+    const Worklet = window.AudioWorkletNode;
+    window.AudioWorkletNode = class extends Worklet { constructor(...args) { super(...args); window.__captureProcessor = this; } };
     window.__messages = []; window.__sent = []; window.__out = ''; window.__paint = [];
     const paint = CanvasRenderingContext2D.prototype.fillText;
     CanvasRenderingContext2D.prototype.fillText = function(text, x, y, ...args) { window.__paint.push({ text, x, y }); return paint.call(this, text, x, y, ...args); };
@@ -169,10 +186,12 @@ try {
   assert.equal(await mic.locator('.dictation-microphone-icon').isVisible(), true);
   assert.equal(await mic.textContent(), '');
   const heldMic = await mic.boundingBox();
+  await page.evaluate(() => { window.__suspendDuringPermission = true; });
   await page.mouse.move(heldMic.x + heldMic.width / 2, heldMic.y + heldMic.height / 2);
   await page.mouse.down();
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await waitForAudioAfter(0);
+  assert.equal(await page.evaluate(() => window.__captureContext.state), 'running', 'Startup resumes audio after a permission/device interruption');
   assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Recording holds a screen wake lock');
   assert.deepEqual(await mic.boundingBox(), micPosition, 'Expanding controls must keep the button under the finger');
   assert.equal(await mic.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(112, 67, 154)');
@@ -241,6 +260,31 @@ try {
   await page.getByLabel('Cancel dictation', { exact: true }).click();
   assert.equal(await page.locator('#termai-dictation').getAttribute('aria-pressed'), 'false');
   assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Cancellation releases wake locks');
+  for (const stall of ['once', 'always']) {
+    const previous = audioBytes;
+    await page.evaluate(stall => { window.__stallCapture = stall; window.__messages = []; }, stall);
+    await mic.press('Enter');
+    await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+    if (stall === 'once') {
+      await waitForAudioAfter(previous);
+      await page.getByLabel('Microphone activity', { exact: true }).waitFor();
+      assert.equal(await mic.getAttribute('aria-pressed'), 'true', 'A stalled capture is recovered without another tap');
+      await page.getByLabel('Cancel dictation', { exact: true }).click();
+    } else {
+      await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+      assert.match(await page.locator('#toast').textContent(), /Microphone audio did not start or resume/);
+      assert.equal(audioBytes, previous, 'A permanently stalled microphone never pretends to send audio');
+    }
+    await page.evaluate(() => { window.__stallCapture = false; });
+    assert.equal(await page.evaluate(() => window.__captureStream.getTracks().every(track => track.readyState === 'ended')), true, 'Stalled/recovered capture releases its microphone');
+  }
+  await page.evaluate(() => { window.__messages = []; });
+  await mic.press('Enter');
+  await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+  await page.waitForFunction(() => window.__captureProcessor?.context === window.__captureContext);
+  await page.evaluate(() => window.__captureProcessor.dispatchEvent(new Event('processorerror')));
+  await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+  assert.match(await page.locator('#toast').textContent(), /audio processing stopped/);
   for (const interruption of ['suspend', 'ended', 'pagehide', 'denied', 'permission', 'disconnect']) {
     await page.evaluate(kind => { window.__messages = []; window.__denyWakeLock = kind === 'denied'; window.__denyMicrophone = kind === 'permission'; }, interruption);
     await mic.press('Enter');
@@ -249,9 +293,10 @@ try {
     } else {
       await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
       if (interruption === 'suspend') {
+        const previous = audioBytes;
         await page.evaluate(() => window.__captureContext.suspend());
-        await page.getByLabel('Audio capture paused', { exact: true }).waitFor();
-        await page.evaluate(() => window.__captureContext.resume());
+        await waitForAudioAfter(previous);
+        assert.equal(await page.evaluate(() => window.__captureContext.state), 'running', 'A suspended capture resumes automatically');
         await page.getByLabel('Microphone activity', { exact: true }).waitFor();
         await page.getByLabel('Cancel dictation', { exact: true }).click();
       } else if (interruption === 'ended') {
