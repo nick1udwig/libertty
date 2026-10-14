@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -102,7 +103,7 @@ try {
   const returns=[];
   for(let i=0;i<Number(process.env.TEST_RETURNS||3);i++) {
     const active=await page.locator('.herdr-terminal').getAttribute('data-terminal'),space=spaces.find(space=>space.terminal.terminalId===active);
-    await page.locator('#terminal-back').click();await page.locator('#nav-settings').click();
+    await showTerminalTabs(page);await page.locator('#terminal-back').click();await page.locator('#nav-settings').click();
     await wait(async()=>(await Promise.all(spaces.map(geometry))).every(size=>size.cols>=100),'Leaving Herdr releases every mobile controller');
     const before=await page.evaluate(()=>{window.__flashPaints=[];return Date.now();});
     for(const frame of page.frames()) if(frame.url().includes('herdrTerminal=')) await frame.evaluate(()=>{window.__captureAllPaints=true;});

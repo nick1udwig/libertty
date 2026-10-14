@@ -5,10 +5,12 @@ import { SourceTextModule } from 'node:vm';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { verifyRegressionInventory } from './regression-inventory.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const start = performance.now();
 const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
+await verifyRegressionInventory(new URL('../', import.meta.url), files);
 let modules = 0, data = 0;
 for (const file of files) {
   if (!/\.(?:[cm]?js|ts|json)$/.test(file)) continue;
@@ -47,6 +49,7 @@ const tests = [
   'plugins.test.ts',
   'push-worker.test.ts',
   'queue.test.ts',
+  'regression-inventory.test.mjs',
   'reconnecting-socket.test.ts',
   'service-worker.test.ts',
   'shell-words.test.ts',

@@ -1,5 +1,6 @@
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import ts from 'typescript-reference';
+import { rustTestNames } from './regression-inventory.mjs';
 
 const root = new URL('../',import.meta.url);
 async function files(directory, suffix) {
@@ -15,7 +16,7 @@ const modules=(await files('crates/',/\/src\/.*\.rs$/)).map(source=>({source}));
 const tests=[];
 for (const source of await files('crates/',/\/(?:src|tests)\/.*\.rs$/)) {
   const text=await readFile(new URL(source,root),'utf8');
-  const assertions=[...text.matchAll(/#\[(?:tokio::)?test\][\s\S]*?\bfn\s+(\w+)\s*\(/g)].map(match=>match[1]);
+  const assertions=rustTestNames(text);
   if (assertions.length) tests.push({source,owner:'rust',assertions});
 }
 for (const source of await files('test/',/\.(?:test\.ts|mjs)$/)) {

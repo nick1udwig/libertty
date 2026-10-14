@@ -461,6 +461,7 @@
       "source": "crates/server/tests/herdr.rs",
       "owner": "rust",
       "assertions": [
+        "checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals",
         "worktrees_and_splits_are_scoped_to_the_held_space",
         "rpc_actions_preserve_labels_and_reject_stale_or_refused_changes",
         "unsupported_split_actions_explain_which_server_needs_updating",
@@ -962,6 +963,13 @@
       ]
     },
     {
+      "source": "test/regression-inventory.test.mjs",
+      "owner": "integration",
+      "assertions": [
+        "quick inventory checks reject missing harnesses and changed Rust test declarations"
+      ]
+    },
+    {
       "source": "test/repair-network.mjs",
       "owner": "integration",
       "assertions": []
@@ -1035,6 +1043,11 @@
     },
     {
       "source": "test/support/sshd.mjs",
+      "owner": "integration",
+      "assertions": []
+    },
+    {
+      "source": "test/support/workspace-navigation.mjs",
       "owner": "integration",
       "assertions": []
     },
