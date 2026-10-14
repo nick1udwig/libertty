@@ -1,14 +1,16 @@
+import { launchBrowser, freePort, startBackend, delay, until } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { herdrFixture } from './herdr-fixture.ts';
 
+const fixturePort3178 = await freePort();
+
 const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pathname;
-const origin = 'http://127.0.0.1:' + (process.env.TEST_PORT || '3178'), base = origin + '/reconnect-test/';
+const origin = 'http://127.0.0.1:' + (process.env.TEST_PORT || String(fixturePort3178)), base = origin + '/reconnect-test/';
 const token = 'reconnect-test-pairing-token';
-const server = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+const server = startBackend({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: new URL(origin).port,
   TERMAI_BASE_PATH: '/reconnect-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_TOKEN: token,
   TERMAI_DATA_DIR: fixture.directory + '/termai', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory,
@@ -17,14 +19,9 @@ const server = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: ['ign
 const exited = once(server, 'exit');
 let logs = '', browser;
 server.stdout.on('data', data => logs += data); server.stderr.on('data', data => logs += data);
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check) {
-  for (const end = Date.now() + 12000; Date.now() < end;) { if (await check()) return; await delay(30); }
-  throw new Error('Backend did not start: ' + logs);
-}
 try {
   await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } });
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);

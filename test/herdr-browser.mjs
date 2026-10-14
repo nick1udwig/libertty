@@ -1,7 +1,7 @@
+import { launchBrowser, freePort, startBackend, delay, until } from './support/browser.mjs';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
@@ -13,7 +13,10 @@ import { sshdPath, sshFixturePath } from './support/sshd.mjs';
 import { fingerprint } from './support/ssh-key.ts';
 import { herdrFixture } from './herdr-fixture.ts';
 
-const fixture = await herdrFixture(), origin = 'http://127.0.0.1:3167', base = origin + '/herdr-test';
+const fixturePort3167 = await freePort();
+const fixturePort3168 = await freePort();
+
+const fixture = await herdrFixture(), origin = 'http://127.0.0.1:' + fixturePort3167, base = origin + '/herdr-test';
 const root = new URL('../', import.meta.url).pathname;
 const voiceToken = 'fixture-voice-token-'.repeat(4), daemon = new WebSocketServer({ port: 0, host: '127.0.0.1' });
 await once(daemon, 'listening'); await writeFile(fixture.directory + '/voice-token', voiceToken, { mode: 0o600 });
@@ -27,16 +30,14 @@ daemon.on('connection', (socket, request) => {
     else { const message = JSON.parse(bytes.toString()); if (message.type === 'finish') socket.send(JSON.stringify({ type: 'final', text: 'Dictated directly into Herdr' })); if (message.type === 'ack') voiceAcks++; }
   });
 });
-const backend = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
-  ...process.env, TERMAI_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token', TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate', NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3167', TERMAI_BASE_PATH: '/herdr-test',
+const backend = startBackend({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+  ...process.env, TERMAI_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token', TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate', NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3167), TERMAI_BASE_PATH: '/herdr-test',
   TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/termai',
   TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory,
   PATH: fixture.directory + ':' + process.env.PATH, TERMAI_TOKEN: '', HERDR_SOCKET_PATH: fixture.socketPath,
 } });
 const exited = once(backend, 'exit'), errors = [], network = []; let logs = '', browser, page, sshd, liveOutput;
 backend.stdout.on('data', b => logs += b); backend.stderr.on('data', b => logs += b);
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check, label, timeout = 12000) { for (const end = Date.now() + timeout; Date.now() < end; ) { if (await check()) return; await delay(30); } throw new Error('Timed out: ' + label); }
 const sha = data => createHash('sha256').update(data).digest('hex');
 try {
   await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'backend');
@@ -57,7 +58,7 @@ try {
   await new Promise((resolve, reject) => { const ws = new WebSocket(wsURL, { origin }); ws.once('open', () => { ws.close(); reject(new Error('Reused Herdr ticket')); }); ws.once('error', error => { assert.match(error.message, /403/); resolve(); }); });
   const scoped = (await (await request('herdr/ticket?herdrSession=work', {}, bearer)).json()).ticket;
   await new Promise((resolve, reject) => { const ws = new WebSocket(base.replace('http:', 'ws:') + '/herdr/ws?ticket=' + scoped, { origin }); ws.once('open', () => { ws.close(); reject(new Error('Session scope bypass')); }); ws.once('error', error => { assert.match(error.message, /403/); resolve(); }); });
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write', 'microphone'] }); page = await context.newPage(); page.setDefaultTimeout(12000);
   const notificationRequests = [], notificationDevice = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
   await context.route('**/api/notifications/**', async route => {
@@ -484,18 +485,18 @@ try {
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'), identity = ssh2.utils.generateKeyPairSync('ed25519', { cipher: 'aes256-ctr', passphrase: 'fixture-passphrase' });
   await writeFile(fixture.directory + '/host-key', hostKey.private, { mode: 0o600 });
   await writeFile(fixture.directory + '/authorized', identity.public + '\n');
-  const config = ['Port 3168', 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + sshFixturePath(fixture.directory), 'Subsystem sftp internal-sftp'].join('\n') + '\n';
+  const config = ['Port ' + fixturePort3168, 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + sshFixturePath(fixture.directory), 'Subsystem sftp internal-sftp'].join('\n') + '\n';
   await writeFile(fixture.directory + '/sshd_config', config);
   sshd = spawn(sshdPath(), ['-D', '-e', '-f', fixture.directory + '/sshd_config'], { stdio: ['ignore', 'pipe', 'pipe'] });
   sshd.stderr.on('data', bytes => logs += bytes); await delay(150);
   const trust = fingerprint(ssh2.utils.parseKey(hostKey.private).getPublicSSH());
-  const remote = await page.evaluate(async ({ identity, trust, username }) => {
-    const response = await fetch(new URL('api/sessions', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'SSH fixture', ssh: { host: '127.0.0.1', port: 3168, username, privateKey: identity, passphrase: 'fixture-passphrase', trust } }) });
+  const remote = await page.evaluate(async ({ identity, trust, username, fixturePort3168 }) => {
+    const response = await fetch(new URL('api/sessions', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'SSH fixture', ssh: { host: '127.0.0.1', port: fixturePort3168, username, privateKey: identity, passphrase: 'fixture-passphrase', trust } }) });
     const result = await response.json(); if (!response.ok) throw new Error(result.error);
-    const hosts = JSON.parse(localStorage.getItem('termai.hosts')); hosts.push({ id: 'ssh-fixture', name: 'SSH fixture', kind: 'ssh', backendId: 'primary', hostname: '127.0.0.1', port: 3168, username }); localStorage.setItem('termai.hosts', JSON.stringify(hosts));
+    const hosts = JSON.parse(localStorage.getItem('termai.hosts')); hosts.push({ id: 'ssh-fixture', name: 'SSH fixture', kind: 'ssh', backendId: 'primary', hostname: '127.0.0.1', port: fixturePort3168, username }); localStorage.setItem('termai.hosts', JSON.stringify(hosts));
     const tabs = JSON.parse(localStorage.getItem('termai.tabs')); tabs.push({ id: result.id, session: result.id, name: 'SSH fixture', backendId: 'primary', hostId: 'ssh-fixture' }); localStorage.setItem('termai.tabs', JSON.stringify(tabs)); localStorage.setItem('termai.activeTab', JSON.stringify(result.id));
     return result;
-  }, { identity: identity.private, trust, username: os.userInfo().username });
+  }, { identity: identity.private, trust, username: os.userInfo().username, fixturePort3168 });
   await page.reload(); await showTerminalTabs(page); await page.locator('#tabs .tab').filter({ hasText: 'SSH fixture' }).click();
   const remoteFrame = await (await page.locator('#terminal-stack > iframe:visible').elementHandle()).contentFrame();
   await remoteFrame.waitForFunction(() => window.__state?.ready);

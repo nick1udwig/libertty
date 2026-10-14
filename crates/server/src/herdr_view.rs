@@ -2,6 +2,7 @@ use crate::{
     dictation::Recording,
     herdr::Target,
     herdr_terminal_stream::{Hub, Size, Subscription},
+    protocol::{ClientMessage, controls},
     session::Transport,
 };
 use serde_json::{Value, json};
@@ -11,13 +12,12 @@ use tokio_util::sync::CancellationToken;
 
 struct Inner {
     revision: u64,
-    dictation: Option<Recording>,
+    input: crate::input_controller::Controller,
     dictation_id: String,
     shell: Option<crate::herdr::ShellInput>,
     prompt: u64,
     prompt_revision: u64,
     editable: Option<Editable>,
-    repair: Option<(String, CancellationToken)>,
 }
 #[derive(Clone)]
 struct Editable {
@@ -57,14 +57,6 @@ pub struct View {
     cancel: CancellationToken,
     services: crate::host::HostServices,
 }
-fn integer(value: &Value) -> Option<f64> {
-    value
-        .as_f64()
-        .filter(|n| n.is_finite() && n.fract() == 0.0 && n.abs() <= 9007199254740991.0)
-}
-fn controls(text: &str) -> bool {
-    text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
-}
 impl View {
     pub fn open(
         target: Target,
@@ -93,13 +85,12 @@ impl View {
             agent,
             inner: Mutex::new(Inner {
                 revision: 0,
-                dictation: None,
+                input: Default::default(),
                 dictation_id: String::new(),
                 shell: None,
                 prompt: 1,
                 prompt_revision: 0,
                 editable: None,
-                repair: None,
             }),
             capacity: Arc::new(Semaphore::new(128)),
             services: crate::host::HostServices::new(),
@@ -473,7 +464,7 @@ impl View {
         tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=work=>result}
     }
     pub fn audio(&self, bytes: Vec<u8>) {
-        if let Some(recording) = &self.inner.lock().unwrap().dictation {
+        if let Some((_, recording)) = &self.inner.lock().unwrap().input.dictation {
             recording.audio(bytes);
         }
     }
@@ -493,9 +484,7 @@ impl View {
                 return;
             }
             inner.dictation_id = id.clone();
-            if let Some((_, previous)) = inner.repair.replace((id.clone(), cancel.clone())) {
-                previous.cancel();
-            }
+            inner.input.replace_repair(id.clone(), cancel.clone());
         }
         let view = self.clone();
         tokio::spawn(async move {
@@ -570,48 +559,38 @@ impl View {
                 reply["source"] = json!("dictation");
             }
             if inner
+                .input
                 .repair
                 .as_ref()
                 .is_some_and(|(active, _)| active == &id)
             {
-                inner.repair.take();
+                inner.input.repair.take();
             }
             view.send(reply);
         });
     }
     pub fn receive(self: &Arc<Self>, message: Value) -> Result<(), String> {
-        match message["type"].as_str().unwrap_or("") {
-            "repair-cancel" => {
-                let inner = self.inner.lock().unwrap();
-                if let Some((id, cancel)) = &inner.repair
-                    && message["id"].as_str() == Some(id)
-                {
-                    cancel.cancel();
-                }
+        let message: ClientMessage = serde_json::from_value(message)
+            .map_err(|error| format!("Invalid terminal action: {error}"))?;
+        if message.edits_input() {
+            self.inner.lock().unwrap().input.cancel_repair(None);
+        }
+        match message {
+            ClientMessage::RepairCancel { id } => {
+                self.inner.lock().unwrap().input.cancel_repair(Some(&id));
                 Ok(())
             }
-            "repair" => {
-                let id = message["id"]
-                    .as_str()
-                    .filter(|id| id.len() <= 100)
-                    .ok_or("Invalid repair")?
-                    .to_owned();
-                let text = message["text"]
-                    .as_str()
-                    .filter(|text| text.encode_utf16().count() <= 2000 && !controls(text))
-                    .ok_or("Invalid repair")?
-                    .to_owned();
-                let intent = message
-                    .get("intent")
-                    .map(|value| serde_json::from_value(value.clone()))
-                    .transpose()
-                    .map_err(|_| "Invalid repair intent")?
-                    .unwrap_or_default();
+            ClientMessage::Repair(request) => {
+                let crate::protocol::Repair {
+                    id,
+                    text,
+                    intent,
+                    prompt,
+                    revision,
+                } = request;
                 let (prompt, revision) = {
                     let inner = self.inner.lock().unwrap();
-                    if integer(&message["prompt"]) != Some(inner.prompt as f64)
-                        || integer(&message["revision"]) != Some(inner.revision as f64)
-                    {
+                    if prompt != inner.prompt || revision != inner.revision {
                         self.send(json!({"type":"repair-result","id":id,"accepted":false,"revision":inner.revision,"prompt":inner.prompt,"original":text,"selected":text,"candidates":[]}));
                         return Ok(());
                     }
@@ -620,8 +599,8 @@ impl View {
                 self.start_repair(id, text, intent, prompt, revision, false);
                 Ok(())
             }
-            "ack" => Ok(()),
-            "herdr-frame-request" => {
+            ClientMessage::Ack { .. } => Ok(()),
+            ClientMessage::HerdrFrameRequest => {
                 self.terminal.refresh();
                 // Subscribe briefly to refresh the shared active resource.
                 if let Ok(history) = self
@@ -632,8 +611,7 @@ impl View {
                 }
                 Ok(())
             }
-            "herdr-active" => {
-                let active = message["active"].as_bool().ok_or("Invalid viewer state")?;
+            ClientMessage::HerdrActive { active } => {
                 let changed = self.active.send_replace(active) != active;
                 let epoch = if changed {
                     self.begin_layout()
@@ -678,19 +656,20 @@ impl View {
                 }
                 Ok(())
             }
-            "resize" => {
-                let cols = integer(&message["cols"]).filter(|n| (1.0..=1000.0).contains(n));
-                let rows = integer(&message["rows"]).filter(|n| (1.0..=1000.0).contains(n));
-                if cols.is_none()
-                    || rows.is_none()
-                    || message.get("mobile").is_some_and(|v| !v.is_boolean())
+            ClientMessage::Resize { cols, rows, mobile } => {
+                if !cols.is_finite()
+                    || !rows.is_finite()
+                    || cols.fract() != 0.0
+                    || rows.fract() != 0.0
+                    || !(1.0..=1000.0).contains(&cols)
+                    || !(1.0..=1000.0).contains(&rows)
                 {
                     return Err("Invalid terminal size".into());
                 }
-                let size = if message["mobile"] == true {
+                let size = if mobile == Some(true) {
                     Some(Size {
-                        cols: cols.unwrap() as u16,
-                        rows: rows.unwrap() as u16,
+                        cols: cols as u16,
+                        rows: rows as u16,
                     })
                 } else {
                     None
@@ -734,35 +713,22 @@ impl View {
                     self.terminal.resize(size)
                 }
             }
-            "terminal-scroll" => {
-                let lines = integer(&message["lines"]).filter(|n| *n != 0.0 && n.abs() <= 100.0);
-                let column = integer(&message["column"]).filter(|n| (0.0..1000.0).contains(n));
-                let row = integer(&message["row"]).filter(|n| (0.0..1000.0).contains(n));
-                if lines.is_none() || column.is_none() || row.is_none() {
+            ClientMessage::TerminalScroll { lines, column, row } => {
+                if lines == 0 || lines.unsigned_abs() > 100 || column >= 1000 || row >= 1000 {
                     return Err("Invalid terminal scroll".into());
                 }
                 let view = self.clone();
                 tokio::spawn(async move {
-                    if let Err(message) = view
-                        .terminal
-                        .scroll(
-                            lines.unwrap() as i32,
-                            column.unwrap() as u16,
-                            row.unwrap() as u16,
-                        )
-                        .await
-                    {
+                    if let Err(message) = view.terminal.scroll(lines, column, row).await {
                         view.send(json!({"type":"reading-error","message":message}));
                     }
                 });
                 Ok(())
             }
-            "input" => {
-                let text = message["data"]
-                    .as_str()
-                    .filter(|s| s.encode_utf16().count() <= 16000)
-                    .ok_or("Invalid input")?
-                    .to_owned();
+            ClientMessage::Input { data: text } => {
+                if text.encode_utf16().count() > 16000 {
+                    return Err("Invalid input".into());
+                }
                 {
                     let mut inner = self.inner.lock().unwrap();
                     inner.revision += 1;
@@ -771,35 +737,26 @@ impl View {
                 self.queue_input(text, None, false, None);
                 Ok(())
             }
-            "paste" => {
-                let text = message["text"]
-                    .as_str()
-                    .filter(|text| {
-                        !text.is_empty() && text.encode_utf16().count() <= 16000 && !controls(text)
-                    })
-                    .ok_or("Invalid paste")?
-                    .to_owned();
+            ClientMessage::Paste { text } => {
+                if text.is_empty() || text.encode_utf16().count() > 16000 || controls(&text) {
+                    return Err("Invalid paste".into());
+                }
                 self.inner.lock().unwrap().revision += 1;
                 self.queue_input(text, None, true, None);
                 Ok(())
             }
-            "replace" => {
-                let id = message["id"]
-                    .as_str()
-                    .filter(|id| id.len() <= 100)
-                    .ok_or("Invalid replacement")?
-                    .to_owned();
-                let text = message["text"]
-                    .as_str()
-                    .filter(|text| {
-                        !text.is_empty() && text.encode_utf16().count() <= 2000 && !controls(text)
-                    })
-                    .ok_or("Invalid replacement")?
-                    .to_owned();
+            ClientMessage::Replace {
+                id,
+                text,
+                prompt,
+                revision,
+            } => {
+                if text.is_empty() || text.encode_utf16().count() > 2000 || controls(&text) {
+                    return Err("Invalid replacement".into());
+                }
                 let replacement = {
                     let mut inner = self.inner.lock().unwrap();
-                    let valid = integer(&message["prompt"]) == Some(inner.prompt as f64)
-                        && integer(&message["revision"]) == Some(inner.revision as f64);
+                    let valid = prompt == inner.prompt && revision == inner.revision;
                     let replacement = inner
                         .shell
                         .clone()
@@ -822,19 +779,13 @@ impl View {
                 }
                 Ok(())
             }
-            "command" => {
-                let command = message["command"]
-                    .as_str()
-                    .filter(|s| {
-                        !s.trim().is_empty() && s.encode_utf16().count() <= 16000 && !controls(s)
-                    })
-                    .ok_or("Invalid command")?
-                    .to_owned();
-                let id = message["id"]
-                    .as_str()
-                    .filter(|s| s.encode_utf16().count() <= 100)
-                    .ok_or("Invalid command")?
-                    .to_owned();
+            ClientMessage::Command { command, id, .. } => {
+                if command.trim().is_empty()
+                    || command.encode_utf16().count() > 16000
+                    || controls(&command)
+                {
+                    return Err("Invalid command".into());
+                }
                 let replacement = {
                     let mut inner = self.inner.lock().unwrap();
                     inner.revision += 1;
@@ -852,134 +803,127 @@ impl View {
                 self.queue_input(command + "\r", Some(id), false, replacement);
                 Ok(())
             }
-            "dictation" => {
-                let id = message["id"]
-                    .as_str()
-                    .filter(|s| s.encode_utf16().count() <= 100)
-                    .ok_or("Invalid dictation")?
-                    .to_owned();
+            ClientMessage::Dictation(request) => {
+                let id = request.id.clone();
                 let mut inner = self.inner.lock().unwrap();
-                match message["action"].as_str() {
-                    Some("start") => {
-                        inner.dictation.take();
-                        let revision = inner.revision;
-                        if message["target"]
-                            != if inner.shell.is_some() {
-                                "shell"
+                if request.action == crate::protocol::DictationAction::Cancel
+                    && inner.dictation_id == id
+                {
+                    inner.dictation_id.clear();
+                }
+                if !inner.input.control_dictation(&request) {
+                    let revision = inner.revision;
+                    if request.target()
+                        != Some(if inner.shell.is_some() {
+                            "shell"
+                        } else {
+                            "program"
+                        })
+                        || request.prompt != Some(inner.prompt)
+                        || request.revision != Some(revision)
+                    {
+                        self.send(json!({"type":"dictation","id":id,"state":"error","message":"Terminal input changed. Try dictating again."}));
+                        return Ok(());
+                    }
+                    inner.dictation_id = id.clone();
+                    inner.input.serial += 1;
+                    let serial = inner.input.serial;
+                    inner.editable = None;
+                    let prompt = inner.prompt;
+                    let shell = inner.shell.is_some();
+                    let weak = Arc::downgrade(self);
+                    let result_id = id.clone();
+                    let phrases = request.reading_phrases.clone();
+                    let result = Arc::new(move |text: String| {
+                        let weak = weak.clone();
+                        let id = result_id.clone();
+                        let phrases = phrases.clone();
+                        Box::pin(async move {
+                            let view = weak.upgrade().ok_or(
+                                "Terminal input changed during dictation. No text was inserted."
+                                    .to_owned(),
+                            )?;
+                            view.guard(revision, &id)?;
+                            if text.is_empty() {
+                                return Ok(());
+                            }
+                            view.input(&text, true, Some((revision, &id)), None).await?;
+                            let screen = if shell {
+                                view.editable_screen(&text).await.ok()
                             } else {
-                                "program"
+                                None
+                            };
+                            let new_revision = {
+                                let mut inner = view.inner.lock().unwrap();
+                                if inner.revision != revision {
+                                    return Err("Terminal input changed during dictation.".into());
+                                }
+                                inner.revision += 1;
+                                inner.editable = screen.map(|screen| Editable {
+                                    text: text.clone(),
+                                    screen,
+                                });
+                                inner.revision
+                            };
+                            view.send(json!({"type":"pasted","text":text,"replace":false,"prompt":prompt,"revision":new_revision,"source":"dictation","repairing":shell && text.encode_utf16().count() <= 2000}));
+                            if shell && text.encode_utf16().count() <= 2000 {
+                                let intent = crate::alternatives::Intent::detect(&text, &phrases);
+                                view.start_repair(
+                                    crate::storage::random_hex(16),
+                                    text,
+                                    intent,
+                                    prompt,
+                                    new_revision,
+                                    true,
+                                );
                             }
-                            || integer(&message["prompt"]) != Some(inner.prompt as f64)
-                            || integer(&message["revision"]) != Some(revision as f64)
-                        {
-                            self.send(json!({"type":"dictation","id":id,"state":"error","message":"Terminal input changed. Try again."}));
-                            return Ok(());
-                        }
-                        inner.dictation_id = id.clone();
-                        inner.editable = None;
-                        let prompt = inner.prompt;
-                        let shell = inner.shell.is_some();
-                        let weak = Arc::downgrade(self);
-                        let result_id = id.clone();
-                        let phrases = message["readingPhrases"].clone();
-                        let result = Arc::new(move |text: String| {
-                            let weak = weak.clone();
-                            let id = result_id.clone();
-                            let phrases = phrases.clone();
-                            Box::pin(async move {
-                                let view=weak.upgrade().ok_or("Terminal input changed during dictation. No text was inserted.".to_owned())?;
-                                view.guard(revision, &id)?;
-                                if text.is_empty() {
-                                    return Ok(());
-                                }
-                                view.input(&text, true, Some((revision, &id)), None).await?;
-                                let screen = if shell {
-                                    view.editable_screen(&text).await.ok()
-                                } else {
-                                    None
-                                };
-                                let new_revision = {
-                                    let mut inner = view.inner.lock().unwrap();
-                                    if inner.revision != revision {
-                                        return Err(
-                                            "Terminal input changed during dictation.".into()
-                                        );
-                                    }
-                                    inner.revision += 1;
-                                    inner.editable = screen.map(|screen| Editable {
-                                        text: text.clone(),
-                                        screen,
-                                    });
-                                    inner.revision
-                                };
-                                view.send(json!({"type":"pasted","text":text,"replace":false,"prompt":prompt,"revision":new_revision,"source":"dictation","repairing":shell && text.encode_utf16().count() <= 2000}));
-                                if shell && text.encode_utf16().count() <= 2000 {
-                                    let intent =
-                                        crate::alternatives::Intent::detect(&text, &phrases);
-                                    view.start_repair(
-                                        crate::storage::random_hex(16),
-                                        text,
-                                        intent,
-                                        prompt,
-                                        new_revision,
-                                        true,
-                                    );
-                                }
-                                Ok(())
-                            })
-                                as futures::future::BoxFuture<'static, Result<(), String>>
-                        });
-                        let weak = Arc::downgrade(self);
-                        let status = Arc::new(move |state: &str, reason: Option<String>| {
-                            if let Some(view) = weak.upgrade() {
-                                let mut message = json!({"type":"dictation","id":id,"state":state});
-                                if let Some(reason) = reason {
-                                    message["message"] = json!(reason);
-                                }
-                                view.send(message);
+                            Ok(())
+                        })
+                            as futures::future::BoxFuture<'static, Result<(), String>>
+                    });
+                    let weak = Arc::downgrade(self);
+                    let status = Arc::new(move |state: &str, reason: Option<String>| {
+                        if let Some(view) = weak.upgrade() {
+                            if !view.inner.lock().unwrap().input.status(&id, serial, state) {
+                                return;
                             }
-                        });
-                        inner.dictation = Some(Recording::start_async(
-                            std::env::vars().collect(),
-                            result,
-                            status,
-                        ));
-                    }
-                    Some("finish") if inner.dictation_id == id => {
-                        if let Some(recording) = &inner.dictation {
-                            recording.finish();
+                            let mut message = json!({"type":"dictation","id":id,"state":state});
+                            if let Some(reason) = reason {
+                                message["message"] = json!(reason);
+                            }
+                            view.send(message);
                         }
-                    }
-                    Some("cancel") if inner.dictation_id == id => {
-                        inner.dictation_id.clear();
-                        inner.dictation.take();
-                    }
-                    _ => {}
+                    });
+                    inner.input.dictation = Some((
+                        request.id,
+                        Recording::start_async(std::env::vars().collect(), result, status),
+                    ));
                 }
                 Ok(())
             }
-            "dictation-paste" => {
-                let text = message["text"]
-                    .as_str()
-                    .filter(|text| {
-                        !text.is_empty() && text.encode_utf16().count() <= 2000 && !controls(text)
-                    })
-                    .ok_or("Invalid dictation")?
-                    .to_owned();
+            ClientMessage::DictationPaste {
+                text,
+                prompt,
+                revision,
+                applied,
+                replace,
+                reading_phrases: phrases,
+            } => {
+                if text.is_empty() {
+                    return Err("Invalid dictation".into());
+                }
                 let (revision, prompt, id, replacement, shell) = {
                     let mut inner = self.inner.lock().unwrap();
                     let shell = inner
                         .shell
                         .clone()
                         .ok_or("Dictation alternatives require a shell prompt.")?;
-                    if integer(&message["prompt"]) != Some(inner.prompt as f64)
-                        || integer(&message["revision"]) != Some(inner.revision as f64)
-                    {
+                    if prompt != inner.prompt || revision != inner.revision {
                         return Err("Terminal input changed. Try again.".into());
                     }
                     let id = crate::storage::random_hex(16);
                     inner.dictation_id = id.clone();
-                    let replacement = if message["replace"] == true {
+                    let replacement = if replace {
                         inner.editable.clone().map(|previous| Replacement {
                             previous,
                             shell: shell.clone(),
@@ -991,8 +935,6 @@ impl View {
                     };
                     (inner.revision, inner.prompt, id, replacement, shell)
                 };
-                let applied = message["applied"] == true;
-                let phrases = message["readingPhrases"].clone();
                 let view = self.clone();
                 tokio::spawn(async move {
                     let work = async {
@@ -1050,6 +992,6 @@ impl View {
 impl Drop for View {
     fn drop(&mut self) {
         self.cancel.cancel();
-        self.inner.get_mut().unwrap().dictation.take();
+        self.inner.get_mut().unwrap().input.dictation.take();
     }
 }

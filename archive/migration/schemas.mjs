@@ -1,9 +1,9 @@
-import ts from 'typescript-reference';
+import ts from 'typescript';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { boundaries, lifecycle } from './migration-boundaries.mjs';
+import { boundaries, lifecycle } from './boundaries.mjs';
 
-const root = path.resolve(import.meta.dirname, '..');
+const root = path.resolve(import.meta.dirname, '../..');
 const sources = ['src/protocol.ts', 'src/facts.ts', 'src/file-protocol.ts', 'src/transfer-protocol.ts', 'src/herdr-protocol.ts',
   'src/engine/types.ts', 'src/engine/help.ts', 'src/engine/command-policy.ts', 'src/engine/directory-types.ts', 'src/connections.ts'];
 const program = ts.createProgram(sources.map(file => path.join(root, file)), { strict: true, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, skipLibCheck: true });

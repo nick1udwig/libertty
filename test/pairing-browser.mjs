@@ -1,4 +1,4 @@
-import { chromium } from 'playwright-core';
+import { launchBrowser } from './support/browser.mjs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -29,7 +29,7 @@ try {
     });
   }
   assert.equal(await deniedUpgrade({ Origin: origin }), 403, 'unpaired Vite upgrades must fail');
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const page = await browser.newPage(); const errors = []; const hmr = [];
   await page.context().route(url => url.pathname.endsWith('/api/dictation'), route => route.fulfill({ json: { installed: true, available: true } }));
   page.on('pageerror', e => errors.push(e.message)); page.on('console', m => { if (m.text().includes('[vite]')) hmr.push(m.text()); });

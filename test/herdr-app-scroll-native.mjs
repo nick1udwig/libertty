@@ -1,18 +1,18 @@
+import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
-import { chromium } from 'playwright-core';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 import { shellQuote } from '../src/shell-words.ts';
 
+const fixturePort3173 = await freePort();
+
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-app-scroll-');
-const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:3173';
+const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:' + fixturePort3173;
 const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const wait = async (check, label) => { for (let end = Date.now() + 15000; Date.now() < end;) { if (await check()) return; await delay(30); } throw new Error('Timed out: ' + label); };
 const state = async () => { try { return JSON.parse(await readFile(dir + '/state.json', 'utf8')); } catch { return {}; } };
 let herdr, desktop, backend, browser;
 try {
@@ -47,10 +47,10 @@ try {
   const terminal = (await herdrSnapshot(target)).terminals.find(t => t.workspaceId === created.workspace.workspace_id); assert.ok(terminal);
   await delay(400); await herdrRequest(target, 'pane.send_text', { pane_id: terminal.paneId, text: "printf 'SHELL HISTORY\\n%.0s' {1..160}\r" });
   await wait(async () => (await herdrRequest(target, 'pane.read', { pane_id: terminal.paneId, source: 'recent_unwrapped', lines: 1000, format: 'ansi' })).read.text.includes('SHELL HISTORY'), 'native shell history');
-  backend = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3173', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  backend = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3173), TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);

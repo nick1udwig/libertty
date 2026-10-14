@@ -1,3 +1,4 @@
+import { launchBrowser, delay, until as wait } from './support/browser.mjs';
 import assert from 'node:assert/strict';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
@@ -5,7 +6,6 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import net from 'node:net';
 import pty from 'node-pty';
-import { chromium } from 'playwright-core';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 import { shellQuote } from '../src/shell-words.ts';
 import { installWireObserver } from './wire-observer.mjs';
@@ -13,8 +13,6 @@ import { installWireObserver } from './wire-observer.mjs';
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-flash-');
 const target = { session:'', socketPath:dir+'/herdr.sock' };
 const env = { ...process.env, HOME:dir, XDG_CONFIG_HOME:dir+'/config', XDG_DATA_HOME:dir+'/data', XDG_STATE_HOME:dir+'/state', HERDR_SOCKET_PATH:target.socketPath, HERDR_SESSION:'', HERDR_ENV:'', SHELL:'/bin/bash', TERM:'xterm-256color' };
-const delay = ms => new Promise(resolve => setTimeout(resolve,ms));
-const wait = async (check,label) => { for(let end=Date.now()+15000;Date.now()<end;) { if(await check()) return; await delay(20); } throw new Error('Timed out: '+label); };
 let herdr, desktop, backend, browser;
 const errors=[];
 try {
@@ -42,7 +40,7 @@ try {
   await wait(async()=>{try{return(await fetch(base)).ok;}catch{return false;}},'backend');
   if(process.env.TEST_REDRAW_TRACE) console.log('Native revision probe:', await herdrRequest(target,'pane.copy_motion',{pane_id:spaces[0].terminal.paneId,motion:'line_end',cursor:{row:0,col:0}}).catch(error=>error.message));
   const token=(await readFile(dir+'/termai/pairing-token','utf8')).trim();
-  browser=await chromium.launch({executablePath:process.env.CHROMIUM||'/usr/bin/chromium',headless:true,args:['--use-gl=angle','--use-angle=gl']});
+  browser=await launchBrowser({args:['--use-gl=angle','--use-angle=gl']});
   const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
   await installWireObserver(context);
   await context.route('**/assets/terminal-*.js',async route=>{const response=await route.fetch(),source=await response.text();const body=source.replace(/new ([\w$]+)\(\{ghostty:/,'window.__terminal=new $1({ghostty:');assert.notEqual(body,source);await route.fulfill({response,body});});

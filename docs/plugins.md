@@ -158,7 +158,7 @@ Typing and command submission stayed close in this sample.
 Client-engine warm reload increased about 14 ms.
 Startup results varied, and these measurements do not establish a server-engine speedup, startup parity, or performance on a physical phone.
 Additional installed packages can add startup and memory costs.
-[Raw measurements](plugin-results.json) include individual samples and first-load observations.
+[Raw measurements](../archive/migration/README.md) include individual samples and first-load observations.
 
 Reproduce the comparison against the pre-plugin revision after building:
 

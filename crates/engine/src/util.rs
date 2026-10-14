@@ -1,11 +1,10 @@
 use crate::types::SharedList;
-use regex::Regex;
 use std::{
     cell::RefCell,
     cmp::Ordering,
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     hash::{Hash, Hasher},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, OnceLock},
 };
 
 /// Small deterministic input caches; never store host facts or full suggestions.
@@ -49,12 +48,16 @@ pub(crate) fn memo<T: Clone>(
 
 /// Bounded memoization of deterministic parsing only, keyed by every input value.
 pub struct ArrayCache<T> {
-    entries: VecDeque<(u64, SharedList<String>, Arc<T>)>,
+    entries: VecDeque<(u64, SharedList<String>, Arc<T>, usize)>,
+    items: usize,
+    bytes: usize,
 }
 impl<T> Default for ArrayCache<T> {
     fn default() -> Self {
         Self {
             entries: VecDeque::new(),
+            items: 0,
+            bytes: 0,
         }
     }
 }
@@ -67,7 +70,7 @@ impl<T> ArrayCache<T> {
         let at = self
             .entries
             .iter()
-            .position(|(old, key, _)| *old == hash && key.as_slice() == values)?;
+            .position(|(old, key, _, _)| *old == hash && key.as_slice() == values)?;
         let entry = self.entries.remove(at).unwrap();
         let result = entry.2.clone();
         self.entries.push_back(entry);
@@ -80,12 +83,12 @@ impl<T> ArrayCache<T> {
         let at = self
             .entries
             .iter()
-            .position(|(_, key, _)| key.shares_storage(values))
+            .position(|(_, key, _, _)| key.shares_storage(values))
             .or_else(|| {
                 let hash = array_hash(values);
                 self.entries
                     .iter()
-                    .position(|(old, key, _)| *old == hash && key == values)
+                    .position(|(old, key, _, _)| *old == hash && key == values)
             })?;
         let mut entry = self.entries.remove(at).unwrap();
         entry.1 = values.clone();
@@ -94,28 +97,19 @@ impl<T> ArrayCache<T> {
         Some(result)
     }
     pub fn insert_shared(&mut self, values: &SharedList<String>, value: Arc<T>) {
-        if values.len() > 100000 || values.iter().map(String::len).sum::<usize>() > 32 * 1024 * 1024
-        {
+        let bytes = values.iter().map(String::len).sum::<usize>();
+        if values.len() > 100000 || bytes > 32 * 1024 * 1024 {
             return;
         }
+        self.items += values.len();
+        self.bytes += bytes;
         self.entries
-            .push_back((array_hash(values), values.clone(), value));
-        while self.entries.len() > 64
-            || self
-                .entries
-                .iter()
-                .map(|(_, key, _)| key.len())
-                .sum::<usize>()
-                > 100000
-            || self
-                .entries
-                .iter()
-                .flat_map(|(_, key, _)| key)
-                .map(String::len)
-                .sum::<usize>()
-                > 32 * 1024 * 1024
-        {
-            self.entries.pop_front();
+            .push_back((array_hash(values), values.clone(), value, bytes));
+        while self.entries.len() > 64 || self.items > 100000 || self.bytes > 32 * 1024 * 1024 {
+            if let Some((_, key, _, bytes)) = self.entries.pop_front() {
+                self.items -= key.len();
+                self.bytes -= bytes;
+            }
         }
     }
 }
@@ -125,47 +119,27 @@ fn array_hash(values: &[String]) -> u64 {
     hash.finish()
 }
 
-pub(crate) mod patterns {
-    include!(concat!(env!("OUT_DIR"), "/patterns.rs"));
+/// Each literal expression owns its compiled regex, with no runtime lookup.
+#[macro_export]
+macro_rules! regex {
+    ($pattern:literal) => {{
+        static REGEX: std::sync::OnceLock<::regex::Regex> = std::sync::OnceLock::new();
+        REGEX.get_or_init(|| ::regex::Regex::new($pattern).expect("static engine regex"))
+    }};
 }
-fn compile(pattern: &str) -> Regex {
-    // Match ECMAScript expressions without the Unicode flag.
-    let javascript = pattern
-        .replace(r"\b", r"(?-u:\b)")
-        .replace(r"\w", "[a-zA-Z0-9_]")
-        .replace(r"\W", "[^a-zA-Z0-9_]")
-        .replace(r"\s", r"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]");
-    Regex::new(&javascript).expect("static engine regex")
+#[macro_export]
+macro_rules! test {
+    ($pattern:literal, $text:expr $(,)?) => {
+        $crate::regex!($pattern).is_match($text)
+    };
 }
-#[inline]
-pub fn regex(pattern: &str) -> Arc<Regex> {
-    if let Some(regex) = patterns::compiled(pattern) {
-        return regex.clone();
-    }
-    // Nonliteral patterns retain a bounded fallback cache.
-    static CACHE: OnceLock<Mutex<HashMap<String, Arc<Regex>>>> = OnceLock::new();
-    let mut cache = CACHE
-        .get_or_init(Default::default)
-        .lock()
-        .expect("regex cache poisoned");
-    if let Some(regex) = cache.get(pattern) {
-        return regex.clone();
-    }
-    let regex = Arc::new(compile(pattern));
-    if cache.len() >= 256 {
-        let key = cache.keys().next().unwrap().clone();
-        cache.remove(&key);
-    }
-    cache.insert(pattern.into(), regex.clone());
-    regex
-}
-#[inline]
-pub fn test(pattern: &str, text: &str) -> bool {
-    regex(pattern).is_match(text)
-}
-#[inline]
-pub fn replace(pattern: &str, text: &str, replacement: &str) -> String {
-    regex(pattern).replace_all(text, replacement).into_owned()
+#[macro_export]
+macro_rules! replace {
+    ($pattern:literal, $text:expr, $replacement:expr $(,)?) => {
+        $crate::regex!($pattern)
+            .replace_all($text, $replacement)
+            .into_owned()
+    };
 }
 
 pub fn utf16_len(text: &str) -> usize {
@@ -228,29 +202,17 @@ pub fn locale_cmp(left: &str, right: &str) -> Ordering {
 
 #[cfg(test)]
 mod regex_tests {
-    use super::*;
     #[test]
-    fn literal_regexes_share_one_compilation_across_threads_and_keep_js_semantics() {
-        let pattern = r"\bcat\b";
-        let first = regex(pattern);
-        let threads: Vec<_> = (0..8)
-            .map(|_| {
-                std::thread::spawn(move || {
-                    let compiled = regex(pattern);
-                    assert!(compiled.is_match("écaté"));
-                    assert!(!compiled.is_match("scatter"));
-                    compiled
-                })
-            })
-            .collect();
-        for thread in threads {
-            assert!(Arc::ptr_eq(&first, &thread.join().unwrap()));
+    fn native_patterns_preserve_ascii_boundaries_and_explicit_whitespace() {
+        fn compiled() -> &'static regex::Regex {
+            crate::regex!(r"(?-u:\b)cat(?-u:\b)")
         }
-        let first = regex("^[a-zA-Z0-9_@%+=:,./~-]+$");
-        assert!(Arc::ptr_eq(
-            &first,
-            patterns::compiled("^[a-zA-Z0-9_@%+=:,./~-]+$").unwrap()
-        ));
-        assert!(test(r"^\s$", "\u{feff}"));
+        let first = compiled();
+        for thread in (0..8).map(|_| std::thread::spawn(compiled)) {
+            assert!(std::ptr::eq(first, thread.join().unwrap()));
+        }
+        assert!(first.is_match("écaté"));
+        assert!(!first.is_match("scatter"));
+        assert!(crate::test!(r"^[\x09-\x0d \u{feff}]$", "\u{feff}"));
     }
 }

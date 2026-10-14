@@ -1,8 +1,9 @@
+use crate::replace;
 use crate::{
     repair::{similarity, tokens},
     speech::expand_symbols,
     types::*,
-    util::{ArrayCache, replace},
+    util::ArrayCache,
     validation::simple_words,
 };
 use std::{
@@ -117,7 +118,7 @@ fn preserves_explicit_input(spoken: &[Token], words: &[Word]) -> bool {
     })
 }
 pub fn history_candidates(input: &str, catalog: &Catalog) -> Vec<Candidate> {
-    let spoken = replace("([a-zA-Z])\\.$", &expand_symbols(input, true), "$1");
+    let spoken = replace!(r###"([a-zA-Z])\.$"###, &expand_symbols(input, true), "$1");
     let input_words = tokens(input);
     static COMMANDS: OnceLock<Mutex<ArrayCache<HashSet<String>>>> = OnceLock::new();
     let allowed = {

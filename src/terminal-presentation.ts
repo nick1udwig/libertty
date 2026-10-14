@@ -5,7 +5,10 @@ export class TerminalPresentation {
   private progress = document.createElement('div');
   private generation = 0;
   private held = false;
-  constructor(private viewport: HTMLElement, private ready: () => void = () => {}) {
+  private viewport: HTMLElement;
+  private ready: () => void;
+  constructor(viewport: HTMLElement, ready: () => void = () => {}) {
+    this.viewport = viewport; this.ready = ready;
     this.layer.className = 'terminal-presentation'; this.layer.hidden = true;
     this.snapshot.setAttribute('aria-hidden', 'true');
     this.progress.className = 'terminal-loading-bar'; this.progress.role = 'progressbar';

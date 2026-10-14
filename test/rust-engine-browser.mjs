@@ -1,4 +1,4 @@
-import { chromium } from 'playwright-core';
+import { launchBrowser } from './support/browser.mjs';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
 import http from 'node:http';
@@ -17,7 +17,7 @@ const server = http.createServer((req, res) => {
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
 let browser;
 try {
-  browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
+  browser = await launchBrowser({ executablePath: process.env.CHROME_PATH || '/usr/bin/chromium', headless: true, args: ['--no-sandbox'] });
   const page = await browser.newPage();
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${server.address().port}/terminal/`);

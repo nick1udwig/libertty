@@ -312,5 +312,5 @@ Reconnecting to a partially typed line also leaves it untouched.
 Automated keyboard-size tests simulate viewport changes; they do not emulate an OS keyboard.
 Linux/Bash is the implemented host target.
 
-The original product conversation is preserved in [initial-spec.md](../initial-spec.md); the user's desires take precedence over its assistant recommendations.
+The original product conversation is preserved in [initial-spec.md](../archive/migration/README.md); the user's desires take precedence over its assistant recommendations.
 The complete benchmark project was moved to **`~/git/termai-benchmark`** before MVP work began; see its `terminal-comparison.md` for the engine decision.

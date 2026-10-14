@@ -1,5 +1,5 @@
+import { launchBrowser, freePort, delay } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
-import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
@@ -8,10 +8,13 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import ssh2 from 'ssh2';
 import { sshdPath, sshFixturePath } from './support/sshd.mjs';
+
+const fixturePort3184 = await freePort();
+const fixturePort3185 = await freePort();
+const fixturePort3186 = await freePort();
 const root = path.resolve(import.meta.dirname, '..'), fixture = await mkdtemp('/tmp/termai-files-');
-const origin = 'http://127.0.0.1:3184', base = origin + '/t/', second = 'http://127.0.0.1:3185/t/', sshPort = 3186;
+const origin = 'http://127.0.0.1:' + fixturePort3184, base = origin + '/t/', second = 'http://127.0.0.1:' + fixturePort3185 + '/t/', sshPort = fixturePort3186;
 const processes = []; let logs = '', browser;
-const delay = ms => new Promise(r => setTimeout(r, ms));
 function start(cmd, args, env = {}) { const p = spawn(cmd, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(p); p.stdout.on('data', b => logs += b); p.stderr.on('data', b => logs += b); return p; }
 const request = (target, route, owner, data) => fetch(target + route, { method: data === undefined ? 'GET' : 'POST', headers: { Origin: origin, ...(owner ? { Authorization: 'Bearer ' + owner } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
 const bytes = Buffer.from([0, 255, 1, 2, 3, 10, 13, 90]);
@@ -22,7 +25,7 @@ try {
   await writeFile(fixture + '/host', hostKey.private, { mode: 0o600 }); await writeFile(fixture + '/authorized', key.public);
   await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote PATH=${sshFixturePath()} LANG=${process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8'}\nSubsystem sftp internal-sftp\n`);
   start(sshdPath(), ['-D', '-e', '-f', fixture + '/sshd_config']);
-  for (const [port, dir] of [[3184, 'local'], [3185, 'secondary']]) start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: 'files-feature-test-123456789', TERMAI_CWD: fixture + '/' + dir, TERMAI_DATA_DIR: fixture + '/data-' + dir, TERMAI_NO_RC: '1', HOME: fixture + '/' + dir });
+  for (const [port, dir] of [[fixturePort3184, 'local'], [fixturePort3185, 'secondary']]) start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: 'files-feature-test-123456789', TERMAI_CWD: fixture + '/' + dir, TERMAI_DATA_DIR: fixture + '/data-' + dir, TERMAI_NO_RC: '1', HOME: fixture + '/' + dir });
   for (let n = 0; n < 200; n++) { try { if ((await fetch(base)).ok && (await fetch(second)).ok) break; } catch {} await delay(50); }
   const owner = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
   const other = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
@@ -38,7 +41,7 @@ try {
   const ssh = { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, privateKey: key.private, passphrase: 'test-passphrase-123' };
   const trust = await (await request(base, 'api/sessions', owner, { name: 'Remote', ssh })).json(); assert.ok(trust.fingerprint, JSON.stringify(trust)); ssh.trust = trust.fingerprint;
   const remote = await (await request(base, 'api/sessions', owner, { name: 'Remote', ssh })).json(); assert.ok(remote.id, JSON.stringify(remote));
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
+  browser = await launchBrowser({ });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);

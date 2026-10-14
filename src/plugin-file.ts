@@ -1,4 +1,4 @@
-import { constrainedLink } from './wire.ts';
+import { request as sendRequest, responseJSON } from './api.ts';
 
 export interface FileSnapshot { text: string; path: string; truncated: boolean; version?: string; unchanged?: boolean }
 /** Pure so the same validation also runs inside the opaque plugin frame. */
@@ -32,14 +32,12 @@ export function selectedFileReader() {
     const before = previous;
     const request = (async () => {
       url = new URL(url); url.searchParams.set('delta', '1');
-      const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(12000), headers: {
-        ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(before?.version ? { 'If-None-Match': '"' + before.version + '"' } : {}), ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}) } });
+      const response = await sendRequest(url, { token, headers: before?.version ? { 'If-None-Match': '"' + before.version + '"' } : {} });
       if (response.status === 304) {
         if (!before) throw new Error('Invalid unchanged selected file response.');
         return { ...before, unchanged: true };
       }
-      const value = await response.json();
-      if (!response.ok) throw Object.assign(new Error(value.error || 'Request failed'), value, { status: response.status });
+      const value = await responseJSON(response);
       const snapshot = mergeFileSnapshot(before, value);
       if (scope === nextScope) previous = snapshot;
       return snapshot;

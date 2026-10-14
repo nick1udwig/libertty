@@ -1,9 +1,10 @@
+use crate::test;
 use crate::{
     command_policy::{option_arity, script_operand, vocabulary},
     host::{self, Host},
     repair::{matches, tokens},
     types::{Catalog, CommandMetadata, Flag, Help, SchemaState, SharedList},
-    util::{locale_cmp, test},
+    util::locale_cmp,
     validation::Environment,
 };
 use futures::future::join_all;
@@ -45,7 +46,12 @@ struct Branch {
 fn context(catalog: &Catalog, env: &Environment) -> String {
     let mut stable: Vec<_> = env
         .iter()
-        .filter(|(key, _)| !test("^(?:_|PWD|OLDPWD|SHLVL|LINES|COLUMNS|TERMAI_.*)$", key))
+        .filter(|(key, _)| {
+            !test!(
+                r###"^(?:_|PWD|OLDPWD|SHLVL|LINES|COLUMNS|TERMAI_.*)$"###,
+                key
+            )
+        })
         .collect();
     stable.sort_by(|(a, _), (b, _)| locale_cmp(a, b));
     serde_json::to_string(&(&catalog.cwd, stable, &catalog.commands, &catalog.functions))
@@ -163,7 +169,7 @@ impl Discovery {
         for line in catalog.history.iter().rev().take(200) {
             let words = tokens(line);
             if words.is_empty()
-                || test(r"[|&;<>()\u{60}$\\]", line)
+                || test!(r###"[|&;<>()\u{60}$\\]"###, line)
                 || words[0].value.starts_with('_')
             {
                 continue;
@@ -172,7 +178,7 @@ impl Discovery {
                 .iter()
                 .take(4)
                 .map(|w| w.value.as_str())
-                .take_while(|w| test(r"^[a-zA-Z][a-zA-Z0-9_-]*$", w))
+                .take_while(|w| test!(r###"^[a-zA-Z][a-zA-Z0-9_-]*$"###, w))
                 .collect::<Vec<_>>()
                 .join(" ");
             if !target.is_empty()

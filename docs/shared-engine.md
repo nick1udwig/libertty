@@ -124,7 +124,7 @@ Cold results remain similar: at 150 ms RTT, browser fuzzy-directory repair was 6
 Cold measurements are single samples per case/RTT; local cold timings fluctuate with JIT, filesystem and subprocess startup.
 This refactor does not remove the existing cold-path and Python/filename network penalties.
 
-[Raw results](shared-engine-results.json) include every case at every RTT, cold/warm timings, individual warm samples, foreground request/byte counts and idle-push costs.
+[Raw results](../archive/migration/README.md) include every case at every RTT, cold/warm timings, individual warm samples, foreground request/byte counts and idle-push costs.
 Reproduce the latency run with `BENCH_SUITE=shared BENCH_AFTER=516ad8f BENCH_REPEATS=7 npm run bench:architecture`; for local runs use `BENCH_RTT=0 BENCH_REPEATS=101`, once normally and once with `BENCH_REVERSE=1`.
 
 As in the earlier benchmark, client CPU runs in Node, native engines receive a prepared catalog, and warm browser trials model an already delivered idle context push.

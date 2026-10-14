@@ -1,3 +1,4 @@
+import { button } from './dom.ts';
 import './download-view.css';
 export interface DownloadTicket { ticket: string; name: string; size: number }
 export function showDownloads() { try { return localStorage.getItem('termai.showDownloads') !== 'false'; } catch { return true; } }
@@ -7,7 +8,6 @@ function previewType(name: string) {
   const ext = name.split('.').pop()?.toLowerCase() || '';
   return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf', mp4: 'video/mp4', mp3: 'audio/mpeg', wav: 'audio/wav', txt: 'text/plain', md: 'text/plain', py: 'text/plain', js: 'text/plain', html: 'text/plain', svg: 'text/plain', json: 'text/plain', csv: 'text/plain', log: 'text/plain' } as Record<string, string>)[ext] || 'application/octet-stream';
 }
-function button(text: string, action: () => void) { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.onclick = action; return b; }
 let panel: ReturnType<typeof createPanel> | undefined;
 function createPanel() {
   const modal = document.createElement('dialog'); modal.className = 'download-dialog'; modal.setAttribute('aria-label', 'Downloads');

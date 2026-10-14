@@ -1,9 +1,10 @@
+use crate::test;
 use crate::{
     command_policy::{child_scope, flags_for, is_path_position, option_arity, subcommands_for},
     host::{self, Host},
     repair::{argument_matches, key, repair_candidates as repair, tokens},
     types::{Candidate, Catalog, CommandMetadata, Flag},
-    util::{test, utf16_len},
+    util::utf16_len,
     validation::simple_words,
 };
 use std::collections::BTreeMap;
@@ -74,7 +75,7 @@ pub async fn complete_arguments(
         let mut pending = Vec::new();
         for index in 1..words.len() {
             let word = &words[index];
-            if word.quoted || test("(?i)^-|^(dash|hyphen|hep)$", &word.value) {
+            if word.quoted || test!(r###"(?i)^-|^(dash|hyphen|hep)$"###, &word.value) {
                 continue;
             }
             let prefix = words[..index]
@@ -156,14 +157,14 @@ pub async fn complete_arguments(
                     }
                     requests.set(requests.get() + 1);
                     let mut prefix = words[index].value.to_lowercase();
-                    if test("(?i)^[a-z]$", &prefix)
+                    if test!(r###"(?i)^[a-z]$"###, &prefix)
                         && words
                             .get(index + 1)
-                            .is_some_and(|w| test("(?i)^[a-z]$", &w.value))
+                            .is_some_and(|w| test!(r###"(?i)^[a-z]$"###, &w.value))
                     {
                         prefix.push_str(&words[index + 1].value.to_lowercase());
                     }
-                    prefix = if test("(?i)^[a-z0-9_]", &prefix) {
+                    prefix = if test!(r###"(?i)^[a-z0-9_]"###, &prefix) {
                         prefix.chars().take(2).collect()
                     } else {
                         String::new()

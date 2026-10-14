@@ -8,6 +8,7 @@ use crate::{
     host::{HostServices, NativeHost},
     markers::{Event, Markers},
     paste_mode::PasteMode,
+    protocol::{ClientMessage, controls as control},
     reading::{self, Captures},
     shell::local_bash,
     storage,
@@ -52,7 +53,7 @@ pub enum Transport {
 #[derive(Clone)]
 struct Output {
     seq: u64,
-    data: String,
+    data: Arc<str>,
     bytes: usize,
 }
 #[derive(Clone, Copy)]
@@ -110,7 +111,8 @@ struct Inner {
     pty: Option<Box<dyn ShellProcess>>,
     markers: Markers,
     paste: PasteMode,
-    history: termai_engine::types::SharedList<String>,
+    history: VecDeque<String>,
+    history_snapshot: Option<termai_engine::types::SharedList<String>>,
     history_cwds: Arc<BTreeMap<String, String>>,
     history_cwd_order: VecDeque<String>,
     history_read_at: Option<Instant>,
@@ -128,7 +130,7 @@ struct Inner {
     detached: Instant,
     input_line: Option<InputLine>,
     input_serial: u64,
-    repair: Option<(String, CancellationToken)>,
+    input: crate::input_controller::Controller,
     captured: Option<Value>,
     captured_result: Option<Value>,
     facts: Facts,
@@ -137,8 +139,6 @@ struct Inner {
     transfers: Transfers,
     reading_queue: VecDeque<(String, String, u8)>,
     reading_running: bool,
-    dictation: Option<(String, Recording)>,
-    dictation_serial: u64,
     capture_cleanup: Arc<dyn Fn(String) + Send + Sync>,
 }
 pub struct Session {
@@ -247,9 +247,10 @@ impl Inner {
                         && !line.is_empty()
                         && !line.starts_with(char::is_whitespace)
                     {
-                        self.history.push(line.clone());
+                        self.history.push_back(line.clone());
+                        self.history_snapshot = None;
                         if self.history.len() > 5000 {
-                            self.history.remove(0);
+                            self.history.pop_front();
                         }
                         if !self.history_cwds.contains_key(&line) {
                             self.history_cwd_order.push_back(line.clone());
@@ -332,7 +333,7 @@ impl Inner {
         let output = Output {
             seq: self.seq,
             bytes: visible.len(),
-            data: visible,
+            data: visible.into(),
         };
         self.output_bytes += output.bytes;
         self.outputs.push_back(output.clone());
@@ -463,6 +464,7 @@ impl Session {
                 markers: Markers::new(&nonce),
                 paste: PasteMode::default(),
                 history: history.into(),
+                history_snapshot: None,
                 history_cwds: Arc::default(),
                 history_cwd_order: VecDeque::new(),
                 history_read_at: None,
@@ -479,7 +481,7 @@ impl Session {
                 attachment: 0,
                 detached: Instant::now(),
                 input_line: None,
-                repair: None,
+                input: Default::default(),
                 input_serial: 0,
                 captured: None,
                 captured_result: None,
@@ -489,8 +491,6 @@ impl Session {
                 transfers: Transfers::new(capture_cleanup.clone()),
                 reading_queue: VecDeque::new(),
                 reading_running: false,
-                dictation: None,
-                dictation_serial: 0,
                 capture_cleanup,
             }),
         });
@@ -723,8 +723,8 @@ impl Session {
             let _ = send.send(Transport::Close(1000, "Session ended".into()));
             return (0, receive);
         }
-        inner.dictation.take();
-        if let Some((_, cancel)) = inner.repair.take() {
+        inner.input.dictation.take();
+        if let Some((_, cancel)) = inner.input.repair.take() {
             cancel.cancel();
         }
         inner.reject_input_line();
@@ -776,8 +776,8 @@ impl Session {
             return;
         }
         inner.socket = None;
-        inner.dictation.take();
-        if let Some((_, cancel)) = inner.repair.take() {
+        inner.input.dictation.take();
+        if let Some((_, cancel)) = inner.input.repair.take() {
             cancel.cancel();
         }
         inner.reject_input_line();
@@ -962,6 +962,9 @@ impl Session {
         });
     }
     pub fn receive(self: &Arc<Self>, attachment: u64, message: Value) {
+        let Ok(message) = serde_json::from_value::<ClientMessage>(message) else {
+            return;
+        };
         let mut inner = self.inner.lock().unwrap();
         if inner
             .socket
@@ -970,55 +973,27 @@ impl Session {
         {
             return;
         }
-        let number = |key: &str| {
-            message[key]
-                .as_f64()
-                .filter(|n| {
-                    n.is_finite() && n.fract() == 0.0 && *n >= 0.0 && *n <= 9007199254740991.0
-                })
-                .map(|n| n as u64)
-        };
         let same = inner.state.ready
             && !inner.state.exited
             && inner.captured.is_none()
-            && number("prompt") == Some(inner.state.prompt);
-        if matches!(
-            message["type"].as_str(),
-            Some("input" | "paste" | "replace" | "command")
-        ) && let Some((_, cancel)) = &inner.repair
-        {
-            cancel.cancel();
+            && message.prompt() == Some(inner.state.prompt);
+        if message.edits_input() {
+            inner.input.cancel_repair(None);
         }
-        match message["type"].as_str() {
-            Some("repair-cancel") => {
-                if let Some((id, cancel)) = &inner.repair
-                    && message["id"].as_str() == Some(id)
-                {
-                    cancel.cancel();
-                }
-            }
-            Some("repair") => {
-                let Some(id) = message["id"].as_str().filter(|id| id.len() <= 100) else {
-                    return;
-                };
-                let Some(text) = message["text"]
-                    .as_str()
-                    .filter(|text| text.encode_utf16().count() <= 2000 && !control(text))
-                else {
-                    return;
-                };
-                if !same || number("revision") != Some(inner.state.input_revision) {
+        match message {
+            ClientMessage::RepairCancel { id } => inner.input.cancel_repair(Some(&id)),
+            ClientMessage::Repair(request) => {
+                let crate::protocol::Repair {
+                    id,
+                    text,
+                    prompt: _,
+                    revision,
+                    intent,
+                } = request;
+                if !same || revision != inner.state.input_revision {
                     inner.send(json!({"type":"repair-result","id":id,"accepted":false,"revision":inner.state.input_revision,"prompt":inner.state.prompt,"original":text,"selected":text,"candidates":[]}));
                     return;
                 }
-                let intent = if message.get("intent").is_some() {
-                    match serde_json::from_value(message["intent"].clone()) {
-                        Ok(intent) => intent,
-                        Err(_) => return,
-                    }
-                } else {
-                    crate::alternatives::Intent::Shell
-                };
                 let (id, text, prompt, revision) = (
                     id.to_owned(),
                     text.to_owned(),
@@ -1038,35 +1013,9 @@ impl Session {
                     false,
                 );
             }
-            Some("dictation") => {
-                let Some(id) = message["id"].as_str().filter(|id| {
-                    id.len() == 36
-                        && id
-                            .bytes()
-                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || b == b'-')
-                }) else {
-                    return;
-                };
-                if message["action"] == "cancel"
-                    && inner
-                        .dictation
-                        .as_ref()
-                        .is_some_and(|(current, _)| current == id)
-                {
-                    inner.dictation.take();
-                } else if message["action"] == "finish"
-                    && inner
-                        .dictation
-                        .as_ref()
-                        .is_some_and(|(current, _)| current == id)
-                {
-                    inner.dictation.as_ref().unwrap().1.finish();
-                } else if message["action"] == "start"
-                    && inner
-                        .dictation
-                        .as_ref()
-                        .is_none_or(|(_, recording)| recording.done())
-                {
+            ClientMessage::Dictation(request) => {
+                let id = request.id.as_str();
+                if !inner.input.control_dictation(&request) {
                     let target = if inner.state.exited {
                         None
                     } else if inner.state.ready {
@@ -1078,9 +1027,9 @@ impl Session {
                     };
                     if target.is_none()
                         || inner.captured.is_some()
-                        || number("prompt") != Some(inner.state.prompt)
-                        || number("revision") != Some(inner.state.input_revision)
-                        || dictation_target(&message["target"]) != target
+                        || request.prompt != Some(inner.state.prompt)
+                        || request.revision != Some(inner.state.input_revision)
+                        || request.target() != target
                     {
                         inner.send(json!({"type":"dictation","id":id,"state":"error","message":if target.is_some()&&inner.captured.is_none(){"Terminal input changed. Try dictating again."}else{"Wait for terminal input before dictating."}}));
                         return;
@@ -1088,10 +1037,10 @@ impl Session {
                     let target = target.unwrap().to_owned();
                     let prompt = inner.state.prompt;
                     let revision = inner.state.input_revision;
-                    inner.dictation_serial += 1;
-                    let serial = inner.dictation_serial;
+                    inner.input.serial += 1;
+                    let serial = inner.input.serial;
                     let weak = Arc::downgrade(self);
-                    let phrases = message["readingPhrases"].clone();
+                    let phrases = request.reading_phrases.clone();
                     let result = Arc::new(move |text: String| {
                         let weak = weak.clone();
                         let target = target.clone();
@@ -1154,13 +1103,9 @@ impl Session {
                         if let Some(session) = weak.upgrade() {
                             let mut inner = session.inner.lock().unwrap();
                             if inner.socket.as_ref().is_none_or(|s| s.id != attachment)
-                                || inner.dictation_serial != serial
-                                || inner.dictation.is_none()
+                                || !inner.input.status(&recording_id, serial, state)
                             {
                                 return;
-                            }
-                            if state != "ready" {
-                                inner.dictation.take();
                             }
                             let mut value =
                                 json!({"type":"dictation","id":recording_id,"state":state});
@@ -1170,37 +1115,33 @@ impl Session {
                             inner.send(value);
                         }
                     });
-                    inner.dictation = Some((
+                    inner.input.dictation = Some((
                         id.into(),
                         Recording::start_async(std::env::vars().collect(), result, status),
                     ));
                 }
             }
-            Some("ack") => {
-                if let Some(seq) = number("seq").filter(|seq| *seq <= inner.sent_seq) {
+            ClientMessage::Ack { seq } => {
+                if seq <= inner.sent_seq {
                     while inner.outstanding.front().is_some_and(|(at, _)| *at <= seq) {
                         inner.outstanding_bytes -= inner.outstanding.pop_front().unwrap().1;
                     }
                     inner.flush();
                 }
             }
-            Some("resize") => {
-                if let (Some(cols), Some(rows)) = (
-                    message["cols"].as_f64().filter(|n| n.fract() == 0.0),
-                    message["rows"].as_f64().filter(|n| n.fract() == 0.0),
-                ) && !inner.state.exited
+            ClientMessage::Resize { cols, rows, .. } => {
+                if cols.is_finite()
+                    && rows.is_finite()
+                    && cols.fract() == 0.0
+                    && rows.fract() == 0.0
+                    && !inner.state.exited
                     && let Some(pty) = &inner.pty
                 {
                     pty.resize(cols.clamp(2.0, 300.0) as u16, rows.clamp(2.0, 120.0) as u16);
                 }
             }
-            Some("input") => {
-                if let Some(data) = message["data"]
-                    .as_str()
-                    .filter(|s| s.encode_utf16().count() <= 65536)
-                    && !inner.state.exited
-                    && inner.captured.is_none()
-                {
+            ClientMessage::Input { data } => {
+                if !inner.state.exited && inner.captured.is_none() {
                     inner.state.input_revision += 1;
                     if data.contains(['\r', '\n', '\x03']) {
                         if inner.state.ready {
@@ -1210,53 +1151,48 @@ impl Session {
                         inner.state();
                     }
                     if let Some(pty) = &inner.pty {
-                        pty.write(data);
+                        pty.write(&data);
                     }
                 }
             }
-            Some("replace") => {
-                if let (Some(text), Some(id)) = (message["text"].as_str(), message["id"].as_str()) {
-                    let accepted = id.encode_utf16().count() <= 100
-                        && same
-                        && number("revision") == Some(inner.state.input_revision)
-                        && text.encode_utf16().count() <= 4000
-                        && !control(text);
-                    if accepted {
-                        inner.state.input_revision += 1;
-                        if let Some(pty) = &inner.pty {
-                            pty.write(&format!("\x07\x05\x15\x1b[200~{text}\x1b[201~"));
-                        }
-                        if text.is_empty() {
-                            inner.state.prompt_revision = inner.state.input_revision;
-                            inner.state();
-                        }
+            ClientMessage::Replace {
+                text, id, revision, ..
+            } => {
+                let accepted = id.encode_utf16().count() <= 100
+                    && same
+                    && revision == inner.state.input_revision
+                    && text.encode_utf16().count() <= 4000
+                    && !control(&text);
+                if accepted {
+                    inner.state.input_revision += 1;
+                    if let Some(pty) = &inner.pty {
+                        pty.write(&format!("\x07\x05\x15\x1b[200~{text}\x1b[201~"));
                     }
-                    inner.send(json!({"type":"edit-result","id":id,"accepted":accepted,"revision":inner.state.input_revision}));
+                    if text.is_empty() {
+                        inner.state.prompt_revision = inner.state.input_revision;
+                        inner.state();
+                    }
                 }
+                inner.send(json!({"type":"edit-result","id":id,"accepted":accepted,"revision":inner.state.input_revision}));
             }
-            Some("command") => {
-                if let (Some(command), Some(id)) =
-                    (message["command"].as_str(), message["id"].as_str())
+            ClientMessage::Command { command, id, .. } => {
                 {
-                    if id.encode_utf16().count() > 100 {
-                        return;
-                    }
                     // Results are retained separately from output replay.
-                    if let Some(previous) = inner.command_result(id) {
+                    if let Some(previous) = inner.command_result(&id) {
                         inner.send(previous);
                         return;
                     }
                     let accepted = same
                         && !command.is_empty()
                         && command.encode_utf16().count() <= 4000
-                        && !control(command);
+                        && !control(&command);
                     let mut result = json!({"type":"result","id":id,"accepted":accepted});
                     if !accepted {
                         result["message"] = json!(
                             "The shell is not at the same prompt. Review the command and try again."
                         );
                     }
-                    inner.remember_command(id, result.clone());
+                    inner.remember_command(&id, result.clone());
                     if accepted {
                         inner.state.input_revision += 1;
                         inner.state.ready = false;
@@ -1269,45 +1205,43 @@ impl Session {
                     inner.send(result);
                 }
             }
-            Some("input-line") => {
-                if let Some(id) = message["id"]
-                    .as_str()
-                    .filter(|s| s.encode_utf16().count() <= 100)
-                {
-                    if !same
-                        || inner.input_line.is_some()
-                        || number("revision") != Some(inner.state.input_revision)
-                    {
-                        inner.send(json!({"type":"input-line","id":id,"prompt":message["prompt"],"revision":message["revision"]}));
-                        return;
-                    }
-                    inner.input_serial += 1;
-                    let serial = inner.input_serial;
-                    inner.input_line = Some(InputLine {
-                        id: id.into(),
-                        prompt: inner.state.prompt,
-                        revision: inner.state.input_revision,
-                        serial,
-                        internal: None,
-                    });
-                    if let Some(pty) = &inner.pty {
-                        pty.write("\x18\x12");
-                    }
-                    let weak = Arc::downgrade(self);
-                    tokio::spawn(async move {
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                        if let Some(session) = weak.upgrade() {
-                            let mut inner = session.inner.lock().unwrap();
-                            if inner
-                                .input_line
-                                .as_ref()
-                                .is_some_and(|r| r.serial == serial)
-                            {
-                                inner.reject_input_line();
-                            }
-                        }
-                    });
+            ClientMessage::InputLine {
+                id,
+                prompt,
+                revision,
+            } => {
+                if !same || inner.input_line.is_some() || revision != inner.state.input_revision {
+                    inner.send(
+                        json!({"type":"input-line","id":id,"prompt":prompt,"revision":revision}),
+                    );
+                    return;
                 }
+                inner.input_serial += 1;
+                let serial = inner.input_serial;
+                inner.input_line = Some(InputLine {
+                    id: id.into(),
+                    prompt: inner.state.prompt,
+                    revision: inner.state.input_revision,
+                    serial,
+                    internal: None,
+                });
+                if let Some(pty) = &inner.pty {
+                    pty.write("\x18\x12");
+                }
+                let weak = Arc::downgrade(self);
+                tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    if let Some(session) = weak.upgrade() {
+                        let mut inner = session.inner.lock().unwrap();
+                        if inner
+                            .input_line
+                            .as_ref()
+                            .is_some_and(|r| r.serial == serial)
+                        {
+                            inner.reject_input_line();
+                        }
+                    }
+                });
             }
             _ => {}
         }
@@ -1366,7 +1300,14 @@ impl Session {
                 .collect::<Vec<_>>();
             history.reverse();
             inner.history = history.into();
+            inner.history_snapshot = None;
         }
+        let history = inner.history_snapshot.clone().unwrap_or_else(|| {
+            let snapshot: termai_engine::types::SharedList<String> =
+                inner.history.iter().cloned().collect();
+            inner.history_snapshot = Some(snapshot.clone());
+            snapshot
+        });
         Ok((
             Catalog {
                 cwd: state.cwd,
@@ -1377,7 +1318,7 @@ impl Session {
                 },
                 functions: Some(shell.functions.clone().into()),
                 paths,
-                history: inner.history.clone(),
+                history,
                 history_cwds: Some(inner.history_cwds.clone()),
             },
             shell.environment.clone(),
@@ -1387,7 +1328,7 @@ impl Session {
     pub fn receive_binary(&self, attachment: u64, bytes: Vec<u8>) {
         let inner = self.inner.lock().unwrap();
         if inner.socket.as_ref().is_some_and(|s| s.id == attachment)
-            && let Some((_, recording)) = &inner.dictation
+            && let Some((_, recording)) = &inner.input.dictation
         {
             recording.audio(bytes);
         }
@@ -1413,8 +1354,8 @@ impl Session {
         };
         if actual != Some(target)
             || inner.socket.as_ref().is_none_or(|s| s.id != attachment)
-            || inner.dictation_serial != serial
-            || inner.dictation.is_none()
+            || inner.input.serial != serial
+            || inner.input.dictation.is_none()
             || inner.captured.is_some()
             || inner.state.prompt != prompt
             || inner.state.input_revision != revision
@@ -1583,9 +1524,7 @@ impl Session {
                 }
                 return;
             }
-            if let Some((_, previous)) = inner.repair.replace((id.clone(), cancel.clone())) {
-                previous.cancel();
-            }
+            inner.input.replace_repair(id.clone(), cancel.clone());
         }
         let session = self.clone();
         tokio::spawn(async move {
@@ -1604,6 +1543,7 @@ impl Session {
                 return;
             }
             let current = inner
+                .input
                 .repair
                 .as_ref()
                 .is_some_and(|(active, _)| active == &id);
@@ -1639,7 +1579,7 @@ impl Session {
                 reply["source"] = json!("dictation");
             }
             if current {
-                inner.repair.take();
+                inner.input.repair.take();
             }
             inner.send(reply);
         });
@@ -1802,7 +1742,7 @@ impl Session {
             inner.reading.clear();
             inner.transfers.clear();
             inner.reading_queue.clear();
-            inner.dictation.take();
+            inner.input.dictation.take();
             if let Some(socket) = inner.socket.take() {
                 let _ = socket
                     .send
@@ -1817,18 +1757,6 @@ impl Session {
         } else if !self.directory.is_empty() {
             let _ = tokio::fs::remove_dir_all(&self.directory).await;
         }
-    }
-}
-fn control(text: &str) -> bool {
-    text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
-}
-fn dictation_target(value: &Value) -> Option<&str> {
-    match value {
-        Value::Null | Value::Bool(false) => Some("shell"),
-        Value::Number(number) if number.as_f64() == Some(0.0) => Some("shell"),
-        Value::String(text) if text.is_empty() => Some("shell"),
-        Value::String(text) => Some(text),
-        _ => None,
     }
 }
 impl Drop for Session {
@@ -1899,7 +1827,7 @@ mod tests {
             inner.pending = (1..=100)
                 .map(|seq| Output {
                     seq,
-                    data: "x".repeat(4096),
+                    data: "x".repeat(4096).into(),
                     bytes: 4096,
                 })
                 .collect();
@@ -1935,7 +1863,7 @@ mod tests {
             inner.outputs = (1..=3)
                 .map(|seq| Output {
                     seq,
-                    data: seq.to_string(),
+                    data: seq.to_string().into(),
                     bytes: 1,
                 })
                 .collect();
@@ -2035,8 +1963,8 @@ mod tests {
             let mut inner = session.inner.lock().unwrap();
             inner.state.ready = false;
             inner.state.input_target = Some("program".into());
-            inner.dictation = Some(("current".into(), Recording::dormant()));
-            inner.dictation_serial = 1;
+            inner.input.dictation = Some(("current".into(), Recording::dormant()));
+            inner.input.serial = 1;
         }
         assert!(session.paste_dictation("Get in it.", 1, 0, "program", attachment, 1));
         assert_eq!(*stub.writes.lock().unwrap(), ["Get in it."]);
@@ -2084,31 +2012,32 @@ mod tests {
         let (session, _, attachment, mut receive) = fixture().await;
         let current = "11111111-1111-1111-1111-111111111111";
         let stale = "22222222-2222-2222-2222-222222222222";
-        session.inner.lock().unwrap().dictation = Some((current.into(), Recording::dormant()));
+        session.inner.lock().unwrap().input.dictation =
+            Some((current.into(), Recording::dormant()));
         for action in ["cancel", "finish"] {
             session.receive(
                 attachment,
                 json!({"type":"dictation","id":stale,"action":action}),
             );
             let inner = session.inner.lock().unwrap();
-            assert_eq!(inner.dictation.as_ref().unwrap().0, current);
-            assert!(!inner.dictation.as_ref().unwrap().1.done());
+            assert_eq!(inner.input.dictation.as_ref().unwrap().0, current);
+            assert!(!inner.input.dictation.as_ref().unwrap().1.done());
         }
         session.receive(
             attachment,
             json!({"type":"dictation","id":current,"action":"cancel"}),
         );
-        assert!(session.inner.lock().unwrap().dictation.is_none());
+        assert!(session.inner.lock().unwrap().input.dictation.is_none());
         for target in [json!({}), json!([]), json!(true), json!(7)] {
             session.receive(attachment, json!({"type":"dictation","id":current,"action":"start","prompt":1,"revision":0,"target":target}));
-            assert!(session.inner.lock().unwrap().dictation.is_none());
+            assert!(session.inner.lock().unwrap().input.dictation.is_none());
             match receive.try_recv().unwrap() {
                 Transport::Message(message) => assert_eq!(message["state"], "error"),
                 _ => panic!(),
             }
         }
         for target in [Value::Null, json!(false), json!(0), json!("")] {
-            assert_eq!(dictation_target(&target), Some("shell"));
+            assert_eq!(crate::protocol::dictation_target(&target), Some("shell"));
         }
     }
 }

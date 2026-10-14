@@ -165,7 +165,7 @@ Preloading terminal assets and caching both HTML entry points reduces the new lo
 Each tab also owns its renderer/WASM and, when applicable, worker, so memory and background work grow with open tabs.
 The before/after engine benchmark is not evidence that SSH matches direct-backend latency; remote fact access adds SSH/SFTP network round trips.
 
-[Raw results](workspace-results.json) contain every cold/warm repair case at 0/50/150 ms RTT, local samples in both orders, and browser startup/echo samples.
+[Raw results](../archive/migration/README.md) contain every cold/warm repair case at 0/50/150 ms RTT, local samples in both orders, and browser startup/echo samples.
 Reproduce after building:
 
 ```sh
@@ -236,7 +236,7 @@ These measurements do not establish zero overhead or predict mobile/network late
 Non-SSH submissions add only a Bash builtin check; configuration/key resolution runs only for captured SSH.
 Repair algorithms are unchanged.
 
-[Raw capture comparison](ssh-capture-results.json) includes all samples and both single cold-load observations per variant.
+[Raw capture comparison](../archive/migration/README.md) includes all samples and both single cold-load observations per variant.
 Reproduce after building:
 
 ```sh

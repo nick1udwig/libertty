@@ -1,16 +1,11 @@
-import { constrainedLink } from './wire.ts';
+import { request as sendRequest, responseJSON } from './api.ts';
 import type { FileClient } from './file-browser.ts';
 import { downloadFile, type DownloadTicket } from './download-view.ts';
 export function saveDownload(base: string, prepare: () => Promise<DownloadTicket>, name?: string) { return downloadFile(base, prepare, name); }
 export function fileClient(base: string, session: string, token: () => string | undefined, authenticate: () => Promise<void>): FileClient {
-  async function request(route: string, query: Record<string, string>, init: RequestInit = {}) {
+  async function request<T = any>(route: string, query: Record<string, string>, init: RequestInit = {}) {
     const url = new URL(route, base); url.search = new URLSearchParams({ session, ...query }).toString();
-    const send = () => fetch(url, { ...init, credentials: 'same-origin', cache: 'no-store', headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...init.headers, ...(token() ? { Authorization: 'Bearer ' + token() } : {}) } });
-    let response = await send();
-    if (response.status === 401) { await authenticate(); response = await send(); }
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'File transfer failed.');
-    return result;
+    return responseJSON<T>(await sendRequest(url, { ...init, token, recoverAuth: authenticate, ...(route.endsWith('/upload') ? { timeout: 0 } : {}) }));
   }
   return {
     action: input => request('api/files/action', {}, { method: 'POST', body: JSON.stringify(input), headers: { 'Content-Type': 'application/json' } }),

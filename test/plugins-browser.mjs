@@ -1,6 +1,6 @@
+import { launchBrowser, delay, until } from './support/browser.mjs';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
@@ -15,8 +15,6 @@ const root = new URL('../', import.meta.url).pathname, fixture = await herdrFixt
 async function freePort() { const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening'); const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port; }
 const port = await freePort(), sshPort = await freePort(), origin = 'http://127.0.0.1:' + port, base = origin + '/plugins-test', processes = [], errors = [];
 let logs = '', browser, page, bearer;
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check, label, timeout = 12000) { for (const end = Date.now() + timeout; Date.now() < end;) { if (await check()) return; await delay(30); } throw new Error('Timed out: ' + label); }
 function start(command, args, env = {}) { const process = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...globalThis.process.env, ...env } }); processes.push(process); process.stdout.on('data', b => logs += b); process.stderr.on('data', b => logs += b); return process; }
 async function request(route, data, credential = bearer) { return fetch(base + '/api/' + route, { method: data === undefined ? 'GET' : 'POST', headers: { Origin: origin, ...(credential ? { Authorization: 'Bearer ' + credential } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) }); }
 async function settings() { if (await page.locator('#workspace-navigation').isVisible()) { await showTerminalTabs(page); await page.locator('#terminal-back').click(); } await page.locator('#nav-settings').click(); }
@@ -34,7 +32,7 @@ try {
   start(root + 'target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/plugins-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/data', TERMAI_TOKEN: 'plugin-test-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory, HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH });
   await until(async () => { try { return (await fetch(base + '/')).ok; } catch { return false; } }, 'backend');
   assert.equal((await request('plugins/read?path=app.log', undefined, undefined)).status, 401);
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   page = await context.newPage(); page.setDefaultTimeout(12000); page.on('pageerror', error => errors.push(error.stack || String(error)));
   await page.goto(base + '/'); await page.locator('#backend-token').fill('plugin-test-pairing-token-123456789'); await page.locator('#backend-login-form button[type=submit]').click();

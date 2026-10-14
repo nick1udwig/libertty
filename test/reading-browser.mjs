@@ -1,5 +1,5 @@
+import { launchBrowser, freePort, delay } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
-import { chromium } from 'playwright-core';
 import { spawn, spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
@@ -8,9 +8,11 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
+const fixturePort3167 = await freePort();
+
 const root = path.resolve(import.meta.dirname, '..');
 const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-reading-'));
-const port = 3167, origin = `http://127.0.0.1:${port}`, mount = process.env.TEST_BASE_PATH || '', base = origin + mount, token = 'reading-test-token-123456789';
+const port = fixturePort3167, origin = `http://127.0.0.1:${port}`, mount = process.env.TEST_BASE_PATH || '', base = origin + mount, token = 'reading-test-token-123456789';
 await writeFile(path.join(fixture, 'note.txt'), 'A quiet place to read.\nSecond line.\n');
 await writeFile(path.join(fixture, 'README.md'), '# Reader heading\n\nA **formatted** paragraph.\n\n![Pixel](image.png)\n\n[Open note](note.txt)\n\n<script>window.markdownRan = true</script>\n');
 await mkdir(path.join(fixture, 'docs'));
@@ -25,7 +27,6 @@ const server = spawn(path.join(root, 'target/debug/termai'), [], { cwd: root, en
 const serverExited = once(server, 'exit');
 let logs = '', browser;
 server.stdout.on('data', data => logs += data); server.stderr.on('data', data => logs += data);
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function saveLegacyReading(page, retainPluginTab = false) {
   await page.evaluate(retain => {
     const tabs = JSON.parse(localStorage.getItem('termai.tabs')), active = JSON.parse(localStorage.getItem('termai.activeTab'));
@@ -37,7 +38,7 @@ async function saveLegacyReading(page, retainPluginTab = false) {
 }
 try {
   for (let i = 0; i < 200; i++) { try { if ((await fetch(base + '/')).ok) break; } catch {} if (server.exitCode !== null) throw new Error(logs); await delay(50); }
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
+  browser = await launchBrowser({ });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(String(error)));

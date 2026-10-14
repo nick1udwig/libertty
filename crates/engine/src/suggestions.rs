@@ -14,9 +14,9 @@ use crate::{
     speech::{expand_symbols, symbol_alternatives},
     transfer_command::download_pipeline,
     types::{Candidate, CandidateSource, Catalog, Change, CommandMetadata, Evidence, Flag},
-    util::{regex, test},
     validation::{Environment, candidate_valid, simple_words},
 };
+use crate::{regex, test};
 use futures::future::{LocalBoxFuture, join_all};
 use std::cell::RefCell;
 
@@ -142,7 +142,7 @@ async fn referenced_paths(
         if word.quoted || word.value.contains(['*', '?', '$']) {
             continue;
         }
-        if let Some(matched) = regex(r"^([^\s]*/)").captures(&word.value) {
+        if let Some(matched) = regex!(r###"^([^[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]]*/)"###).captures(&word.value) {
             let prefix = matched[1].to_owned();
             if !prefixes.contains(&prefix) {
                 prefixes.push(prefix);
@@ -190,7 +190,7 @@ async fn nearby_file_paths(
         return catalog.clone();
     }
     let expanded = expand_symbols(input, true);
-    if test(r"[~/*?<>|&;$]", &expanded) {
+    if test!(r###"[~/*?<>|&;$]"###, &expanded) {
         return catalog.clone();
     }
     let target = discovery_target(&expanded, catalog);
@@ -605,7 +605,7 @@ async fn suggest_one(
     let unresolved_dash = fast.iter().any(|c| {
         tokens(&c.command)
             .iter()
-            .any(|w| !w.quoted && test("(?i)^(dash|hyphen|hep)$", &w.value))
+            .any(|w| !w.quoted && test!(r###"(?i)^(dash|hyphen|hep)$"###, &w.value))
     });
     if !fast.is_empty() && !unresolved_dash {
         let completed = complete_arguments(input, &catalog, &metadata, host, None).await?;

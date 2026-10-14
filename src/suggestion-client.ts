@@ -1,3 +1,4 @@
+import { requestJSON } from './api.ts';
 import type { EngineMode, ServerMessage } from './protocol.ts';
 import type { Candidate } from './protocol.ts';
 
@@ -42,11 +43,7 @@ export class SuggestionClient {
     }
   }
   private async nativeSuggest(text: string, signal: AbortSignal): Promise<{ candidates: Candidate[] }> {
-    const response = await fetch(this.endpoint('api/suggest'), { method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', ...(this.authorization() ? { Authorization: 'Bearer ' + this.authorization() } : {}) }, body: JSON.stringify({ text }), signal });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Suggestions unavailable.');
-    return result;
+    return requestJSON(new URL(this.endpoint('api/suggest')), { text }, { token: this.authorization, signal });
   }
   suggest(text: string, signal: AbortSignal): Promise<{ candidates: Candidate[] }> {
     signal.throwIfAborted();

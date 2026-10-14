@@ -1,20 +1,18 @@
+import { launchBrowser, freePort, startBackend, delay, until, waitForBackend, pair } from './support/browser.mjs';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { chromium } from 'playwright-core';
 import { herdrFixture } from './herdr-fixture.ts';
 
-const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pathname, base = 'http://127.0.0.1:3192/';
+const fixturePort3192 = await freePort();
+
+const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pathname, base = 'http://127.0.0.1:' + fixturePort3192 + '/';
 const token = 'herdr-reopen-fixture-token';
-const backend = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: 'ignore', env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3192', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_DATA_DIR: fixture.directory + '/termai', TERMAI_TOKEN: token, TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory, PATH: fixture.directory + ':' + process.env.PATH, HERDR_SOCKET_PATH: fixture.socketPath } });
+const backend = startBackend({ cwd: root, stdio: 'ignore', env: { ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3192), TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_DATA_DIR: fixture.directory + '/termai', TERMAI_TOKEN: token, TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory, PATH: fixture.directory + ':' + process.env.PATH, HERDR_SOCKET_PATH: fixture.socketPath } });
 const exited = once(backend, 'exit'); let browser;
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check) { for (const end = Date.now() + 15000; Date.now() < end;) { if (await check()) return; await delay(30); } throw Error('Timed out waiting for recovery'); }
 try {
-  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } });
-  const response = await fetch(base + 'api/connect', { method: 'POST', headers: { Origin: new URL(base).origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ token, noSession: true }) });
-  const owner = (await response.json()).accessToken;
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true });
+  await waitForBackend(base, backend);
+  const owner = await pair(base, token);
+  browser = await launchBrowser({ });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await context.addInitScript(({ base, owner }) => {

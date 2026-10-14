@@ -1,3 +1,4 @@
+use crate::protocol::controls as control;
 use base64::{
     Engine,
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig, general_purpose::STANDARD},
@@ -45,9 +46,6 @@ pub enum Event {
 }
 fn length(value: &str) -> usize {
     value.encode_utf16().count()
-}
-fn control(value: &str) -> bool {
-    value.chars().any(|ch| ch < '\x20' || ch == '\x7f')
 }
 /// Node's base64 decoder accepts wrapping, URL-safe letters and missing padding.
 fn decode(value: &str) -> String {

@@ -30,9 +30,6 @@ pub const INPUT_LIMIT: usize = 64 * 1024 * 1024;
 /// This performs no host callbacks and does not populate catalog or fact caches.
 pub fn initialize() {
     command_policy::vocabulary();
-    for pattern in util::patterns::PATTERNS {
-        util::regex(pattern);
-    }
     util::locale_cmp("", "");
 }
 

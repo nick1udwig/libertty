@@ -1,3 +1,4 @@
+use crate::protocol::integer;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -7,11 +8,7 @@ pub struct Tracker {
     initialized: bool,
     agents: Vec<Value>,
 }
-fn integer(value: &Value) -> Option<f64> {
-    value
-        .as_f64()
-        .filter(|n| n.is_finite() && n.fract() == 0.0 && n.abs() <= 9007199254740991.0)
-}
+
 fn status(value: &Value) -> bool {
     ["idle", "working", "blocked", "done", "unknown"]
         .iter()

@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { rustExample } from './support/rust-example.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -22,8 +24,9 @@ test('Rust shell utilities and pairing assets match their declared byte checksum
 
 test('all migration schemas compile and every API route has a resolvable request, response and error contract', async () => {
   for (const name of Object.keys(schemas.$defs)) validate(name);
-  const source = await readFile(new URL('../crates/server/src/http.rs', import.meta.url), 'utf8');
-  const endpoints = [...source.matchAll(/\b(?:pathname|path) == "(\/[^"]+)"/g)].map(match => match[1]);
+  const source = await readFile(new URL('../crates/server/src/http/routes.rs', import.meta.url), 'utf8');
+  const endpoints = [...source.matchAll(/\.route\(\s*"(\/[^"]+)"/g)].map(match => match[1]);
+  assert.ok(endpoints.length >= 35, 'The Axum route table must be covered');
   for (const path of new Set(endpoints)) assert.ok([...http.routes,...http.sockets].some(route => route.path === path), 'Missing HTTP contract: ' + path);
   const seen = new Set();
   for (const route of http.routes) {
@@ -97,4 +100,30 @@ test('asynchronous native/Wasm messages obey their contracts', () => {
   const pins = validate('EngineDirectoryPins');
   assert.ok(pins({ request: 1, directories: [{ directory: 2, entries: [{ name: '🌍', directory: true, symlink: false }] }, { directory: 3 }] }));
   for (const directories of [[{ directory: 0 }], [{ directory: 2, entries: null }], Array(33).fill({ directory: 2 })]) assert.equal(pins({ request: 1, directories }), false);
+});
+
+test('the Rust client parser accepts every declared client message and rejects malformed field types', () => {
+  const id = '11111111-1111-4111-8111-111111111111';
+  const samples = [
+    { type: 'repair', id, text: 'echo 🌍', prompt: 1, revision: 2 },
+    { type: 'repair-cancel', id }, { type: 'input-line', id, prompt: 1, revision: 2 },
+    { type: 'dictation', id, action: 'start', target: 'program', prompt: 1, revision: 2 },
+    { type: 'input', data: '\u001b[A' }, { type: 'paste', text: '🌍' },
+    { type: 'dictation-paste', text: 'hello', applied: false, replace: false, prompt: 1, revision: 2 },
+    { type: 'replace', id, text: 'echo', prompt: 1, revision: 2 },
+    { type: 'command', id, command: 'echo', prompt: 1 },
+    { type: 'resize', cols: 80, rows: 24, mobile: true },
+    { type: 'terminal-scroll', lines: -2, column: 0, row: 0 },
+    { type: 'herdr-frame-request' }, { type: 'herdr-active', active: true }, { type: 'ack', seq: Number.MAX_SAFE_INTEGER },
+  ];
+  const declared = schemas.$defs.ClientMessage.anyOf.map(variant => variant.properties.type.const).sort();
+  assert.deepEqual(samples.map(sample => sample.type).sort(), declared);
+  const check = validate('ClientMessage');
+  const cases = samples.map(value => ({ value: { ...value, future: true }, accepted: true }));
+  for (const sample of samples) for (const [field, value] of Object.entries(sample)) {
+    if (field !== 'type' && field !== 'target') cases.push({ value: { ...sample, [field]: typeof value === 'string' ? {} : 'invalid' }, accepted: false });
+  }
+  for (const { value, accepted } of cases) assert.equal(check(value), accepted, JSON.stringify(value));
+  const actual = execFileSync(rustExample('protocol_check'), { input: cases.map(test => JSON.stringify(test.value)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map(value => value === 'true');
+  assert.deepEqual(actual, cases.map(test => test.accepted));
 });

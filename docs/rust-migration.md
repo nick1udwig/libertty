@@ -43,7 +43,7 @@ SSH sessions retain the reference's client-engine mode.
 Herdr snapshots, actions, status tracking, mobile terminal ownership, incremental frames, scrolling, dictation, remote Unix socket forwarding, and notification persistence are implemented.
 The full Herdr and file browser suites pass against the Rust backend, including remote SSH sessions.
 Notification tests use synthetic subscriptions and mocked deliveries to verify encryption, saved VAPID identity, owner isolation, foreground suppression, acknowledgements, restart behavior, and expired devices.
-The generated inventory records active Rust modules, named unit tests and integration harnesses.
+The active checks discover Rust tests and browser harnesses directly.
 Retained Bash utilities are byte-identical to the reference source, with a contract assertion checking the embedded bytes.
 Rust also serves the unchanged development pairing page and proxies loopback Vite assets and hot-reload sockets behind native authorization.
 Release archives contain the native executable and production Wasm, and installed launchers execute Rust directly with the existing configuration format.
@@ -58,9 +58,8 @@ The browser Wasm harness requires Chromium, selected through `CHROME_PATH` when 
 ```sh
 npm ci
 rustup target add wasm32-unknown-unknown
-npm run migration:schemas -- --check
-npm run migration:inventory -- --check
-npm run migration:vocabulary -- --check
+npm run test:contracts
+npm run contracts:vocabulary -- --check
 npm run test:contracts
 npm run test:rust
 npm run test:rust-state
@@ -88,8 +87,8 @@ Native and browser tests exercise prewarm expiry, prepared catalog isolation, im
 
 `contracts/schemas.json` contains JSON Schema 2020-12 definitions generated from the five existing protocol modules, shared engine data types, help metadata, and SSH key metadata.
 `contracts/engine-operations.json` defines operation-specific argument tuples, optional argument nulls, result schemas and ignored trailing callback arguments.
-`contracts/regression-inventory.json` records active Rust modules, named tests and integration harnesses.
-Run `npm run migration:schemas` and `npm run migration:inventory` to regenerate these files, or append `-- --check` to detect drift.
+The historical migration generators and assertion inventory are retired from active CI.
+Run `npm run test:contracts` to verify current protocol boundaries and `npm run contracts:vocabulary -- --check` to detect vocabulary drift.
 Optional properties are omitted, and null is accepted only by explicitly nullable unions or the fact result for a missing file or description.
 Unknown object fields and terminal message tags are ignored for compatibility, while unknown fact operation kinds and Herdr actions are rejected before starting work.
 All JSON strings use Unicode, all host paths use POSIX syntax, and the `x-utf16MaxLength` and `x-utf8MaxBytes` schema keywords distinguish reference text limits from standard JSON Schema character counts.
@@ -174,7 +173,7 @@ Compatibility fixtures must use synthetic credentials and keys rather than mater
 `npm test` runs frontend and contract tests, and `npm run test:install` exercises the installer in isolated temporary directories.
 `npm run build` compiles the native backend, browser Wasm and frontend.
 Native adapter tests exercise actual Bash, PTY, shared cancellation and filesystem changes.
-The active regression inventory tracks these tests without claiming coverage for the retired migration corpus.
+The historical regression inventory is retained in Git history.
 Run the browser harness in each engine mode with dedicated ports, including `TEST_BASE_PATH=/terminal` in client mode.
 Reading, development pairing/HMR, plugins, files, transfers, gestures, touch, workspace and Herdr harnesses exercise the Rust executable.
 The native Herdr harnesses use the checksum-pinned supported Herdr executable, including mobile sizing, native scroll and shared spaces.

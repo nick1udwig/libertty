@@ -1,5 +1,5 @@
+import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
-import { chromium } from 'playwright-core';
 import { spawn, execFile } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access } from 'node:fs/promises';
 import os from 'node:os';
@@ -8,12 +8,14 @@ import assert from 'node:assert/strict';
 import ssh2 from 'ssh2';
 import { sshdPath, sshFixturePath } from './support/sshd.mjs';
 import { WebSocket } from 'ws';
+
+const fixturePort3153 = await freePort();
+const fixturePort3154 = await freePort();
+const fixturePort3158 = await freePort();
 const root = path.resolve(import.meta.dirname, '..'), fixture = await mkdtemp('/tmp/termai-workspace-');
-const origin = 'http://127.0.0.1:3153', secondary = 'http://127.0.0.1:3154', sshPort = 3158;
+const origin = 'http://127.0.0.1:' + fixturePort3153, secondary = 'http://127.0.0.1:' + fixturePort3154, sshPort = fixturePort3158;
 const processes = [], logs = [], errors = [], facts = [];
 let browser;
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(fn, timeout = 15000) { const start = Date.now(); while (Date.now() - start < timeout) { if (await fn()) return; await delay(40); } throw new Error('Timed out'); }
 function start(command, args, env = {}) { const proc = spawn(command, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(proc); proc.stdout.on('data', b => logs.push(String(b))); proc.stderr.on('data', b => logs.push(String(b))); return proc; }
 async function vaultData(name) {
   const bytes=await readFile(fixture+'/'+name+'/vault.json','utf8').catch(error=>{if(error.code!=='ENOENT')throw error;return '{"keys":[],"knownHosts":[]}';});
@@ -36,7 +38,7 @@ try {
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'); await writeFile(fixture + '/host', hostKey.private, { mode: 0o600 }); await writeFile(fixture + '/authorized', '');
   await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote PATH=${sshFixturePath()}\nSubsystem sftp internal-sftp\n`);
   start(sshdPath(), ['-D', '-e', '-f', fixture + '/sshd_config']);
-  const backendSpecs = [[3153, 'primary', ''], [3154, 'secondary', 'test-backend-token-123456789']];
+  const backendSpecs = [[fixturePort3153, 'primary', ''], [fixturePort3154, 'secondary', 'test-backend-token-123456789']];
   const startBackend = ([port, name, token]) => start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '', TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: token, TERMAI_ENGINE: 'server', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, HOME: fixture, TERMAI_DATA_DIR: fixture + '/' + name, TERMAI_HISTORY_FILE: fixture + '/no-history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/no-history' });
   const backends = backendSpecs.map(startBackend);
   await until(async () => { try { return (await fetch(origin)).ok && (await fetch(secondary)).ok; } catch { return false; } });
@@ -59,7 +61,7 @@ try {
   await new Promise((resolve, reject) => { const socket = new WebSocket(socketURL, { origin }); socket.once('open', () => { socket.close(); resolve(); }); socket.once('error', reject); });
   await new Promise((resolve, reject) => { const socket = new WebSocket(socketURL, { origin }); socket.once('open', () => { socket.close(); reject(new Error('Reused websocket ticket was accepted')); }); socket.once('error', error => { assert.match(error.message, /403/); resolve(); }); });
   await request(origin, 'sessions/close?session=' + isolated, ownerA, {});
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } }), page = await context.newPage();
   // Inspect the real terminal buffer without exposing a debug API in production.
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));

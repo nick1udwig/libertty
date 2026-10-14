@@ -1,3 +1,4 @@
+mod routes;
 use crate::{
     assets, dictation, files, herdr, herdr_terminal_stream, herdr_view,
     host::HostServices,
@@ -640,8 +641,15 @@ impl App {
             .unwrap())
     }
     pub fn router(self: &Arc<Self>) -> Router {
-        Router::new()
-            .fallback(dispatch)
+        let api = routes::router();
+        let router = if self.config.base_path == "/" {
+            api
+        } else {
+            Router::new().nest(&self.config.base_path, api)
+        };
+        router
+            .fallback(static_request)
+            .layer(middleware::from_fn(compression))
             .layer(middleware::from_fn_with_state(self.clone(), security))
             .with_state(self.clone())
     }
@@ -663,6 +671,17 @@ async fn security(State(app): State<Arc<App>>, req: Request<Body>, next: Next) -
             })
             .body(Body::empty())
             .unwrap()
+    } else if req.uri().path().contains("/api/")
+        && app.owner(req.headers()).is_none()
+        && !(req.uri().path().ends_with("/api/connect") && *req.method() == Method::POST)
+        && !(req.uri().path().ends_with("/api/files/download") && *req.method() == Method::GET)
+    {
+        error(StatusCode::UNAUTHORIZED, "Connect to your shell first.")
+    } else if req.uri().path().contains("/api/")
+        && *req.method() != Method::GET
+        && !app.same_origin(req.headers())
+    {
+        error(StatusCode::FORBIDDEN, "Origin is not allowed.")
     } else {
         next.run(req).await
     };
@@ -719,6 +738,13 @@ async fn body(req: &mut Request<Body>, limit: usize) -> Result<Value, Failure> {
     }
     Ok(parsed)
 }
+async fn typed_body<T: serde::de::DeserializeOwned>(
+    req: &mut Request<Body>,
+    limit: usize,
+) -> Result<T, Failure> {
+    serde_json::from_value(body(req, limit).await?)
+        .map_err(|error| fail(format!("Invalid request: {error}")))
+}
 struct CancelOnDrop(CancellationToken);
 impl Drop for CancelOnDrop {
     fn drop(&mut self) {
@@ -734,7 +760,7 @@ async fn bounded<T>(
         .map_err(|_| fail("The operation was aborted due to timeout"))?
         .map_err(fail)
 }
-async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response<Body> {
+async fn compression(req: Request<Body>, next: Next) -> Response<Body> {
     let accepted = assets::accepted_encodings(
         req.headers()
             .get("accept-encoding")
@@ -745,10 +771,7 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response<B
         .get("x-termai-link")
         .is_some_and(|value| value == "constrained");
     let head = *req.method() == Method::HEAD;
-    let response = match request(&app, req).await {
-        Ok(response) => response,
-        Err((status, message)) => error(status, message),
-    };
+    let response = next.run(req).await;
     let mime = response
         .headers()
         .get("content-type")
@@ -796,699 +819,6 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response<B
         Response::from_parts(parts, Body::from(bytes))
     }
 }
-async fn request(app: &Arc<App>, mut req: Request<Body>) -> Result<Response<Body>, Failure> {
-    let uri = req.uri().to_string();
-    let url =
-        url::Url::parse(&format!("http://localhost{uri}")).map_err(|_| fail("Invalid URL"))?;
-    let pathname = if app.config.base_path != "/" && url.path().starts_with(&app.config.public_base)
-    {
-        &url.path()[app.config.base_path.len()..]
-    } else {
-        url.path()
-    };
-    let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
-    let get = *req.method() == Method::GET;
-    if app.config.base_path != "/" && url.path() == app.config.base_path {
-        return Ok(Response::builder()
-            .status(308)
-            .header("location", &app.config.public_base)
-            .body(Body::empty())
-            .unwrap());
-    }
-    if pathname == "/ws" {
-        return websocket(app, req, &query).await;
-    }
-    if pathname == "/herdr/ws" {
-        return herdr_websocket(app, req, &query).await;
-    }
-    if pathname == "/healthz" && get {
-        return Ok(json_response(
-            StatusCode::OK,
-            json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"commit":app.config.release.as_ref().and_then(|v| v["commit"].as_str()).or(option_env!("TERMAI_COMMIT")),"platform":if cfg!(target_os="macos"){"darwin"}else{std::env::consts::OS},"arch":if cfg!(target_arch="x86_64"){"x64"}else{std::env::consts::ARCH},"runtime":"rust","packaged":app.config.release.is_some() || option_env!("TERMAI_COMMIT").is_some()}),
-        ));
-    }
-    if !pathname.starts_with("/api/") {
-        if let Some(frontend) = &app.config.dev_frontend {
-            return crate::dev::serve(
-                frontend,
-                &app.config.public_base,
-                pathname,
-                app.owner(req.headers()).is_some(),
-                app.same_origin(req.headers()),
-                req,
-            )
-            .await;
-        }
-        return Ok(assets::serve(
-            &app.config.dist,
-            &app.config.public_base,
-            pathname,
-            req.method(),
-            req.headers(),
-        )
-        .await);
-    }
-    if !get && !app.same_origin(req.headers()) {
-        return Err((StatusCode::FORBIDDEN, "Origin is not allowed.".into()));
-    }
-    if pathname == "/api/files/download" && get {
-        return app
-            .send_download(query.get("ticket").map(String::as_str).unwrap_or(""))
-            .await;
-    }
-    let mut owner = app.owner(req.headers());
-    let ok = |value| Ok(json_response(StatusCode::OK, value));
-    if pathname == "/api/connect" && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        if owner.is_none() {
-            if !token_matches(&app.token, text(&input, "token")) {
-                return Err((
-                    StatusCode::UNAUTHORIZED,
-                    "Enter the pairing token shown by your termai server.".into(),
-                ));
-            }
-            let mut registry = app.owners.lock().unwrap();
-            if registry.len() >= 256 {
-                return Err((StatusCode::TOO_MANY_REQUESTS,"The saved pairing limit has been reached. Revoke old pairings before adding more.".into()));
-            }
-            owner = Some(registry.issue().map_err(|e| fail(e.to_string()))?);
-        }
-        let owner = owner.unwrap();
-        let sid = session_id(input.get("session"))?;
-        let result = if input["noSession"] == true {
-            json!({"accessToken":owner,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
-        } else {
-            if sid != "default"
-                && !app
-                    .sessions
-                    .lock()
-                    .await
-                    .contains_key(&format!("{owner}/{sid}"))
-            {
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    "This terminal has ended. Open its saved host to reconnect.".into(),
-                ));
-            }
-            json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state(),"accessToken":owner,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
-        };
-        let secure = if req
-            .headers()
-            .get("origin")
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|s| s.starts_with("https:"))
-        {
-            "; Secure"
-        } else {
-            ""
-        };
-        let mut response = json_response(StatusCode::OK, result);
-        response.headers_mut().insert(
-            "set-cookie",
-            HeaderValue::from_str(&format!(
-                "termai={owner}; Path={}; HttpOnly; SameSite=Strict; Max-Age=31536000{secure}",
-                app.config.public_base
-            ))
-            .map_err(|_| fail("Invalid pairing credential."))?,
-        );
-        return Ok(response);
-    }
-    let owner = owner.ok_or((
-        StatusCode::UNAUTHORIZED,
-        "Connect to your shell first.".into(),
-    ))?;
-    if pathname == "/api/notifications/key" && get {
-        return ok(json!({"publicKey":app.notifications.public_key}));
-    }
-    if pathname.starts_with("/api/notifications/") && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        match pathname {
-            "/api/notifications/subscribe" => {
-                return ok(
-                    json!({"device":app.notifications.subscribe(&owner,&input["subscription"]).map_err(fail)?}),
-                );
-            }
-            "/api/notifications/unsubscribe" => app
-                .notifications
-                .unsubscribe(&owner, &input["device"])
-                .map_err(fail)?,
-            "/api/notifications/unwatch" => app
-                .notifications
-                .remove_view(&owner, &input["device"], &input["tabId"])
-                .map_err(fail)?,
-            _ => return Err((StatusCode::NOT_FOUND, "Not found".into())),
-        }
-        return ok(json!({"ok":true}));
-    }
-    if pathname.starts_with("/api/herdr/") {
-        return herdr_request(app, &owner, pathname, &query, &mut req).await;
-    }
-    if pathname == "/api/ssh/probe" && *req.method() == Method::POST {
-        let _permit = app.ssh_probes.try_acquire().map_err(|_| {
-            (
-                StatusCode::TOO_MANY_REQUESTS,
-                "Route probes are busy. Try again.".into(),
-            )
-        })?;
-        let input = body(&mut req, 16384).await?;
-        return ok(
-            json!({"milliseconds":ssh::route_probe(&input,&CancellationToken::new()).await.map_err(fail)?}),
-        );
-    }
-    let sid = session_id(
-        query
-            .get("session")
-            .map(|s| Value::String(s.clone()))
-            .as_ref(),
-    )?;
-    let key = format!("{owner}/{sid}");
-    if pathname == "/api/dictation" && get {
-        return ok(dictation::detect(&std::env::vars().collect()).await);
-    }
-    if pathname == "/api/ping" && get {
-        return ok(json!({"ok":true}));
-    }
-    if pathname == "/api/keychain" {
-        let vault = app.vault.clone();
-        let input = if get {
-            None
-        } else {
-            Some(body(&mut req, 16384).await?)
-        };
-        let result = tokio::task::spawn_blocking(move || -> Result<Value, String> {
-            let result = || -> std::io::Result<Value> {
-                if let Some(input) = input {
-                    match text(&input, "action") {
-                        "delete" if input["id"].is_string() => vault.remove(text(&input, "id"))?,
-                        "rename" if input["id"].is_string() && input["name"].is_string() => {
-                            vault.rename(text(&input, "id"), text(&input, "name"))?
-                        }
-                        "forget" => {
-                            let address = system_ssh::address(&json!({"host":input["host"],"port":input.get("port"),"username":"unused"})).map_err(std::io::Error::other)?;
-                            vault.forget(&address.host,address.port)?;
-                        },
-                        "inspect" => {
-                            return Ok(serde_json::to_value(inspect_private_key(
-                                text(&input, "privateKey"),
-                                text(&input, "passphrase"),
-                            )?)?);
-                        }
-                        "create" | "backup" => {
-                            return Ok(serde_json::to_value(vault.create(
-                                text(&input, "name"),
-                                text(&input, "passphrase"),
-                                input["privateKey"].as_str(),
-                                if input["action"] == "backup" {
-                                    input["replaceId"].as_str()
-                                } else {
-                                    None
-                                },
-                            )?)?);
-                        }
-                        "export" if input["id"].is_string() => {
-                            let raw =
-                                vault.unlock(text(&input, "id"), text(&input, "passphrase"))?;
-                            let mut info = serde_json::to_value(
-                                vault
-                                    .list()?
-                                    .keys
-                                    .into_iter()
-                                    .find(|k| k.id == text(&input, "id"))
-                                    .ok_or_else(|| std::io::Error::other("SSH key not found."))?,
-                            )?;
-                            info["privateKey"] = json!(String::from_utf8_lossy(&raw));
-                            return Ok(info);
-                        }
-                        _ => return Err(std::io::Error::other("Unknown keychain action.")),
-                    }
-                }
-                Ok(serde_json::to_value(vault.list()?)?)
-            };
-            result().map_err(|e| e.to_string())
-        })
-        .await
-        .map_err(|_| fail("Vault operation failed."))?
-        .map_err(fail)?;
-        return ok(result);
-    }
-    if pathname == "/api/sessions" && get {
-        let sessions = app.sessions.lock().await;
-        return ok(json!(sessions.iter().filter(|(key,_)|key.starts_with(&format!("{owner}/"))).map(|(_,t)|json!({"id":t.id,"name":t.name,"kind":if t.session.remote.is_some(){"ssh"}else{"http"},"state":t.session.state()})).collect::<Vec<_>>()));
-    }
-    if pathname == "/api/sessions" && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        let raw = storage::random_hex(16);
-        let sid = format!(
-            "{}-{}-{}-{}-{}",
-            &raw[..8],
-            &raw[8..12],
-            &raw[12..16],
-            &raw[16..20],
-            &raw[20..]
-        );
-        let name = if text(&input, "name").trim().is_empty() {
-            "Terminal".into()
-        } else {
-            text(&input, "name")
-                .trim()
-                .chars()
-                .scan(0, |n, c| {
-                    *n += c.len_utf16();
-                    if *n <= 100 { Some(c) } else { None }
-                })
-                .collect::<String>()
-        };
-        let session = if input.get("ssh").is_some_and(|v| !v.is_null()) {
-            match app
-                .get_remote_session(
-                    &owner,
-                    &sid,
-                    &name,
-                    &input["ssh"],
-                    None,
-                    input["files"] == true,
-                )
-                .await
-            {
-                Ok(session) => session,
-                Err(error) => return Ok(ssh_error(error)),
-            }
-        } else {
-            app.get_session(&owner, &sid, &name, input["files"] == true)
-                .await?
-        };
-        return ok(json!({"id":sid,"name":name,"state":session.state()}));
-    }
-    if pathname == "/api/sessions/close" && *req.method() == Method::POST {
-        app.close_session(&owner, &sid).await;
-        return ok(json!({"ok":true}));
-    }
-    if pathname == "/api/ticket" && *req.method() == Method::POST {
-        if !app
-            .sessions
-            .lock()
-            .await
-            .get(&key)
-            .is_some_and(|t| !t.session.files_only)
-        {
-            return Err((StatusCode::NOT_FOUND, "Terminal not found.".into()));
-        }
-        let mut tickets = app.tickets.lock().unwrap();
-        tickets.retain(|_, t| t.until >= Instant::now());
-        if tickets.len() >= 256 {
-            return Err(fail("Too many pending connections."));
-        }
-        let ticket = storage::random_hex(32);
-        tickets.insert(
-            ticket.clone(),
-            Ticket {
-                owner,
-                session: sid,
-                until: Instant::now() + Duration::from_secs(15),
-            },
-        );
-        return ok(json!({"ticket":ticket,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}));
-    }
-    if sid != "default" && !app.sessions.lock().await.contains_key(&key) {
-        return Err((StatusCode::NOT_FOUND, "Terminal not found.".into()));
-    }
-    let session = app.get_session(&owner, &sid, "Terminal", false).await?;
-    let cwd = session.state().cwd;
-    let home = session.home();
-    if pathname == "/api/plugins/read" && get {
-        let path = query.get("path").ok_or_else(|| fail("Select a file."))?;
-        let known = req
-            .headers()
-            .get("if-none-match")
-            .and_then(|value| value.to_str().ok())
-            .map(|value| value.trim_start_matches("W/").trim_matches('"'));
-        let mut cache = session.plugin_files.lock().await;
-        let snapshot = cache
-            .read(
-                &session.filesystem(),
-                &cwd,
-                &home,
-                path,
-                known,
-                &CancellationToken::new(),
-            )
-            .await
-            .map_err(file_failure)?;
-        let mut response = if known == Some(snapshot.etag.as_str()) {
-            Response::builder()
-                .status(StatusCode::NOT_MODIFIED)
-                .header("cache-control", "no-store")
-                .body(Body::empty())
-                .unwrap()
-        } else {
-            let delta = if query.get("delta").is_some_and(|value| value == "1") {
-                known.and_then(|known| cache.delta(known, &snapshot))
-            } else {
-                None
-            };
-            json_response(
-                StatusCode::OK,
-                delta.unwrap_or_else(|| snapshot.value.as_ref().clone()),
-            )
-        };
-        response.headers_mut().insert(
-            "etag",
-            HeaderValue::from_str(&format!("\"{}\"", snapshot.etag)).unwrap(),
-        );
-        return Ok(response);
-    }
-    if pathname == "/api/files/list" && get {
-        return ok(serde_json::to_value(
-            files::list_files_on(
-                &session.filesystem(),
-                &cwd,
-                &home,
-                query
-                    .get("path")
-                    .filter(|s| !s.is_empty())
-                    .map(String::as_str)
-                    .unwrap_or("."),
-            )
-            .await
-            .map_err(file_failure)?,
-        )
-        .unwrap());
-    }
-    if pathname == "/api/files/mkdir" && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        if !input["name"].is_string() || !input["path"].is_string() {
-            return Err(fail("Enter a folder name."));
-        }
-        return ok(files::make_directory_on(
-            &session.filesystem(),
-            &cwd,
-            &home,
-            text(&input, "path"),
-            text(&input, "name"),
-        )
-        .await
-        .map_err(file_failure)?);
-    }
-    if pathname == "/api/files/action" && *req.method() == Method::POST {
-        let input = body(&mut req, 256 * 1024).await?;
-        return ok(files::action_on(&session.filesystem(), &cwd, &home, &input)
-            .await
-            .map_err(file_failure)?);
-    }
-    if pathname == "/api/images/upload" && *req.method() == Method::POST {
-        let payload = std::mem::take(req.body_mut());
-        return ok(files::upload_image_on(
-            &session.filesystem(),
-            query.get("name").map(String::as_str).unwrap_or(""),
-            payload,
-        )
-        .await
-        .map_err(file_failure)?);
-    }
-    if pathname == "/api/files/upload" && *req.method() == Method::POST {
-        let length = req
-            .headers()
-            .get("content-length")
-            .and_then(|v| v.to_str().ok())
-            .map(str::to_owned);
-        let payload = std::mem::take(req.body_mut());
-        return ok(files::upload_on(
-            &session.filesystem(),
-            &cwd,
-            &home,
-            query
-                .get("path")
-                .filter(|s| !s.is_empty())
-                .map(String::as_str)
-                .unwrap_or("."),
-            query.get("name").map(String::as_str).unwrap_or(""),
-            payload,
-            length.as_deref(),
-        )
-        .await
-        .map_err(file_failure)?);
-    }
-    if pathname == "/api/files/download" && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        return ok(app
-            .download_ticket(&owner, &sid, &session, text(&input, "path"), None, None)
-            .await?);
-    }
-    if pathname == "/api/files/transfer" && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        let transfer = session.transfer(text(&input, "id")).ok_or((
-            StatusCode::NOT_FOUND,
-            "This transfer request expired. Run the command again.".into(),
-        ))?;
-        if input["action"] == "ack" {
-            session.acknowledge_transfer(&transfer.id);
-            return ok(json!({"ok":true}));
-        }
-        if input["action"] != "download" || transfer.action != "download" {
-            return Err(fail("Invalid transfer action."));
-        }
-        let ticket = app
-            .download_ticket(
-                &owner,
-                &sid,
-                &session,
-                &transfer.path,
-                Some(&transfer.name),
-                Some(transfer.id.clone()),
-            )
-            .await?;
-        session.acknowledge_transfer(&transfer.id);
-        return ok(ticket);
-    }
-    if session.files_only {
-        return Err(fail("Open a terminal tab for shell actions."));
-    }
-    if pathname == "/api/dictation/install" && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        let command = dictation::install_command(&std::env::vars().collect())
-            .await
-            .map_err(fail)?;
-        let number = |field| {
-            input[field]
-                .as_f64()
-                .filter(|n| safe_integer(*n))
-                .map(|n| n as u64)
-        };
-        if !number("prompt")
-            .zip(number("revision"))
-            .is_some_and(|(prompt, revision)| session.paste(&command, prompt, revision, true, None))
-        {
-            return Err(fail(
-                "The terminal changed. Return to the shell prompt and try again.",
-            ));
-        }
-        return ok(json!({"ok":true}));
-    }
-    if pathname == "/api/reading/capture" {
-        let id = query.get("id").map(String::as_str).unwrap_or("");
-        if *req.method() == Method::DELETE {
-            session.remove_reading_capture(id);
-            return ok(json!({"ok":true}));
-        }
-        if get {
-            let capture = session.reading_capture(id).ok_or((
-                StatusCode::NOT_FOUND,
-                "This captured output has expired. Run the command again to create a new snapshot."
-                    .into(),
-            ))?;
-            return Ok(binary_response(capture.mime, capture.data));
-        }
-    }
-    if pathname == "/api/reading/file" && get {
-        let path = query
-            .get("path")
-            .ok_or_else(|| fail("Enter a file path."))?;
-        let file = session.read_file(&cwd, path).await.map_err(file_failure)?;
-        return Ok(binary_response(file.mime, file.data));
-    }
-    if pathname == "/api/ssh/captured" && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        let id = text(&input, "id");
-        if input["action"] == "ack" {
-            session.acknowledge_capture(id);
-            return ok(json!({"ok":true}));
-        }
-        if let Some(result) = session.capture_result(id) {
-            return ok(result);
-        }
-        if input["action"] == "cancel" || input["action"] == "native" {
-            let _flight = session
-                .capture_flight
-                .try_lock()
-                .map_err(|_| fail("SSH is still connecting."))?;
-            if session.remote.is_some()
-                || session
-                    .captured()
-                    .is_none_or(|c| c["kind"] != "ssh" || c["id"] != id)
-            {
-                return Err(fail("This SSH request is no longer active."));
-            }
-            session
-                .release_capture(id, input["action"] == "native", None)
-                .map_err(fail)?;
-            return ok(json!({"native":input["action"] == "native"}));
-        }
-        let _flight = session.capture_flight.lock().await;
-        if let Some(result) = session.capture_result(id) {
-            return ok(result);
-        }
-        let capture = session
-            .captured()
-            .filter(|c| c["kind"] == "ssh" && c["id"] == id && session.remote.is_none())
-            .ok_or_else(|| fail("This SSH request is no longer active."))?;
-        let resolved = system_ssh::resolve(
-            capture["command"].as_str().unwrap_or(""),
-            &session.environment().await,
-            &cwd,
-            input["passphrase"].as_str(),
-            &CancellationToken::new(),
-        )
-        .await;
-        let system = match resolved {
-            Ok(system) if system.identities.is_empty() && !system.locked => {
-                let result =
-                    json!({"native":true,"message":"No reusable key was found; using native SSH."});
-                session
-                    .release_capture(id, true, Some(result.clone()))
-                    .map_err(fail)?;
-                return ok(result);
-            }
-            Ok(system) => system,
-            Err(error) if error.native => {
-                let result = json!({"native":true,"message":error.message});
-                session
-                    .release_capture(id, true, Some(result.clone()))
-                    .map_err(fail)?;
-                return ok(result);
-            }
-            Err(error) => return Err(fail(error.message)),
-        };
-        if id.len() != 32 {
-            return Err(fail("This SSH request is no longer active."));
-        }
-        let child_id = format!(
-            "{}-{}-{}-{}-{}",
-            &id[..8],
-            &id[8..12],
-            &id[12..16],
-            &id[16..20],
-            &id[20..]
-        );
-        let name = format!("{}@{}", system.address.username, system.address.host);
-        let input = json!({"host":system.address.host,"port":system.address.port,"username":system.address.username,"trust":input.get("trust")});
-        let child = match app
-            .get_remote_session(&owner, &child_id, &name, &input, Some(system), false)
-            .await
-        {
-            Ok(child) => child,
-            Err(error) => return Ok(ssh_error(error)),
-        };
-        let mut result = json!({"id":child_id,"name":name,"host":input["host"],"port":input["port"],"username":input["username"]});
-        if let Some(key) = child.remote.as_ref().and_then(|h| h.key.as_ref()) {
-            result["key"] = json!(key);
-        }
-        if !app
-            .sessions
-            .lock()
-            .await
-            .get(&key)
-            .is_some_and(|t| Arc::ptr_eq(&t.session, &session))
-        {
-            app.close_session(&owner, &child_id).await;
-            return Err(fail("The source terminal has ended."));
-        }
-        session
-            .release_capture(id, false, Some(result.clone()))
-            .map_err(fail)?;
-        return ok(result);
-    }
-    if pathname == "/api/context" && get {
-        return ok(
-            serde_json::to_value(session.snapshot(true).await.map_err(fail)?.0)
-                .map_err(|e| fail(e.to_string()))?,
-        );
-    }
-    if pathname == "/api/suggest" && *req.method() == Method::POST {
-        if session.engine_mode != "server" {
-            return Err((
-                StatusCode::CONFLICT,
-                "This connection computes suggestions in the client.".into(),
-            ));
-        }
-        let input = body(&mut req, 16384).await?;
-        let text = input["text"]
-            .as_str()
-            .filter(|t| t.encode_utf16().count() <= 2000)
-            .ok_or((
-                StatusCode::BAD_REQUEST,
-                "Keep a command under 2,000 characters.".into(),
-            ))?;
-        return ok(bounded(async |cancel| session.suggest(text, cancel).await).await?);
-    }
-    if pathname == "/api/facts" && *req.method() == Method::POST {
-        let input = body(&mut req, 16384).await?;
-        return ok(bounded(async |cancel| {
-            if input["kind"] == "context" {
-                session
-                    .context(input["known"].as_str(), input["paths"] != false)
-                    .await
-            } else if input["kind"] == "repair" {
-                if input.get("key").is_none() {
-                    let prompt = session.state().prompt;
-                    if input
-                        .get("prompt")
-                        .is_some_and(|value| value.as_u64() != Some(prompt))
-                    {
-                        return Err("Shell context changed. Try again.".into());
-                    }
-                    let result = session
-                        .suggest(
-                            input["text"]
-                                .as_str()
-                                .filter(|text| text.encode_utf16().count() <= 2000)
-                                .ok_or("Expected command text under 2,000 characters.")?,
-                            cancel,
-                        )
-                        .await?;
-                    if session.state().prompt != prompt {
-                        return Err("Shell context changed. Try again.".into());
-                    }
-                    return Ok(result["candidates"].clone());
-                }
-                session
-                    .repair(
-                        input["key"].as_str().ok_or("Expected a context key.")?,
-                        input["catalogKey"]
-                            .as_str()
-                            .ok_or("Expected a catalog key.")?,
-                        input["text"].as_str().ok_or("Expected command text.")?,
-                        cancel,
-                    )
-                    .await
-            } else if let Some(key) = input["key"].as_str() {
-                session.read_facts(key, &input["operations"], cancel).await
-            } else {
-                Err("Expected a context key.".into())
-            }
-        })
-        .await?);
-    }
-    if pathname == "/api/new" && *req.method() == Method::POST {
-        if session.remote.is_some() {
-            return Err(fail(
-                "Open the saved SSH host again to start another shell.",
-            ));
-        }
-        app.close_session(&owner, &sid).await;
-        return ok(json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state()}));
-    }
-    Err((StatusCode::NOT_FOUND, "Not found".into()))
-}
 fn ssh_error(error: ssh::Error) -> Response<Body> {
     json_response(
         StatusCode::from_u16(error.status).unwrap_or(StatusCode::BAD_REQUEST),
@@ -1503,255 +833,6 @@ fn binary_response(mime: &str, data: Vec<u8>) -> Response<Body> {
         .header("content-disposition", "attachment")
         .body(Body::from(data))
         .unwrap()
-}
-async fn herdr_request(
-    app: &Arc<App>,
-    owner: &str,
-    path: &str,
-    query: &HashMap<String, String>,
-    req: &mut Request<Body>,
-) -> Result<Response<Body>, Failure> {
-    let session_name =
-        herdr::session(query.get("herdrSession").map(|s| json!(s)).as_ref()).map_err(fail)?;
-    let get = *req.method() == Method::GET;
-    let ok = |value| Ok(json_response(StatusCode::OK, value));
-    if path == "/api/herdr/connect" && *req.method() == Method::POST {
-        let input = body(req, 16384).await?;
-        let sid = session_id(input.get("source"))?;
-        let source = app
-            .sessions
-            .lock()
-            .await
-            .get(&format!("{owner}/{sid}"))
-            .map(|t| t.session.clone())
-            .filter(|s| s.files_only)
-            .ok_or_else(|| fail("Open a dedicated connection before connecting Herdr."))?;
-        let session_name = herdr::session(input.get("session")).map_err(fail)?;
-        let target = herdr::Target::from_source(&source, &session_name)
-            .await
-            .map_err(fail)?;
-        target.ensure(&source.state().cwd).await.map_err(fail)?;
-        if !app
-            .sessions
-            .lock()
-            .await
-            .get(&format!("{owner}/{sid}"))
-            .is_some_and(|t| Arc::ptr_eq(&t.session, &source))
-        {
-            return Err(fail("This connection has closed."));
-        }
-        app.herdr_targets
-            .lock()
-            .unwrap()
-            .insert(format!("{owner}/{sid}/{}", target.session), target);
-        return ok(json!({"herdrSession":session_name,"herdrSource":sid}));
-    }
-    if path == "/api/herdr/captured" && *req.method() == Method::POST {
-        let sid = session_id(query.get("session").map(|s| json!(s)).as_ref())?;
-        let source = app
-            .sessions
-            .lock()
-            .await
-            .get(&format!("{owner}/{sid}"))
-            .map(|t| t.session.clone())
-            .ok_or_else(|| fail("The source terminal has ended."))?;
-        let input = body(req, 16384).await?;
-        let id = text(&input, "id");
-        if input["action"] == "ack" {
-            source.acknowledge_capture(id);
-            return ok(json!({"ok":true}));
-        }
-        let _flight = source.capture_flight.lock().await;
-        if let Some(result) = source.capture_result(id) {
-            return ok(result);
-        }
-        let capture = source
-            .captured()
-            .filter(|c| c["kind"] == "herdr" && c["id"] == id)
-            .ok_or_else(|| fail("This Herdr request is no longer active."))?;
-        if input["action"] == "cancel" || input["action"] == "native" {
-            source
-                .release_capture(id, input["action"] == "native", None)
-                .map_err(fail)?;
-            return ok(json!({"native":true}));
-        }
-        let env = source.environment().await;
-        let (binary, session) =
-            herdr::parse_command(capture["command"].as_str().unwrap_or(""), &env).map_err(fail)?;
-        let socket_path = herdr::socket(&session, &env).map_err(fail)?;
-        let target = herdr::Target {
-            remote: source.remote.clone(),
-            session: session.clone(),
-            binary,
-            socket_path: Some(socket_path.clone()),
-            env,
-            repairs: Default::default(),
-        };
-        target.ensure(&source.state().cwd).await.map_err(fail)?;
-        if !app
-            .sessions
-            .lock()
-            .await
-            .get(&format!("{owner}/{sid}"))
-            .is_some_and(|t| Arc::ptr_eq(&t.session, &source))
-        {
-            return Err(fail("This connection has closed."));
-        }
-        let local = source.remote.is_none()
-            && socket_path == herdr::socket(&session, &std::env::vars().collect()).map_err(fail)?;
-        let result = json!({"herdrSession":session,"herdrSource":if local{""}else{&sid},"name":if target.session.is_empty(){"Herdr".into()}else{format!("Herdr · {}",target.session)},"remote":source.remote.is_some()});
-        app.herdr_targets
-            .lock()
-            .unwrap()
-            .insert(format!("{owner}/{sid}/{}", target.session), target.clone());
-        if local {
-            app.herdr_targets
-                .lock()
-                .unwrap()
-                .insert(format!("{owner}//{}", target.session), target);
-        }
-        source
-            .release_capture(id, false, Some(result.clone()))
-            .map_err(fail)?;
-        return ok(result);
-    }
-    let source = query
-        .get("herdrSource")
-        .filter(|s| !s.is_empty())
-        .map(String::as_str)
-        .unwrap_or("");
-    let target = if source.is_empty() {
-        let key = format!("{owner}//{session_name}");
-        let mut targets = app.herdr_targets.lock().unwrap();
-        if let Some(target) = targets.get(&key) {
-            target.clone()
-        } else {
-            let target = herdr::Target::local(&session_name).map_err(fail)?;
-            targets.insert(key, target.clone());
-            target
-        }
-    } else {
-        let source = session_id(Some(&json!(source)))?;
-        if !app
-            .sessions
-            .lock()
-            .await
-            .contains_key(&format!("{owner}/{source}"))
-        {
-            return Err((StatusCode::NOT_FOUND,"This Herdr connection has ended. Reconnect from the host menu, or run herdr again in its source terminal.".into()));
-        }
-        app.herdr_targets.lock().unwrap().get(&format!("{owner}/{source}/{session_name}")).cloned().ok_or((StatusCode::NOT_FOUND,"This Herdr connection has ended. Reconnect from the host menu, or run herdr again in its source terminal.".into()))?
-    };
-    if path == "/api/herdr/notifications" && *req.method() == Method::POST {
-        let input = body(req, 16384).await?;
-        app.notifications
-            .add_view(owner, &input["device"], &input["tabId"], source, &target)
-            .map_err(fail)?;
-        return ok(json!({"ok":true}));
-    }
-    if path == "/api/herdr/snapshot" && get {
-        return ok(target.snapshot().await.map_err(fail)?);
-    }
-    if path == "/api/herdr/images/upload" && *req.method() == Method::POST {
-        let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
-        if !target.snapshot().await.map_err(fail)?["terminals"]
-            .as_array()
-            .is_some_and(|items| items.iter().any(|item| item["terminalId"] == terminal))
-        {
-            return Err(fail("This terminal has ended."));
-        }
-        let fs = crate::filesystem::FileSystem {
-            remote: target.remote.clone(),
-        };
-        let payload = std::mem::take(req.body_mut());
-        return ok(files::upload_image_on(
-            &fs,
-            query.get("name").map(String::as_str).unwrap_or(""),
-            payload,
-        )
-        .await
-        .map_err(file_failure)?);
-    }
-    if path == "/api/herdr/options" && get {
-        return ok(target.options().await.map_err(fail)?);
-    }
-    if path == "/api/herdr/suggest" && *req.method() == Method::POST {
-        let input = body(req, 16384).await?;
-        let text = input["text"]
-            .as_str()
-            .filter(|text| text.encode_utf16().count() <= 2000)
-            .ok_or_else(|| fail("Keep a command under 2,000 characters."))?;
-        let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
-        return ok(bounded(async |cancel| {
-            target
-                .suggest(terminal, text, app.services.clone(), cancel)
-                .await
-        })
-        .await?);
-    }
-    if path == "/api/herdr/action" && *req.method() == Method::POST {
-        return ok(target
-            .action(&body(req, 65536).await?)
-            .await
-            .map_err(fail)?);
-    }
-    if path == "/api/herdr/ticket" && *req.method() == Method::POST {
-        let terminal = query.get("terminalId").cloned().unwrap_or_default();
-        // Existing ticket callers may omit a JSON body entirely.
-        let input = if req
-            .headers()
-            .get("content-type")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.starts_with("application/json"))
-        {
-            body(req, 2048).await?
-        } else {
-            json!({})
-        };
-        let size = if input["mobile"] == true && !terminal.is_empty() {
-            let dimension = |key: &str| {
-                input[key]
-                    .as_u64()
-                    .filter(|n| (1..=1000).contains(n))
-                    .map(|n| n as u16)
-            };
-            Some(herdr_terminal_stream::Size {
-                cols: dimension("cols").ok_or_else(|| fail("Invalid terminal size."))?,
-                rows: dimension("rows").ok_or_else(|| fail("Invalid terminal size."))?,
-            })
-        } else {
-            None
-        };
-        if !terminal.is_empty()
-            && !target.snapshot().await.map_err(fail)?["terminals"]
-                .as_array()
-                .is_some_and(|a| a.iter().any(|a| a["terminalId"] == terminal))
-        {
-            return Err(fail("This agent has ended."));
-        }
-        let mut tickets = app.herdr_tickets.lock().unwrap();
-        tickets.retain(|_, t| t.until >= Instant::now());
-        if tickets.len() >= 256 || app.herdr_capacity.available_permits() == 0 {
-            return Err(fail("Too many pending Herdr connections."));
-        }
-        let ticket = storage::random_hex(32);
-        tickets.insert(
-            ticket.clone(),
-            HerdrTicket {
-                size,
-                owner: owner.into(),
-                session: session_name,
-                source: source.into(),
-                terminal,
-                target,
-                until: Instant::now() + Duration::from_secs(15),
-            },
-        );
-        return ok(
-            json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
-        );
-    }
-    Err((StatusCode::NOT_FOUND, "Not found".into()))
 }
 async fn herdr_websocket(
     app: &Arc<App>,
@@ -2082,4 +1163,50 @@ pub async fn run() -> Result<(), String> {
         })
         .await
         .map_err(|e| e.to_string())
+}
+
+async fn static_request(State(app): State<Arc<App>>, req: Request<Body>) -> Response<Body> {
+    let path = req.uri().path().to_owned();
+    if app.config.base_path != "/" && path == app.config.base_path {
+        return Response::builder()
+            .status(308)
+            .header("location", &app.config.public_base)
+            .body(Body::empty())
+            .unwrap();
+    }
+    let pathname = if app.config.base_path != "/" && path.starts_with(&app.config.public_base) {
+        &path[app.config.base_path.len()..]
+    } else {
+        &path
+    };
+    if pathname.starts_with("/api/") {
+        return if app.owner(req.headers()).is_none() {
+            error(StatusCode::UNAUTHORIZED, "Connect to your shell first.")
+        } else {
+            error(StatusCode::NOT_FOUND, "Not found")
+        };
+    }
+    if let Some(frontend) = &app.config.dev_frontend {
+        return match crate::dev::serve(
+            frontend,
+            &app.config.public_base,
+            pathname,
+            app.owner(req.headers()).is_some(),
+            app.same_origin(req.headers()),
+            req,
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err((status, message)) => error(status, message),
+        };
+    }
+    assets::serve(
+        &app.config.dist,
+        &app.config.public_base,
+        pathname,
+        req.method(),
+        req.headers(),
+    )
+    .await
 }

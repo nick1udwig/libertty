@@ -1,6 +1,6 @@
 use crate::{reading, storage};
 use regex::Regex;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     sync::{Arc, LazyLock},
@@ -317,25 +317,28 @@ impl Target {
         )
     }
     pub async fn action(&self, input: &Value) -> Result<Value, String> {
+        use crate::herdr_action::Action;
+        let input: Action = serde_json::from_value(input.clone())
+            .map_err(|error| format!("Invalid Herdr action: {error}"))?;
         let snapshot = self.snapshot().await?;
         let spaces = array(&snapshot, "spaces");
         let terminals = array(&snapshot, "terminals");
-        let space = spaces
-            .iter()
-            .find(|s| s.get("id") == input.get("workspaceId"));
-        match input["action"].as_str().unwrap_or("") {
-            "delete-worktree" => {
+        let space = input
+            .workspace()
+            .and_then(|id| spaces.iter().find(|s| s["id"] == id));
+        match input {
+            Action::DeleteWorktree { path, .. } => {
                 let space = space.ok_or("This space has closed.")?;
                 if space["linkedWorktree"] != true {
                     return Err("Only a linked worktree checkout can be deleted.".into());
                 }
-                let path = space["checkoutPath"]
+                let checkout = space["checkoutPath"]
                     .as_str()
-                    .filter(|path| !path.is_empty())
+                    .filter(|p| !p.is_empty())
                     .ok_or(
                         "Herdr did not provide the checkout folder. Update Herdr on this host.",
                     )?;
-                if input["path"].as_str() != Some(path) {
+                if path.as_deref() != Some(checkout) {
                     return Err(
                         "The checkout folder changed. Reopen the confirmation before deleting."
                             .into(),
@@ -347,52 +350,53 @@ impl Target {
                 )
                 .await
             }
-            "list-worktrees" | "new-worktree" | "open-worktree" => {
+            action @ (Action::ListWorktrees { .. }
+            | Action::NewWorktree { .. }
+            | Action::OpenWorktree { .. }) => {
                 let space = space.ok_or("This space has closed.")?;
                 if space["linkedWorktree"] == true {
                     return Err(
                         "New and open worktree actions start from the repo parent space.".into(),
                     );
                 }
-                let params = json!({"workspace_id":space["id"],"trust_repository":false});
+                let mut params = json!({"workspace_id":space["id"],"trust_repository":false});
                 let mut listing = self.space_request("worktree.list", params.clone()).await?;
                 if !listing["worktrees"].is_array() || !listing["source"]["repo_name"].is_string() {
                     return Err("This Herdr server does not provide worktree discovery. Update Herdr on this host.".into());
                 }
-                if input["action"] == "list-worktrees" {
-                    if let Some(root) = listing["source"]["repo_root"].as_str() {
-                        // Suggestions must not prevent manual creation if Git discovery fails.
-                        listing["branches"] =
-                            json!(self.branch_names(root).await.unwrap_or_default());
+                let method = match action {
+                    Action::ListWorktrees { .. } => {
+                        if let Some(root) = listing["source"]["repo_root"].as_str() {
+                            listing["branches"] =
+                                json!(self.branch_names(root).await.unwrap_or_default());
+                        }
+                        if let Some(directory) = snapshot.get("worktreeDirectory") {
+                            listing["directory"] = directory.clone();
+                        }
+                        return Ok(listing);
                     }
-                    if let Some(directory) = snapshot.get("worktreeDirectory") {
-                        listing["directory"] = directory.clone();
+                    Action::NewWorktree { branch, .. } => {
+                        params["branch"] = json!(name(&json!(branch))?);
+                        params["base"] = json!("HEAD");
+                        "worktree.create"
                     }
-                    return Ok(listing);
-                }
-                let mut params = params;
-                params["focus"] = json!(false);
-                let method = if input["action"] == "new-worktree" {
-                    params["branch"] = json!(name(&input["branch"])?);
-                    params["base"] = json!("HEAD");
-                    "worktree.create"
-                } else {
-                    let path = input["path"]
-                        .as_str()
-                        .ok_or("Choose an existing worktree.")?;
-                    if !array(&listing, "worktrees").iter().any(|entry| {
-                        entry["path"] == path
-                            && entry["is_bare"] != true
-                            && entry["is_prunable"] != true
-                    }) {
-                        return Err(
-                            "This worktree is no longer available. Reopen the worktree picker."
-                                .into(),
-                        );
+                    Action::OpenWorktree { path, .. } => {
+                        if !array(&listing, "worktrees").iter().any(|entry| {
+                            entry["path"] == path
+                                && entry["is_bare"] != true
+                                && entry["is_prunable"] != true
+                        }) {
+                            return Err(
+                                "This worktree is no longer available. Reopen the worktree picker."
+                                    .into(),
+                            );
+                        }
+                        params["path"] = json!(path);
+                        "worktree.open"
                     }
-                    params["path"] = json!(path);
-                    "worktree.open"
+                    _ => unreachable!(),
                 };
+                params["focus"] = json!(false);
                 let created = self.space_request(method, params).await?;
                 if !created["workspace"]["workspace_id"].is_string() {
                     return Err("Herdr changed the worktree but did not return its identity. Refresh spaces before retrying.".into());
@@ -401,27 +405,30 @@ impl Target {
                     json!({"workspaceId":created["workspace"]["workspace_id"],"terminalId":created["root_pane"]["terminal_id"]}),
                 )
             }
-            "split" => {
+            Action::Split {
+                terminal_id,
+                direction,
+                ..
+            } => {
                 let space = space.ok_or("This space has closed.")?;
                 let terminal = terminals
                     .iter()
                     .find(|t| {
-                        t.get("terminalId") == input.get("terminalId")
-                            && t.get("workspaceId") == space.get("id")
+                        t["terminalId"] == terminal_id && t.get("workspaceId") == space.get("id")
                     })
                     .ok_or("Choose a running terminal in this space.")?;
-                if !matches!(input["direction"].as_str(), Some("right" | "down")) {
-                    return Err("Choose a right or down split.".into());
-                }
-                let created = self.space_request("pane.split", json!({"workspace_id":space["id"],"target_pane_id":terminal["paneId"],"direction":input["direction"],"focus":false})).await?;
+                let created = self.space_request("pane.split", json!({"workspace_id":space["id"],"target_pane_id":terminal["paneId"],"direction":direction,"focus":false})).await?;
                 Ok(json!({"workspaceId":space["id"],"terminalId":created["pane"]["terminal_id"]}))
             }
-            "create-space" => {
-                if input.get("workspaceId").is_some() && space.is_none() {
+            Action::CreateSpace {
+                workspace_id,
+                terminal_id,
+            } => {
+                if workspace_id.is_some() && space.is_none() {
                     return Err("This space has closed.".into());
                 }
                 let terminal = terminals.iter().find(|t| {
-                    t.get("terminalId") == input.get("terminalId")
+                    t["terminalId"].as_str() == terminal_id.as_deref()
                         && t.get("workspaceId") == space.and_then(|s| s.get("id"))
                 });
                 let cwd = terminal
@@ -449,42 +456,45 @@ impl Target {
                 }
                 Ok(result)
             }
-            "move-space" => {
+            Action::MoveSpace {
+                workspace_id,
+                before_workspace_id,
+            } => {
                 if space.is_none() {
                     return Err("This space has closed.".into());
                 }
-                if let Some(before) = input.get("beforeWorkspaceId")
-                    && (Some(before) == input.get("workspaceId")
-                        || !spaces.iter().any(|s| s.get("id") == Some(before)))
+                if let Some(before) = &before_workspace_id
+                    && (before == &workspace_id || !spaces.iter().any(|s| s["id"] == *before))
                 {
                     return Err("Choose another existing space.".into());
                 }
-                let mut params = json!({"workspace_ids":[input["workspaceId"]]});
-                if let Some(before) = input.get("beforeWorkspaceId") {
-                    params["before_workspace_id"] = before.clone();
+                let mut params = json!({"workspace_ids":[workspace_id]});
+                if let Some(before) = before_workspace_id {
+                    params["before_workspace_id"] = json!(before);
                 }
                 self.request("workspace.move_block", params).await
             }
-            "create" => {
-                let label = name(&input["name"])?;
-                if !input["kind"].is_string()
-                    || !array(&self.options().await?, "kinds").contains(&input["kind"])
-                {
+            Action::Create {
+                name: label,
+                kind,
+                cwd,
+                ..
+            } => {
+                let label = name(&json!(label))?;
+                if !array(&self.options().await?, "kinds").contains(&json!(kind)) {
                     return Err("Choose a supported agent type.".into());
                 }
                 let space = space.ok_or("Choose an existing space.")?;
-                if let Some(cwd) = input.get("cwd")
-                    && !cwd.as_str().is_some_and(|s| {
-                        s.starts_with('/')
-                            && s.encode_utf16().count() <= 4096
-                            && !s.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
-                    })
-                {
+                if cwd.as_ref().is_some_and(|s| {
+                    !s.starts_with('/')
+                        || s.encode_utf16().count() > 4096
+                        || crate::protocol::controls(s)
+                }) {
                     return Err("Enter an absolute working directory.".into());
                 }
                 let mut params = json!({"workspace_id":space["id"],"label":label,"focus":false});
-                if truthy(&input["cwd"]) {
-                    params["cwd"] = input["cwd"].clone();
+                if let Some(cwd) = cwd {
+                    params["cwd"] = json!(cwd);
                 }
                 let created = self.request("tab.create", params).await?;
                 let pane = &created["root_pane"];
@@ -496,7 +506,7 @@ impl Target {
                 }
                 let work = async {
                     self.request("pane.rename", json!({"pane_id":pane["pane_id"],"label":label})).await?;
-                    self.request("agent.start", json!({"pane_id":pane["pane_id"],"name":format!("agent-{}",storage::random_hex(10)),"kind":input["kind"],"args":[]})).await?;
+                    self.request("agent.start", json!({"pane_id":pane["pane_id"],"name":format!("agent-{}",storage::random_hex(10)),"kind":kind,"args":[]})).await?;
                     Ok::<_, String>(())
                 }.await;
                 let mut result = json!({"terminalId":pane["terminal_id"]});
@@ -505,43 +515,45 @@ impl Target {
                 }
                 Ok(result)
             }
-            "rename-space" | "close-space" => {
+            Action::RenameSpace { name: label, .. } => {
                 let space = space.ok_or("This space has closed.")?;
-                if input["action"] == "close-space" {
-                    self.request(
-                        "workspace.close",
-                        json!({"workspace_id":space["id"],"close_group":false}),
-                    )
-                    .await
-                } else {
-                    self.request(
-                        "workspace.rename",
-                        json!({"workspace_id":space["id"],"label":name(&input["name"])?}),
-                    )
-                    .await
-                }
+                self.request(
+                    "workspace.rename",
+                    json!({"workspace_id":space["id"],"label":name(&json!(label))?}),
+                )
+                .await
             }
-            _ => {
-                if !input["terminalId"].is_string() {
-                    return Err("Choose an agent.".into());
-                }
+            Action::CloseSpace { .. } => {
+                let space = space.ok_or("This space has closed.")?;
+                self.request(
+                    "workspace.close",
+                    json!({"workspace_id":space["id"],"close_group":false}),
+                )
+                .await
+            }
+            action @ (Action::Rename { .. } | Action::Close { .. }) => {
+                let id = match &action {
+                    Action::Rename { terminal_id, .. } | Action::Close { terminal_id } => {
+                        terminal_id
+                    }
+                    _ => unreachable!(),
+                };
                 let agent = terminals
                     .iter()
-                    .find(|t| t["terminalId"] == input["terminalId"])
+                    .find(|t| t["terminalId"] == *id)
                     .ok_or("This agent has ended.")?;
-                match input["action"].as_str() {
-                    Some("rename") => {
+                match action {
+                    Action::Rename { name: label, .. } => {
                         self.request(
                             "pane.rename",
-                            json!({"pane_id":agent["paneId"],"label":name(&input["name"])?}),
+                            json!({"pane_id":agent["paneId"],"label":name(&json!(label))?}),
                         )
                         .await
                     }
-                    Some("close") => {
+                    _ => {
                         self.request("pane.close", json!({"pane_id":agent["paneId"]}))
                             .await
                     }
-                    _ => Err("Unknown Herdr action.".into()),
                 }
             }
         }
@@ -769,258 +781,7 @@ fn truthy(value: &Value) -> bool {
         _ => true,
     }
 }
-fn first(values: &[&Value], fallback: Value) -> Value {
-    values
-        .iter()
-        .find(|v| truthy(v))
-        .map(|v| (*v).clone())
-        .unwrap_or(fallback)
-}
-fn safe_integer(value: &Value) -> bool {
-    value
-        .as_f64()
-        .is_some_and(|n| n.is_finite() && n.fract() == 0.0 && n.abs() <= 9007199254740991.0)
-}
-fn copy_fields(object: &mut Map<String, Value>, source: &Value, fields: &[(&str, &str)]) {
-    for (to, from) in fields {
-        if let Some(value) = source.get(from) {
-            object.insert((*to).into(), value.clone());
-        }
-    }
-}
-pub fn normalize(raw: &Value) -> Result<Value, String> {
-    let snapshot = &raw["snapshot"];
-    if !["agents", "tabs", "workspaces"]
-        .iter()
-        .all(|field| snapshot[field].is_array())
-    {
-        return Err("This Herdr server does not provide a session snapshot.".into());
-    }
-    let workspaces: HashMap<_, _> = array(snapshot, "workspaces")
-        .iter()
-        .map(|w| {
-            (
-                w["workspace_id"].clone(),
-                first(
-                    &[&w["label"]],
-                    json!(format!(
-                        "Workspace {}",
-                        w.get("number")
-                            .filter(|v| truthy(v))
-                            .map(|v| v
-                                .as_str()
-                                .map(str::to_owned)
-                                .unwrap_or_else(|| v.to_string()))
-                            .unwrap_or_default()
-                    )),
-                ),
-            )
-        })
-        .collect();
-    let tabs: HashMap<_, _> = array(snapshot, "tabs")
-        .iter()
-        .map(|t| (t["tab_id"].clone(), t))
-        .collect();
-    let mut panes = Vec::<&Value>::new();
-    for pane in array(snapshot, "panes") {
-        if let Some(previous) = panes.iter_mut().find(|p| p["pane_id"] == pane["pane_id"]) {
-            *previous = pane;
-        } else {
-            panes.push(pane);
-        }
-    }
-    let mut agents = Vec::new();
-    for agent in array(snapshot, "agents")
-        .iter()
-        .filter(|a| a["terminal_id"].is_string() && a["pane_id"].is_string())
-        .take(256)
-    {
-        let pane = panes
-            .iter()
-            .find(|p| p["pane_id"] == agent["pane_id"])
-            .copied()
-            .unwrap_or(&Value::Null);
-        let tab = tabs.get(&agent["tab_id"]).copied().unwrap_or(&Value::Null);
-        let mut value = Map::new();
-        copy_fields(
-            &mut value,
-            agent,
-            &[
-                ("terminalId", "terminal_id"),
-                ("paneId", "pane_id"),
-                ("workspaceId", "workspace_id"),
-                ("tabId", "tab_id"),
-            ],
-        );
-        value.insert(
-            "workspace".into(),
-            workspaces
-                .get(&agent["workspace_id"])
-                .cloned()
-                .unwrap_or(json!("Workspace")),
-        );
-        value.insert(
-            "name".into(),
-            first(
-                &[
-                    &pane["label"],
-                    &agent["title"],
-                    &pane["title"],
-                    &agent["name"],
-                    &agent["terminal_title_stripped"],
-                    &pane["terminal_title_stripped"],
-                    &tab["label"],
-                    &agent["display_agent"],
-                    &agent["agent"],
-                ],
-                json!("Agent"),
-            ),
-        );
-        value.insert(
-            "kind".into(),
-            first(
-                &[&agent["display_agent"], &agent["agent"]],
-                json!("Terminal"),
-            ),
-        );
-        value.insert(
-            "status".into(),
-            if ["idle", "working", "blocked", "done"]
-                .iter()
-                .any(|s| agent["agent_status"] == *s)
-            {
-                agent["agent_status"].clone()
-            } else {
-                json!("unknown")
-            },
-        );
-        value.insert(
-            "sequence".into(),
-            if safe_integer(&agent["state_change_seq"]) {
-                agent["state_change_seq"].clone()
-            } else {
-                first(&[&agent["revision"]], json!(0))
-            },
-        );
-        if safe_integer(&agent["completion_seq"]) {
-            value.insert("completion".into(), agent["completion_seq"].clone());
-        }
-        value.insert(
-            "cwd".into(),
-            first(&[&agent["foreground_cwd"], &agent["cwd"]], json!("")),
-        );
-        agents.push(Value::Object(value));
-    }
-    let mut terminals = Vec::new();
-    for pane in panes
-        .iter()
-        .filter(|p| p["terminal_id"].is_string())
-        .take(256)
-    {
-        if let Some(agent) = agents
-            .iter()
-            .find(|a| a["terminalId"] == pane["terminal_id"])
-        {
-            terminals.push(agent.clone());
-            continue;
-        }
-        let tab = tabs.get(&pane["tab_id"]).copied().unwrap_or(&Value::Null);
-        let mut value = Map::new();
-        copy_fields(
-            &mut value,
-            pane,
-            &[
-                ("terminalId", "terminal_id"),
-                ("paneId", "pane_id"),
-                ("workspaceId", "workspace_id"),
-                ("tabId", "tab_id"),
-            ],
-        );
-        value.insert(
-            "workspace".into(),
-            workspaces
-                .get(&pane["workspace_id"])
-                .cloned()
-                .unwrap_or(json!("Workspace")),
-        );
-        value.insert(
-            "name".into(),
-            first(
-                &[
-                    &pane["label"],
-                    &pane["title"],
-                    &pane["terminal_title_stripped"],
-                    &tab["label"],
-                ],
-                json!("Terminal"),
-            ),
-        );
-        value.insert("kind".into(), json!("Terminal"));
-        value.insert("status".into(), json!("idle"));
-        value.insert("sequence".into(), first(&[&pane["revision"]], json!(0)));
-        value.insert(
-            "cwd".into(),
-            first(&[&pane["foreground_cwd"], &pane["cwd"]], json!("")),
-        );
-        terminals.push(Value::Object(value));
-    }
-    for agent in &agents {
-        if !terminals
-            .iter()
-            .any(|t| t["terminalId"] == agent["terminalId"])
-        {
-            terminals.push(agent.clone());
-        }
-    }
-    let mut spaces = Vec::new();
-    for workspace in array(snapshot, "workspaces") {
-        let members: Vec<_> = terminals
-            .iter()
-            .filter(|t| t.get("workspaceId") == workspace.get("workspace_id"))
-            .collect();
-        let focused = panes.iter().find(|p| {
-            p.get("workspace_id") == workspace.get("workspace_id")
-                && p.get("tab_id") == workspace.get("active_tab_id")
-                && truthy(&p["focused"])
-        });
-        let selected = focused
-            .and_then(|p| p.get("terminal_id"))
-            .filter(|v| truthy(v))
-            .or_else(|| {
-                members
-                    .iter()
-                    .find(|t| t.get("tabId") == workspace.get("active_tab_id"))
-                    .and_then(|t| t.get("terminalId"))
-                    .filter(|v| truthy(v))
-            })
-            .or_else(|| members.first().and_then(|t| t.get("terminalId")));
-        let cwd = selected
-            .and_then(|id| members.iter().find(|t| t.get("terminalId") == Some(id)))
-            .map(|t| &t["cwd"])
-            .filter(|v| truthy(v));
-        let mut space = json!({"id":workspace["workspace_id"],"name":workspaces[&workspace["workspace_id"]],"terminalIds":members.iter().map(|t| &t["terminalId"]).collect::<Vec<_>>(),"cwd":first(&[cwd.unwrap_or(&Value::Null), &workspace["worktree"]["checkout_path"]], json!(""))});
-        if let Some(id) = selected {
-            space["selectedTerminalId"] = id.clone();
-        }
-        if let Some(linked) = workspace["worktree"].get("is_linked_worktree") {
-            space["linkedWorktree"] = linked.clone();
-        }
-        if let Some(path) = workspace["worktree"].get("checkout_path") {
-            space["checkoutPath"] = path.clone();
-        }
-        spaces.push(space);
-    }
-    let mut result = json!({"agents":agents,"terminals":terminals,"spaces":spaces});
-    if let Some(directory) = snapshot.get("worktree_directory") {
-        result["worktreeDirectory"] = directory.clone();
-    }
-    for field in ["version", "protocol"] {
-        if let Some(value) = snapshot.get(field) {
-            result[field] = value.clone();
-        }
-    }
-    Ok(result)
-}
+pub use crate::herdr_snapshot::normalize;
 
 pub fn response_preview(screen: &str) -> String {
     static COMPOSER: LazyLock<Regex> =

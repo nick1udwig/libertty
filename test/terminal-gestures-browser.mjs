@@ -1,26 +1,27 @@
+import { launchBrowser, freePort, delay } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
-import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 
+const fixturePort3182 = await freePort();
+
 const root = path.resolve(import.meta.dirname, '..');
 const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-gestures-'));
-const port = Number(process.env.TEST_PORT || 3182), base = `http://127.0.0.1:${port}`;
+const port = Number(process.env.TEST_PORT || fixturePort3182), base = `http://127.0.0.1:${port}`;
 const token = 'gesture-test-pairing-token-123456789';
 const server = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: token, TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = '', browser;
 server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 try {
   for (let i = 0; i < 100; i++) {
     if (await fetch(base).then(r => r.ok, () => false)) break;
     if (server.exitCode !== null) throw new Error(logs);
     await delay(100);
   }
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Opened terminal link</title>' }));

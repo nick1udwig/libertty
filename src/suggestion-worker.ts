@@ -1,3 +1,4 @@
+import { requestJSON } from './api.ts';
 import type { Candidate } from './protocol.ts';
 
 // Interpretation and dependent facts stay together on the backend.
@@ -15,11 +16,7 @@ self.onmessage = async (event: MessageEvent<{ id: number; text?: string; endpoin
   const controller = new AbortController(); active.set(id, controller);
   const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(12000)]);
   try {
-    const response = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: { 'Content-Type': 'application/json', ...(authorization ? { Authorization: 'Bearer ' + authorization } : {}) },
-      body: JSON.stringify({ kind: 'repair', text, prompt }), signal });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Repair unavailable.');
+    const result = await requestJSON<Candidate[]>(new URL(endpoint), { kind: 'repair', text, prompt }, { token: authorization, signal });
     signal.throwIfAborted();
     self.postMessage({ id, candidates: result as Candidate[] });
   } catch (error) {

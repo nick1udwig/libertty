@@ -1,3 +1,4 @@
+use crate::test;
 use crate::types::Word;
 use crate::{
     command_policy::*,
@@ -5,7 +6,6 @@ use crate::{
     path,
     repair::command_available,
     types::{Candidate, Catalog, CommandMetadata, Flag, ValueKind},
-    util::test,
 };
 use std::collections::BTreeMap;
 
@@ -176,7 +176,7 @@ async fn policy_plain(
             literal = true;
             continue;
         }
-        if !literal && test("^-.", arg) {
+        if !literal && test!(r###"^-."###, arg) {
             let Some(takes) = option_arity(arg, &flags) else {
                 return Ok(false);
             };
@@ -253,7 +253,7 @@ async fn policy_plain(
             continue;
         }
         operands.push(word);
-        if test("^python[23]?$", command)
+        if test!(r###"^python[23]?$"###, command)
             && operands.len() == 1
             && let Some(script_flags) = script_flags
         {

@@ -1,5 +1,5 @@
+import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
-import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, access, mkdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -7,6 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
+
+const fixturePort3123 = await freePort();
 const root = path.resolve(import.meta.dirname, '..');
 const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-browser-'));
 await mkdir(path.join(fixture, 'subfolder'));
@@ -27,7 +29,7 @@ await writeFile(path.join(fixture, 'hello_world.py'), `import argparse\nfrom pat
 await writeFile(path.join(fixture, 'history'), "echo remembered-command\ngit c . m 'add init commit'\n");
 await writeFile(path.join(fixture, '.gitconfig'), '[alias]\n c = commit\n');
 await writeFile(path.join(fixture, 'eternal-history'), '#1234567890\ngit init\n');
-const port = Number(process.env.TEST_PORT || 3123);
+const port = Number(process.env.TEST_PORT || fixturePort3123);
 const origin = `http://127.0.0.1:${port}`;
 const engine = process.env.TEST_ENGINE || 'server';
 assert.ok(['server', 'client'].includes(engine));
@@ -37,8 +39,6 @@ const pairingToken = 'test-local-pairing-token-123456789';
 const server = spawn(process.env.TEST_EXECUTABLE || path.join(root, 'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_BASE_PATH: mount, TERMAI_ENGINE: engine, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: pairingToken, TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 let browser;
-const delay = ms => new Promise(r => setTimeout(r, ms));
-async function until(fn, timeout = 12000) { const start = Date.now(); while (Date.now()-start < timeout) { if (await fn()) return; await delay(50); } throw new Error('Timed out waiting for condition'); }
 async function focusTerminal(page) { await page.locator('#terminal textarea').evaluate(el => el.focus()); }
 async function shellPrompt(page) { return page.evaluate(() => window.__shellState.prompt); }
 async function ready(page, previous = -1) { await page.waitForFunction(previous => window.__shellState?.ready && window.__shellState.prompt > previous, previous); }
@@ -52,7 +52,7 @@ async function command(page, text) {
 }
 try {
   await until(async () => { try { return (await fetch(base)).ok; } catch { if (server.exitCode !== null) throw new Error(logs); return false; } });
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(String(e)));
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));

@@ -1,19 +1,19 @@
+import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import pty from 'node-pty';
-import { chromium } from 'playwright-core';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 import { shellQuote } from '../src/shell-words.ts';
+
+const fixturePort3172 = await freePort();
 
 // A real Herdr desktop and responsive PTY app, in an entirely disposable HOME.
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-resize-');
 const target = { session: '', socketPath: dir + '/herdr.sock' };
 const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const wait = async (check, label) => { for (let end = Date.now() + 15000; Date.now() < end;) { if (await check()) return; await delay(30); } throw new Error('Timed out: ' + label); };
 const geometry = async () => { try { return JSON.parse(await readFile(dir + '/geometry.json', 'utf8')); } catch { return {}; } };
 let herdr, desktop, backend, browser;
 try {
@@ -37,11 +37,11 @@ try {
   await herdrRequest(target, 'pane.send_text', { pane_id: terminal.paneId, text: [process.execPath, dir + '/responsive.mjs'].map(shellQuote).join(' ') + '\r' });
   await wait(async () => (await geometry()).cols > 80, 'desktop application geometry');
   const original = await geometry();
-  const base = 'http://127.0.0.1:3172';
-  backend = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: '3172', TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  const base = 'http://127.0.0.1:' + fixturePort3172;
+  backend = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3172), TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated Termai backend');
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await context.route('**/assets/terminal-*.js', async route => {
     const response = await route.fetch(), source = await response.text();

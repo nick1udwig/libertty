@@ -1,4 +1,4 @@
-import { constrainedLink } from './wire.ts';
+import { request } from './api.ts';
 import type { BackendProfile, TerminalTab } from './connections.ts';
 import { BUILTIN_VERSION, type PluginView, type TabPlugin } from './plugins.ts';
 import { readingMessage, readingView, type ReadingView } from './reading-view.ts';
@@ -20,15 +20,12 @@ export function readingPlugin(s: ReadingServices): TabPlugin {
       if (tab.readCapture) {
         const backend = s.backend(tab), url = new URL('api/reading/capture', backend.url);
         url.searchParams.set('id', tab.readCapture); url.searchParams.set('session', tab.session);
-        void fetch(url, { method: 'DELETE', credentials: 'same-origin', signal: AbortSignal.timeout(12000),
-          headers: authorization(s.token(backend)) }).catch(() => {});
+        void request(url, { method: 'DELETE', token: () => s.token(backend), recoverAuth: () => s.authenticate(backend, true) }).catch(() => {});
       }
       return true;
     },
   };
 }
-
-function authorization(token?: string): HeadersInit { return token ? { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), Authorization: 'Bearer ' + token } : constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}; }
 
 function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
   const path = tab.readPath;
@@ -47,9 +44,7 @@ function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
   const readFile = async (path: string, capture?: string) => {
     const url = new URL(capture ? 'api/reading/capture' : 'api/reading/file', backend.url);
     url.searchParams.set(capture ? 'id' : 'path', capture || path); url.searchParams.set('session', tab.session);
-    const fetchFile = () => fetch(url, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal, headers: authorization(s.token(backend)) });
-    let response = await fetchFile();
-    if (response.status === 401) { await s.authenticate(backend, true); response = await fetchFile(); }
+    const response = await request(url, { signal: controller.signal, token: () => s.token(backend), recoverAuth: () => s.authenticate(backend, true) });
     if (!response.ok) { const result = await response.json(); throw new Error(result.error || 'Could not open file.'); }
     return response.blob();
   };

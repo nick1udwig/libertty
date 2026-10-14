@@ -5,12 +5,10 @@ import { SourceTextModule } from 'node:vm';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { verifyRegressionInventory } from './regression-inventory.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const start = performance.now();
 const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
-await verifyRegressionInventory(new URL('../', import.meta.url), files);
 let modules = 0, data = 0;
 for (const file of files) {
   if (!/\.(?:[cm]?js|ts|json)$/.test(file)) continue;
@@ -18,7 +16,7 @@ for (const file of files) {
   try {
     if (file.endsWith('.json')) { JSON.parse(source); data++; }
     else {
-      new SourceTextModule(file.endsWith('.ts') ? stripTypeScriptTypes(source, { mode: 'transform' }) : source, { identifier: file });
+      new SourceTextModule(file.endsWith('.ts') ? stripTypeScriptTypes(source, { mode: 'strip' }) : source, { identifier: file });
       modules++;
     }
   } catch (error) { throw new Error(file + ': ' + error.message, { cause: error }); }
@@ -32,6 +30,7 @@ console.log(`Verified syntax for ${modules} modules, ${data} JSON files and ${Ob
 // Keep this explicit: adding a native or package-dependent harness must not make
 // the required check install dependencies, build Rust or start a browser.
 const tests = [
+  'api.test.ts',
   'ci-suites.test.mjs',
   'compound-repair.test.ts',
   'dictation-alternatives.test.ts',
@@ -49,7 +48,6 @@ const tests = [
   'plugins.test.ts',
   'push-worker.test.ts',
   'queue.test.ts',
-  'regression-inventory.test.mjs',
   'reconnecting-socket.test.ts',
   'service-worker.test.ts',
   'shell-words.test.ts',
@@ -58,7 +56,7 @@ const tests = [
   'vault.test.ts',
   'wire.test.ts',
 ];
-const result = spawnSync(process.execPath, ['--experimental-transform-types', '--disable-warning=ExperimentalWarning', '--test', '--test-reporter=spec', ...tests.map(file => 'test/' + file)], { cwd: root, stdio: 'inherit' });
+const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--test', '--test-reporter=spec', ...tests.map(file => 'test/' + file)], { cwd: root, stdio: 'inherit' });
 if (result.error) throw result.error;
 assert.equal(result.status, 0, 'Quick unit tests failed: ' + (result.signal || result.status));
 console.log(`Quick checks completed in ${((performance.now() - start) / 1000).toFixed(2)}s.`);

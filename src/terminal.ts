@@ -1,3 +1,4 @@
+import { requestJSON } from './api.ts';
 import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
 import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
@@ -96,11 +97,7 @@ function publishShortcuts(available = (state.ready || herdrReady) && !state.exit
   shortcutState = serialized; notify('terminal-shortcuts', snapshot);
 }
 async function api<T>(url: string, data?: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(endpoint(url), { method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin', cache: 'no-store',
-    headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }), signal });
-  const result = await response.json();
-  if (!response.ok) throw Object.assign(new Error(result.error || 'Request failed'), { status: response.status });
-  return result;
+  return requestJSON<T>(endpoint(url), data, { token: () => accessToken, signal });
 }
 function send(message: ClientMessage): boolean {
   if ((message.type === 'dictation' && message.action === 'start') || message.type === 'dictation-paste') {
@@ -262,10 +259,7 @@ const inline = new InlineSuggestions(term, { latencyKey: baseURL.href, state: ()
   },
   suggest: async (text, signal) => {
     if (!herdrTerminal) return suggestions.suggest(text, signal);
-    const response = await fetch(herdrEndpoint('api/herdr/suggest'), { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'Content-Type': 'application/json', ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}) }, body: JSON.stringify({ text }), signal });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Alternatives unavailable.');
-    return result;
+    return requestJSON(herdrEndpoint('api/herdr/suggest'), { text }, { token: () => accessToken, signal });
   }, raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, key: baseURL.href,
   audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data, transport.socket.protocol)); return true; },
@@ -363,9 +357,7 @@ async function socketURL(signal: AbortSignal) {
     herdrPreserve = false; herdrMobileRendered = false;
     herdrLayoutPending = geometry.mobile;
     terminalViewport.classList.toggle('awaiting-herdr-layout', herdrLayoutPending && !herdrParked);
-    const response = await fetch(herdrEndpoint('api/herdr/ticket'), { method: 'POST', credentials: 'same-origin', headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(accessToken ? { Authorization: 'Bearer ' + accessToken } : {}), 'Content-Type': 'application/json' }, body: JSON.stringify(geometry), signal });
-    const result = await response.json();
-    if (!response.ok) throw Object.assign(new Error(result.error), { status: response.status });
+    const result = await requestJSON<{ redrawBarrier?: boolean; parkViews?: boolean; ticket: string; wire?: string[] }>(herdrEndpoint('api/herdr/ticket'), geometry, { token: () => accessToken, signal });
     herdrBarrier = result.redrawBarrier === true; herdrBarrierReady = !herdrBarrier; herdrParkable = result.parkViews === true;
     socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire;
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);

@@ -35,9 +35,6 @@ pub fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
     encoder.write_all(bytes).ok()?;
     encoder.finish().ok()
 }
-fn number(value: &Value) -> Option<u64> {
-    value.as_u64().filter(|n| *n <= 9_007_199_254_740_991)
-}
 pub fn encode(value: &Value, mode: Mode) -> Encoded {
     if mode == Mode::Json {
         return Encoded {
@@ -49,16 +46,18 @@ pub fn encode(value: &Value, mode: Mode) -> Encoded {
     match value["type"].as_str() {
         Some("output")
             if mode != Mode::JsonGzip
-                && number(&value["seq"]).is_some()
+                && crate::protocol::unsigned(&value["seq"]).is_some()
                 && value["data"].is_string() =>
         {
             bytes[3] = 1;
-            bytes.extend_from_slice(&(number(&value["seq"]).unwrap() as f64).to_le_bytes());
+            bytes.extend_from_slice(
+                &(crate::protocol::unsigned(&value["seq"]).unwrap() as f64).to_le_bytes(),
+            );
             bytes.extend_from_slice(value["data"].as_str().unwrap().as_bytes());
         }
         Some("herdr-frame") if mode != Mode::JsonGzip => {
-            let frame = number(&value["width"])
-                .zip(number(&value["height"]))
+            let frame = crate::protocol::unsigned(&value["width"])
+                .zip(crate::protocol::unsigned(&value["height"]))
                 .filter(|(w, h)| *w <= u16::MAX as u64 && *h <= u16::MAX as u64)
                 .zip(value["full"].as_bool())
                 .zip(

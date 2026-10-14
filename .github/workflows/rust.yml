@@ -71,9 +71,7 @@ jobs:
       - name: Install dependencies and verify generated contracts
         run: |
           npm ci --no-audit --no-fund
-          npm run migration:schemas -- --check
-          npm run migration:inventory -- --check
-          npm run migration:vocabulary -- --check
+          npm run contracts:vocabulary -- --check
       - name: Verify Rust formatting and lints
         run: |
           cargo fmt --all -- --check

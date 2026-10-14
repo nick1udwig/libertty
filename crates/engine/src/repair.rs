@@ -2,6 +2,7 @@ use crate::{
     command_policy::*, command_speech::command_speech_shared, speech::expand_symbols, types::*,
     util::*,
 };
+use crate::{regex, replace, test};
 use std::{
     cell::RefCell,
     collections::{BTreeSet, HashMap, HashSet},
@@ -54,7 +55,7 @@ pub fn shell_quote(value: &str) -> String {
     if let Some(rest) = value.strip_prefix("~/") {
         return format!("~/{}", shell_quote(rest));
     }
-    if test("^[a-zA-Z0-9_@%+=:,./~-]+$", value) {
+    if test!(r###"^[a-zA-Z0-9_@%+=:,./~-]+$"###, value) {
         value.into()
     } else {
         format!("'{}'", value.replace('\'', "'\\''"))
@@ -115,7 +116,7 @@ fn command_tokens(input: &str, catalog: &Catalog) -> SharedList<Token> {
     if first.quoted || index.lower.contains_key(&first.value.to_lowercase()) {
         return words;
     }
-    let structural = replace("[\u{2010}-\u{2015}\u{2212}]", &first.value, "-");
+    let structural = replace!(r###"[‐-―−]"###, &first.value, "-");
     let folded = structural.to_lowercase();
     let mut prefixes: Vec<_> = folded
         .char_indices()
@@ -536,8 +537,8 @@ fn indexed_matches(
         {
             break;
         }
-        if test(
-            "(?i)^(dash|hyphen|underscore|dot|hep)$",
+        if test!(
+            r###"(?i)^(dash|hyphen|underscore|dot|hep)$"###,
             &span.last().unwrap().value,
         ) {
             continue;
@@ -579,8 +580,8 @@ fn indexed_matches(
         && !tail
             .iter()
             .any(|word| word.quoted || word.value.starts_with('-'))
-        && !test(
-            "(?i)^(dash|hyphen|underscore|dot|hep)$",
+        && !test!(
+            r###"(?i)^(dash|hyphen|underscore|dot|hep)$"###,
             &tail.last().unwrap().value,
         )
     {
@@ -636,7 +637,7 @@ fn compact_boundaries(input: &str, catalog: &Catalog) -> Vec<Boundary> {
     };
     let names = match_index(&catalog.commands, Some(&catalog.commands));
     if first.quoted
-        || !test("^[a-zA-Z0-9]+$", &first.value)
+        || !test!(r###"^[a-zA-Z0-9]+$"###, &first.value)
         || names.lower.contains_key(&first.value.to_lowercase())
     {
         return vec![];
@@ -752,8 +753,8 @@ pub(crate) fn argument_matches(words: &[Token], start: usize, values: &[String])
         {
             break;
         }
-        if test(
-            "(?i)^(dash|hyphen|underscore|dot|hep)$",
+        if test!(
+            r###"(?i)^(dash|hyphen|underscore|dot|hep)$"###,
             &span.last().unwrap().value,
         ) {
             continue;
@@ -814,11 +815,11 @@ pub(crate) fn repair_candidates(
     {
         catalog.commands = command_names(input, &catalog).into();
     }
-    if let Some(sentence) = regex("^(.*[a-zA-Z])\\.$").captures(input) {
+    if let Some(sentence) = regex!(r###"^(.*[a-zA-Z])\.$"###).captures(input) {
         let last = tokens(input)
             .last()
             .map_or(String::new(), |word| word.value.clone());
-        if !catalog.paths.contains(&last) && !test(r#"["'|&;<>()`$\\]"#, input) {
+        if !catalog.paths.contains(&last) && !test!(r###"["'|&;<>()`$\\]"###, input) {
             let clean: Vec<_> = repair_candidates(&sentence[1], &catalog, script_flags, metadata)
                 .into_iter()
                 .filter(|candidate| !candidate.is_literal())
@@ -853,7 +854,7 @@ pub(crate) fn repair_candidates(
             candidate
         })
         .collect();
-    if test(r#"[|&;<>()`$\\*?"'!\[\]{}#^]"#, &expanded) {
+    if test!(r###"[|&;<>()`$\\*?"'!\[\]{}#^]"###, &expanded) {
         let words = tokens(&expanded);
         let first = words.first().map(|word| word.value.as_str()).unwrap_or("");
         let canonical = catalog
@@ -1155,7 +1156,7 @@ fn repair_one(
                 literal_rest: false,
                 quoted: vec![],
                 fold_flags: original[0].value != words[0].value
-                    || (test("^[A-Z][A-Z0-9]+$", &words[0].value)
+                    || (test!(r###"^[A-Z][A-Z0-9]+$"###, &words[0].value)
                         && words[0].value != item.value
                         && words[0].value.to_lowercase() == item.value.to_lowercase()),
                 repaired_flag: false,
@@ -1293,11 +1294,11 @@ fn repair_one(
                         metadata,
                     );
                 }
-                if !test("^[-\u{2010}-\u{2015}\u{2212}]", &word.value) {
+                if !test!(r###"^[-‐-―−]"###, &word.value) {
                     continue;
                 }
             }
-            if test("^[-\u{2010}-\u{2015}\u{2212}]", &word.value) {
+            if test!(r###"^[-‐-―−]"###, &word.value) {
                 if word.value == "--" {
                     push(
                         &mut next,
@@ -1309,11 +1310,11 @@ fn repair_one(
                     );
                     continue;
                 }
-                let mut option = replace("[\u{2010}-\u{2015}\u{2212}]", &word.value, "-");
+                let mut option = replace!(r###"[‐-―−]"###, &word.value, "-");
                 let mut consumed = 1;
                 if option == "-"
                     && words.get(state.index + 1).is_some_and(|word| {
-                        !word.quoted && test("^[a-zA-Z][a-zA-Z0-9_-]*$", &word.value)
+                        !word.quoted && test!(r###"^[a-zA-Z][a-zA-Z0-9_-]*$"###, &word.value)
                     })
                 {
                     option.push_str(&words[state.index + 1].value);
@@ -1380,7 +1381,8 @@ fn repair_one(
                 }
                 continue;
             }
-            let exact_path = catalog.paths.contains(&word.value) && test("[./_-]", &word.value);
+            let exact_path =
+                catalog.paths.contains(&word.value) && test!(r###"[./_-]"###, &word.value);
             let file_matches = if !is_path_position(&state.args.values()) {
                 vec![]
             } else if exact_path {
@@ -1429,8 +1431,8 @@ fn repair_one(
                 {
                     break;
                 }
-                let spoken = replace(
-                    "(?i)^(?:dash[ -]*|hyphen[ -]*|hep[ -]*)+",
+                let spoken = replace!(
+                    r###"(?i)^(?:dash[ -]*|hyphen[ -]*|hep[ -]*)+"###,
                     &span
                         .iter()
                         .map(|word| word.value.as_str())
@@ -1523,7 +1525,7 @@ fn repair_one(
         let args = state.args.values();
         if state.repaired_flag
             && args.iter().enumerate().any(|(index, arg)| {
-                test("(?i)^(dash|hep|hyphen)$", arg) && !state.quoted.contains(&index)
+                test!(r###"(?i)^(dash|hep|hyphen)$"###, arg) && !state.quoted.contains(&index)
             })
         {
             continue;

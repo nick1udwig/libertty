@@ -51,7 +51,7 @@ The host still enforces shell identity and prompt/revision checks.
 
 `npm run bench:architecture` is identical on both branches.
 It extracts four recorded revisions into a temporary directory and runs the real engines and host operations with JSON serialization and simulated RTT.
-The raw result, including exact revisions, request counts, byte counts and background-push cost, is in [directory-optimization-results.json](directory-optimization-results.json).
+The raw result, including exact revisions, request counts, byte counts and background-push cost, is in [directory-optimization-results.json](../archive/migration/README.md).
 
 This run used Node 26.8.1 on Linux x64, 3,007 command names, 5,000 history entries and a large directory with 2,000 ordinary files plus one target directory.
 Each of nine cases ran cold once and warm three times at 0, 50 and 150 ms RTT.

@@ -8,10 +8,8 @@ use crate::{
     },
     util::locale_cmp,
 };
-use crate::{
-    speech::expand_symbols,
-    util::{regex, replace, test, utf16_len},
-};
+use crate::{regex, replace, test};
+use crate::{speech::expand_symbols, util::utf16_len};
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 
@@ -391,7 +389,7 @@ pub type DirectoryInput = PathInput;
 pub fn directory_input(input: &str) -> Option<PathInput> {
     let expanded = expand_symbols(input, true);
     let expanded = expanded.trim();
-    let direct = regex("(?i)^(cd|pushd|upload)\\s+(.*)$").captures(expanded);
+    let direct = regex!(r###"(?i)^(cd|pushd|upload)[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]+(.*)$"###).captures(expanded);
     let (command, target) = if let Some(matched) = direct {
         (matched[1].to_lowercase(), matched[2].trim().to_owned())
     } else {
@@ -402,7 +400,7 @@ pub fn directory_input(input: &str) -> Option<PathInput> {
             .into_iter()
             .filter(|matched| matched.score >= 100.0)
             .max_by_key(|matched| matched.consumed)?;
-        let end = regex(r"\S+\s*")
+        let end = regex!(r###"\S+[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*"###)
             .find_iter(expanded)
             .nth(matched.consumed - 1)?
             .end();
@@ -410,25 +408,29 @@ pub fn directory_input(input: &str) -> Option<PathInput> {
     };
     let mut target = target;
     let mut options = String::new();
-    if let Some(matched) = regex("^((?:(?:-[LPe]+|--)\\s+)+)(.+)$").captures(&target) {
+    if let Some(matched) = regex!(r###"^((?:(?:-[LPe]+|--)[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]+)+)(.+)$"###).captures(&target) {
         options = matched[1].into();
         target = matched[2].into();
     }
     if target.is_empty()
         || target == "-"
-        || test(r"[|&;<>`$\\\n\r]", &target)
+        || test!(r###"[|&;<>`$\\\n\r]"###, &target)
         || target.starts_with('-')
     {
         return None;
     }
-    let quoted = test(r#"^("[^"]*"|'[^']*')$"#, &target);
+    let quoted = test!(r###"^("[^"]*"|'[^']*')$"###, &target);
     if target.contains(['\'', '"']) && !quoted {
         return None;
     }
     target = if quoted {
         target[1..target.len() - 1].into()
     } else {
-        replace("\\s*/\\s*", &target, "/")
+        replace!(
+            r###"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*/[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*"###,
+            &target,
+            "/"
+        )
     };
     let from_home = !quoted && (target == "~" || target.starts_with("~/"));
     let absolute = target.starts_with('/');

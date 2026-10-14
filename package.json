@@ -9,9 +9,6 @@
   },
   "scripts": {
     "ci:quick": "node --experimental-vm-modules --disable-warning=ExperimentalWarning scripts/ci-quick.mjs",
-    "migration:schemas": "node scripts/migration-schemas.mjs",
-    "migration:inventory": "node scripts/migration-inventory.mjs",
-    "migration:vocabulary": "node scripts/migration-vocabulary.mjs",
     "build:rust-engine": "node scripts/build-rust-engine.mjs",
     "build:backend": "cargo build --locked -p termai-server --bin termai",
     "test:rust": "cargo test --workspace --locked",
@@ -47,7 +44,8 @@
     "test:herdr-flash": "node test/herdr-space-flash-native.mjs",
     "test:herdr-loading": "node test/herdr-loading-browser.mjs",
     "build:test-support": "cargo build --locked -p termai-server --examples",
-    "pretest": "npm run build:test-support"
+    "pretest": "npm run build:test-support",
+    "contracts:vocabulary": "node scripts/engine-vocabulary.mjs"
   },
   "dependencies": {
     "ghostty-web": "0.4.0-next.20.g1858a59",
@@ -63,7 +61,6 @@
     "ajv": "8.20.0",
     "playwright-core": "1.63.0",
     "typescript": "7.0.2",
-    "typescript-reference": "npm:typescript@5.9.3",
     "vite": "8.3.0",
     "node-pty": "1.1.0",
     "ssh2": "1.17.0"

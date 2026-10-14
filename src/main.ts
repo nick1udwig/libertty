@@ -1,4 +1,9 @@
-import { constrainedLink } from './wire.ts';
+import { menuEvents } from './menu.ts';
+import { $, input, select, dialog, button } from './dom.ts';
+import { saved, validSession, validCapture, validPath } from './persistence.ts';
+import { readingTab } from './tabs.ts';
+import { vaultUI } from './vault-ui.ts';
+import { requestJSON } from './api.ts';
 import { selectedFileReader } from './plugin-file.ts';
 import './workspace.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
@@ -20,23 +25,19 @@ import { parsePluginPackage, MAX_PLUGIN_BYTES, type PluginPackage, type Installe
 import type { HerdrView } from './herdr-view.ts';
 import { backendURL, sshAddress, type BackendProfile, type HostProfile, type TerminalTab, type LegacyReadingTab, type KeyInfo, type KnownHost, type SSHConnection } from './connections.ts';
 const browserVault = new BrowserVault();
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const input = (id: string) => $<HTMLInputElement>(id);
-const select = (id: string) => $<HTMLSelectElement>(id);
-const dialog = (id: string) => $<HTMLDialogElement>(id);
 const primary: BackendProfile = { id: 'primary', name: 'Primary backend', url: new URL('.', document.baseURI).href };
-function saved<T>(key: string, fallback: T): T { try { const value = JSON.parse(localStorage.getItem('termai.' + key) || 'null'); return value === null || (Array.isArray(fallback) ? !Array.isArray(value) : typeof value !== typeof fallback) ? fallback : value; } catch { return fallback; } }
+
 let backends: BackendProfile[] = saved<BackendProfile[]>('backends', []).filter(b => { try { return b && typeof b.id === 'string' && b.id !== 'primary' && typeof b.name === 'string' && backendURL(b.url) === b.url; } catch { return false; } });
 backends.unshift(primary);
 let hosts: HostProfile[] = saved<HostProfile[]>('hosts', [{ id: 'local', name: 'This machine', kind: 'http', backendId: 'primary' }]).filter(h => h && typeof h.id === 'string' && typeof h.name === 'string' && ['http', 'ssh', 'herdr'].includes(h.kind) && backends.some(b => b.id === h.backendId));
-let tabs: TerminalTab[] = saved<TerminalTab[]>('tabs', []).filter(t => t && typeof t.id === 'string' && typeof t.name === 'string' && backends.some(b => b.id === t.backendId) && (t.session === 'default' || /^[a-f0-9-]{36}$/.test(t.session))).map(migratePluginTab);
-for (const tab of saved<LegacyReadingTab[]>('readingTabs', []).filter(t => t && typeof t.id === 'string' && typeof t.name === 'string' && typeof t.path === 'string' && typeof t.sourceTabId === 'string' && backends.some(b => b.id === t.backendId) && (t.session === 'default' || /^[a-f0-9-]{36}$/.test(t.session)))) {
+let tabs: TerminalTab[] = saved<TerminalTab[]>('tabs', []).filter(t => t && typeof t.id === 'string' && typeof t.name === 'string' && backends.some(b => b.id === t.backendId) && validSession(t.session)).map(migratePluginTab);
+for (const tab of saved<LegacyReadingTab[]>('readingTabs', []).filter(t => t && typeof t.id === 'string' && typeof t.name === 'string' && typeof t.path === 'string' && typeof t.sourceTabId === 'string' && backends.some(b => b.id === t.backendId) && validSession(t.session))) {
   if (!tabs.some(existing => existing.id === tab.id)) tabs.push(migrateReadingTab(tab));
 }
 let active = saved<string>('activeTab', '') || tabs[0]?.id || '';
 let navigationTab = '', terminalTabsExpanded = false;
 let page: 'terminal' | 'hosts' | 'vault' | 'keychain' | 'backends' | 'known' | 'settings' = 'terminal';
-let alphabetical = false, editingHost: string | undefined, keyDetail: { backend?: BackendProfile; key: KeyInfo | BrowserKeyInfo } | undefined;
+let alphabetical = false, editingHost: string | undefined;
 const frames = new Map<string, HTMLIFrameElement>(), tokens = new Map<string, string>(), vaults = new Map<string, { keys: KeyInfo[]; knownHosts: KnownHost[] }>();
 const plugins = new PluginRegistry(), pluginViews = new Map<string, PluginView>();
 const mounting = new Map<string, Promise<void>>(), mountGeneration = new Map<string, number>();
@@ -115,21 +116,13 @@ function authorizeTerminals(backend: BackendProfile, accessToken: string) {
 }
 async function api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string, recoverAuth = true): Promise<T> {
   const url = new URL(name, backend.url); if (session) url.searchParams.set('session', session);
-  const token = tokenFor(backend);
-  const timeout = url.pathname.endsWith('/api/herdr/action') && ['list-worktrees', 'new-worktree', 'open-worktree', 'delete-worktree'].includes((data as any)?.action) ? 135000 : ['api/sessions', 'api/ssh/captured'].includes(name) ? 25000 : 12000;
-  const response = await fetch(url, { method: data === undefined ? 'GET' : 'POST', cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(timeout),
-    headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-  const result = await response.json();
-  // Revoked credentials can expire while the workspace stays open.
-  // Retry only an explicit authentication rejection: the server has not performed
-  // the requested action. Never replay a timeout or an uncertain connection failure.
-  if (response.status === 401 && name !== 'api/connect' && recoverAuth) {
-    if (tokenFor(backend) === token) await authenticate(backend, true);
-    else await authenticating.get(backend.id); // Another request may already be refreshing it.
-    return api<T>(backend, name, data, session, false);
-  }
-  if (!response.ok) throw Object.assign(new Error(result.error || 'Request failed'), result, { status: response.status });
-  return result;
+  return requestJSON<T>(url, data, {
+    token: () => tokenFor(backend),
+    ...(name !== 'api/connect' && recoverAuth ? { recoverAuth: async (rejected?: string) => {
+      if (tokenFor(backend) === rejected) await authenticate(backend, true);
+      else await authenticating.get(backend.id);
+    } } : {}),
+  });
 }
 let loginQueue: Promise<unknown> = Promise.resolve();
 function authenticate(backend: BackendProfile, force = false): Promise<void> {
@@ -182,7 +175,6 @@ function show(view: typeof page) {
   if (view === 'settings') { renderSettings(); return; }
   void renderCards();
 }
-function button(text: string, action: () => void, className = '') { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.className = className; b.onclick = action; return b; }
 function card(name: string, detail: string, icon: string, action: () => void, edit?: () => void, badge?: string) {
   const row = document.createElement('div'); row.className = 'card';
   const main = button('', action, 'card-main'), glyph = document.createElement('span'); glyph.className = 'card-icon'; glyph.textContent = icon; glyph.setAttribute('aria-hidden', 'true');
@@ -232,19 +224,11 @@ function openHostMenu(host: HostProfile, anchor: HTMLButtonElement) {
   hostMenu.style.top = `${Math.max(top + 12, Math.min(rect.bottom + 4, top + height - size.height - 12))}px`;
   hostMenu.querySelector('button')?.focus();
 }
-hostMenu.onkeydown = event => {
-  if (event.key === 'Escape') { event.preventDefault(); closeHostMenu(true); return; }
-  if (event.key === 'Tab') { closeHostMenu(true); return; }
-  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-  event.preventDefault(); const items = [...hostMenu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement);
-  items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus();
-};
-document.addEventListener('pointerdown', event => { if (!hostMenu.contains(event.target as Node) && !menuAnchor?.contains(event.target as Node)) closeHostMenu(); });
+menuEvents(hostMenu, () => menuAnchor, closeHostMenu);
 $('library-content').addEventListener('scroll', () => closeHostMenu(), { passive: true });
-window.addEventListener('resize', () => closeHostMenu());
 const tabMenu = document.createElement('div'); tabMenu.className = 'host-terminal-menu'; tabMenu.role = 'menu'; tabMenu.hidden = true; document.body.append(tabMenu);
 let tabMenuAnchor: HTMLElement | undefined;
-function closeTabMenu() { tabMenu.hidden = true; tabMenuAnchor = undefined; }
+function closeTabMenu(focus = false) { tabMenu.hidden = true; if (focus) tabMenuAnchor?.focus(); tabMenuAnchor = undefined; }
 function openTabMenu(tab: TerminalTab, anchor: HTMLElement) {
   tabMenuAnchor = anchor; tabMenu.replaceChildren();
   const rename = button('Rename', () => { closeTabMenu(); renameTab(tab); }); rename.role = 'menuitem';
@@ -263,12 +247,7 @@ function renameTab(tab: TerminalTab) {
   form.onsubmit = event => { event.preventDefault(); try { tab.name = herdrName(field.value); store(); renderTabs(); modal.close(); } catch (reason: any) { error.textContent = reason.message; } };
   modal.showModal(); field.focus(); field.select();
 }
-document.addEventListener('pointerdown', event => { if (!tabMenu.contains(event.target as Node) && !tabMenuAnchor?.contains(event.target as Node)) closeTabMenu(); });
-window.addEventListener('resize', closeTabMenu);
-tabMenu.onkeydown = event => {
-  if (event.key === 'Escape') { tabMenuAnchor?.focus(); closeTabMenu(); }
-  if (['ArrowUp', 'ArrowDown'].includes(event.key)) { event.preventDefault(); const items = [...tabMenu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement); items[(index + 1) % items.length]?.focus(); }
-};
+menuEvents(tabMenu, () => tabMenuAnchor, closeTabMenu);
 let rendering = 0;
 async function renderCards() {
   closeHostMenu();
@@ -404,17 +383,16 @@ function renderTabs() {
 }
 function activate(id: string) { const tab = tabs.find(tab => tab.id === id); if (!tab) return; tab.lastUsed = Date.now(); terminalTabsExpanded = !$('terminal-tabs-drawer').inert; active = navigationTab = id; store(); show('terminal'); pluginViews.get(id)?.focus?.(); }
 
-function openReading(source: TerminalTab, path: string) {
-  const tab: TerminalTab = { id: crypto.randomUUID(), pluginId: 'reading', pluginVersion: BUILTIN_VERSION, ownsSession: false,
-    name: path.split('/').at(-1) || path, readPath: path, backendId: source.backendId, session: source.session,
-    parentTabId: tabPluginId(source) === 'reading' ? source.parentTabId : source.id, lastUsed: Date.now() };
+function addReading(source: TerminalTab, detail: Pick<TerminalTab, 'name' | 'readPath' | 'readCapture' | 'readExitCode'>) {
+  const tab = readingTab(source, detail);
   tabs.push(tab); active = tab.id; store(); show('terminal'); void mount(tab);
+}
+function openReading(source: TerminalTab, path: string) {
+  addReading(source, { name: path.split('/').at(-1) || path, readPath: path });
 }
 function openReadingCapture(source: TerminalTab, capture: string, name: string, exitCode?: number) {
   if (tabs.some(tab => tabPluginId(tab) === 'reading' && tab.backendId === source.backendId && tab.session === source.session && tab.readCapture === capture)) return;
-  const tab: TerminalTab = { id: crypto.randomUUID(), pluginId: 'reading', pluginVersion: BUILTIN_VERSION, ownsSession: false,
-    name, readPath: name, readCapture: capture, readExitCode: exitCode, backendId: source.backendId, session: source.session, parentTabId: source.id, lastUsed: Date.now() };
-  tabs.push(tab); active = tab.id; store(); show('terminal'); void mount(tab);
+  addReading(source, { name, readPath: name, readCapture: capture, readExitCode: exitCode });
 }
 function unmount(tab: TerminalTab) {
   mountGeneration.set(tab.id, (mountGeneration.get(tab.id) || 0) + 1);
@@ -513,7 +491,7 @@ window.addEventListener('message', event => {
   if (event.data?.type === 'herdr-command' && typeof event.data.id === 'string') { showTerminalLoading(tab.id); void capturedHerdr(backend, tab, event.data.id); }
   if (event.data?.type === 'terminal-notice' && typeof event.data.message === 'string') notice(event.data.message);
   if (event.data?.type === 'reading-open' && typeof event.data.path === 'string' && event.data.path.length <= 4096) openReading(tab, event.data.path);
-  if (event.data?.type === 'reading-open' && typeof event.data.capture === 'string' && /^[a-f0-9]{32}$/.test(event.data.capture) && typeof event.data.name === 'string' && event.data.name.length <= 180 && Number.isInteger(event.data.exitCode) && event.data.exitCode >= 0 && event.data.exitCode <= 255) openReadingCapture(tab, event.data.capture, event.data.name, event.data.exitCode);
+  if (event.data?.type === 'reading-open' && validCapture(event.data.capture) && typeof event.data.name === 'string' && event.data.name.length <= 180 && Number.isInteger(event.data.exitCode) && event.data.exitCode >= 0 && event.data.exitCode <= 255) openReadingCapture(tab, event.data.capture, event.data.name, event.data.exitCode);
   if (event.data?.type === 'terminal-state' && event.data.state?.ready === true && terminalLoading?.id === tab.id && terminalLoading.waitForPrompt) hideTerminalLoading(tab.id);
   if (event.data?.type === 'terminal-ended' || (event.data?.type === 'terminal-state' && typeof event.data.state?.exited === 'boolean')) {
     const ended = event.data.type === 'terminal-ended' || event.data.state.exited;
@@ -654,7 +632,7 @@ $<HTMLFormElement>('plugin-connect-form').onsubmit = event => {
     if (request.pluginId === 'herdr') request.herdrSession = herdrSession(input('plugin-herdr-session').value);
     else {
       const path = input('plugin-read-path').value.trim();
-      if (!path || path.length > 4096 || /[\x00-\x1f\x7f]/.test(path)) throw new Error('Enter a file path.');
+      if (!validPath(path)) throw new Error('Enter a file path.');
       request.readPath = path;
     }
     dialog('plugin-connect-dialog').close(); pendingConnection = undefined;
@@ -808,101 +786,7 @@ async function connectSSH() {
   } catch (error: any) { if (!dialog('ssh-dialog').open) dialog('ssh-dialog').showModal(); if (error.needsSecret) input('ssh-secret').required = true; $('ssh-error').textContent = error.message + (error.changed ? '\nVerify the new fingerprint before removing its Known hosts entry: ' + error.fingerprint : ''); }
   finally { if (ssh) { delete ssh.privateKey; delete ssh.passphrase; delete ssh.password; } input('ssh-secret').value = ''; control.disabled = false; $('ssh-progress').textContent = ''; }
 };
-function keyDetails(backend: BackendProfile | undefined, key: KeyInfo | BrowserKeyInfo) {
-  keyDetail = { backend, key }; input('key-rename').value = key.name; $('key-fingerprint').textContent = key.fingerprint; $<HTMLTextAreaElement>('public-key').value = key.publicKey;
-  const backups = 'backups' in key ? key.backups : [];
-  $('key-storage').textContent = backend ? key.reference ? backend.name + ' · ' + key.reference.type + ': ' + key.reference.path : 'Stored on ' + backend.name : 'Source of truth: this browser.' + (backups.length ? ' Last backed up to: ' + backups.map(b => b.backendName + ' (' + new Date(b.savedAt).toLocaleDateString() + ')').join(', ') + '.' : ' No device backups yet.');
-  for (const id of ['export-key-backup', 'export-private-key', 'backup-key']) $(id).hidden = !!backend;
-  $('restore-backend-key').hidden = !backend || !!key.reference;
-  $('delete-key').textContent = key.reference ? 'Remove reference' : 'Delete key';
-  if (!dialog('key-details').open) dialog('key-details').showModal();
-}
-function downloadKey(contents: string, name: string, extension: string) {
-  const url = URL.createObjectURL(new Blob([contents], { type: 'application/octet-stream' })), link = document.createElement('a');
-  link.href = url; link.download = (name.replace(/[^a-zA-Z0-9_-]/g, '_') || 'ssh-key') + extension; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
-$('copy-key').onclick = () => void navigator.clipboard.writeText($<HTMLTextAreaElement>('public-key').value).then(() => notice('Public key copied.')).catch(() => notice('Select the public key to copy it.'));
-$('rename-key').onclick = () => {
-  if (!keyDetail) return; const { backend, key } = keyDetail;
-  void (backend ? api(backend, 'api/keychain', { action: 'rename', id: key.id, name: input('key-rename').value }) : browserVault.rename(key.id, input('key-rename').value)).then(() => { dialog('key-details').close(); void renderCards(); }).catch(error => notice(error.message));
-};
-$('delete-key').onclick = () => {
-  if (!keyDetail) return; const { backend, key } = keyDetail;
-  if (confirm(key.reference ? 'Remove this key reference? Its original file or agent identity will stay unchanged.' : 'Delete this private key from ' + (backend?.name || 'this browser') + '? Copies on other devices and existing SSH sessions will stay.')) void (backend ? api(backend, 'api/keychain', { action: 'delete', id: key.id }) : browserVault.remove(key.id)).then(() => { routes.clear(); dialog('key-details').close(); void renderCards(); }).catch(error => notice(error.message));
-};
-$('export-key-backup').onclick = () => { if (keyDetail && !keyDetail.backend) { const key = keyDetail.key; void browserVault.export(key.id).then(text => downloadKey(text, key.name, '.termai-key.json')).catch(error => notice(error.message)); } };
-let transferMode: 'backup' | 'private' | 'restore' = 'backup';
-function openTransfer(mode: typeof transferMode) {
-  if (!keyDetail) return; transferMode = mode;
-  $('key-transfer-title').textContent = { backup: 'Back up to devices', private: 'Export SSH private key', restore: 'Restore to this browser' }[mode];
-  $('key-transfer-hint').textContent = { backup: 'Choose the backends that should keep an encrypted backup. This browser stays the source of truth. Unselected backups are left as they are.', private: 'This exports the original SSH key file. Generated keys are unencrypted in this format. Use “Export encrypted backup” for a password-protected copy.', restore: 'Unlock the backend copy and save it encrypted in this browser. The backend copy will remain as a backup.' }[mode];
-  $('backup-devices').replaceChildren();
-  if (mode === 'backup') for (const backend of backends) {
-    const label = document.createElement('label'); label.className = 'toggle'; const check = document.createElement('input'); check.type = 'checkbox'; check.value = backend.id;
-    const exists = 'backups' in keyDetail.key && keyDetail.key.backups.some(b => b.backendURL === backend.url);
-    label.append(check, document.createTextNode(backend.name + ' · ' + backend.url + (exists ? ' (refresh backup)' : ''))); $('backup-devices').append(label);
-  }
-  $('key-transfer-submit').textContent = mode === 'backup' ? 'Back up selected devices' : mode === 'private' ? 'Download private key' : 'Restore key';
-  $('key-transfer-error').textContent = ''; input('key-transfer-passphrase').value = ''; dialog('key-transfer').showModal();
-}
-$('backup-key').onclick = () => openTransfer('backup'); $('export-private-key').onclick = () => openTransfer('private'); $('restore-backend-key').onclick = () => openTransfer('restore');
-$<HTMLFormElement>('key-transfer-form').onsubmit = async event => {
-  event.preventDefault(); if (!keyDetail) return; const { backend, key } = keyDetail, mode = transferMode, passphrase = input('key-transfer-passphrase').value;
-  const control = $<HTMLButtonElement>('key-transfer-submit'); control.disabled = true; $('key-transfer-error').textContent = '';
-  try {
-    if (mode === 'restore' && backend) {
-      await authenticate(backend);
-      const result = await api<KeyInfo & { privateKey: string }>(backend, 'api/keychain', { action: 'export', id: key.id, passphrase });
-      const local = (await browserVault.list()).find(k => k.fingerprint === key.fingerprint) || await browserVault.create(key.name, passphrase, result);
-      await browserVault.rememberBackup(local.id, { backendURL: backend.url, backendName: backend.name, keyId: key.id, savedAt: new Date().toISOString() });
-      select('backend-filter').value = 'browser'; keyDetails(undefined, (await browserVault.list()).find(k => k.id === local.id)!);
-    } else if (!backend) {
-      const destinations = [...$('backup-devices').querySelectorAll<HTMLInputElement>('input:checked')].map(el => backendFor(el.value));
-      if (mode === 'backup' && !destinations.length) throw new Error('Select a device to back up to.');
-      const privateKey = await browserVault.unlock(key.id, passphrase);
-      if (mode === 'private') downloadKey(privateKey, key.name, '.key');
-      else {
-        const failures: string[] = [];
-        for (const device of destinations) {
-          try {
-            await authenticate(device);
-            const local = (await browserVault.list()).find(k => k.id === key.id)!;
-            const copy = await api<KeyInfo>(device, 'api/keychain', { action: 'backup', name: local.name, privateKey, passphrase, replaceId: local.backups.find(b => b.backendURL === device.url)?.keyId });
-            await browserVault.rememberBackup(key.id, { backendURL: device.url, backendName: device.name, keyId: copy.id, savedAt: new Date().toISOString() });
-          } catch (error: any) { failures.push(device.name + ': ' + error.message); }
-        }
-        keyDetails(undefined, (await browserVault.list()).find(k => k.id === key.id)!);
-        if (failures.length) throw new Error('Successful backups were saved. Could not back up to: ' + failures.join('; '));
-        notice('Backed up to ' + destinations.map(b => b.name).join(', ') + '.');
-      }
-    }
-    dialog('key-transfer').close(); void renderCards();
-  } catch (error: any) { $('key-transfer-error').textContent = error.message; }
-  finally { input('key-transfer-passphrase').value = ''; control.disabled = false; }
-};
-select('key-method').onchange = () => { $('key-import-label').hidden = select('key-method').value !== 'import'; $<HTMLTextAreaElement>('key-import').required = select('key-method').value === 'import'; };
-input('key-import-file').onchange = async () => {
-  const file = input('key-import-file').files?.[0]; if (!file) return;
-  $<HTMLTextAreaElement>('key-import').value = ''; $('key-error').textContent = '';
-  if (file.size > 100000) { $('key-error').textContent = 'This key file is too large.'; input('key-import-file').value = ''; return; }
-  try { const text = await file.text(); if (dialog('key-dialog').open && input('key-import-file').files?.[0] === file) $<HTMLTextAreaElement>('key-import').value = text; }
-  catch { $('key-error').textContent = 'Could not read this key file.'; }
-};
-$<HTMLFormElement>('key-form').onsubmit = async event => {
-  event.preventDefault(); const control = $('key-form').querySelector<HTMLButtonElement>('[type=submit]')!; control.disabled = true; $('key-error').textContent = '';
-  try {
-    const passphrase = input('key-passphrase').value, name = input('key-name').value;
-    if (passphrase !== input('key-confirm').value) throw new Error('Passphrases do not match.');
-    let key: BrowserKeyInfo;
-    if (select('key-method').value === 'import') {
-      const raw = $<HTMLTextAreaElement>('key-import').value.trim();
-      if (raw.startsWith('{')) key = await browserVault.restore(raw, passphrase, name);
-      else { await authenticate(primary); const info = await api<{ publicKey: string; fingerprint: string }>(primary, 'api/keychain', { action: 'inspect', privateKey: raw, passphrase }); key = await browserVault.create(name, passphrase, { privateKey: raw, ...info }); }
-    } else key = await browserVault.create(name, passphrase);
-    dialog('key-dialog').close(); select('backend-filter').value = 'browser'; void renderCards(); keyDetails(undefined, key);
-  } catch (error: any) { $('key-error').textContent = error.message; }
-  finally { input('key-passphrase').value = input('key-confirm').value = ''; $<HTMLTextAreaElement>('key-import').value = ''; input('key-import-file').value = ''; control.disabled = false; }
-};
+const keyDetails = vaultUI({ browserVault, primary, backends: () => backends, backendFor, authenticate, api, notice, renderCards, clearRoutes: () => routes.clear() });
 for (const element of document.querySelectorAll<HTMLElement>('[data-close]')) element.onclick = () => dialog(element.dataset.close!).close();
 for (const id of ['ssh-dialog', 'key-dialog', 'backend-login', 'key-transfer']) dialog(id).addEventListener('close', () => { for (const secret of dialog(id).querySelectorAll<HTMLInputElement>('input[type=password]')) secret.value = ''; input('ssh-secret').value = ''; $<HTMLTextAreaElement>('key-import').value = ''; input('key-import-file').value = ''; });
 dialog('ssh-dialog').addEventListener('close', () => {
@@ -1021,20 +905,24 @@ async function openHerdrNotification(tabId: unknown, terminalId: unknown) {
   if (typeof terminalId === 'string') herdrViews.get(tab.id)?.openTerminal(terminalId);
 }
 navigator.serviceWorker?.addEventListener('message', event => { if (event.data?.type === 'herdr-notification') void openHerdrNotification(event.data.tabId, event.data.terminalId).catch(error => notice(error.message)); });
+async function pendingSource(backendUrl: string, session: string) {
+  const url = backendURL(backendUrl);
+  let backend = backends.find(item => item.url === url);
+  if (!backend) { backend = { id: crypto.randomUUID(), name: new URL(url).host, url }; backends.push(backend); }
+  let source = tabs.find(tab => tabPluginId(tab) === 'terminal' && tab.backendId === backend.id && tab.session === session);
+  if (!source) {
+    source = { id: crypto.randomUUID(), name: backend.name, backendId: backend.id, session, lastUsed: Date.now() };
+    tabs.push(source); store(); await mount(source);
+  }
+  return { backend, source };
+}
 async function consumePendingHerdr() {
   try {
     const key = 'termai.pendingHerdr:' + new URL('.', document.baseURI).pathname;
     const raw = sessionStorage.getItem(key); if (!raw) return; sessionStorage.removeItem(key);
     const request = JSON.parse(raw);
-    if (typeof request.id !== 'string' || !/^[a-f0-9]{32}$/.test(request.id) || typeof request.session !== 'string' || !(request.session === 'default' || /^[a-f0-9-]{36}$/.test(request.session))) return;
-    const url = backendURL(request.backendUrl);
-    let backend = backends.find(backend => backend.url === url);
-    if (!backend) { backend = { id: crypto.randomUUID(), name: new URL(url).host, url }; backends.push(backend); }
-    let source = tabs.find(tab => tabPluginId(tab) === 'terminal' && tab.backendId === backend.id && tab.session === request.session);
-    if (!source) {
-      source = { id: crypto.randomUUID(), name: backend.name, backendId: backend.id, session: request.session, lastUsed: Date.now() };
-      tabs.push(source); store(); await mount(source);
-    }
+    if (!validCapture(request.id) || typeof request.session !== 'string' || !validSession(request.session)) return;
+    const { backend, source } = await pendingSource(request.backendUrl, request.session);
     await capturedHerdr(backend, source, request.id);
   } catch (error: any) { notice(error.message || 'Herdr could not open.'); }
 }
@@ -1044,17 +932,10 @@ async function consumePendingReading() {
     const raw = sessionStorage.getItem(key); if (!raw) return;
     sessionStorage.removeItem(key);
     const request = JSON.parse(raw);
-    const captured = typeof request.capture === 'string' && /^[a-f0-9]{32}$/.test(request.capture) && typeof request.name === 'string' && request.name.length <= 180 && Number.isInteger(request.exitCode) && request.exitCode >= 0 && request.exitCode <= 255;
-    if ((!captured && (typeof request.path !== 'string' || !request.path || request.path.length > 4096 || /[\x00-\x1f\x7f]/.test(request.path))) ||
-      typeof request.backendUrl !== 'string' || typeof request.session !== 'string' || !(request.session === 'default' || /^[a-f0-9-]{36}$/.test(request.session))) return;
-    const url = backendURL(request.backendUrl);
-    let backend = backends.find(item => item.url === url);
-    if (!backend) { backend = { id: crypto.randomUUID(), name: new URL(url).host, url }; backends.push(backend); }
-    let source = tabs.find(tab => tabPluginId(tab) === 'terminal' && tab.backendId === backend.id && tab.session === request.session);
-    if (!source) {
-      source = { id: crypto.randomUUID(), name: backend.name, backendId: backend.id, session: request.session, lastUsed: Date.now() };
-      tabs.push(source); store(); await mount(source);
-    }
+    const captured = validCapture(request.capture) && typeof request.name === 'string' && request.name.length <= 180 && Number.isInteger(request.exitCode) && request.exitCode >= 0 && request.exitCode <= 255;
+    if ((!captured && (!validPath(request.path))) ||
+      typeof request.backendUrl !== 'string' || typeof request.session !== 'string' || !validSession(request.session)) return;
+    const { backend, source } = await pendingSource(request.backendUrl, request.session);
     if (captured) openReadingCapture(source, request.capture, request.name, request.exitCode); else openReading(source, request.path);
   } catch (error: any) { notice(error?.message || 'Reading Mode could not open this file.'); }
 }

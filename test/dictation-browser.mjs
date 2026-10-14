@@ -1,5 +1,5 @@
+import { launchBrowser, freePort } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
-import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, mkdir, rm, access, readFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -16,6 +16,8 @@ await writeFile(path.join(fixture, 'history'), 'git init\n');
 await writeFile(path.join(fixture, 'source/scripts/install'), 'touch ' + path.join(fixture, 'installed'));
 await writeFile(path.join(fixture, 'program.mjs'), `
 import { appendFileSync } from 'node:fs';
+
+const fixturePort3176 = await freePort();
 process.stdin.setRawMode(true);
 if (process.argv[2] === 'bracketed') process.stdout.write('\\x1b[?2004h');
 process.stdout.write('PROGRAM_READY');
@@ -66,13 +68,13 @@ daemon.on('connection', (socket, request) => {
     }
   });
 });
-const port = Number(process.env.TEST_PORT || 3176), base = `http://127.0.0.1:${port}`;
+const port = Number(process.env.TEST_PORT || fixturePort3176), base = `http://127.0.0.1:${port}`;
 const server = spawn(path.join(root,'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: 'feature-test-pairing-token-123456789', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_VOXTYPE_SOURCE: path.join(fixture, 'source'), TERMAI_VOXTYPE_TOKEN_FILE: path.join(fixture, 'token'), TERMAI_VOXTYPE_URL: `ws://127.0.0.1:${daemon.address().port}/v1/dictate` }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 let browser;
 try {
   for (let i = 0; i < 100; i++) { if (await fetch(base).then(r => r.ok, () => false)) break; if (server.exitCode !== null) throw new Error(logs); await new Promise(r => setTimeout(r, 100)); }
-  browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+  browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const context = await browser.newContext({ viewport: { width: 600, height: 850 }, hasTouch: true, serviceWorkers: 'block' });
   const page = await context.newPage();
   await page.route('**/assets/terminal-*.js', async route => {

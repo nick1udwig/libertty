@@ -18,6 +18,3 @@ serde_json.workspace = true
 regex.workspace = true
 icu_collator = "=2.3.1"
 futures = { version = "0.3.32", default-features = false, features = ["alloc", "async-await"] }
-
-[build-dependencies]
-syn = { version = "2", features = ["full", "visit"] }

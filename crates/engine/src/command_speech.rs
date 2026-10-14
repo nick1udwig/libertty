@@ -1,6 +1,7 @@
+use crate::test;
 use crate::{
     types::{Match, SharedList, Token},
-    util::{ArrayCache, collapse, test},
+    util::{ArrayCache, collapse},
 };
 use std::{
     collections::HashMap,
@@ -87,7 +88,7 @@ fn speech_index(commands: &[String], shared: Option<&SharedList<String>>) -> Arc
     let mut names: HashMap<String, Vec<String>> = HashMap::new();
     let mut sounds: HashMap<String, Vec<(String, usize)>> = HashMap::new();
     for command in commands {
-        if !test("^[a-zA-Z]{2,12}$", command) {
+        if !test!(r###"^[a-zA-Z]{2,12}$"###, command) {
             continue;
         }
         names
@@ -141,7 +142,7 @@ pub(crate) fn command_speech_shared(
     let mut input = Vec::new();
     let mut found: Vec<Match> = Vec::new();
     for word in words.iter().take(12) {
-        if word.quoted || !test("^[a-zA-Z]+\\.?$", &word.value) {
+        if word.quoted || !test!(r###"^[a-zA-Z]+\.?$"###, &word.value) {
             break;
         }
         input.push(word.value.to_lowercase().trim_end_matches('.').to_owned());
@@ -175,7 +176,11 @@ pub(crate) fn command_speech_shared(
                 });
             }
         }
-        if !valid && found.is_empty() && input.len() <= 6 && test("[aeiouy]", &input.join("")) {
+        if !valid
+            && found.is_empty()
+            && input.len() <= 6
+            && test!(r###"[aeiouy]"###, &input.join(""))
+        {
             for (command, length) in index
                 .sounds
                 .get(&sound_key(&input.join(" ")))

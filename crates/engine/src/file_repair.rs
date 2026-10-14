@@ -5,8 +5,9 @@ use crate::{
     shell_structure::word_spans,
     speech::expand_symbols,
     types::{Candidate, Catalog, CommandMetadata, Flag, ValueKind},
-    util::{replace, test, utf16_len},
+    util::utf16_len,
 };
+use crate::{replace, test};
 
 /// Describe a single existing-path operand; traversal is shared with directory repair.
 pub async fn repair_input_file(
@@ -46,22 +47,34 @@ pub async fn repair_input_file(
         return Ok(None);
     };
     let mut operand = expanded[span.start..].to_owned();
-    let quoted = test(r#"^("[^"]*"|'[^']*')$"#, &operand);
+    let quoted = test!(r###"^("[^"]*"|'[^']*')$"###, &operand);
     if command != "download"
         && (!operand.contains('/')
-            || (test("\\s", &replace("\\s*/\\s*", &operand, "/"))
-                && !quoted
-                && !test("(?i)\\bslash\\b", spoken_input)))
+            || (test!(
+                r###"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]"###,
+                &replace!(
+                    r###"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*/[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*"###,
+                    &operand,
+                    "/"
+                )
+            ) && !quoted
+                && !test!(r###"(?i)(?-u:\b)slash(?-u:\b)"###, spoken_input)))
     {
         return Ok(None);
     }
-    if test(r"[|&;<>`$\\*?\[\]{}\n\r]", &operand) || (operand.contains(['\'', '"']) && !quoted) {
+    if test!(r###"[|&;<>`$\\*?\[\]{}\n\r]"###, &operand)
+        || (operand.contains(['\'', '"']) && !quoted)
+    {
         return Ok(None);
     }
     operand = if quoted {
         operand[1..operand.len() - 1].into()
     } else {
-        replace("\\s*/\\s*", &operand, "/")
+        replace!(
+            r###"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*/[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*"###,
+            &operand,
+            "/"
+        )
     };
     let from_home = !quoted && (operand == "~" || operand.starts_with("~/"));
     let absolute = operand.starts_with('/');

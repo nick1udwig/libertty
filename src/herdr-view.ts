@@ -1,3 +1,4 @@
+import { node } from './dom.ts';
 import { wireProtocols, decodeWire } from './wire.ts';
 import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSpace, type HerdrWorktrees } from './herdr-protocol.ts';
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
@@ -19,9 +20,6 @@ interface Host {
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; retain:boolean; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
 type StripItem = HerdrAgent & { space?: HerdrSpace };
 interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; spaceTerminals?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']> }
-const node = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', text = '') => {
-  const element = document.createElement(tag); element.className = className; element.textContent = text; return element;
-};
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
   private strip = node('div', 'herdr-agent-strip');
