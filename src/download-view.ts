@@ -15,8 +15,9 @@ function createPanel() {
   const header = document.createElement('header'), rows = document.createElement('div'); rows.className = 'download-items';
   const abort = new AbortController(), urls: string[] = [];
   let pending = 0, failed = false;
-  const close = button('Cancel', () => modal.close());
-  const x = button('×', () => modal.close()); x.setAttribute('aria-label', 'Close downloads');
+  const dismiss = () => { modal.close(); dispose(); };
+  const close = button('Cancel', dismiss);
+  const x = button('×', dismiss); x.setAttribute('aria-label', 'Close downloads');
   header.append(heading, x);
   const label = document.createElement('label'), never = document.createElement('input'); never.type = 'checkbox'; never.checked = !showDownloads(); label.append(never, document.createTextNode('Don’t show this again')); label.className = 'download-preference';
   never.onchange = () => { try { localStorage.setItem('termai.showDownloads', JSON.stringify(!never.checked)); } catch { never.checked = false; } };
@@ -24,8 +25,9 @@ function createPanel() {
   modal.append(header, rows, label, actions); document.body.append(modal);
   const show = () => { if (!modal.open) modal.showModal(); };
   if (showDownloads()) show();
-  const dispose = () => { abort.abort(); modal.remove(); if (panel?.modal === modal) panel = undefined; setTimeout(() => urls.forEach(url => URL.revokeObjectURL(url)), 60000); };
+  const dispose = () => { if (abort.signal.aborted) return; abort.abort(); modal.remove(); if (panel?.modal === modal) panel = undefined; setTimeout(() => urls.forEach(url => URL.revokeObjectURL(url)), 60000); };
   modal.onclose = dispose;
+  modal.oncancel = event => { event.preventDefault(); dismiss(); };
   return { modal, abort, urls, rows, show, start() { pending++; heading.textContent = 'Downloading…'; close.textContent = 'Cancel'; }, end(error = false) { failed ||= error; if (--pending === 0) { heading.textContent = failed ? 'Download failed' : 'Download complete'; close.textContent = 'Close'; if (!modal.open && !failed) dispose(); } } };
 }
 /** XHR's Blob response lets the browser spool bytes without a JS chunk array. */

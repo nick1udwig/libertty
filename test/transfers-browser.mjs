@@ -99,9 +99,16 @@ try {
     pending = page.waitForEvent('download'); await type("printf '\\000\\377ABC' | download 'pipe result.bin'"); file = await pending;
     assert.equal(file.suggestedFilename(), 'pipe result.bin'); assert.deepEqual(await readFile(await file.path()), Buffer.from([0, 255, 65, 66, 67]));
     await page.locator('.download-dialog h2').filter({ hasText: 'Download complete' }).waitFor();
+    // The browser queues dialog close events, which may arrive after the next transfer.
+    await page.locator('.download-dialog').evaluate(modal => {
+      const dispose = modal.onclose;
+      modal.onclose = () => {};
+      window.__finishDownloadClose = () => dispose.call(modal, new Event('close'));
+    });
     await page.locator('.download-dialog').getByRole('button', { name: 'Close', exact: true }).click();
     pending = page.waitForEvent('download'); await type('printf "" | download'); file = await pending;
     assert.equal(file.suggestedFilename(), 'command-output.txt'); assert.equal((await readFile(await file.path())).length, 0);
+    await page.evaluate(() => { window.__finishDownloadClose(); delete window.__finishDownloadClose; });
     await page.locator('.download-dialog h2').filter({ hasText: 'Download complete' }).waitFor();
     await page.locator('.download-dialog').getByRole('button', { name: 'Close', exact: true }).click();
     await page.waitForFunction(() => window.__state.ready);
@@ -110,7 +117,7 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log('PASS transfer utilities: local and real SSH upload picker, invocation cwd despite cd, Unicode file downloads, binary pipe downloads, named/default output, empty output');
-} catch (e) { console.error(logs); if (browser) console.error(await browser.contexts()[0].pages()[0].evaluate(() => ({ state: window.__state, transfer: window.__transfer, output: window.__output, modal: document.querySelector('.transfer-dialog')?.outerHTML }))); throw e; }
+} catch (e) { console.error(logs); if (browser) console.error(await browser.contexts()[0].pages()[0].evaluate(() => ({ state: window.__state, transfer: window.__transfer, output: window.__output, modal: document.querySelector('.transfer-dialog')?.outerHTML, downloads: document.querySelector('.download-dialog')?.outerHTML }))); throw e; }
 finally {
   await browser?.close();
   await Promise.all(processes.map(async process => {
