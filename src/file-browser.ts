@@ -1,6 +1,6 @@
 import { button } from './dom.ts';
 import './file-browser.css';
-import { uploadIcon, downloadIcon, moreIcon, searchIcon, chevronIcon, folderIcon, fileOptionIcons } from './icons.ts';
+import { uploadIcon, downloadIcon, moreIcon, searchIcon, chevronIcon, folderIcon, fileOptionIcons, closeIcon } from './icons.ts';
 import { fileBreadcrumbs, sortedFiles, type FileOptions, type FileSort } from './file-options.ts';
 import type { FileListing, FileEntry } from './file-protocol.ts';
 
@@ -30,7 +30,7 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
   const stopHold = () => { clearTimeout(hold); hold = undefined; };
   const selection = document.createElement('div'); selection.className = 'file-selection'; selection.hidden = true;
   const count = document.createElement('strong');
-  const clear = button('×', () => { selected.clear(); render(); }); clear.setAttribute('aria-label', 'Clear selection'); selection.append(clear, count);
+  const clear = button('', () => { selected.clear(); render(); }); clear.innerHTML = closeIcon; clear.setAttribute('aria-label', 'Clear selection'); selection.append(clear, count);
   const loading = document.createElement('span'); loading.className = 'file-loading-spinner'; loading.setAttribute('role', 'status'); loading.setAttribute('aria-label', 'Loading files');
   const upload = button('', () => picker.click()); upload.className = 'file-upload'; upload.innerHTML = uploadIcon + '<span>Upload</span>'; upload.setAttribute('aria-label', 'Upload');
   const more = button('', () => selected.size ? openSelection() : openOptions()); more.innerHTML = moreIcon; more.setAttribute('aria-label', 'File options'); more.setAttribute('aria-haspopup', 'menu');

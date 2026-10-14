@@ -6,6 +6,7 @@ import { vaultUI } from './vault-ui.ts';
 import { requestJSON } from './api.ts';
 import { selectedFileReader } from './plugin-file.ts';
 import './workspace.css';
+import { hostIcon, keyIcon, backendIcon, shieldIcon, ellipsisIcon, chevronDownIcon, chevronIcon, closeIcon } from './icons.ts';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
 import { BrowserVault } from './browser-vault.ts';
 import type { BrowserKeyInfo } from './browser-key.ts';
@@ -181,15 +182,15 @@ function show(view: typeof page) {
   if (view === 'settings') { renderSettings(); return; }
   void renderCards();
 }
-function card(name: string, detail: string, icon: string, action: () => void, edit?: () => void, badge?: string) {
+function card(name: string, detail: string, iconHTML: string, action: () => void, edit?: () => void, badge?: string) {
   const row = document.createElement('div'); row.className = 'card';
-  const main = button('', action, 'card-main'), glyph = document.createElement('span'); glyph.className = 'card-icon'; glyph.textContent = icon; glyph.setAttribute('aria-hidden', 'true');
+  const main = button('', action, 'card-main'), glyph = document.createElement('span'); glyph.className = 'card-icon'; glyph.innerHTML = iconHTML; glyph.setAttribute('aria-hidden', 'true');
   const text = document.createElement('span'); text.className = 'card-text';
   const title = document.createElement('span'); title.className = 'card-name'; title.textContent = name;
   if (badge) { const tag = document.createElement('span'); tag.className = 'badge'; tag.textContent = badge; title.append(document.createTextNode(' '), tag); }
   const subtitle = document.createElement('span'); subtitle.className = 'card-detail'; subtitle.textContent = detail;
   text.append(title, subtitle); main.append(glyph, text); row.append(main);
-  if (edit) { const b = button('•••', edit, 'card-edit'); b.setAttribute('aria-label', 'Edit ' + name); row.append(b); }
+  if (edit) { const b = button('', edit, 'card-edit'); b.innerHTML = ellipsisIcon; b.setAttribute('aria-label', 'Edit ' + name); row.append(b); }
   $('cards').append(row); return row;
 }
 function hostTabs(host: HostProfile) { return tabs.filter(tab => tab.hostId === host.id && !tab.ended); }
@@ -263,17 +264,20 @@ async function renderCards() {
   const items = <T extends { name: string }>(values: T[]) => alphabetical ? [...values].sort((a, b) => a.name.localeCompare(b.name)) : values;
   $('list-heading').textContent = { terminal: '', settings: '', hosts: 'Saved hosts', vault: 'Your workspace', keychain: 'SSH keys', backends: 'Direct backends', known: 'Verified fingerprints' }[page];
   if (page === 'vault') {
-    for (const [name, detail, icon, view] of [['Hosts', `${hosts.length} saved`, '▤', 'hosts'], ['Keychain', 'Encrypted SSH keys', '⚿', 'keychain'], ['Backends', `${backends.length} available`, '⌘', 'backends'], ['Known hosts', 'SSH host fingerprints', '◎', 'known']] as const) card(name, detail, icon, () => show(view)).classList.add('vault-card');
+    for (const [name, detail, icon, view] of [['Hosts', `${hosts.length} saved`, hostIcon, 'hosts'], ['Keychain', 'Encrypted SSH keys', keyIcon, 'keychain'], ['Backends', `${backends.length} available`, backendIcon, 'backends'], ['Known hosts', 'SSH host fingerprints', shieldIcon, 'known']] as const) {
+      const row = card(name, detail, icon, () => show(view)); row.classList.add('vault-card');
+      const chevron = document.createElement('span'); chevron.className = 'chevron'; chevron.innerHTML = chevronIcon; row.querySelector('.card-main')!.append(chevron);
+    }
   } else if (page === 'hosts') {
     for (const host of items(hosts).filter(h => matches(h.name + ' ' + (h.hostname || backendFor(h.backendId).url)))) {
-      const row = card(host.name, host.kind === 'ssh' ? `${host.username}@${host.hostname} · ${host.route === 'fixed' ? backendFor(host.backendId).name : 'Automatic route'}` : backendFor(host.backendId).url, '▤', () => void openHost(host).catch(error => notice(error.message)), undefined, host.kind.toUpperCase());
+      const row = card(host.name, host.kind === 'ssh' ? `${host.username}@${host.hostname} · ${host.route === 'fixed' ? backendFor(host.backendId).name : 'Automatic route'}` : backendFor(host.backendId).url, hostIcon, () => void openHost(host).catch(error => notice(error.message)), undefined, host.kind.toUpperCase());
       const count = hostTabs(host).length, menu = button('', () => openHostMenu(host, menu), 'host-terminals');
       menu.setAttribute('aria-label', `Terminals for ${host.name} (${count} open)`); menu.setAttribute('aria-haspopup', 'menu'); menu.setAttribute('aria-expanded', 'false'); menu.setAttribute('aria-controls', hostMenu.id);
       const number = document.createElement('span'); number.className = 'host-terminal-count'; number.textContent = String(count);
-      const arrow = document.createElement('span'); arrow.textContent = '▾'; arrow.setAttribute('aria-hidden', 'true'); menu.append(number, arrow); row.append(menu);
+      const arrow = document.createElement('span'); arrow.className = 'host-terminal-arrow'; arrow.innerHTML = chevronDownIcon; arrow.setAttribute('aria-hidden', 'true'); menu.append(number, arrow); row.append(menu);
     }
   } else if (page === 'backends') {
-    for (const backend of backends.filter(b => matches(b.name + ' ' + b.url))) card(backend.name, backend.url, '⌘', () => void authenticate(backend).then(() => notice('Connected to ' + backend.name)).catch(error => notice(error.message)), backend.id === 'primary' ? undefined : () => {
+    for (const backend of backends.filter(b => matches(b.name + ' ' + b.url))) card(backend.name, backend.url, backendIcon, () => void authenticate(backend).then(() => notice('Connected to ' + backend.name)).catch(error => notice(error.message)), backend.id === 'primary' ? undefined : () => {
       if (tabs.some(t => t.backendId === backend.id)) { notice('Close this backend’s tabs before removing it.'); return; }
       if (confirm('Remove this backend and its saved hosts? Its SSH keys will stay on the server.')) void herdrNotifications.forgetBackend(backend.id).then(() => { backends = backends.filter(b => b.id !== backend.id); hosts = hosts.filter(h => h.backendId !== backend.id); routes.clear(); tokens.delete(backend.id); forgetBackendAccess(backend.url); store(); void renderCards(); }).catch(error => notice(error.message));
     }, 'HTTP');
@@ -282,12 +286,12 @@ async function renderCards() {
     try {
       if (page === 'keychain' && select('backend-filter').value === 'browser') {
         const keys = await browserVault.list(); if (generation !== rendering) return;
-        for (const key of items(keys).filter(k => matches(k.name))) card(key.name, key.publicKey.split(' ')[0].replace('ssh-', '').toUpperCase() + ' · This browser', '⚿', () => keyDetails(undefined, key));
+        for (const key of items(keys).filter(k => matches(k.name))) card(key.name, key.publicKey.split(' ')[0].replace('ssh-', '').toUpperCase() + ' · This browser', keyIcon, () => keyDetails(undefined, key));
       } else {
         await authenticate(backend); const vault = await api<{ keys: KeyInfo[]; knownHosts: KnownHost[] }>(backend, 'api/keychain'); vaults.set(backend.id, vault);
         if (generation !== rendering) return;
-        if (page === 'keychain') for (const key of items(vault.keys).filter(k => matches(k.name))) card(key.name, key.publicKey.split(' ')[0].replace('ssh-', '').toUpperCase() + ' · ' + (key.reference ? key.reference.type === 'file' ? 'Backend file' : 'Backend agent' : backend.name), '⚿', () => keyDetails(backend, key));
-        else for (const item of vault.knownHosts.filter(k => matches(k.host))) card(item.host + ':' + item.port, item.fingerprint, '◎', () => notice(item.fingerprint), () => {
+        if (page === 'keychain') for (const key of items(vault.keys).filter(k => matches(k.name))) card(key.name, key.publicKey.split(' ')[0].replace('ssh-', '').toUpperCase() + ' · ' + (key.reference ? key.reference.type === 'file' ? 'Backend file' : 'Backend agent' : backend.name), keyIcon, () => keyDetails(backend, key));
+        else for (const item of vault.knownHosts.filter(k => matches(k.host))) card(item.host + ':' + item.port, item.fingerprint, shieldIcon, () => notice(item.fingerprint), () => {
           if (confirm('Forget this SSH host fingerprint? Verify its identity again before your next connection.')) void api(backend, 'api/keychain', { action: 'forget', host: item.host, port: item.port }).then(() => renderCards()).catch(error => notice(error.message));
         });
       }
@@ -370,9 +374,9 @@ function renderTabs() {
     if (plugin?.iconHTML) icon.innerHTML = plugin.iconHTML;
     else icon.textContent = plugin?.icon || '◇';
     const name = document.createElement('span'); name.className = 'tab-name'; name.textContent = tabLabel(tab);
-    const close = button('×', () => void closeTab(tab).catch(error => notice(error.message)), 'tab-close'); close.setAttribute('aria-label', 'Close ' + tab.name); close.addEventListener('click', event => event.stopPropagation());
+    const close = button('', () => void closeTab(tab).catch(error => notice(error.message)), 'tab-close'); close.innerHTML = closeIcon; close.setAttribute('aria-label', 'Close ' + tab.name); close.addEventListener('click', event => event.stopPropagation());
     if (tabPluginId(tab) === 'herdr') {
-      el.classList.add('herdr-tab'); icon.textContent = 'H';
+      el.classList.add('herdr-tab');
       const badge = document.createElement('span'); badge.className = 'herdr-attention'; badge.textContent = String(herdrAttention.get(tab.id) || 0); badge.hidden = !herdrAttention.get(tab.id); badge.setAttribute('aria-label', badge.textContent + ' agents need attention');
       el.append(icon, name, badge, close);
     } else el.append(icon, name, close);

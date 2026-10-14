@@ -1,5 +1,5 @@
 import type { BackendProfile, HostProfile, TerminalTab } from './connections.ts';
-import { folderIcon } from './icons.ts';
+import { folderIcon, terminalIcon, herdrIcon } from './icons.ts';
 import { fileBrowser } from './file-browser.ts';
 import { fileClient } from './file-client.ts';
 import { herdrSession } from './herdr-protocol.ts';
@@ -31,7 +31,7 @@ export interface BuiltinServices extends ReadingServices {
 export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
   const common = { version: BUILTIN_VERSION, available: (host: HostProfile) => host.kind !== 'herdr' };
   return [
-    { ...common, id: 'terminal', name: 'Terminal', connectLabel: 'Connect new terminal', icon: '▤', panelPrefix: 'frame-',
+    { ...common, id: 'terminal', name: 'Terminal', connectLabel: 'Connect new terminal', icon: '▤', iconHTML: terminalIcon, panelPrefix: 'frame-',
       connect: host => s.connect(host, 'terminal'),
       async mount(tab) {
         const frame = document.createElement('iframe'); frame.title = tab.name + ' terminal'; frame.id = 'frame-' + tab.id;
@@ -55,7 +55,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       },
       async close(tab) { await s.closeSession(tab); return true; },
     },
-    { version: BUILTIN_VERSION, id: 'herdr', name: 'Herdr', connectLabel: 'Connect Herdr', icon: 'H', panelPrefix: 'herdr-', className: 'herdr-tab', available: () => true,
+    { version: BUILTIN_VERSION, id: 'herdr', name: 'Herdr', connectLabel: 'Connect Herdr', icon: 'H', iconHTML: herdrIcon, panelPrefix: 'herdr-', className: 'herdr-tab', available: () => true,
       connect: host => s.connect(host, 'herdr'),
       async mount(tab) {
         const backend = s.backend(tab); await s.authenticate(backend);

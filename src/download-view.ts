@@ -1,4 +1,5 @@
 import { button } from './dom.ts';
+import { closeIcon } from './icons.ts';
 import './download-view.css';
 export interface DownloadTicket { ticket: string; name: string; size: number }
 export function showDownloads() { try { return localStorage.getItem('termai.showDownloads') !== 'false'; } catch { return true; } }
@@ -17,7 +18,7 @@ function createPanel() {
   let pending = 0, failed = false;
   const dismiss = () => { modal.close(); dispose(); };
   const close = button('Cancel', dismiss);
-  const x = button('×', dismiss); x.setAttribute('aria-label', 'Close downloads');
+  const x = button('', dismiss); x.innerHTML = closeIcon; x.setAttribute('aria-label', 'Close downloads');
   header.append(heading, x);
   const label = document.createElement('label'), never = document.createElement('input'); never.type = 'checkbox'; never.checked = !showDownloads(); label.append(never, document.createTextNode('Don’t show this again')); label.className = 'download-preference';
   never.onchange = () => { try { localStorage.setItem('termai.showDownloads', JSON.stringify(!never.checked)); } catch { never.checked = false; } };

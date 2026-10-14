@@ -25,14 +25,14 @@
 
 </div>
 <dialog id="login-dialog"><span class="eyebrow">CONNECT TO YOUR MACHINE</span><h2>Your terminal, anywhere.</h2><p>Enter the pairing token shown in the server’s startup output. Pairing is required even on this machine.</p><form id="login-form"><label for="token">Pairing token</label><input id="token" type="password" autocomplete="current-password" required><p id="login-error" role="alert"></p><button class="run-button" type="submit">Connect</button></form></dialog>
-<dialog id="options-dialog"><div class="dialog-heading"><h2>Settings</h2><button class="icon-button" data-close="options-dialog" aria-label="Close session options">×</button></div>
+<dialog id="options-dialog"><div class="dialog-heading"><h2>Settings</h2><button class="icon-button" data-close="options-dialog" aria-label="Close session options"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
 
 <p class="muted"><span id="connection-label" role="status">Connecting</span> · <span id="shell-status">Starting</span><br><span id="cwd"></span></p>
 <label for="font-size">Terminal font size (pt)</label><input id="font-size" type="number" min="6" max="24" step="0.5" value="10" required>
 <label class="setting-toggle"><input id="auto-alternatives" type="checkbox" checked><span>Open alternatives after dictation</span></label>
 <label class="setting-toggle"><input id="tap-alternate-send" type="checkbox" checked><span>Tap alternate to send</span></label>
 <button id="customize-shortcuts" class="secondary-button">Customize shortcuts</button><button id="new-shell" class="secondary-button">Start a new shell</button><button id="copy-selection" class="secondary-button">Copy terminal selection</button></dialog>
-<dialog id="shortcuts-dialog"><div class="dialog-heading"><h2>Shortcuts</h2><button class="icon-button" data-close="shortcuts-dialog" aria-label="Close shortcuts">×</button></div>
+<dialog id="shortcuts-dialog"><div class="dialog-heading"><h2>Shortcuts</h2><button class="icon-button" data-close="shortcuts-dialog" aria-label="Close shortcuts"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
 <p>Run a saved command with one tap, or send keys such as Ctrl+R, Tab, Escape, Alt+B or Up. Separate keys with spaces to send a sequence. Use Ctrl alone for the modifier.</p>
 <form id="shortcuts-form"><div id="shortcut-editor"></div><button id="add-shortcut" type="button" class="secondary-button">+ Add shortcut</button><p id="shortcut-error" role="alert"></p><div class="run-row"><button id="reset-shortcuts" type="button" class="text-button">Restore defaults</button><button type="submit" class="run-button">Save shortcuts</button></div></form></dialog>
 <div id="toast" role="status" hidden></div>

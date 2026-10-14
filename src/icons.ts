@@ -18,3 +18,16 @@ export const fileOptionIcons = {
   refresh: svg('<path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 14 6M4 12a8 8 0 0 0 14 6"/>'),
   help: svg('<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 5m0 3h.01"/>'),
 };
+export const hostIcon = svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8m-4-4v4"/>');
+export const keyIcon = svg('<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9m-4 4 3 3m-6-1 2 2"/>');
+export const backendIcon = svg('<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>');
+export const shieldIcon = svg('<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6Z"/><path d="m9 12 2 2 4-4"/>');
+export const terminalIcon = svg('<path d="m5 7 5 5-5 5m8 0h6"/>');
+export const vaultIcon = svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>');
+export const settingsIcon = svg('<path d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h11m4 0h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>');
+export const closeIcon = svg('<path d="m6 6 12 12M18 6 6 18"/>');
+export const plusIcon = svg('<path d="M12 5v14M5 12h14"/>');
+export const sortIcon = svg('<path d="M7 4v16m0 0-3-3m3 3 3-3m4-11h7m-7 6h5m-5 6h3"/>');
+export const herdrIcon = svg('<circle cx="12" cy="6" r="2.5"/><circle cx="6" cy="17" r="2.5"/><circle cx="18" cy="17" r="2.5"/><path d="M10.7 8.2 7.3 14.8m6-6.6 3.4 6.6M8.5 17h7"/>');
+export const ellipsisIcon = svg('<circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/>');
+export const chevronDownIcon = svg('<path d="m6 9 6 6 6-6"/>');

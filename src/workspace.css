@@ -80,3 +80,6 @@ dialog .primary[type=submit]{width:100%;margin-top:8px}dialog .actions .primary{
 #terminal-tabs-drawer .terminal-header{transform:translateY(0);opacity:1;transition:transform .2s ease,opacity .2s ease}
 #terminal-tabs-drawer.collapsed .terminal-header{transform:translateY(44px);opacity:0}
 @media(prefers-reduced-motion:reduce){#terminal-tabs-drawer,#terminal-tabs-drawer .terminal-header{transition:none}}
+.host-terminal-arrow,.vault-card .chevron{display:grid;place-items:center}.host-terminal-arrow svg{width:16px;height:16px}.vault-card .chevron{margin-left:auto}.vault-card .chevron svg{width:18px;height:18px}
+.card-edit svg{width:18px;height:18px}.tab-close svg{width:16px;height:16px}
+.bottom-nav button span svg{width:20px;height:20px}
