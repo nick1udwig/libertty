@@ -1,10 +1,12 @@
 # Building and publishing releases
 
-The [Release workflow](../.github/workflows/release.yml) builds native Linux x86_64, Linux ARM64 and macOS Apple Silicon archives when a GitHub release is published.
-Daily runs at 08:17 UTC run the same native verification and packaging without publishing assets.
-Pull requests and updates to `master` run the quick main CI and separate integration workflow described in [ci.md](ci.md).
-Publishing a prerelease also triggers the workflow, while the installer selects stable releases by default.
-All three native jobs must pass before the workflow uploads any release assets.
+The [Release workflow](../.github/workflows/release.yml) builds native Linux x86_64, Linux ARM64 and macOS Apple Silicon archives when a `v*` tag is pushed.
+Pull requests and updates to `master` run the quick CI described in [ci.md](ci.md), and full local checks are required before committing or merging.
+Manual release runs build and validate the same archives without publishing.
+All Linux release checks and three native packages must pass before the publication job starts.
+The publication job uploads every asset to a draft and publishes it only after confirming that all uploads are complete.
+A failed build or upload never publishes an empty release or makes it Latest.
+Tags with a prerelease suffix publish prereleases without making them Latest, while the installer selects stable releases by default.
 
 Each archive includes the native Rust executable, frontend and engine Wasm, launch and setup scripts, licenses and release metadata.
 An official Node runtime and `ws` support installation and validation tools, while the installed service executes Rust directly.
@@ -18,13 +20,15 @@ Herdr is downloaded only if requested during installation and is checked against
 1. Merge the release workflow and installer into the default branch before publishing the first release.
 2. Update the workspace version in `Cargo.toml` and the versions in `package.json` and `package-lock.json`, including the root package entry.
 3. Commit the version change and push the commit you want to release.
-4. Create a matching `vX.Y.Z` tag and publish a GitHub release for it.
-5. Wait for the Release workflow to finish before distributing the install command.
+4. Create and push a matching `vX.Y.Z` tag with `git tag vX.Y.Z` and `git push origin vX.Y.Z`.
+5. Wait for the Release workflow to create the complete GitHub release before distributing the install command.
 
 The tag must exactly match `v` followed by the package version, including any prerelease suffix.
 The workflow checks out the tag and records its commit in every archive.
-The publication job uploads the three platform archives, individual `.sha256` files, `SHA256SUMS` and `install.sh` to that release.
-Rerunning a failed workflow replaces assets for the same tag only after every target passes again.
+The publication job creates a draft with the three platform archives, individual `.sha256` files, `SHA256SUMS` and `install.sh`, then publishes the complete release.
+Rerunning a failed publication replaces assets in its existing draft only after every target passes again.
+The publisher refuses to overwrite an already public release, so use a new version for a subsequent release.
+Existing public releases without assets are not automatically repaired by this workflow change.
 The one-liner requires the first complete stable release to exist, so adding these files alone does not make its download URL live.
 
 ## Validate before publishing
@@ -33,14 +37,15 @@ Use **Actions → Release → Run workflow** to build without creating or modify
 Select the workflow branch and optionally supply a branch, tag or commit in the `ref` field.
 Manual runs produce downloadable workflow artifacts and never execute the publication job.
 
-Release builds depend on the complete three-platform Rust parity workflow, including contracts, native tests, actual Chromium Wasm, both engine modes, SSH, Herdr, saved-data rollback and packaged browser and installation checks.
-Latency comparisons run in a separate manual workflow and do not block commit or release checks.
-Each platform builds its native executables, frontend and engine Wasm once and runs the type check, frontend and contract suite and installer fixture suite.
-Browser checks run in three parallel groups per platform using those builds, with tar archives preserving executable permissions.
-Build manifests record the source commit, platform, compiler and file checksums, and consumers reject mismatched or modified artifacts.
-Release packaging reuses the verified optimized executable and frontend after all native and browser checks pass.
+One Linux x64 checking job runs Rust formatting, native and Wasm Clippy, Rust and JavaScript tests, contracts, installer fixtures, saved-data compatibility and all browser and native Herdr harnesses.
+The release workflow and local validation use the same `npm run verify:local` command.
+All full validation and packaging use the Node version pinned in `build/release-config.json`.
+Each platform builds its frontend and engine Wasm, then `release:package` compiles the optimized native executable once and creates the archive that both smoke checks exercise.
+Formatting, lints and full browser validation run once on Linux rather than on every platform.
+The platform jobs do not transport intermediate builds or generate build manifests.
+Local performance checks remain available through the scripts and commit requirements described in [ci.md](ci.md).
 The pinned Linux dictation daemon prepares alongside verification, and its cache depends on the companion source, runner, compiler and CPU build settings.
-Feature branches run quick CI and independent integration checks through pull requests, while full manual runs remain available for branches without a pull request.
+Voxtype Mobile currently has no published releases, so replacing its source build with checksum-verified downloads first requires upstream release binaries and per-platform pins.
 The npm postinstall hook applies a version-scoped ssh2 Ed25519 key-generation fix and restores the execute permission on macOS node-pty helpers.
 Keep the deterministic leading-zero key test and helper permission checks when updating those dependencies, and remove the compatibility fixes when stable upstream releases include them.
 The packaged smoke check starts the bundled server, pairs a browser client and exercises a real PTY with Bash prompt hooks.
@@ -67,13 +72,9 @@ Point `VOXTYPE_MOBILE_CHECKOUT` to that checkout before packaging a distributabl
 
 ```sh
 npm ci
-npm run build
-npm test
-npm run test:rust
-npm run test:install
+npm run verify:local
 VOXTYPE_MOBILE_CHECKOUT=/path/to/pinned/voxtype-mobile npm run release:package
-node scripts/smoke-release.mjs release/termai-v0.2.2-linux-x64.tar.gz
-node scripts/smoke-install.mjs release/termai-v0.2.2-linux-x64.tar.gz
+npm run verify:package -- release/termai-v0.2.3-linux-x64.tar.gz
 ```
 
 Packaging requires a clean checkout, the pinned Node version and a complete Linux companion bundle.

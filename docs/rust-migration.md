@@ -47,8 +47,8 @@ The active checks discover Rust tests and browser harnesses directly.
 Retained Bash utilities are byte-identical to the reference source, with a contract assertion checking the embedded bytes.
 Rust also serves the unchanged development pairing page and proxies loopback Vite assets and hot-reload sockets behind native authorization.
 Release archives contain the native executable and production Wasm, and installed launchers execute Rust directly with the existing configuration format.
-The three-platform CI matrix is configured, but only the Linux x86_64 checks have been run locally.
-The release workflow requires the complete regression and platform matrix before publishing.
+The three-platform release build matrix is configured, but only the Linux x86_64 checks have been run locally.
+The release workflow requires Linux regression checks and packaged smoke checks on every platform before publishing.
 
 ## Run the migration checks
 
@@ -177,9 +177,9 @@ The historical regression inventory is retained in Git history.
 Run the browser harness in each engine mode with dedicated ports, including `TEST_BASE_PATH=/terminal` in client mode.
 Reading, development pairing/HMR, plugins, files, transfers, gestures, touch, workspace and Herdr harnesses exercise the Rust executable.
 The native Herdr harnesses use the checksum-pinned supported Herdr executable, including mobile sizing, native scroll and shared spaces.
-Nightly and release runs repeat the same checks on Linux ARM64 and macOS Apple Silicon, and the release workflow waits for all three platform gates before building publishable archives.
-Pull requests and pushes to `master` run quick main CI and independent Linux integration checks as described in [ci.md](ci.md).
-Architecture latency comparisons run in a separate manual workflow and do not block commit or release checks.
+Tag-triggered release runs execute the complete checking suite once on Linux x86_64 and build, package and smoke-test the shipped archive on Linux ARM64 and macOS Apple Silicon as well.
+Pull requests and pushes to `master` run quick CI, while [AGENTS.md](../AGENTS.md) requires full local validation before committing or merging as described in [ci.md](ci.md).
+Architecture latency comparisons remain available as standalone scripts and are required locally for relevant changes before committing or merging.
 
 The architecture baseline uses `BENCH_SUITE=shared`, both before references set to `.`, the after reference set to `.`, and RTTs of 0, 50, and 150 milliseconds.
 Rust comparisons use at least 31 warm CPU repetitions through `BENCH_CPU_REPEATS` and three warm network repetitions through `BENCH_REPEATS`.
@@ -205,10 +205,10 @@ These local measurements exclude real mobile hardware, production bandwidth limi
 Reports are written to `.test-artifacts/rust-browser-initialization.json` and the architecture benchmark's configured JSON output.
 Local checks passed 90 native Rust tests, 230 frontend/reference tests with one existing skip, 27 installer tests, the contracts and both mounted engine modes.
 Real SSH/SFTP, development HMR, Herdr, saved-data rollback, installer rollback and packaged execution are checked alongside the browser and performance gates.
-The three-platform workflow repeats the complete matrix on Linux x86_64, Linux ARM64 and macOS Apple Silicon and retains machine-readable reports as artifacts.
+The original migration configured a complete three-platform validation matrix, now replaced by one Linux checking job and three release package jobs as described in [releases.md](releases.md).
 Linux ARM64 and macOS jobs were configured but could not be executed in this Linux x86_64 workspace.
-The release workflow depends on that full parity workflow and then verifies the final companion-equipped release and installed launcher before publishing.
-Package smoke checks exercise both engine modes under a mounted path, and full browser checks additionally launch the extracted native release executable in both modes.
+The release workflow verifies the final companion-equipped archive and installed launcher on each supported platform before publishing.
+Package smoke checks exercise both engine modes under a mounted path, and `npm run verify:package -- ARCHIVE` retains local browser checks against the extracted native release executable in both modes.
 
 The first optimization comparison uses 62 warm samples per case and execution mode across forward and reverse run orders, with 2,304 exact candidate-array comparisons.
 That comparison measured faster native Rust medians in seven of nine cases and faster Wasm medians in six of nine cases.

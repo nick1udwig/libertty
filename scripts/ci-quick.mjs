@@ -8,7 +8,9 @@ import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
 const start = performance.now();
-const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
+const list = args => execFileSync('git', ['ls-files', '-z', ...args], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
+const deleted = new Set(list(['--deleted']));
+const files = list(['--cached', '--others', '--exclude-standard']).filter(file => !deleted.has(file));
 let modules = 0, data = 0;
 for (const file of files) {
   if (!/\.(?:[cm]?js|ts|json)$/.test(file)) continue;
@@ -31,7 +33,6 @@ console.log(`Verified syntax for ${modules} modules, ${data} JSON files and ${Ob
 // the required check install dependencies, build Rust or start a browser.
 const tests = [
   'api.test.ts',
-  'ci-suites.test.mjs',
   'compound-repair.test.ts',
   'dictation-alternatives.test.ts',
   'dictation-layout.test.ts',
@@ -47,6 +48,7 @@ const tests = [
   'plugin-file.test.ts',
   'plugins.test.ts',
   'push-worker.test.ts',
+  'publish-release.test.mjs',
   'queue.test.ts',
   'reconnecting-socket.test.ts',
   'service-worker.test.ts',

@@ -1,5 +1,5 @@
 {
-  "node": "22.23.3",
+  "node": "26.8.1",
   "voxtypeMobile": {
     "repository": "nick1udwig/voxtype-mobile",
     "commit": "4a1f061cdc03a662c9ba04dd415d8a392144c5e5"

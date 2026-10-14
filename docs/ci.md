@@ -1,61 +1,72 @@
 # CI checks
 
-The [CI workflow](../.github/workflows/ci.yml) runs one independent `CI` job on pull requests and pushes to `master`.
-The main CI target is 30 seconds or less from job start, with a 20-second limit on its check command.
-It uses the runner's existing Node runtime and a shallow checkout without installing dependencies or restoring caches.
+The [CI workflow](../.github/workflows/ci.yml) runs one `CI` job on pull requests and pushes to `master`.
+The main CI target is 30 seconds or less from job start, with a 20-second limit on its JavaScript check command and a one-minute job timeout.
+It uses the runner's existing Node and Rust tools and a shallow checkout without installing dependencies or restoring caches.
 Only this `CI` check belongs on the required commit path.
 
 ## Main checks
 
-`npm run ci:quick` checks JavaScript and TypeScript syntax, parses tracked JSON, verifies contract asset checksums and runs an explicit set of dependency-free unit tests.
+`npm run ci:quick` checks JavaScript and TypeScript syntax, parses JSON, verifies contract asset checksums and runs an explicit set of dependency-free unit tests.
+It includes untracked source files and excludes deleted files so it also works before staging a commit.
 These tests cover dictation state, reconnects, wire messages, input editing, plugins, Herdr space layout and other frontend logic.
-The same command runs locally without `npm ci`, Rust or Chromium.
-Any check failure or exceeded command budget fails CI.
+The workflow also checks Rust formatting and the canonical command and speech vocabulary without compiling Rust.
 
 ```sh
 npm run ci:quick
+cargo fmt --all -- --check
+npm run contracts:vocabulary -- --check
 ```
 
-## Independent integration checks
+## Full local and release checks
 
-The [Integration checks workflow](../.github/workflows/integration.yml) runs independently on pull requests, pushes to `master` and manual dispatch.
-It runs Rust formatting and lints, all native and JavaScript tests, generated contract checks, installer fixtures and the frontend type check.
-It builds the backend and frontend before running security tests, and development harnesses reuse the verified build.
-It shares checksummed build archives with selected Linux browser jobs, which do not rebuild Rust or the frontend.
-Main CI has no dependency on this workflow or its results.
-
-[scripts/ci-suites.mjs](../scripts/ci-suites.mjs) selects Linux browser suites from the changed files.
-Feature changes run suites for their affected consumers, while saved-data changes also run the compatibility harness.
-Shared inputs, unknown paths or an unavailable comparison revision select all Linux integration suites and saved-data compatibility.
-Deletions and both sides of renames contribute to selection, and pull requests use the merge base to exclude unrelated base-branch changes.
+[AGENTS.md](../AGENTS.md) requires local validation before creating a commit or merging because ordinary pushes and pull requests only run fast CI.
+Run the following with the Node version pinned in `build/release-config.json`, Rust with the `wasm32-unknown-unknown` target, native dependency build tools, Chromium, OpenSSH server and Bash completion available.
 
 ```sh
-node --input-type=module -e 'import { selectSuites } from "./scripts/ci-suites.mjs"; console.log(selectSuites(["src/dictation.ts"]))'
-```
-
-To run a selected browser suite locally, build first and set the browser executable paths.
-The native Herdr and dictation suites download and verify the pinned Herdr executable automatically.
-
-```sh
-npm run build
-npm run build:test-support
+npm ci
 npx --no-install playwright-core install --with-deps chromium
-export CHROME_PATH="$(node -e 'process.stdout.write(require("playwright-core").chromium.executablePath())')"
-export CHROMIUM="$CHROME_PATH"
-node scripts/ci-suites.mjs dictation
+npm run verify:local
 ```
 
-## Full platform and release checks
+[scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native and Wasm Clippy, Rust tests, the complete build, JavaScript and contract tests, installer fixtures, saved-data compatibility and browser checks in sequence.
+[scripts/check-browser.mjs](../scripts/check-browser.mjs) contains the single explicit browser list used by both local validation and the Linux release checking job.
+It covers actual browser Wasm, both engine modes, SSH, reading, Herdr, plugins, pairing, reconnects, gestures, touch, dictation, files and workspace behavior.
+It also downloads and verifies the pinned Herdr release before running dictation, spaces, resize, flash and fullscreen scrolling against the real native integration.
+Every existing application harness remains available through its original npm command or `node test/<harness>.mjs`.
+`npm run verify:package -- release/termai-vVERSION-PLATFORM.tar.gz` retains packaged browser coverage locally by running both smoke checks and both engine modes against the extracted archive.
+The deleted tests covered only the removed CI suite selector and build manifests, while useful package checksum, permission, metadata and companion checks remain in `test/package-release.test.mjs`.
 
-The [Release workflow](../.github/workflows/release.yml) runs full validation daily at 08:17 UTC, on published releases and on manual dispatch.
-These runs cover Linux x86_64, Linux ARM64 and macOS Apple Silicon, including the complete browser matrix, saved-data compatibility, packaged executables, installation and the pinned Linux dictation daemon.
-Scheduled and manual runs create downloadable archives, and only published releases upload release assets.
-The [Full platform validation workflow](../.github/workflows/rust.yml) can also be dispatched manually when platform coverage is needed without producing the complete release bundle.
-These workflows do not block main CI, while published releases still require full validation before uploading assets.
-See [releases.md](releases.md) for release pins, packaging and publication.
+To rerun browser checks against an existing development build, use:
 
-## Performance checks
+```sh
+npm run verify:browser
+```
 
-The [Performance comparison workflow](../.github/workflows/performance.yml) is manual and independent of commit and release gates.
-Select a platform and optionally a branch, tag or commit to compare with the historical architecture baseline.
-The existing correctness and latency assertions still report failures within that workflow, and measurement artifacts remain available for investigation.
+The scripts use `CHROME_PATH` or `CHROMIUM` if supplied, otherwise system Chromium or the Playwright-managed executable.
+On Linux, ensure the SSH daemon can use its runtime directory, normally `/run/sshd`.
+macOS needs modern Bash, with `TERMAI_BASH` pointing to it and `TERMAI_GIT_COMPLETIONS_FILE` pointing to Git's Bash completion script when running full local validation.
+
+The [Release workflow](../.github/workflows/release.yml) runs on `v*` tag pushes and manual dispatch.
+One Linux x64 job runs `npm run verify:local`, and each supported platform then builds, packages and smoke-tests its actual shipped archive once.
+There is no nightly schedule or separate integration or Rust workflow.
+Manual runs create downloadable artifacts without publishing a release.
+See [releases.md](releases.md) for pins, packaging and publication.
+
+## Local performance checks
+
+Performance comparisons run on the developer's machine through standalone scripts, with the commit and merge requirements in [AGENTS.md](../AGENTS.md).
+The manual GitHub performance workflow has been removed because shared runners add noise to latency comparisons.
+
+```sh
+npm run verify:performance
+BENCH_SUITE=shared npm run bench:architecture
+npm run bench:workspace
+```
+
+[scripts/check-performance.mjs](../scripts/check-performance.mjs) builds the optimized native wire host, measures JSON and compression under fast and mobile profiles, then enforces the existing transport latency budgets.
+The architecture benchmark retains correctness, cold and warm latency, request-count checks and reversed-order confirmation of suspected regressions.
+Its default `0e0646c` reference is the historical TypeScript architecture, and `BENCH_BEFORE_MASTER` and `BENCH_BEFORE_CLIENT` can select other compatible TypeScript references from local Git history.
+The workspace benchmark retains startup, reload, echo and submit measurements against its historical `2a99127` reference, selectable with `BENCH_BEFORE`.
+These historical loaders require the old TypeScript server layout and do not accept arbitrary modern Rust revisions as baselines.
+Reports are written to ignored `.test-artifacts` files, and historical comparisons should be reviewed alongside current measurements rather than treated as current phone performance guarantees.

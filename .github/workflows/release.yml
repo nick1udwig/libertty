@@ -1,10 +1,8 @@
 name: Release
 
 on:
-  schedule:
-    - cron: '17 8 * * *'
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       ref:
@@ -16,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event.release.tag_name || inputs.ref || github.ref }}
+  group: release-${{ inputs.ref || github.ref }}
   cancel-in-progress: false
 
 defaults:
@@ -27,6 +25,7 @@ jobs:
   source:
     name: Resolve the source revision and release pins
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
     outputs:
       sha: ${{ steps.source.outputs.sha }}
       node: ${{ steps.source.outputs.node }}
@@ -36,29 +35,67 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name || inputs.ref || github.sha }}
+          ref: ${{ inputs.ref || github.sha }}
           persist-credentials: false
       - id: source
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
         run: |
-          python3 - <<'PYTHON'
-          import json, os, re, subprocess
-          pins = json.load(open('build/release-config.json'))
-          version = json.load(open('package.json'))['version']
-          tag = os.environ.get('RELEASE_TAG') or 'v' + version
-          assert re.fullmatch(r'v\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?', tag) and tag == 'v' + version, 'Tag must match package.json version'
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              values = {'sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), 'node': pins['node'], 'tag': tag, 'voxtype_repository': pins['voxtypeMobile']['repository'], 'voxtype_commit': pins['voxtypeMobile']['commit']}
-              for key, value in values.items():
-                  print(f'{key}={value}', file=output)
-          PYTHON
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          import { execFileSync } from 'node:child_process';
+          const pins = JSON.parse(readFileSync('build/release-config.json', 'utf8'));
+          const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          const values = {
+            sha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+            node: pins.node,
+            tag: process.env.RELEASE_TAG || 'v' + version,
+            voxtype_repository: pins.voxtypeMobile.repository,
+            voxtype_commit: pins.voxtypeMobile.commit,
+          };
+          appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(values).map(([key, value]) => `${key}=${value}\n`).join(''));
+          NODE
+
   verify:
     needs: source
-    name: Verify Rust on all supported platforms
-    uses: ./.github/workflows/rust.yml
-    with:
-      ref: ${{ needs.source.outputs.sha }}
+    name: Release checks on Linux x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.source.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ needs.source.outputs.node }}
+          cache: npm
+      - name: Install native test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server bash-completion
+          sudo mkdir -p /run/sshd
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: termai-linux-x64
+          cache-on-failure: true
+          cache-bin: false
+      - run: npm ci --no-audit --no-fund
+      - name: Install the pinned test browser
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: Verify native, JavaScript, installer, saved-data and browser behavior
+        run: npm run verify:local
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-check-diagnostics
+          path: .test-artifacts/*.json
+          if-no-files-found: ignore
+          include-hidden-files: true
 
   companion:
     needs: source
@@ -98,7 +135,7 @@ jobs:
         if: steps.voxtype-cache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential python3 cmake pkg-config libclang-dev libasound2-dev libopus0 libssl-dev
+          sudo apt-get install -y libclang-dev libasound2-dev libopus0 libssl-dev
       - name: Build the compatible CPU dictation daemon
         if: steps.voxtype-cache.outputs.cache-hit != 'true'
         env:
@@ -144,9 +181,9 @@ jobs:
 
   build:
     needs: [source, verify, companion]
-    name: Package and verify ${{ matrix.target }}
+    name: Build, package and smoke-test ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -166,10 +203,14 @@ jobs:
         with:
           node-version: ${{ needs.source.outputs.node }}
           cache: npm
-      - name: Verify native architecture
-        env:
-          EXPECTED_TARGET: ${{ matrix.target }}
-        run: node -e 'if (process.platform + "-" + process.arch !== process.env.EXPECTED_TARGET) throw new Error("Runner architecture mismatch")'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: termai-${{ matrix.target }}
+          cache-on-failure: true
+          cache-bin: false
       - name: Install Linux runtime dependencies
         if: runner.os == 'Linux'
         run: |
@@ -180,18 +221,11 @@ jobs:
         run: |
           brew install bash
           echo "TERMAI_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
-      - name: Install packaging dependencies
+      - name: Install dependencies and build the frontend and engine Wasm
         run: |
-          npm ci --omit=dev --no-audit --no-fund
+          npm ci --no-audit --no-fund
           bash -n install.sh
-      - uses: actions/download-artifact@v8
-        with:
-          name: validated-release-${{ matrix.target }}
-          path: .test-artifacts
-      - name: Restore the validated release build
-        run: |
-          tar -xzpf .test-artifacts/release-build.tar.gz
-          node scripts/ci-build.mjs verify release .test-artifacts/release-build.json
+          npm run build:frontend
       - name: Check out the pinned companion license and installer
         if: runner.os == 'Linux'
         uses: actions/checkout@v7
@@ -214,10 +248,9 @@ jobs:
           cat "$RUNNER_TEMP/voxtype-libraries.txt"
           if grep -q 'not found' "$RUNNER_TEMP/voxtype-libraries.txt"; then exit 1; fi
           echo "VOXTYPE_MOBILE_CHECKOUT=$GITHUB_WORKSPACE/.release-companions/voxtype-mobile" >> "$GITHUB_ENV"
-      - name: Package and verify the actual release
+      - name: Build, package and verify the actual release
         env:
           RELEASE_TAG: ${{ needs.source.outputs.tag }}
-          TERMAI_RELEASE_BUILD_MANIFEST: .test-artifacts/release-build.json
           TARGET: ${{ matrix.target }}
         run: |
           npm run release:package
@@ -236,34 +269,29 @@ jobs:
           overwrite: true
 
   publish:
-    name: Publish verified release assets
-    if: github.event_name == 'release'
-    needs: build
-    runs-on: ubuntu-22.04
+    name: Publish the complete verified release
+    if: github.event_name == 'push'
+    needs: [source, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ needs.source.outputs.node }}
       - uses: actions/download-artifact@v8
         with:
           pattern: termai-*
           path: release
           merge-multiple: true
-      - name: Verify all targets and publish
+      - name: Verify all files, upload to a draft and publish last
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: |
-          for target in linux-x64 linux-arm64 darwin-arm64; do
-            test -f "release/termai-$RELEASE_TAG-$target.tar.gz"
-            test -f "release/termai-$RELEASE_TAG-$target.tar.gz.sha256"
-          done
-          cp install.sh release/install.sh
-          cd release
-          sha256sum -c ./*.sha256
-          sha256sum ./*.tar.gz install.sh > SHA256SUMS
-          gh release upload "$RELEASE_TAG" ./*.tar.gz ./*.sha256 install.sh SHA256SUMS --clobber
+          RELEASE_TAG: ${{ needs.source.outputs.tag }}
+        run: node scripts/publish-release.mjs
