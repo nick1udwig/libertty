@@ -156,8 +156,22 @@ try {
   assert.ok(joinedAnimation >= 9, 'A joining pane keeps rendering from its refreshed baseline without snapshots: ' + joinedAnimation);
   assert.deepEqual({ cols: (await state()).cols, rows: (await state()).rows }, { cols: geometry.cols, rows: geometry.rows });
   await joined.close();
+  // Reopen a fullscreen alternate-buffer app after releasing mobile ownership.
+  await page.bringToFront();
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await wait(async () => (await state()).cols > geometry.cols, 'background restores desktop geometry');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForFunction(() => window.__terminal?.buffer.active.getLine(0)?.translateToString(true).includes('Application transcript') && document.querySelector('#connection-label').textContent === 'Connected');
+  await page.reload();
+  await page.waitForFunction(() => window.__terminal?.buffer.active.getLine(0)?.translateToString(true).includes('Application transcript') && document.querySelector('#connection-label').textContent === 'Connected');
+  const tick = await page.evaluate(() => window.__terminal.buffer.active.getLine(0).translateToString(true));
+  await page.waitForFunction(before => window.__terminal.buffer.active.getLine(0).translateToString(true) !== before, tick);
   assert.deepEqual(errors, []);
-  console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; shell-to-TUI/joining baselines, incremental frames, stale snapshots, cursor, native touch scrolling, hold/copy, plain/OSC-8 links and keyboard behavior passed.');
+  console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; shell-to-TUI/joining baselines, incremental frames, stale snapshots, cursor, native touch scrolling, hold/copy, plain/OSC-8 links and keyboard behavior and fullscreen background/reopen recovery passed.');
 } finally {
   await browser?.close(); if (backend) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
   const stopped = herdr && herdr.exitCode === null && herdr.signalCode === null ? once(herdr, 'exit') : null;

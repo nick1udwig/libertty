@@ -1,5 +1,6 @@
 import { node } from './dom.ts';
-import { wireProtocols, decodeWire } from './wire.ts';
+import { wireProtocols } from './wire.ts';
+import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSpace, type HerdrWorktrees } from './herdr-protocol.ts';
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
 import { tabGestures } from './tab-gestures.ts';
@@ -9,7 +10,7 @@ import './herdr.css';
 interface Host {
   url: string; session: string; source?: string; key: string;
   token(): string | undefined; authenticate(): Promise<void>;
-  api<T>(path: string, data?: unknown): Promise<T>;
+  api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
   notice(message: string): void;
   reconnect?(): Promise<void>;
@@ -37,9 +38,11 @@ export class HerdrView {
   private dropLabel = node('span', 'herdr-drop-label');
   private tracker = new HerdrState();
   private preferences: Preferences;
-  private ws?: WebSocket;
-  private reconnect?: ReturnType<typeof setTimeout>;
-  private connecting = false;
+  private transport!: ReconnectingSocket;
+  private get ws() { return this.transport?.socket; }
+  private offeredWire?: string[];
+  private recovering?: Promise<void>;
+  private recoveryRetry?: ReturnType<typeof setTimeout>;
   private disposed = false;
   private visible = false;
   private connected = false;
@@ -121,10 +124,9 @@ export class HerdrView {
     document.addEventListener('visibilitychange', presence); window.addEventListener('focus', presence); window.addEventListener('blur', presence);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', presence), () => window.removeEventListener('focus', presence), () => window.removeEventListener('blur', presence));
     const resume = () => {
-      if (this.disposed || document.hidden || !navigator.onLine) return;
-      clearTimeout(this.reconnect);
-      const ws = this.ws; this.ws = undefined; this.connected = false; ws?.close();
-      void this.connect();
+      if (this.disposed) return;
+      if (document.hidden || !navigator.onLine) { this.transport.suspend(); return; }
+      void this.transport.resume(true);
     };
     document.addEventListener('visibilitychange', resume); window.addEventListener('online', resume); window.addEventListener('pageshow', resume);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', resume), () => window.removeEventListener('online', resume), () => window.removeEventListener('pageshow', resume));
@@ -135,6 +137,28 @@ export class HerdrView {
       if (event.key === 'Escape') { this.menu.hidden = true; this.strip.querySelector<HTMLButtonElement>('[aria-selected=true]')?.focus(); }
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const items = [...this.menu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement); items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus(); }
     };
+    this.transport = new ReconnectingSocket({
+      available: () => !this.disposed && !this.recovering && !document.hidden && navigator.onLine,
+      protocols: () => wireProtocols(this.offeredWire),
+      prepare: async signal => {
+        const { ticket, wire } = await this.host.api<{ ticket: string; wire?: string[] }>('api/herdr/ticket', {}, signal);
+        signal.throwIfAborted(); this.offeredWire = wire;
+        const url = this.endpoint('herdr/ws');
+        url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
+        return url;
+      },
+      open: () => { this.quietSnapshot = true; this.updatePresence(); },
+      message: event => {
+        try { this.receive(typeof event.data === 'string' ? JSON.parse(event.data) : event.data); }
+        catch { this.ws?.close(4002, 'Invalid transport message'); }
+      },
+      close: () => {
+        if (this.disposed) return false;
+        this.connected = false; this.status.textContent = 'Herdr disconnected. Reconnecting…'; this.render();
+        this.setLoading(false); this.host.ready?.(); return true;
+      },
+      error: error => { this.connectionError(error); return true; },
+    });
     this.render(); void this.connect();
   }
   setVisible(visible: boolean) {
@@ -231,36 +255,26 @@ export class HerdrView {
     while (this.terminalFrames.size > 4) { const candidate = [...this.terminalFrames].find(([,entry]) => entry.frame !== this.frame && entry.frame !== this.displayed); if (!candidate) break; const [id, entry] = candidate; entry.frame.remove(); this.terminalFrames.delete(id); }
   }
   private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
-  private async connect() {
-    if (this.disposed || this.connecting || this.ws?.readyState === WebSocket.OPEN || document.hidden || !navigator.onLine) return;
-    clearTimeout(this.reconnect); this.connecting = true;
-    try {
-      const { ticket, wire } = await this.host.api<{ ticket: string; wire?: string[] }>('api/herdr/ticket', {});
-      if (this.disposed || document.hidden || !navigator.onLine) return;
-      const url = this.endpoint('herdr/ws'); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
-      const ws = new WebSocket(url, wireProtocols(wire)); ws.binaryType = 'arraybuffer'; this.ws = ws; let decoded = Promise.resolve();
-      ws.onopen = () => { if (this.ws !== ws) return; this.connected = true; this.quietSnapshot = true; this.status.textContent = ''; this.updatePresence(); this.render(); };
-      ws.onmessage = event => { decoded = decoded.then(async () => { const value = await decodeWire(event.data); if (this.ws === ws) this.receive(value); }).catch(() => { if (this.ws === ws) ws.close(4002, 'Invalid transport message'); }); };
-      ws.onclose = () => {
-        if (this.ws !== ws || this.disposed) return;
-        this.connected = false; this.status.textContent = 'Herdr disconnected. Reconnecting…'; this.render();
-        this.setLoading(false); this.host.ready?.();
-        this.reconnect = setTimeout(() => void this.connect(), 2000);
-      };
-    } catch (error: any) { if (!this.disposed) {
-      this.status.textContent = error.message; this.setLoading(false); this.host.ready?.();
-      if (error.status === 404 && this.host.source && this.host.reconnect) {
-        if (!this.visible) return;
-        this.status.textContent = 'Reconnecting to Herdr…';
-        try { await this.host.reconnect(); }
-        catch (reason: any) { if (!this.disposed) { this.status.textContent = reason.message; if (!reason.cancelled) this.reconnect = setTimeout(() => void this.connect(), 3000); } }
-      } else this.reconnect = setTimeout(() => void this.connect(), 3000);
-    } }
-    finally { this.connecting = false; }
+  private connect() { return this.transport.connect(); }
+  private connectionError(error: unknown) {
+    if (this.disposed) return;
+    const failure = error as { status?: number; message?: string; name?: string };
+    this.status.textContent = failure.name === 'TimeoutError' ? 'Herdr connection timed out. Retrying…' : failure.message || 'Herdr connection failed.'; this.setLoading(false); this.host.ready?.();
+    if (failure.status !== 404 || !this.host.source || !this.host.reconnect || !this.visible || this.recovering) return;
+    this.status.textContent = 'Reconnecting to Herdr…';
+    let cancelled = false;
+    this.recovering = this.host.reconnect().catch((reason: { message?: string; cancelled?: boolean }) => {
+      if (!this.disposed) this.status.textContent = reason.message || 'Herdr connection failed.';
+      cancelled = reason.cancelled === true;
+    }).finally(() => {
+      this.recovering = undefined;
+      if (!this.disposed && !cancelled) this.recoveryRetry = setTimeout(() => void this.connect(), 3000);
+    });
   }
   private receive(message: HerdrMessage) {
     if (message.type === 'error') { this.status.textContent = message.message; this.setLoading(false); this.host.ready?.(); return; }
     if (message.type !== 'snapshot') return;
+    this.transport.ready(); this.connected = this.ws?.readyState === WebSocket.OPEN;
     this.status.textContent = '';
     this.terminals = message.snapshot.terminals || message.snapshot.agents; this.spaces = message.snapshot.spaces || [];
     const notifications = this.tracker.update(message.snapshot);
@@ -704,7 +718,7 @@ export class HerdrView {
     if (this.disposed) return; this.disposed = true;
     this.actionDialog?.close();
     this.dropIndicator.remove();
-    clearTimeout(this.reconnect); clearInterval(this.presenceTimer); this.ws?.close(); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.strip.remove(); this.element.remove();
+    clearTimeout(this.recoveryRetry); this.transport.suspend(); clearInterval(this.presenceTimer); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
   }
 }

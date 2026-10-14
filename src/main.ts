@@ -114,10 +114,10 @@ function authorizeTerminals(backend: BackendProfile, accessToken: string) {
     frames.get(id)?.contentWindow?.postMessage({ type: 'authorize', accessToken }, location.origin);
   }
 }
-async function api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string, recoverAuth = true): Promise<T> {
+async function api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string, recoverAuth = true, signal?: AbortSignal): Promise<T> {
   const url = new URL(name, backend.url); if (session) url.searchParams.set('session', session);
   return requestJSON<T>(url, data, {
-    token: () => tokenFor(backend),
+    token: () => tokenFor(backend), signal,
     ...(name !== 'api/connect' && recoverAuth ? { recoverAuth: async (rejected?: string) => {
       if (tokenFor(backend) === rejected) await authenticate(backend, true);
       else await authenticating.get(backend.id);

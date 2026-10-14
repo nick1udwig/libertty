@@ -43,8 +43,26 @@ try {
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await until(() => tickets > before);
   await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
+  // A ticket fetch left behind by a suspended PWA must not block foreground recovery.
+  let stalled, metadataAttempts = 0;
+  await page.route('**/api/herdr/ticket?**', async route => {
+    if (new URL(route.request().url()).searchParams.has('terminalId')) { await route.continue(); return; }
+    metadataAttempts++;
+    if (metadataAttempts === 1) { stalled = route; return; }
+    await route.continue();
+  });
+  const foreground = () => page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await delay(200); await foreground(); await until(() => !!stalled, 'held metadata ticket');
+  try {
+    await foreground();
+    await until(() => metadataAttempts >= 2, 'fresh foreground attempt', 2500);
+  } finally { await stalled.abort('failed').catch(() => {}); }
+  await page.locator('.herdr-connection').filter({ hasText: 'timed out' }).waitFor({ state: 'hidden' });
   assert.deepEqual(errors, []);
-  console.log('PASS Herdr reopen: expired sources restore automatically in the same tab, transient failures retry, and foregrounding refreshes the connection');
+  console.log('PASS Herdr reopen: expired sources restore automatically in the same tab, transient failures retry, and foregrounding cancels stalled attempts');
 } catch (error) {
   for (const page of browser?.contexts().flatMap(context => context.pages()) || []) console.error(await page.evaluate(() => ({ text: document.body.innerText, tabs: localStorage.getItem('termai.tabs'), hosts: localStorage.getItem('termai.hosts') })));
   throw error;

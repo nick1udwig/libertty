@@ -128,6 +128,7 @@ struct Inner {
     socket: Option<Attachment>,
     attachment: u64,
     detached: Instant,
+    leases: usize,
     input_line: Option<InputLine>,
     input_serial: u64,
     input: crate::input_controller::Controller,
@@ -157,6 +158,17 @@ pub struct Session {
     lifetime: CancellationToken,
     prewarming: AtomicBool,
     shell_context: context::Cache,
+}
+/// A Herdr viewer uses its dedicated source without attaching a shell socket.
+pub struct Lease(std::sync::Weak<Session>);
+impl Drop for Lease {
+    fn drop(&mut self) {
+        if let Some(session) = self.0.upgrade() {
+            let mut inner = session.inner.lock().unwrap();
+            inner.leases -= 1;
+            inner.detached = Instant::now();
+        }
+    }
 }
 pub(crate) enum ProcessEvent {
     Data(Vec<u8>),
@@ -480,6 +492,7 @@ impl Session {
                 socket: None,
                 attachment: 0,
                 detached: Instant::now(),
+                leases: 0,
                 input_line: None,
                 input: Default::default(),
                 input_serial: 0,
@@ -701,11 +714,24 @@ impl Session {
     }
     pub fn expired(&self) -> bool {
         let inner = self.inner.lock().unwrap();
-        inner.socket.is_none() && inner.detached.elapsed() >= Duration::from_secs(3600)
+        inner.socket.is_none()
+            && inner.leases == 0
+            && inner.detached.elapsed() >= Duration::from_secs(3600)
+    }
+    pub fn lease(self: &Arc<Self>) -> Option<Lease> {
+        let mut inner = self.inner.lock().unwrap();
+        if self.lifetime.is_cancelled() {
+            return None;
+        }
+        inner.leases += 1;
+        Some(Lease(Arc::downgrade(self)))
     }
     pub fn mark_expired(&self) -> bool {
         let inner = self.inner.lock().unwrap();
-        if inner.socket.is_none() && inner.detached.elapsed() >= Duration::from_secs(3600) {
+        if inner.socket.is_none()
+            && inner.leases == 0
+            && inner.detached.elapsed() >= Duration::from_secs(3600)
+        {
             self.lifetime.cancel();
             true
         } else {
@@ -1930,8 +1956,27 @@ mod tests {
         session.detach(attachment);
         session.inner.lock().unwrap().detached = Instant::now() - Duration::from_secs(3601);
         assert!(session.mark_expired());
+        assert!(session.lease().is_none());
         let (_, mut receive) = session.attach(0, None);
         assert!(matches!(receive.try_recv(), Ok(Transport::Close(1000, _))));
+    }
+    #[tokio::test]
+    async fn herdr_source_leases_prevent_expiration_and_refresh_idle_time_on_last_disconnect() {
+        let (session, _, attachment, _) = fixture().await;
+        session.detach(attachment);
+        let metadata = session.lease().unwrap();
+        let pane = session.lease().unwrap();
+        session.inner.lock().unwrap().detached = Instant::now() - Duration::from_secs(3601);
+        assert!(!session.mark_expired());
+        assert!(!session.expired());
+        drop(metadata);
+        session.inner.lock().unwrap().detached = Instant::now() - Duration::from_secs(3601);
+        assert!(!session.mark_expired());
+        drop(pane);
+        assert!(!session.mark_expired());
+        assert!(session.inner.lock().unwrap().detached.elapsed() < Duration::from_secs(1));
+        session.inner.lock().unwrap().detached = Instant::now() - Duration::from_secs(3601);
+        assert!(session.mark_expired());
     }
     #[tokio::test]
     async fn control_d_keeps_the_prompt_and_input_snapshots_reject_stale_revisions() {

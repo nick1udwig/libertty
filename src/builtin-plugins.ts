@@ -10,7 +10,7 @@ import { readingPlugin, type ReadingServices } from './reading-plugin.ts';
 export interface BuiltinServices extends ReadingServices {
   active(tab: TerminalTab): boolean;
   host(id?: string): HostProfile | undefined;
-  api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string): Promise<T>;
+  api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string, recoverAuth?: boolean, signal?: AbortSignal): Promise<T>;
   connect(host: HostProfile, pluginId: string): Promise<void>;
   closeSession(tab: TerminalTab): Promise<void>;
   reconnectHerdr(tab: TerminalTab): Promise<void>;
@@ -65,9 +65,9 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         const connection = backend.url + '#' + (source ? sourceHost || tab.hostId || source : '') + '#' + session;
         const view = new HerdrView({ url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'termai.herdr.' + connection,
           notificationDevice: () => s.notificationDevice(tab.backendId), toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
-          api: async <T>(name: string, data?: unknown) => {
-            try { return await s.api<T>(backend, name + '?' + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data); }
-            catch (error: any) { if (error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
+          api: async <T>(name: string, data?: unknown, signal?: AbortSignal) => {
+            try { return await s.api<T>(backend, name + '?' + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }
+            catch (error: any) { if (!signal?.aborted && error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
           },
           changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice });
         view.element.id = 'herdr-' + tab.id; view.navigationElement.id = 'herdr-strip-' + tab.id; s.herdr(tab, view);

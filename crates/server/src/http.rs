@@ -902,6 +902,18 @@ async fn herdr_socket_session(
     cancel: CancellationToken,
     id: &str,
 ) {
+    let _source = if ticket.source.is_empty() {
+        None
+    } else {
+        let source = app
+            .sessions
+            .lock()
+            .await
+            .get(&format!("{}/{}", ticket.owner, ticket.source))
+            .and_then(|terminal| terminal.session.lease());
+        let Some(source) = source else { return };
+        Some(source)
+    };
     let mode = wire::Mode::protocol(
         socket
             .protocol()
