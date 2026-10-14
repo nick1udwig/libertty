@@ -74,7 +74,12 @@ try {
   const release = async child => child.evaluate(() => { for(const message of window.__blockedRendered.splice(0)) parent.postMessage(message, location.origin); });
   const releaseShortcuts = async child => child.evaluate(() => { for(const message of window.__blockedShortcuts.splice(0)) parent.postMessage(message, location.origin); });
   const hotkeys = page.locator('#workspace-shortcut-buttons button');
-  const captureBottomLayout = () => page.evaluate(() => { window.__bottomLayouts=[]; window.__captureBottomLayout=true; return window.__bottomLayout(); });
+  const captureBottomLayout = () => page.evaluate(async () => {
+    window.__bottomLayouts=[]; window.__captureBottomLayout=true;
+    // Start sampling before a fast handoff can finish within the current frame.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return window.__bottomLayout();
+  });
   const assertBottomLayout = async expected => {
     const layouts = await page.evaluate(() => { window.__captureBottomLayout=false; return window.__bottomLayouts; });
     assert.ok(layouts.length > 0, 'Inspect bottom bars on animation frames during loading');
