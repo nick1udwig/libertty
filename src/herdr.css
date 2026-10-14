@@ -7,6 +7,9 @@
 .herdr-stack-toggle{flex:none;border-radius:7px;background:#353b51;color:#d7e6d9;min-height:30px;min-width:28px;font:12px system-ui}
 .herdr-agent-tab[data-drop=group]{outline:2px solid #65ddb5;background:#214438}
 .herdr-agent-tab[data-drop=before]{box-shadow:-4px 0 #65ddb5}.herdr-agent-tab[data-drop=after]{box-shadow:4px 0 #65ddb5}
+.herdr-drop-indicator{position:fixed;z-index:16;pointer-events:none;border:4px solid #83ffd0;border-radius:12px;background:linear-gradient(#65ddb530,#65ddb508);box-shadow:0 0 0 2px #102d25,0 0 20px #65ddb550}
+.herdr-drop-indicator[data-drop=before],.herdr-drop-indicator[data-drop=after]{border:0;border-radius:5px;background:#83ffd0;box-shadow:0 0 0 2px #102d25,0 0 20px #65ddb580}
+.herdr-drop-label{position:absolute;top:-36px;transform:translateX(-50%);width:max-content;max-width:calc(100vw - 16px);padding:6px 10px;border:2px solid #83ffd0;border-radius:9px;background:#153d30;color:#edfff6;box-shadow:0 3px 14px #0008;font:700 14px system-ui;white-space:nowrap}
 .herdr-status-dot{width:8px;height:8px;border-radius:50%;border:1.5px solid #7d8791;flex:none}
 [data-status=idle] .herdr-status-dot{border-color:var(--herdr-idle)}
 [data-status=done] .herdr-status-dot{background:var(--herdr-done);border-color:var(--herdr-done)}
@@ -33,4 +36,8 @@
 .herdr-tabs-toggle svg{transition:transform .2s ease}
 .herdr-tabs-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
 .herdr-checkout-path{font-family:ui-monospace,monospace;overflow-wrap:anywhere;padding:10px 12px;border-radius:8px;background:#191b2c}
+.herdr-branch-suggestions{max-height:210px;overflow-y:auto;margin-top:-8px;margin-bottom:14px;border:1px solid #44485e;border-radius:10px;background:#191b2c}
+.herdr-branch-option{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:11px 12px;background:none;text-align:left;overflow-wrap:anywhere;font:14px ui-monospace,monospace}
+.herdr-branch-option:hover,.herdr-branch-option[aria-selected=true]{background:#153e3c;color:#83ffd0}.herdr-branch-option:disabled{cursor:default;opacity:.55}
+.herdr-branch-status{flex:none;font:11px system-ui;color:#989bad}
 @media(prefers-reduced-motion:reduce){.herdr-tabs-toggle svg{transition:none}}

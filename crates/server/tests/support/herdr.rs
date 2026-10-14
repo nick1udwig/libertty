@@ -135,7 +135,7 @@ impl Fixture {
                             }
                             "worktree.list" => {
                                 actions.lock().unwrap().push(request.clone());
-                                json!({"source":{"repo_name":"repo","repo_root":"/workspace"},"worktrees":[{"path":"/workspace","label":"main","is_bare":false,"is_prunable":false},{"path":"/worktrees/repo/review","label":"review","is_bare":false,"is_prunable":false},{"path":"/pruned","is_prunable":true}]})
+                                json!({"source":{"repo_name":"repo","repo_root":snapshot.lock().unwrap()["panes"][0]["cwd"]},"worktrees":[{"path":"/workspace","label":"main","is_bare":false,"is_prunable":false},{"path":"/worktrees/repo/review","label":"review","is_bare":false,"is_prunable":false},{"path":"/pruned","is_prunable":true}]})
                             }
                             "worktree.create" | "worktree.open" => {
                                 actions.lock().unwrap().push(request.clone());

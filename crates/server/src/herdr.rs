@@ -360,6 +360,11 @@ impl Target {
                     return Err("This Herdr server does not provide worktree discovery. Update Herdr on this host.".into());
                 }
                 if input["action"] == "list-worktrees" {
+                    if let Some(root) = listing["source"]["repo_root"].as_str() {
+                        // Suggestions must not prevent manual creation if Git discovery fails.
+                        listing["branches"] =
+                            json!(self.branch_names(root).await.unwrap_or_default());
+                    }
                     if let Some(directory) = snapshot.get("worktreeDirectory") {
                         listing["directory"] = directory.clone();
                     }
@@ -540,6 +545,55 @@ impl Target {
                 }
             }
         }
+    }
+    async fn branch_names(&self, root: &str) -> Result<Vec<String>, String> {
+        let args: Vec<String> = vec![
+            "-C".into(),
+            root.into(),
+            "for-each-ref".into(),
+            "--sort=refname".into(),
+            "--format=%(refname:strip=2)".into(),
+            "refs/heads/".into(),
+        ];
+        let cancel = CancellationToken::new();
+        let output = if let Some(remote) = &self.remote {
+            let command = format!(
+                "git {}",
+                args.iter()
+                    .map(|arg| shell_quote(arg))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            let result = remote.exec(&command, &cancel).await?;
+            if result.code != 0 {
+                return Err(result.stderr);
+            }
+            result.stdout
+        } else {
+            let options = crate::probes::ProbeOptions {
+                cwd: root.into(),
+                env: self.env.clone(),
+                timeout: Duration::from_secs(5),
+                max_buffer: 1024 * 1024,
+            };
+            let result = crate::probes::probe(
+                &crate::probes::ProbePool::default(),
+                "git",
+                &args,
+                &options,
+                &cancel,
+            )
+            .await?;
+            if !result.success {
+                return Err(String::from_utf8_lossy(&result.stderr).into());
+            }
+            String::from_utf8(result.stdout).map_err(|error| error.to_string())?
+        };
+        Ok(output
+            .lines()
+            .filter(|branch| name(&json!(branch)).is_ok())
+            .map(str::to_owned)
+            .collect())
     }
     async fn space_request(&self, method: &str, params: Value) -> Result<Value, String> {
         self.request(method, params).await.map_err(|error| {

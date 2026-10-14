@@ -10,6 +10,7 @@ export interface HerdrWorktrees {
   source: { repo_name: string; repo_root: string };
   worktrees: { path: string; branch?: string; label: string; is_bare: boolean; is_prunable: boolean; open_workspace_id?: string }[];
   directory?: string;
+  branches?: string[];
 }
 export type HerdrMessage =
   | { type: 'snapshot'; snapshot: HerdrSnapshot }

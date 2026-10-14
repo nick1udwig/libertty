@@ -396,7 +396,14 @@ try {
   const [before, after] = await tabBounds(0, 2);
   await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2); await page.mouse.down();
   await page.locator('.herdr-tab-menu').waitFor({ state: 'visible' });
-  await page.mouse.move(after.x + after.width * .8, after.y + after.height / 2, { steps: 10 }); await page.mouse.up();
+  await page.mouse.move(after.x + after.width * .8, after.y + after.height / 2, { steps: 10 });
+  const dropPreview = page.locator('.herdr-drop-indicator:visible');
+  assert.equal(await dropPreview.textContent(), 'Drop here');
+  const dropBounds = await dropPreview.boundingBox();
+  assert.ok(dropBounds.height >= 80 && dropBounds.y < after.y - 40, 'Drop marker rises above the finger covering the strip');
+  await page.screenshot({ path: root + '.test-artifacts/herdr-terminal-drop.png' });
+  await page.mouse.up();
+  assert.equal(await page.locator('.herdr-drop-indicator:visible').count(), 0, 'Drop marker clears on release');
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   // Real touch drag goes back and forth; moving tabs must retain capture.
   const [routeRect, testRect] = await tabBounds(0, 1);

@@ -77,6 +77,53 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
 }
 
 #[tokio::test]
+async fn worktree_branch_suggestions_read_only_local_refs_from_the_held_repository() {
+    let fixture = support::Fixture::new().await;
+    let repo = fixture.directory.path().join("repo with 'quotes'");
+    std::fs::create_dir(&repo).unwrap();
+    let git = |args: &[&str]| {
+        let result = std::process::Command::new("git")
+            .current_dir(&repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+    };
+    git(&["init", "-q", "-b", "main"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.test",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "Initial",
+    ]);
+    git(&["branch", "review/existing"]);
+    git(&["branch", "fix/another"]);
+    git(&["tag", "not-a-branch"]);
+    git(&["update-ref", "refs/remotes/origin/not-local", "HEAD"]);
+    fixture.snapshot.lock().unwrap()["panes"][0]["cwd"] = json!(repo.to_str().unwrap());
+    let listing = fixture
+        .target
+        .action(&json!({"action":"list-worktrees","workspaceId":"w1"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        listing["branches"],
+        json!(["fix/another", "main", "review/existing"])
+    );
+    assert_eq!(listing["source"]["repo_root"], repo.to_str().unwrap());
+    assert_eq!(listing["worktrees"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn worktrees_and_splits_are_scoped_to_the_held_space() {
     let fixture = support::Fixture::new().await;
     for input in [
