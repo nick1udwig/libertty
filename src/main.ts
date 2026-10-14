@@ -34,6 +34,7 @@ for (const tab of saved<LegacyReadingTab[]>('readingTabs', []).filter(t => t && 
   if (!tabs.some(existing => existing.id === tab.id)) tabs.push(migrateReadingTab(tab));
 }
 let active = saved<string>('activeTab', '') || tabs[0]?.id || '';
+let navigationTab = '', terminalTabsExpanded = false;
 let page: 'terminal' | 'hosts' | 'vault' | 'keychain' | 'backends' | 'known' | 'settings' = 'terminal';
 let alphabetical = false, editingHost: string | undefined, keyDetail: { backend?: BackendProfile; key: KeyInfo | BrowserKeyInfo } | undefined;
 const frames = new Map<string, HTMLIFrameElement>(), tokens = new Map<string, string>(), vaults = new Map<string, { keys: KeyInfo[]; knownHosts: KnownHost[] }>();
@@ -63,7 +64,8 @@ for (const plugin of builtinPlugins({
   backend: tab => backendFor(tab.backendId), host: id => hosts.find(host => host.id === id), authenticate, token: tokenFor, api,
   connect: (host, id) => configureConnection(host, id), closeSession: closeTabSession, reconnectHerdr, store, notice, terminalURL, openReading,
   frame(tab, frame) { if (frame) frames.set(tab.id, frame); else frames.delete(tab.id); },
-  herdr(tab, view) { if (view) herdrViews.set(tab.id, view); else { herdrViews.delete(tab.id); herdrAttention.delete(tab.id); } },
+  herdr(tab, view) { if (view) { herdrViews.set(tab.id, view); $('workspace-navigation').append(view.navigationElement); } else { herdrViews.delete(tab.id); herdrAttention.delete(tab.id); } },
+  toggleTerminalTabs(tab) { if (tab.id === active) { terminalTabsExpanded = !terminalTabsExpanded; updateWorkspaceNavigation(); } },
   ready(tab) { if (tab.id === active) updateViewVisibility(); },
   attention(tab, count) { herdrAttention.set(tab.id, count); const badge = $('tabs').querySelector<HTMLElement>('[aria-controls="herdr-' + tab.id + '"] .herdr-attention'); if (badge) { badge.textContent = String(count); badge.hidden = !count; badge.setAttribute('aria-label', count + ' agents need attention'); } if (tab.id === active) queueMicrotask(renderWorkspaceShortcuts); },
   notification: (connection, event) => herdrSounds.play(connection, event), notificationDevice: id => herdrNotifications.device(id),
@@ -95,7 +97,11 @@ const handledEnds = new Map<string, string>();
 let terminalLoading: { id: string; waitForPrompt: boolean } | undefined;
 let presentedTab = '', herdrLoading = false;
 let notification: ReturnType<typeof setTimeout>;
-function notice(message: string) { $('notice').textContent = message; $('notice').hidden = false; clearTimeout(notification); notification = setTimeout(() => $('notice').hidden = true, 6000); }
+function positionNotice() {
+  const bars = ($('terminal-tabs-drawer').inert ? 0 : $('terminal-header').offsetHeight) + (herdrViews.get(active)?.navigationElement.offsetHeight || 0) + $('workspace-shortcuts').offsetHeight;
+  $('notice').style.bottom = page === 'terminal' ? 'calc(' + (bars + 12) + 'px + env(safe-area-inset-bottom))' : '30px';
+}
+function notice(message: string) { $('notice').textContent = message; $('notice').hidden = false; positionNotice(); clearTimeout(notification); notification = setTimeout(() => $('notice').hidden = true, 6000); }
 function store() { try { for (const [key, value] of Object.entries({ backends: backends.filter(b => b.id !== 'primary'), hosts, tabs, activeTab: active })) localStorage.setItem('termai.' + key, JSON.stringify(value)); localStorage.removeItem('termai.readingTabs'); } catch { notice('Browser storage is unavailable. Connections will last for this page only.'); } }
 function tokenFor(backend: BackendProfile) { return tokens.get(backend.id) || backendAccess(backend.url); }
 function authorizeTerminals(backend: BackendProfile, accessToken: string) {
@@ -162,7 +168,7 @@ function show(view: typeof page) {
   closeHostMenu();
   closeTabMenu();
   const previous = page; page = view; const terminal = view === 'terminal';
-  $('terminal-header').hidden = !terminal; $('terminal-stack').hidden = !terminal; $('library').hidden = terminal;
+  $('workspace-navigation').hidden = !terminal; $('terminal-stack').hidden = !terminal; $('library').hidden = terminal;
   updateViewVisibility();
   if (terminal) { renderTabs(); return; }
   $('settings-pane').hidden = view !== 'settings'; $('library-content').hidden = view === 'settings';
@@ -325,8 +331,17 @@ function updateViewVisibility() {
     view.element.inert = visible && (id !== active || preparing);
   }
   $('terminal-stack').setAttribute('aria-busy', String(preparing));
+  updateWorkspaceNavigation();
   updateTerminalLoading();
   renderWorkspaceShortcuts();
+}
+function updateWorkspaceNavigation() {
+  if (navigationTab !== active) { if (!herdrViews.has(navigationTab)) terminalTabsExpanded = false; navigationTab = active; }
+  const herdr = herdrViews.get(active), expanded = !herdr || terminalTabsExpanded;
+  const drawer = $('terminal-tabs-drawer');
+  drawer.classList.toggle('collapsed', !expanded); drawer.inert = !expanded; drawer.setAttribute('aria-hidden', String(!expanded));
+  for (const [id, view] of herdrViews) { view.navigationElement.hidden = id !== active; view.setTerminalTabsExpanded(terminalTabsExpanded); }
+  positionNotice();
 }
 function shortcutFrame() { return frames.get(active) || herdrViews.get(active)?.terminalFrame; }
 let imageTarget: Window | null | undefined;
@@ -338,6 +353,7 @@ function renderWorkspaceShortcuts() {
   const frame = shortcutFrame(), source = frame?.contentWindow, state = source && terminalShortcuts.get(source);
   const tab = tabs.find(tab => tab.id === active), herdr = herdrViews.get(active);
   $('workspace-shortcuts').hidden = page !== 'terminal' || !(state || tab && ['terminal', 'herdr'].includes(tabPluginId(tab)));
+  positionNotice();
   const ready = !!state && !frame?.inert && (!herdr || herdr.ready);
   // Reserve the configured controls before the incoming terminal publishes its state.
   const shortcuts = state?.shortcuts || currentShortcuts();
@@ -386,7 +402,7 @@ function renderTabs() {
   updateTerminalLoading();
   requestAnimationFrame(() => $('tabs').querySelector('[aria-selected=true]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
 }
-function activate(id: string) { const tab = tabs.find(tab => tab.id === id); if (!tab) return; tab.lastUsed = Date.now(); active = id; store(); show('terminal'); pluginViews.get(id)?.focus?.(); }
+function activate(id: string) { const tab = tabs.find(tab => tab.id === id); if (!tab) return; tab.lastUsed = Date.now(); terminalTabsExpanded = !$('terminal-tabs-drawer').inert; active = navigationTab = id; store(); show('terminal'); pluginViews.get(id)?.focus?.(); }
 
 function openReading(source: TerminalTab, path: string) {
   const tab: TerminalTab = { id: crypto.randomUUID(), pluginId: 'reading', pluginVersion: BUILTIN_VERSION, ownsSession: false,
@@ -445,6 +461,7 @@ async function closeTab(tab: TerminalTab) {
   unmount(tab); lockedTerminals.delete(tab.id); handledEnds.delete(tab.id); const index = tabs.indexOf(tab); tabs = tabs.filter(t => t.id !== tab.id);
   hideTerminalLoading(tab.id);
   if (active === tab.id) active = tabs.find(t => t.id === tab.parentTabId)?.id || tabs[Math.min(index, tabs.length - 1)]?.id || '';
+  if (wasActive) { terminalTabsExpanded = !$('terminal-tabs-drawer').inert; navigationTab = active; }
   store(); renderTabs(); if (!tabs.length) { $('empty-terminal').querySelector('p')!.textContent = 'Open a saved host to start a terminal.'; }
   if (wasActive) pluginViews.get(active)?.focus?.();
 }
@@ -891,7 +908,7 @@ for (const id of ['ssh-dialog', 'key-dialog', 'backend-login', 'key-transfer']) 
 dialog('ssh-dialog').addEventListener('close', () => {
   if (sshRequest.herdrTab && !$<HTMLButtonElement>('ssh-connect').disabled) herdrReconnects.get(sshRequest.herdrTab.id)?.reject(Object.assign(new Error('Connection cancelled.'), { cancelled: true }));
 });
-$('terminal-back').onclick = $('add-tab').onclick = $('empty-open').onclick = () => show('hosts');
+$('terminal-back').onclick = $('empty-open').onclick = () => show('hosts');
 $('page-back').onclick = () => show(['vault', 'settings'].includes(page) ? 'terminal' : 'vault');
 $('nav-vault').onclick = () => show('vault'); $('nav-terminals').onclick = () => show('terminal');
 $('nav-settings').onclick = () => show('settings');

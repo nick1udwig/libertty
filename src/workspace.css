@@ -20,3 +20,10 @@
 #workspace-shortcut-buttons button:hover,#workspace-shortcut-buttons button[aria-pressed=true]{border-color:#bbf6b4;color:#bbf6b4;background:#263e2a}
 #workspace-shortcut-buttons button.command-shortcut{color:#bbf6b4}
 .terminal-header{border-top:1px solid #2c3046}
+#workspace-navigation{flex:none;min-width:0;background:#17182b}
+#terminal-tabs-drawer{display:grid;grid-template-rows:1fr;transition:grid-template-rows .2s ease}
+#terminal-tabs-drawer.collapsed{grid-template-rows:0fr}
+.terminal-tabs-clip{min-height:0;overflow:hidden}
+#terminal-tabs-drawer .terminal-header{transform:translateY(0);opacity:1;transition:transform .2s ease,opacity .2s ease}
+#terminal-tabs-drawer.collapsed .terminal-header{transform:translateY(44px);opacity:0}
+@media(prefers-reduced-motion:reduce){#terminal-tabs-drawer,#terminal-tabs-drawer .terminal-header{transition:none}}

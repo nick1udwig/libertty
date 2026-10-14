@@ -30,7 +30,7 @@ try {
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   let tickets = 0; page.on('request', request => { if (request.url().includes('/api/herdr/ticket')) tickets++; });
   await page.goto(base);
-  await page.locator('#herdr-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
+  await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
   await page.waitForFunction(() => { const tab = JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === 'saved-herdr'); return tab && !tab.ended && tab.herdrSource === tab.session && tab.session !== '11111111-1111-4111-8111-111111111111'; });
   assert.equal(await page.getByRole('button', { name: 'Reconnect', exact: true }).count(), 0);
   assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Restoration reuses the saved tab');
@@ -40,11 +40,11 @@ try {
   await page.route('**/api/herdr/ticket?**', async route => { if (failOnce) { failOnce = false; await route.abort('connectionfailed'); } else await route.continue(); });
   await page.reload();
   await page.waitForFunction(() => { const tab = JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === 'saved-herdr'); return tab && !tab.ended && tab.herdrSource === tab.session && tab.session !== '22222222-2222-4222-8222-222222222222'; });
-  await page.locator('#herdr-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
+  await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
   const before = tickets;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await until(() => tickets > before);
-  await page.locator('#herdr-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
+  await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
   assert.deepEqual(errors, []);
   console.log('PASS Herdr reopen: expired sources restore automatically in the same tab, transient failures retry, and foregrounding refreshes the connection');
 } catch (error) {

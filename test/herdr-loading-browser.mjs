@@ -1,3 +1,4 @@
+import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import assert from 'node:assert/strict';
 import { readFile, mkdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -38,7 +39,7 @@ try {
         const strips = [...document.querySelectorAll('.herdr-agent-strip')];
         const strip = strips.find(element => element.checkVisibility({checkVisibilityCSS:true})) || strips.find(element => element.getClientRects().length);
         return [...document.querySelectorAll('#terminal-header, #workspace-shortcuts'), ...(strip ? [strip] : [])].map(element => {
-          const {y,height} = element.getBoundingClientRect(); return {bar:element.id || element.className,y,height};
+          const {y,height} = element.getBoundingClientRect(); return {bar:element === strip ? 'herdr-agent-strip' : element.id || element.className,y,height};
         });
       };
       const inspect = () => {
@@ -98,7 +99,7 @@ try {
   assert.equal(await page.locator('#terminal-loading').isVisible(), false);
   const paneLayout = await captureBottomLayout();
   await page.evaluate(() => { window.__holdRendered=['term_1']; window.__holdShortcuts=['term_1']; window.__visibleScreens=[]; });
-  await page.locator('#herdr-'+first+' .herdr-agent-tab[data-terminal="term_1"]').click();
+  await page.locator('#herdr-strip-'+first+' .herdr-agent-tab[data-terminal="term_1"]').click();
   const beta = await frame(pane(first,'term_1'));
   await wait(async () => await beta.evaluate(() => window.__blockedRendered.length > 0 && window.__blockedShortcuts.length > 0), 'new pane painted behind the old view');
   await assertVisible(pane(first,'term_0'),true); await assertVisible(pane(first,'term_1'),false);
@@ -146,17 +147,17 @@ try {
 
   // Cancel a pending switch and reject its delayed acknowledgement.
   await page.evaluate(() => { window.__holdRendered=['term_0']; });
-  await page.locator('#herdr-'+first+' .herdr-agent-tab[data-terminal="term_0"]').click();
+  await page.locator('#herdr-strip-'+first+' .herdr-agent-tab[data-terminal="term_0"]').click();
   const alpha = await frame(pane(first,'term_0'));
   await wait(async () => await alpha.evaluate(() => window.__blockedRendered.length > 0), 'pending Alpha switch');
-  await page.locator('#herdr-'+first+' .herdr-agent-tab[data-terminal="term_1"]').click();
+  await page.locator('#herdr-strip-'+first+' .herdr-agent-tab[data-terminal="term_1"]').click();
   await page.evaluate(() => { window.__holdRendered=[]; }); if (!alpha.isDetached()) await release(alpha);
   await wait(async () => await page.locator('#herdr-'+first+' .herdr-loading').isHidden(), 'return to already displayed Beta');
   await assertVisible(pane(first,'term_1'),true); await assertVisible(pane(first,'term_0'),false);
 
   // Leaving the app tab keeps its last displayed pane for the return handoff.
   await page.evaluate(() => { window.__holdRendered=['term_1']; });
-  await page.locator('#terminal-back').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click();
   await page.locator('#nav-terminals').click();
   await assertVisible(pane(first,'term_1'),true);
   assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),true);

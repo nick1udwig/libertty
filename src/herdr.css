@@ -27,5 +27,10 @@
 .herdr-loading{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px;background:#0c1310;color:#d7eae2;font:14px system-ui;text-align:center;padding:24px;pointer-events:none}
 .herdr-loading.has-previous{inset:12px 12px auto auto;flex-direction:row;gap:9px;max-width:calc(100% - 24px);padding:10px 13px;border:1px solid #416256;border-radius:10px;background:#11201bf2;box-shadow:0 3px 12px #0004}
 .herdr-loading.has-previous .terminal-loading-spinner{width:18px;height:18px;border-width:2px;flex:none}
+.herdr-agent-strip{position:relative;z-index:1;--herdr-idle:#a6e3a1;--herdr-done:#89dceb;--herdr-working:#f9c97b;--herdr-blocked:#f38ba8}
 .herdr-tab-menu button.danger{color:#ff9d9d}
+.herdr-tabs-toggle{display:grid;place-items:center;flex:none;min-height:33px;min-width:33px;padding:0;border-radius:9px;background:#24263a;color:#b6bec7}
+.herdr-tabs-toggle svg{transition:transform .2s ease}
+.herdr-tabs-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
 .herdr-checkout-path{font-family:ui-monospace,monospace;overflow-wrap:anywhere;padding:10px 12px;border-radius:8px;background:#191b2c}
+@media(prefers-reduced-motion:reduce){.herdr-tabs-toggle svg{transition:none}}

@@ -13,6 +13,7 @@ interface Host {
   notice(message: string): void;
   reconnect?(): Promise<void>;
   ready?(): void;
+  toggleTerminalTabs?(): void;
   notificationDevice?(): string | undefined;
 }
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; retain:boolean; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
@@ -24,6 +25,7 @@ const node = <K extends keyof HTMLElementTagNameMap>(tag: K, className = '', tex
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
   private strip = node('div', 'herdr-agent-strip');
+  private tabsToggle = node('button', 'herdr-tabs-toggle');
   private screen = node('div', 'herdr-screen');
   private frame?: HTMLIFrameElement;
   private displayed?: HTMLIFrameElement;
@@ -75,13 +77,16 @@ export class HerdrView {
     this.element.setAttribute('aria-label', 'Herdr connection');
     this.element.role = 'tabpanel'; this.screen.id = 'herdr-terminal-' + crypto.randomUUID(); this.screen.role = 'tabpanel'; this.screen.setAttribute('aria-label', 'Agent terminal');
     this.strip.role = 'tablist'; this.strip.setAttribute('aria-label', 'Herdr agents');
+    this.tabsToggle.type = 'button'; this.tabsToggle.setAttribute('aria-controls', 'terminal-tabs-drawer');
+    this.tabsToggle.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>';
+    this.tabsToggle.onclick = () => this.host.toggleTerminalTabs?.(); this.setTerminalTabsExpanded(false);
     this.menu.role = 'menu'; this.menu.hidden = true;
     this.status.setAttribute('role', 'status');
     this.loading.role = 'status'; this.loading.hidden = true;
     const spinner = node('span', 'terminal-loading-spinner'); spinner.setAttribute('aria-hidden', 'true');
     this.loading.append(spinner, this.loadingLabel);
     this.screen.append(this.status, this.empty, this.loading);
-    this.element.append(this.screen, this.strip, this.menu);
+    this.element.append(this.screen, this.menu);
     const viewed = () => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     const messages = (event: MessageEvent) => {
       if (event.origin !== location.origin) return;
@@ -152,6 +157,11 @@ export class HerdrView {
     if (visible && !this.connected) void this.connect();
   }
   get ready() { return this.rendered || !!this.status.textContent || this.connected && !this.selected; }
+  get navigationElement() { return this.strip; }
+  setTerminalTabsExpanded(expanded: boolean) {
+    this.tabsToggle.setAttribute('aria-expanded', String(expanded));
+    this.tabsToggle.setAttribute('aria-label', expanded ? 'Hide terminal tabs' : 'Show terminal tabs');
+  }
   setHeld(held: boolean) {
     if (this.handoffHeld === held) return;
     this.handoffHeld = held;
@@ -326,7 +336,7 @@ export class HerdrView {
       }
       return;
     }
-    const scroll = this.strip.scrollLeft; this.strip.replaceChildren();
+    const scroll = this.strip.scrollLeft; this.strip.replaceChildren(this.tabsToggle);
     const agents = this.ordered();
     const stacks = new Map<string, HTMLElement>();
     for (const agent of agents) {
@@ -634,7 +644,7 @@ export class HerdrView {
   dispose() {
     if (this.disposed) return; this.disposed = true;
     this.actionDialog?.close();
-    clearTimeout(this.reconnect); clearInterval(this.presenceTimer); this.ws?.close(); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.element.remove();
+    clearTimeout(this.reconnect); clearInterval(this.presenceTimer); this.ws?.close(); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
   }
 }

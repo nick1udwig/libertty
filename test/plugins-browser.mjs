@@ -1,3 +1,4 @@
+import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
 import { spawn } from 'node:child_process';
@@ -18,8 +19,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check, label, timeout = 12000) { for (const end = Date.now() + timeout; Date.now() < end;) { if (await check()) return; await delay(30); } throw new Error('Timed out: ' + label); }
 function start(command, args, env = {}) { const process = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...globalThis.process.env, ...env } }); processes.push(process); process.stdout.on('data', b => logs += b); process.stderr.on('data', b => logs += b); return process; }
 async function request(route, data, credential = bearer) { return fetch(base + '/api/' + route, { method: data === undefined ? 'GET' : 'POST', headers: { Origin: origin, ...(credential ? { Authorization: 'Bearer ' + credential } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) }); }
-async function settings() { if (await page.locator('#terminal-back').isVisible()) await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); }
-async function hosts() { if (await page.locator('#nav-terminals').isVisible()) await page.locator('#nav-terminals').click(); await page.locator('#terminal-back').click(); }
+async function settings() { if (await page.locator('#workspace-navigation').isVisible()) { await showTerminalTabs(page); await page.locator('#terminal-back').click(); } await page.locator('#nav-settings').click(); }
+async function hosts() { if (await page.locator('#nav-terminals').isVisible()) await page.locator('#nav-terminals').click(); await showTerminalTabs(page); await page.locator('#terminal-back').click(); }
 async function action(name, host = 'This machine') { await hosts(); await page.getByRole('button', { name: new RegExp('^Terminals for ' + host + ' ') }).click(); await page.getByRole('menuitem', { name, exact: true }).click(); }
 async function pluginFrame() { const element = await page.locator('#terminal-stack > iframe[sandbox]:visible').elementHandle(); const frame = await element.contentFrame(); await frame.waitForFunction(() => !!window.termai); await frame.evaluate(() => termai.ready); return frame; }
 async function loadPackage(pkg) {
@@ -85,16 +86,16 @@ try {
   await settings(); await page.getByRole('button', { name: 'Remove plugin', exact: true }).click(); await page.locator('#nav-terminals').click(); await page.getByText(/This plugin version is missing or disabled/).last().waitFor();
   await page.reload(); await page.getByText(/This plugin version is missing or disabled/).last().waitFor();
   await loadPackage(sample); await page.locator('#nav-terminals').click();
-  await page.locator('#tabs .tab').filter({ hasText: 'Log viewer' }).first().click(); frame = await pluginFrame(); assert.equal(await frame.locator('#filter').inputValue(), 'warning', 'Reinstalling restores retained state');
+  await showTerminalTabs(page); await page.locator('#tabs .tab').filter({ hasText: 'Log viewer' }).first().click(); frame = await pluginFrame(); assert.equal(await frame.locator('#filter').inputValue(), 'warning', 'Reinstalling restores retained state');
   await page.getByRole('button', { name: 'Close Log viewer · This machine', exact: true }).first().click();
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === logTab.session), 'Plugin tab close releases its session');
 
-  await action('Connect Herdr'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('.herdr-view:visible .herdr-agent-tab').first().waitFor();
+  await action('Connect Herdr'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
   const localHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'herdr'));
   assert.equal(localHerdr.ownsSession, true); assert.equal(localHerdr.herdrSource, localHerdr.session);
   assert.equal((await request('ticket?session=' + localHerdr.session, {})).status, 404);
-  await page.reload(); await page.locator('.herdr-view:visible .herdr-agent-tab').first().waitFor();
-  await page.getByRole('button', { name: 'Close ' + localHerdr.name, exact: true }).click();
+  await page.reload(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
+  await showTerminalTabs(page); await page.getByRole('button', { name: 'Close ' + localHerdr.name, exact: true }).click();
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === localHerdr.session));
   assert.equal((await request('herdr/snapshot')).status, 200, 'Closing the view leaves Herdr agents running');
 
@@ -115,7 +116,7 @@ try {
   await page.getByRole('button', { name: 'Close ' + remoteLog.name, exact: true }).click();
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === remoteLog.session), 'Remote plugin cleanup closes its SSH connection');
   await action('Connect Herdr', 'Remote host'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('#ssh-secret').fill('fixture-secret'); await page.locator('#ssh-connect').click();
-  await page.locator('.herdr-view:visible .herdr-agent-tab').first().waitFor();
+  await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
   const remoteHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'herdr' && tab.hostId === 'ssh-plugin'));
   assert.equal(remoteHerdr.ownsSession, true); assert.equal(remoteHerdr.herdrSource, remoteHerdr.session);
   const sourceTabs = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).filter(tab => tab.hostId === 'ssh-plugin'));
@@ -126,11 +127,11 @@ try {
   await action('Connect new terminal', 'Remote host'); await page.locator('#ssh-secret').fill('fixture-secret'); await page.locator('#ssh-connect').click();
   await until(async () => await page.locator('#terminal-stack > iframe:not([sandbox]):visible').count() === 1, 'independent SSH terminal');
   await page.getByRole('button', { name: 'Close Remote host', exact: true }).click();
-  await page.locator('#tabs .herdr-tab').filter({ hasText: 'Remote host' }).click(); await page.locator('.herdr-view:visible .herdr-agent-tab').first().waitFor();
+  await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').filter({ hasText: 'Remote host' }).click(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
   const ticket = await (await request('herdr/ticket?herdrSource=' + remoteHerdr.herdrSource, {})).json();
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/herdr/ws?herdrSource=' + remoteHerdr.herdrSource + '&ticket=' + ticket.ticket, { origin });
   await once(socket, 'open'); const closed = once(socket, 'close');
-  await page.getByRole('button', { name: 'Close ' + remoteHerdr.name, exact: true }).click(); await closed;
+  await showTerminalTabs(page); await page.getByRole('button', { name: 'Close ' + remoteHerdr.name, exact: true }).click(); await closed;
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === remoteHerdr.session));
   assert.equal((await request('herdr/ticket?herdrSource=' + remoteHerdr.herdrSource, {})).status, 404, 'Closed connections cannot issue new tickets');
   assert.equal((await request('herdr/snapshot')).status, 200, 'Remote connection cleanup leaves agents running');

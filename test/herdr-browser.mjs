@@ -1,3 +1,4 @@
+import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright-core';
@@ -115,7 +116,7 @@ try {
   const shell = await (await page.locator('#terminal-stack > iframe').elementHandle()).contentFrame();
   await shell.waitForFunction(() => window.__state?.ready);
   await shell.locator('#terminal textarea').focus(); await page.keyboard.type('herdr'); await page.keyboard.press('Enter');
-  await page.locator('#tabs .herdr-tab').waitFor();
+  await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').waitFor();
   assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('termai.hosts'))).some(host => host.kind === 'herdr'), 'Typing herdr saves its host automatically');
   const agentFrame = async () => {
     const element = await page.locator('.herdr-terminal').elementHandle(), frame = await element.contentFrame();
@@ -138,7 +139,7 @@ try {
     return bounds;
   };
   await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').waitFor();
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces', 'New installations default to spaces');
   await page.locator('#herdr-strip').selectOption('agents'); await page.locator('#nav-terminals').click();
   await tab(0).waitFor(); let terminal = await agentFrame();
@@ -169,13 +170,15 @@ try {
   assert.equal(await terminal.locator('#shortcut-buttons').textContent(), await shell.locator('#shortcut-buttons').textContent());
   await page.locator('#workspace-shortcuts').waitFor({ state: 'visible' });
   assert.equal(await terminal.locator('.input-dock').isVisible(), false, 'Embedded pane delegates shortcuts to the workspace');
+  await showTerminalTabs(page);
+  await page.waitForFunction(() => document.querySelector('#terminal-tabs-drawer').getBoundingClientRect().height === 44);
   const bottomControls = await page.evaluate(() => {
     const box = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; };
     return { screen: box('.herdr-screen'), spaces: box('.herdr-agent-strip'), tabs: box('#terminal-header'), shortcuts: box('#workspace-shortcuts'), height: innerHeight };
   });
-  assert.ok(bottomControls.screen.bottom <= bottomControls.spaces.top + 1);
-  assert.ok(bottomControls.spaces.bottom <= bottomControls.tabs.top + 1, 'Herdr spaces sit above terminal tabs');
-  assert.ok(bottomControls.tabs.bottom <= bottomControls.shortcuts.top + 1, 'Terminal tabs sit above configurable buttons');
+  assert.ok(bottomControls.screen.bottom <= bottomControls.tabs.top + 1);
+  assert.ok(bottomControls.tabs.bottom <= bottomControls.spaces.top + 1, 'Terminal tabs sit above Herdr spaces');
+  assert.ok(bottomControls.spaces.bottom <= bottomControls.shortcuts.top + 1, 'Herdr spaces sit above configurable buttons');
   assert.equal(bottomControls.shortcuts.bottom, bottomControls.height);
   await terminal.locator('#terminal textarea').focus(); await page.keyboard.type('Split routes into handlers'); await page.keyboard.press('Enter');
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\r'), 'direct Enter delivery');
@@ -325,12 +328,12 @@ try {
   }
   await terminal.evaluate(() => clearInterval(window.__cursorFrames)); fixture.setScreen(0, touchHistory);
   await until(async () => !(await text()).includes('Open help'), 'Restore history after link checks');
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-layout').inputValue(), 'reflow');
   await page.locator('#herdr-layout').selectOption('full-width'); await page.locator('#page-back').click();
   assert.ok(await terminal.evaluate(() => window.__testTerminal.cols < 80), 'Mobile always fits the PTY to its screen despite a saved full-width preference');
   await page.setViewportSize({ width: 1100, height: 900 });
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#font-size').fill('24'); await page.locator('#page-back').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#font-size').fill('24'); await page.locator('#page-back').click();
   await until(async () => await terminal.evaluate(() => window.__testTerminal.cols === 80), 'Desktop full-width layout retains the native column count after releasing mobile geometry');
   await terminal.waitForFunction(() => {
     const viewport = document.querySelector('#terminal-viewport');
@@ -355,7 +358,7 @@ try {
   assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Copying focuses the document without opening terminal input');
   fixture.setScreen(0, '╭' + '─'.repeat(78) + '╮\n│ › prompt' + ' '.repeat(69) + '│\n╰' + '─'.repeat(78) + '╯\nfooter\n', { x: 4, y: 1 });
   await until(async () => await terminal.evaluate(() => { const term = window.__testTerminal; return Array.from({ length: term.buffer.active.length }, (_, row) => term.buffer.active.getLine(row)?.translateToString(true)).some(row => row === '╭' + '─'.repeat(78) + '╮'); }), 'Terminal app borders stay on a single row');
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#herdr-layout').selectOption('reflow'); await page.locator('#font-size').fill('10'); await page.locator('#page-back').click(); await page.setViewportSize({ width: 390, height: 844 });
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#herdr-layout').selectOption('reflow'); await page.locator('#font-size').fill('10'); await page.locator('#page-back').click(); await page.setViewportSize({ width: 390, height: 844 });
   await until(async () => await terminal.evaluate(() => window.__testTerminal.cols < 80), 'Return to mobile prose reflow');
   assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.release'), 'Desktop layout releases the mobile controller');
   fixture.setScreen(0, 'api-refactor\nLive Herdr terminal\n');
@@ -368,7 +371,7 @@ try {
   assert.equal(fixture.snapshot.panes[0].label, 'routes', 'Mobile rename updates the actual desktop pane label');
   fixture.rename(0, 'desktop'); await until(async () => (await tab(0).textContent()).includes('desktop'), 'desktop rename propagates to mobile');
   fixture.rename(0, 'routes'); await until(async () => (await tab(0).textContent()).includes('routes'), 'restore shared label');
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   await page.locator('#customize-shortcuts').click(); await page.locator('#add-shortcut').click();
   const shortcut = page.locator('.shortcut-row').last(); await shortcut.locator('.shortcut-label').fill('Help'); await shortcut.locator('select').selectOption('keys'); await shortcut.locator('.binding').fill('Ctrl+H');
   await page.getByRole('button', { name: 'Save shortcuts', exact: true }).click();
@@ -401,7 +404,7 @@ try {
   await tab(2).click();
   await page.waitForFunction(() => document.querySelector('.herdr-agent-tab[data-terminal=term_2]').getAttribute('aria-selected') === 'true'); terminal = await agentFrame();
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
-  await page.locator('#tabs .tab').first().click();
+  await showTerminalTabs(page); await page.locator('#tabs .tab').first().click();
   assert.equal(await page.locator('.herdr-agent-strip').isVisible(), false);
   await delay(250); const readsWhileHidden = fixture.actions.filter(a => a.method === 'pane.read').length; await delay(300);
   assert.equal(fixture.actions.filter(a => a.method === 'pane.read').length, readsWhileHidden, 'Hidden views stop reading history');
@@ -412,22 +415,22 @@ try {
   await until(async () => (await page.evaluate(() => window.__sounds.length)) === 2, 'request sound under regular terminal');
   assert.equal(await page.locator('.herdr-attention').textContent(), '2');
   await delay(150); assert.equal(await page.evaluate(() => window.__sounds.length), 2, 'snapshots must not repeat sound');
-  await page.locator('#tabs .herdr-tab').click(); await tab(1).waitFor();
+  await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').click(); await tab(1).waitFor();
   assert.equal(await tab(1).getAttribute('data-status'), 'done'); assert.equal(await tab(0).getAttribute('data-status'), 'blocked');
   await tab(1).click(); await until(async () => await tab(1).getAttribute('data-status') === 'idle', 'acknowledge only viewed completion');
-  await page.locator('#tabs .tab').first().click(); await page.evaluate(() => window.__focused = false);
+  await showTerminalTabs(page); await page.locator('#tabs .tab').first().click(); await page.evaluate(() => window.__focused = false);
   fixture.update(1, 'working'); await delay(150); fixture.update(1, 'idle');
   await delay(300); assert.equal(await page.evaluate(() => window.__sounds.length), 2, 'unfocused webapp stays quiet');
-  await page.evaluate(() => window.__focused = true); await page.locator('#tabs .herdr-tab').click();
+  await page.evaluate(() => window.__focused = true); await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').click();
   await until(async () => await tab(1).getAttribute('data-status') === 'idle', 'view after muted notification');
-  await hold(page.locator('#tabs .herdr-tab'));
+  await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab'));
   await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Rename', exact: true }).click();
   await page.getByRole('textbox', { name: 'Tab name', exact: true }).fill('Agent team'); await page.locator('dialog[open]').getByRole('button', { name: 'Save', exact: true }).click();
   await page.reload();
   await until(async () => await tab(1).count() === 1 && await tab(1).getAttribute('data-status') === 'idle', 'restored view and acknowledgements');
   assert.equal(await page.locator('#tabs .herdr-tab .tab-name').textContent(), 'Agent team');
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
-  await page.locator('#tabs .herdr-tab').click();
+  await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').click();
   await mkdir(root + '.test-artifacts', { recursive: true }); await page.screenshot({ path: root + '.test-artifacts/herdr-mobile.png' });
   await page.setViewportSize({ width: 1280, height: 800 }); await page.screenshot({ path: root + '.test-artifacts/herdr-desktop.png' });
   // Asset identity and content type, including a mounted installation.
@@ -438,7 +441,7 @@ try {
     const name = new URL(url).pathname.includes('/done-') ? 'done' : 'request';
     assert.equal(sha(Buffer.from(await response.arrayBuffer())), sha(await readFile(root + 'src/assets/herdr/' + name + '.mp3')));
   }
-  await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
+  await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
   assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control'));
   assert.equal(await page.locator('.herdr-view').count(), 0); assert.equal(fixture.snapshot.agents.length, 3);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -456,7 +459,7 @@ try {
   await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.session !== previous.session && tab.herdrSource === tab.session && !tab.ended), localHerdr);
   await tab(0).waitFor(); assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the local Herdr tab');
   assert.equal(await page.getByRole('button', { name: 'Reconnect', exact: true }).count(), 0, 'An expired source restores without a manual reconnect');
-  await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
+  await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
   const controlsBeforeSSH = fixture.actions.filter(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control').length;
   // A real disposable SSH server exercises command capture and Unix socket forwarding.
   await mkdir(fixture.directory + '/remote');
@@ -475,11 +478,11 @@ try {
     const tabs = JSON.parse(localStorage.getItem('termai.tabs')); tabs.push({ id: result.id, session: result.id, name: 'SSH fixture', backendId: 'primary', hostId: 'ssh-fixture' }); localStorage.setItem('termai.tabs', JSON.stringify(tabs)); localStorage.setItem('termai.activeTab', JSON.stringify(result.id));
     return result;
   }, { identity: identity.private, trust, username: os.userInfo().username });
-  await page.reload(); await page.locator('#tabs .tab').filter({ hasText: 'SSH fixture' }).click();
+  await page.reload(); await showTerminalTabs(page); await page.locator('#tabs .tab').filter({ hasText: 'SSH fixture' }).click();
   const remoteFrame = await (await page.locator('#terminal-stack > iframe:visible').elementHandle()).contentFrame();
   await remoteFrame.waitForFunction(() => window.__state?.ready);
   await remoteFrame.locator('#terminal textarea').focus(); await page.keyboard.type('herdr'); await page.keyboard.press('Enter');
-  await page.locator('#tabs .herdr-tab').waitFor(); await tab(0).waitFor(); terminal = await agentFrame();
+  await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').waitFor(); await tab(0).waitFor(); terminal = await agentFrame();
   const remoteHost = await page.evaluate(source => JSON.parse(localStorage.getItem('termai.hosts')).find(host => host.kind === 'herdr' && host.herdrSource === source), remote.id);
   assert.equal(remoteHost.herdrSourceHostId, 'ssh-fixture', 'Typing herdr in SSH saves a host for that machine');
   await until(() => fixture.actions.filter(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control').length > controlsBeforeSSH, 'Mobile acquires native geometry through SSH');
@@ -516,10 +519,10 @@ try {
   await until(async () => (await standalone.locator('.herdr-agent-strip:visible .herdr-agent-tab').count()) === 3, 'standalone discovery opens the workspace');
   await standalone.close();
   // Desktop-created spaces remain absent from agent mode, and appear in spaces mode.
-  await page.locator('#tabs .herdr-tab').last().click();
+  await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').last().click();
   fixture.addSpace('w2', 'Scratch'); fixture.addTerminal('w2', 'Scratch shell', false);
   await delay(250); assert.equal(await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').count(), 3);
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'agents');
   await page.locator('#herdr-strip').selectOption('spaces'); await page.locator('#nav-terminals').click();
   const spaceTab = id => page.locator('.herdr-agent-strip:visible .herdr-agent-tab[data-terminal="space:' + id + '"]');
@@ -537,7 +540,7 @@ try {
   assert.equal(fixture.snapshot.agents.length, 4); assert.equal(fixture.snapshot.panes[4].label, 'Mobile review');
   assert.equal(fixture.actions.filter(a => a.method === 'agent.start').length, 1);
   await page.reload(); await spaceTab('w2').waitFor();
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces');
   await page.locator('#herdr-strip').selectOption('agents'); await page.locator('#nav-terminals').click();
   await tab(4).waitFor(); assert.equal(await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').count(), 4);
@@ -555,7 +558,7 @@ try {
   await hold(tab(4)); await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
   await until(async () => await tab(4).count() === 0 && await page.locator('.herdr-terminal').getAttribute('data-terminal') !== 'term_4', 'closing selected agent chooses a surviving pane');
   assert.ok(!fixture.snapshot.panes.some(p => p.terminal_id === 'term_4'));
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   await page.locator('#herdr-strip').selectOption('spaces'); await page.locator('#nav-terminals').click();
   await spaceTab('w2').click(); terminal = await agentFrame();
   await hold(spaceTab('w2')); await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close', exact: true }).click();
@@ -563,11 +566,11 @@ try {
   assert.ok(!fixture.snapshot.workspaces.some(w => w.workspace_id === 'w2')); assert.ok(!fixture.snapshot.panes.some(p => p.workspace_id === 'w2'));
   assert.deepEqual(fixture.actions.filter(a => a.method === 'workspace.close').at(-1).params, { workspace_id: 'w2', close_group: false });
   await page.reload(); await spaceTab('w1').waitFor(); assert.equal(await spaceTab('w2').count(), 0, 'Closed space stays closed after reload');
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   // The primary backend's label is installation-specific; choose its single control.
   const enable = page.locator('#herdr-notifications button').first();
   assert.equal(await enable.isDisabled(), true, 'Permission is offered inside the installed PWA'); assert.equal(await page.evaluate(() => window.__permissionRequests), 0);
-  await page.evaluate(() => window.__installed = true); await page.locator('#page-back').click(); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await page.evaluate(() => window.__installed = true); await page.locator('#page-back').click(); await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   await page.locator('#herdr-notifications button').first().click();
   await until(async () => await page.locator('#herdr-notifications button').first().textContent().then(text => text.startsWith('Disable')), 'Enable background alerts');
   assert.equal(await page.evaluate(() => window.__permissionRequests), 1, 'Permission requested only from Enable');
@@ -585,7 +588,7 @@ try {
   await page.goto(base + '/?notificationTab=' + notificationTab + '&notificationTerminal=term_2');
   await until(async () => await page.locator('.herdr-view:visible .herdr-terminal').getAttribute('data-terminal') === 'term_2');
   assert.equal(new URL(page.url()).search, '', 'Cold notification routing consumes its parameters');
-  await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#herdr-notifications button').first().click();
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#herdr-notifications button').first().click();
   await until(async () => !(await page.evaluate(() => localStorage.getItem('termai.notifications.primary'))));
   assert.ok(notificationRequests.some(request => request.url.endsWith('/unsubscribe')));
   assert.deepEqual(errors, []); console.log('Herdr browser checks passed: automatic discovery, shared direct input/shortcuts/touch scroll/copy, live-output selection and wrapped/labeled link taps, native mobile sizing/release, desktop reflow/full-width layouts and panning, PWA enable/disable/scoped workers/focus/click routing, session labels, hold menus, ordering, persistence, server pane/space close, sounds and scoped tickets.');

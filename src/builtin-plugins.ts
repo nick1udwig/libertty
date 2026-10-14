@@ -19,6 +19,7 @@ export interface BuiltinServices extends ReadingServices {
   terminalURL(backend: BackendProfile, session: string): string;
   frame(tab: TerminalTab, frame?: HTMLIFrameElement): void;
   herdr(tab: TerminalTab, view?: HerdrView): void;
+  toggleTerminalTabs(tab: TerminalTab): void;
   ready(tab: TerminalTab): void;
   attention(tab: TerminalTab, count: number): void;
   notification(connection: string, event: Parameters<ConstructorParameters<typeof HerdrView>[0]['notification']>[0]): void;
@@ -63,13 +64,13 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         const session = herdrSession(tab.herdrSession), source = tab.herdrSource, sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
         const connection = backend.url + '#' + (source ? sourceHost || tab.hostId || source : '') + '#' + session;
         const view = new HerdrView({ url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'termai.herdr.' + connection,
-          notificationDevice: () => s.notificationDevice(tab.backendId),
+          notificationDevice: () => s.notificationDevice(tab.backendId), toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
           api: async <T>(name: string, data?: unknown) => {
             try { return await s.api<T>(backend, name + '?' + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data); }
             catch (error: any) { if (error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
           },
           changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice });
-        view.element.id = 'herdr-' + tab.id; s.herdr(tab, view);
+        view.element.id = 'herdr-' + tab.id; view.navigationElement.id = 'herdr-strip-' + tab.id; s.herdr(tab, view);
         void s.watch(tab).then(() => view.updatePresence()).catch(error => s.notice(error.message));
         return { element: view.element, setVisible: visible => view.setVisible(visible), setHeld: held => view.setHeld(held), applySettings: () => view.applySettings(), copySelection: () => view.copySelection(),
           dispose() { view.dispose(); s.herdr(tab); } };
