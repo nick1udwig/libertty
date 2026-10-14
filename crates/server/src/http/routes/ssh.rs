@@ -12,9 +12,9 @@ pub(super) async fn api_ssh_probe(
         )
     })?;
     let input = body(&mut req, 16384).await?;
-    return ok(
+    ok(
         json!({"milliseconds":ssh::route_probe(&input,&CancellationToken::new()).await.map_err(fail)?}),
-    );
+    )
 }
 
 pub(super) async fn api_ssh_captured(
@@ -124,5 +124,5 @@ pub(super) async fn api_ssh_captured(
     session
         .release_capture(id, false, Some(result.clone()))
         .map_err(fail)?;
-    return ok(result);
+    ok(result)
 }

@@ -34,7 +34,7 @@ pub(super) async fn api_herdr_connect(
         .lock()
         .unwrap()
         .insert(format!("{owner}/{sid}/{}", target.session), target);
-    return ok(json!({"herdrSession":session_name,"herdrSource":sid}));
+    ok(json!({"herdrSession":session_name,"herdrSource":sid}))
 }
 
 pub(super) async fn api_herdr_captured(
@@ -110,7 +110,7 @@ pub(super) async fn api_herdr_captured(
     source
         .release_capture(id, false, Some(result.clone()))
         .map_err(fail)?;
-    return ok(result);
+    ok(result)
 }
 
 pub(super) async fn api_herdr_notifications(
@@ -125,7 +125,7 @@ pub(super) async fn api_herdr_notifications(
     app.notifications
         .add_view(owner, &input["device"], &input["tabId"], source, &target)
         .map_err(fail)?;
-    return ok(json!({"ok":true}));
+    ok(json!({"ok":true}))
 }
 
 pub(super) async fn api_herdr_snapshot(
@@ -264,7 +264,7 @@ pub(super) async fn api_herdr_ticket(
             until: Instant::now() + Duration::from_secs(15),
         },
     );
-    return ok(
+    ok(
         json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
-    );
+    )
 }

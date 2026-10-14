@@ -78,6 +78,14 @@ test('Herdr space action contracts include splits and worktrees with scoped oper
   for (const input of [{ action: 'split', workspaceId: 'w1', direction: 'right' }, { action: 'split', workspaceId: 'w1', terminalId: 'term_0', direction: 'left' }, { action: 'new-worktree', branch: 'review' }, { action: 'open-worktree', workspaceId: 'w1' }]) assert.equal(action(input), false);
 });
 
+test('Herdr worktree reply contracts validate branch suggestions', () => {
+  const check = validate('HerdrWorktrees');
+  const reply = { source: { repo_name: 'fixture', repo_root: '/fixture' }, worktrees: [], branches: ['main', 'review/existing'] };
+  assert.ok(check(reply));
+  assert.ok(check({ ...reply, branches: undefined }));
+  for (const branches of [null, 'main', [1], [{}]]) assert.equal(check({ ...reply, branches }), false);
+});
+
 test('persisted pairing credentials require hashed version-one records and bounded arrays', () => {
   const pairings = validate('PairingsData');const hash = 'a'.repeat(64);
   assert.ok(pairings({ version: 1, tokenHash: hash, credentials: [hash] }));

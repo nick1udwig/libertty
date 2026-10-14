@@ -1245,7 +1245,7 @@ impl Session {
                 inner.input_serial += 1;
                 let serial = inner.input_serial;
                 inner.input_line = Some(InputLine {
-                    id: id.into(),
+                    id,
                     prompt: inner.state.prompt,
                     revision: inner.state.input_revision,
                     serial,

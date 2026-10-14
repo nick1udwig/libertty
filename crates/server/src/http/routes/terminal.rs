@@ -4,10 +4,10 @@ pub(super) async fn healthz(
     app: &Arc<App>,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    return Ok(json_response(
+    Ok(json_response(
         StatusCode::OK,
         json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"commit":app.config.release.as_ref().and_then(|v| v["commit"].as_str()).or(option_env!("TERMAI_COMMIT")),"platform":if cfg!(target_os="macos"){"darwin"}else{std::env::consts::OS},"arch":if cfg!(target_arch="x86_64"){"x64"}else{std::env::consts::ARCH},"runtime":"rust","packaged":app.config.release.is_some() || option_env!("TERMAI_COMMIT").is_some()}),
-    ));
+    ))
 }
 
 pub(super) async fn api_connect(
@@ -71,7 +71,7 @@ pub(super) async fn api_connect(
         ))
         .map_err(|_| fail("Invalid pairing credential."))?,
     );
-    return Ok(response);
+    Ok(response)
 }
 
 pub(super) async fn api_notifications_key(
@@ -79,7 +79,7 @@ pub(super) async fn api_notifications_key(
     _ctx: RequestContext<0>,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    return ok(json!({"publicKey":app.notifications.public_key}));
+    ok(json!({"publicKey":app.notifications.public_key}))
 }
 
 pub(super) async fn api_dictation(
@@ -95,7 +95,7 @@ pub(super) async fn api_ping(
     _ctx: RequestContext<0>,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    return ok(json!({"ok":true}));
+    ok(json!({"ok":true}))
 }
 
 pub(super) async fn api_sessions_get(
@@ -105,7 +105,7 @@ pub(super) async fn api_sessions_get(
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sessions = app.sessions.lock().await;
-    return ok(json!(sessions.iter().filter(|(key,_)|key.starts_with(&format!("{owner}/"))).map(|(_,t)|json!({"id":t.id,"name":t.name,"kind":if t.session.remote.is_some(){"ssh"}else{"http"},"state":t.session.state()})).collect::<Vec<_>>()));
+    ok(json!(sessions.iter().filter(|(key,_)|key.starts_with(&format!("{owner}/"))).map(|(_,t)|json!({"id":t.id,"name":t.name,"kind":if t.session.remote.is_some(){"ssh"}else{"http"},"state":t.session.state()})).collect::<Vec<_>>()))
 }
 
 pub(super) async fn api_sessions_post(
@@ -155,7 +155,7 @@ pub(super) async fn api_sessions_post(
         app.get_session(&owner, &sid, &name, input["files"] == true)
             .await?
     };
-    return ok(json!({"id":sid,"name":name,"state":session.state()}));
+    ok(json!({"id":sid,"name":name,"state":session.state()}))
 }
 
 pub(super) async fn api_sessions_close(
@@ -166,7 +166,7 @@ pub(super) async fn api_sessions_close(
     let owner = ctx.owner;
     let sid = ctx.sid;
     app.close_session(&owner, &sid).await;
-    return ok(json!({"ok":true}));
+    ok(json!({"ok":true}))
 }
 
 pub(super) async fn api_ticket(
@@ -200,7 +200,7 @@ pub(super) async fn api_ticket(
             until: Instant::now() + Duration::from_secs(15),
         },
     );
-    return ok(json!({"ticket":ticket,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}));
+    ok(json!({"ticket":ticket,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}))
 }
 
 pub(super) async fn api_dictation_install(
@@ -218,7 +218,7 @@ pub(super) async fn api_dictation_install(
             "The terminal changed. Return to the shell prompt and try again.",
         ));
     }
-    return ok(json!({"ok":true}));
+    ok(json!({"ok":true}))
 }
 
 pub(super) async fn api_reading_capture(
@@ -257,7 +257,7 @@ pub(super) async fn api_reading_file(
         .get("path")
         .ok_or_else(|| fail("Enter a file path."))?;
     let file = session.read_file(&cwd, path).await.map_err(file_failure)?;
-    return Ok(binary_response(file.mime, file.data));
+    Ok(binary_response(file.mime, file.data))
 }
 
 pub(super) async fn api_context(
@@ -357,5 +357,5 @@ pub(super) async fn api_new(
         ));
     }
     app.close_session(&owner, &sid).await;
-    return ok(json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state()}));
+    ok(json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state()}))
 }

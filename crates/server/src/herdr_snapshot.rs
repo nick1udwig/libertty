@@ -170,10 +170,10 @@ pub fn normalize(raw: &Value) -> Result<Value, String> {
     let mut order = Vec::new();
     let mut panes = HashMap::new();
     for pane in &snapshot.panes {
-        if let Some(id) = pane.pane_id.as_deref() {
-            if panes.insert(id, pane).is_none() {
-                order.push(id);
-            }
+        if let Some(id) = pane.pane_id.as_deref()
+            && panes.insert(id, pane).is_none()
+        {
+            order.push(id);
         }
     }
     let empty = Pane::default();

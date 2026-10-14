@@ -58,7 +58,7 @@ pub(super) async fn api_plugins_read(
         "etag",
         HeaderValue::from_str(&format!("\"{}\"", snapshot.etag)).unwrap(),
     );
-    return Ok(response);
+    Ok(response)
 }
 
 pub(super) async fn api_files_list(
@@ -218,5 +218,5 @@ pub(super) async fn api_files_transfer(
         )
         .await?;
     session.acknowledge_transfer(&transfer.id);
-    return ok(ticket);
+    ok(ticket)
 }

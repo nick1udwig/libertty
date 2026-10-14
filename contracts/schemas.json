@@ -1968,6 +1968,12 @@
         },
         "directory": {
           "type": "string"
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

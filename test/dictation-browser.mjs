@@ -9,6 +9,7 @@ import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
 import { parseOpusFrame } from '../src/voxtype-audio.ts';
 import { getPacketInfo } from 'libopus-wasm';
+const fixturePort3176 = await freePort();
 const root = path.resolve(import.meta.dirname, '..');
 const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-dictation-browser-'));
 await mkdir(path.join(fixture, 'source/scripts'), { recursive: true });
@@ -16,8 +17,6 @@ await writeFile(path.join(fixture, 'history'), 'git init\n');
 await writeFile(path.join(fixture, 'source/scripts/install'), 'touch ' + path.join(fixture, 'installed'));
 await writeFile(path.join(fixture, 'program.mjs'), `
 import { appendFileSync } from 'node:fs';
-
-const fixturePort3176 = await freePort();
 process.stdin.setRawMode(true);
 if (process.argv[2] === 'bracketed') process.stdout.write('\\x1b[?2004h');
 process.stdout.write('PROGRAM_READY');

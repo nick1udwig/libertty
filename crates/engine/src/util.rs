@@ -123,8 +123,10 @@ fn array_hash(values: &[String]) -> u64 {
 #[macro_export]
 macro_rules! regex {
     ($pattern:literal) => {{
-        static REGEX: std::sync::OnceLock<::regex::Regex> = std::sync::OnceLock::new();
-        REGEX.get_or_init(|| ::regex::Regex::new($pattern).expect("static engine regex"))
+        static REGEX: std::sync::LazyLock<::regex::Regex> = std::sync::LazyLock::new(|| {
+            ::regex::Regex::new($pattern).expect("static engine regex")
+        });
+        &*REGEX
     }};
 }
 #[macro_export]
