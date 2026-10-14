@@ -23,9 +23,9 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
         json!("/worktrees/repo/review/src");
     fixture.snapshot.lock().unwrap()["agents"][0]["cwd"] = json!("/worktrees/repo/review/src");
     let snapshot = fixture.target.snapshot().await.unwrap();
-    assert_eq!(snapshot["spaces"][0]["cwd"], "/worktrees/repo/review/src");
+    assert_eq!(snapshot.spaces[0].cwd, "/worktrees/repo/review/src");
     assert_eq!(
-        snapshot["spaces"][0]["checkoutPath"],
+        snapshot.spaces[0].checkout_path.as_deref().unwrap(),
         "/worktrees/repo/review"
     );
     assert!(fixture.target.action(&json!({"action":"delete-worktree","workspaceId":"missing","path":"/worktrees/repo/review"})).await.unwrap_err().contains("closed"));
@@ -49,21 +49,10 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
             .unwrap_err()
             .contains("uncommitted")
     );
-    assert_eq!(
-        fixture.target.snapshot().await.unwrap()["spaces"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
+    assert_eq!(fixture.target.snapshot().await.unwrap().spaces.len(), 1);
     fixture.close_error.lock().unwrap().clear();
     fixture.target.action(&request).await.unwrap();
-    assert!(
-        fixture.target.snapshot().await.unwrap()["spaces"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(fixture.target.snapshot().await.unwrap().spaces.is_empty());
     assert!(
         fixture
             .actions
@@ -110,12 +99,7 @@ async fn forced_checkout_deletion_keeps_scope_guards_and_requires_a_boolean() {
         fixture.actions.lock().unwrap()[0]["params"],
         json!({"workspace_id":"w1","force":true,"trust_repository":false})
     );
-    assert!(
-        fixture.target.snapshot().await.unwrap()["spaces"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
+    assert!(fixture.target.snapshot().await.unwrap().spaces.is_empty());
 }
 
 #[tokio::test]
@@ -275,7 +259,7 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
         "agent-address"
     );
     assert_eq!(
-        fixture.target.snapshot().await.unwrap()["agents"][0]["name"],
+        fixture.target.snapshot().await.unwrap().agents[0].name,
         "API routes"
     );
     assert!(
@@ -292,7 +276,7 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
         .await
         .unwrap();
     assert_eq!(
-        fixture.target.snapshot().await.unwrap()["spaces"][0]["name"],
+        fixture.target.snapshot().await.unwrap().spaces[0].name,
         "Review"
     );
     assert!(
@@ -312,13 +296,7 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
             .unwrap_err()
             .contains("refused")
     );
-    assert_eq!(
-        fixture.target.snapshot().await.unwrap()["terminals"]
-            .as_array()
-            .unwrap()
-            .len(),
-        1
-    );
+    assert_eq!(fixture.target.snapshot().await.unwrap().terminals.len(), 1);
     fixture.close_error.lock().unwrap().clear();
     fixture
         .target
@@ -326,9 +304,12 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
         .await
         .unwrap();
     assert!(
-        fixture.target.snapshot().await.unwrap()["terminals"]
-            .as_array()
+        fixture
+            .target
+            .snapshot()
+            .await
             .unwrap()
+            .terminals
             .is_empty()
     );
     assert_eq!(

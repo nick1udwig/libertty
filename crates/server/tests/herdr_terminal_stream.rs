@@ -69,10 +69,14 @@ async fn until(mut check: impl FnMut() -> bool) {
     .await
     .expect("Terminal stream must settle");
 }
-async fn frame(receive: &mut mpsc::Receiver<Value>, width: u16, full: bool) -> Value {
+async fn frame(
+    receive: &mut mpsc::Receiver<termai_server::protocol::ServerMessage>,
+    width: u16,
+    full: bool,
+) -> Value {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let message = receive.recv().await.unwrap();
+            let message = receive.recv().await.unwrap().value();
             if message["type"] == "herdr-frame"
                 && message["width"] == width
                 && message["full"] == full
@@ -265,7 +269,7 @@ async fn failed_controllers_retry_with_a_bound_and_stop_when_the_last_viewer_lea
         .unwrap();
     view.resize(Some(Size { cols: 40, rows: 20 })).unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
-        while receive.recv().await.unwrap()["type"] != "reading-error" {}
+        while receive.recv().await.unwrap().value()["type"] != "reading-error" {}
     })
     .await
     .unwrap();

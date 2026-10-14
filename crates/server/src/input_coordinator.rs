@@ -4,49 +4,11 @@ use crate::{
     dictation::Recording,
     protocol::Repair,
 };
-use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
 
-#[derive(Serialize)]
-#[serde(tag = "type", rename = "repair-result")]
-pub(crate) struct RepairReply {
-    pub id: String,
-    pub prompt: u64,
-    pub revision: u64,
-    pub accepted: bool,
-    #[serde(flatten)]
-    pub prepared: Prepared,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source: Option<&'static str>,
-}
-impl RepairReply {
-    pub fn new(id: String, text: String, prompt: u64, revision: u64, backend: bool) -> Self {
-        Self {
-            id,
-            prompt,
-            revision,
-            accepted: false,
-            prepared: Prepared {
-                original: text.clone(),
-                selected: text,
-                candidates: vec![],
-            },
-            error: None,
-            source: backend.then_some("dictation"),
-        }
-    }
-    pub fn value(&self) -> Value {
-        serde_json::to_value(self).expect("repair reply")
-    }
-    pub fn backend(&self) -> bool {
-        self.source.is_some()
-    }
-}
-
+pub(crate) use crate::protocol::RepairReply;
 pub(crate) trait RepairTarget: Send + Sync + 'static {
     type Guard: Send + 'static;
     fn lifetime(&self) -> &CancellationToken;
@@ -142,7 +104,7 @@ pub(crate) trait RecordingTarget: Send + Sync + 'static {
         id: &str,
         serial: u64,
         state: &str,
-        reply: Value,
+        reply: crate::protocol::ServerMessage,
     );
 }
 pub(crate) fn recording<T: RecordingTarget>(
@@ -170,10 +132,14 @@ pub(crate) fn recording<T: RecordingTarget>(
     let weak = Arc::downgrade(target);
     let status = Arc::new(move |state: &str, message: Option<String>| {
         if let Some(target) = weak.upgrade() {
-            let mut reply = json!({"type":"dictation","id":id,"state":state});
-            if let Some(message) = message {
-                reply["message"] = json!(message);
-            }
+            let Some(status) = crate::protocol::DictationState::from_name(state) else {
+                return;
+            };
+            let reply = crate::protocol::ServerMessage::Dictation {
+                id: id.clone(),
+                state: status,
+                message,
+            };
             target.recording_status(&guard, &id, serial, state, reply);
         }
     });
@@ -183,6 +149,7 @@ pub(crate) fn recording<T: RecordingTarget>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use std::sync::atomic::{AtomicBool, Ordering};
     struct Dropped(Arc<AtomicBool>);
     impl Drop for Dropped {
@@ -233,14 +200,27 @@ mod tests {
     }
     #[test]
     fn rejected_and_backend_replies_match_the_terminal_contract() {
-        let reply = RepairReply::new("one".into(), "echo words".into(), 3, 4, false).value();
+        let reply = crate::protocol::ServerMessage::RepairResult(RepairReply::new(
+            "one".into(),
+            "echo words".into(),
+            3,
+            4,
+            false,
+        ))
+        .value();
         assert_eq!(
             reply,
             json!({"type":"repair-result","id":"one","prompt":3,"revision":4,"accepted":false,"original":"echo words","selected":"echo words","candidates":[]})
         );
         let mut reply = RepairReply::new("two".into(), "echo words".into(), 3, 4, true);
         reply.error = Some("Repair timed out.".into());
-        assert_eq!(reply.value()["source"], "dictation");
-        assert_eq!(reply.value()["error"], "Repair timed out.");
+        assert_eq!(
+            crate::protocol::ServerMessage::RepairResult(reply.clone()).value()["source"],
+            "dictation"
+        );
+        assert_eq!(
+            crate::protocol::ServerMessage::RepairResult(reply).value()["error"],
+            "Repair timed out."
+        );
     }
 }

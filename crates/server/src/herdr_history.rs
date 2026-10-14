@@ -1,6 +1,7 @@
 //! One history request per target/pane, with replay and bounded latest-value delivery.
 use crate::herdr::Target;
-use serde_json::{Value, json};
+use crate::protocol::ServerMessage;
+use serde_json::json;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -9,7 +10,7 @@ use std::{
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-type Update = Option<Result<Arc<Value>, Arc<str>>>;
+type Update = Option<Result<Arc<ServerMessage>, Arc<str>>>;
 struct Resource {
     send: watch::Sender<Update>,
     users: Mutex<usize>,
@@ -35,7 +36,7 @@ impl Drop for Subscription {
     }
 }
 impl Hub {
-    pub fn subscribe(&self, target: Target, pane: Value) -> Result<Subscription, String> {
+    pub fn subscribe(&self, target: Target, pane: String) -> Result<Subscription, String> {
         let transport = target
             .remote
             .as_ref()
@@ -70,7 +71,7 @@ impl Hub {
         })
     }
 }
-async fn run(target: Target, pane: Value, resource: Arc<Resource>) {
+async fn run(target: Target, pane: String, resource: Arc<Resource>) {
     let mut previous = None;
     let mut force = false;
     loop {
@@ -83,7 +84,7 @@ async fn run(target: Target, pane: Value, resource: Arc<Resource>) {
         };
         match result.and_then(|value| value["read"]["text"].as_str().map(str::to_owned).ok_or("Herdr did not return terminal history. Update Herdr to a version supporting recent-unwrapped reads.".into())) {
             Ok(text) => if force || previous.as_ref() != Some(&text) {
-                let message = Arc::new(json!({"type":"screen","text":text}));
+                let message = Arc::new(ServerMessage::Screen { text: Arc::from(text.as_str()) });
                 force = false;
                 previous = Some(text); resource.send.send_replace(Some(Ok(message)));
             },

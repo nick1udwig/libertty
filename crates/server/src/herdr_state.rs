@@ -6,7 +6,7 @@ use std::collections::HashMap;
 pub struct Tracker {
     states: HashMap<String, Value>,
     initialized: bool,
-    agents: Vec<Value>,
+    agents: Vec<crate::herdr::Terminal>,
 }
 
 fn status(value: &Value) -> bool {
@@ -36,44 +36,40 @@ impl Tracker {
     pub fn checkpoint(&self) -> Value {
         json!(self.states)
     }
-    pub fn update(&mut self, snapshot: &Value) -> Vec<Value> {
-        let agents = snapshot["agents"].as_array().cloned().unwrap_or_default();
+    pub fn update(&mut self, snapshot: &crate::herdr::Snapshot) -> Vec<Value> {
+        let agents = snapshot.agents.clone();
         self.states
-            .retain(|id, _| agents.iter().any(|a| a["terminalId"] == *id));
+            .retain(|id, _| agents.iter().any(|a| a.terminal_id == *id));
         let mut notifications = Vec::new();
         for agent in &agents {
-            let Some(id) = agent["terminalId"].as_str() else {
-                continue;
-            };
-            let old = self.states.get(id).filter(|s| {
-                agent["sequence"].as_f64().unwrap_or(0.0) >= s["sequence"].as_f64().unwrap_or(0.0)
-            });
-            let mut state = json!({"raw":agent["status"],"sequence":agent["sequence"],"working":old.is_some_and(|s| s["working"]==true)});
+            let id = agent.terminal_id.as_str();
+            let old = self
+                .states
+                .get(id)
+                .filter(|s| agent.sequence >= s["sequence"].as_f64().unwrap_or(0.0));
+            let mut state = json!({"raw":agent.status,"sequence":agent.sequence,"working":old.is_some_and(|s| s["working"]==true)});
             if let Some(seen) = old.and_then(|s| s.get("seen")) {
                 state["seen"] = seen.clone();
             }
-            if agent["status"] == "working" {
+            if agent.status == "working" {
                 state["working"] = json!(true);
             }
-            if agent["status"] == "idle" || agent["status"] == "done" {
-                let completion = agent
-                    .get("completion")
-                    .filter(|v| !v.is_null())
-                    .or_else(|| {
-                        if agent["status"] == "done" || old.is_some_and(|s| s["working"] == true) {
-                            agent.get("sequence")
-                        } else {
-                            old.and_then(|s| s.get("completion"))
-                        }
-                    });
+            if agent.status == "idle" || agent.status == "done" {
+                let completion = agent.completion.or_else(|| {
+                    if agent.status == "done" || old.is_some_and(|state| state["working"] == true) {
+                        Some(agent.sequence)
+                    } else {
+                        old.and_then(|state| state["completion"].as_f64())
+                    }
+                });
                 if let Some(completion) = completion {
-                    state["completion"] = completion.clone();
+                    state["completion"] = json!(completion);
                 }
                 state["working"] = json!(false);
                 if self.initialized
                     && old.is_some()
                     && completion.is_some()
-                    && completion != old.and_then(|s| s.get("completion"))
+                    && completion != old.and_then(|state| state["completion"].as_f64())
                 {
                     notifications
                         .push(json!({"terminalId":id,"kind":"done","sequence":completion}));
@@ -81,13 +77,13 @@ impl Tracker {
             }
             if self.initialized
                 && let Some(old) = old
-                && agent["status"] == "blocked"
-                && (old["raw"] != "blocked" || old["sequence"] != agent["sequence"])
+                && agent.status == "blocked"
+                && (old["raw"] != "blocked" || old["sequence"] != agent.sequence)
             {
                 notifications
-                    .push(json!({"terminalId":id,"kind":"request","sequence":agent["sequence"]}));
+                    .push(json!({"terminalId":id,"kind":"request","sequence":agent.sequence}));
             }
-            if agent["status"] == "unknown" {
+            if agent.status == "unknown" {
                 state["working"] = json!(false);
             }
             self.states.insert(id.into(), state);
@@ -109,10 +105,8 @@ impl Tracker {
         state["seen"] = state["completion"].clone();
         true
     }
-    pub fn status(&self, agent: &Value) -> String {
-        if let Some(state) = agent["terminalId"]
-            .as_str()
-            .and_then(|s| self.states.get(s))
+    pub fn status(&self, agent: &crate::herdr::Terminal) -> String {
+        if let Some(state) = self.states.get(&agent.terminal_id)
             && (state["raw"] == "idle" || state["raw"] == "done")
         {
             return if state["completion"]
@@ -125,7 +119,7 @@ impl Tracker {
             }
             .into();
         }
-        agent["status"].as_str().unwrap_or("unknown").into()
+        agent.status.clone()
     }
     pub fn attention(&self) -> usize {
         self.agents

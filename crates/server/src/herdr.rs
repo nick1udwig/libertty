@@ -1,5 +1,6 @@
 use crate::{reading, storage};
 use regex::Regex;
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -143,7 +144,7 @@ pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
 pub type Connection = Box<dyn Stream>;
 impl Target {
-    pub async fn shell_input(&self, pane: &Value) -> Result<Option<ShellInput>, String> {
+    pub async fn shell_input(&self, pane: &str) -> Result<Option<ShellInput>, String> {
         let response = self
             .request("pane.process_info", json!({"pane_id":pane}))
             .await?;
@@ -182,12 +183,11 @@ impl Target {
         cancel: &CancellationToken,
     ) -> Result<Value, String> {
         let snapshot = self.snapshot().await?;
-        let pane = snapshot["terminals"]
-            .as_array()
-            .and_then(|items| items.iter().find(|item| item["terminalId"] == terminal))
+        let pane = snapshot
+            .terminal(terminal)
             .ok_or("This terminal has ended.")?;
         let shell = self
-            .shell_input(&pane["paneId"])
+            .shell_input(&pane.pane_id)
             .await?
             .ok_or("Command alternatives require a shell prompt.")?;
         let mut env = self.env.clone();
@@ -225,7 +225,7 @@ impl Target {
         let mut host = crate::host::NativeHost::new(services, catalog, env, help);
         host.remote = self.remote.clone();
         let candidates = engine.suggest(text, &host, cancel).await?;
-        if self.shell_input(&pane["paneId"]).await?.as_ref() != Some(&shell) {
+        if self.shell_input(&pane.pane_id).await?.as_ref() != Some(&shell) {
             return Err("Terminal input changed. Try again.".into());
         }
         Ok(json!({"candidates":candidates}))
@@ -297,7 +297,7 @@ impl Target {
             .await
             .map_err(|_| "Herdr did not respond.".to_owned())?
     }
-    pub async fn snapshot(&self) -> Result<Value, String> {
+    pub async fn snapshot(&self) -> Result<Snapshot, String> {
         normalize(&self.request("session.snapshot", json!({})).await?)
     }
     pub async fn options(&self) -> Result<Value, String> {
@@ -316,24 +316,32 @@ impl Target {
             json!({"kinds":kinds,"actions":["list-worktrees","new-worktree","open-worktree","delete-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
         )
     }
-    pub async fn action(&self, input: &Value) -> Result<Value, String> {
+    pub async fn action<M: TryInto<crate::herdr_action::Action>>(
+        &self,
+        input: M,
+    ) -> Result<Value, String>
+    where
+        M::Error: std::fmt::Display,
+    {
         use crate::herdr_action::Action;
-        let input: Action = serde_json::from_value(input.clone())
+        let input: Action = input
+            .try_into()
             .map_err(|error| format!("Invalid Herdr action: {error}"))?;
         let snapshot = self.snapshot().await?;
-        let spaces = array(&snapshot, "spaces");
-        let terminals = array(&snapshot, "terminals");
+        let spaces = &snapshot.spaces;
+        let terminals = &snapshot.terminals;
         let space = input
             .workspace()
-            .and_then(|id| spaces.iter().find(|s| s["id"] == id));
+            .and_then(|id| spaces.iter().find(|space| space.id == id));
         match input {
             Action::DeleteWorktree { path, force, .. } => {
                 let space = space.ok_or("This space has closed.")?;
-                if space["linkedWorktree"] != true {
+                if space.linked_worktree != Some(true) {
                     return Err("Only a linked worktree checkout can be deleted.".into());
                 }
-                let checkout = space["checkoutPath"]
-                    .as_str()
+                let checkout = space
+                    .checkout_path
+                    .as_deref()
                     .filter(|p| !p.is_empty())
                     .ok_or(
                         "Herdr did not provide the checkout folder. Update Herdr on this host.",
@@ -346,7 +354,7 @@ impl Target {
                 }
                 self.space_request(
                     "worktree.remove",
-                    json!({"workspace_id":space["id"],"force":force,"trust_repository":false}),
+                    json!({"workspace_id":space.id,"force":force,"trust_repository":false}),
                 )
                 .await
             }
@@ -354,12 +362,12 @@ impl Target {
             | Action::NewWorktree { .. }
             | Action::OpenWorktree { .. }) => {
                 let space = space.ok_or("This space has closed.")?;
-                if space["linkedWorktree"] == true {
+                if space.linked_worktree == Some(true) {
                     return Err(
                         "New and open worktree actions start from the repo parent space.".into(),
                     );
                 }
-                let mut params = json!({"workspace_id":space["id"],"trust_repository":false});
+                let mut params = json!({"workspace_id":space.id,"trust_repository":false});
                 let mut listing = self.space_request("worktree.list", params.clone()).await?;
                 if !listing["worktrees"].is_array() || !listing["source"]["repo_name"].is_string() {
                     return Err("This Herdr server does not provide worktree discovery. Update Herdr on this host.".into());
@@ -370,8 +378,8 @@ impl Target {
                             listing["branches"] =
                                 json!(self.branch_names(root).await.unwrap_or_default());
                         }
-                        if let Some(directory) = snapshot.get("worktreeDirectory") {
-                            listing["directory"] = directory.clone();
+                        if let Some(directory) = snapshot.worktree_directory.as_ref() {
+                            listing["directory"] = json!(directory);
                         }
                         return Ok(listing);
                     }
@@ -414,11 +422,12 @@ impl Target {
                 let terminal = terminals
                     .iter()
                     .find(|t| {
-                        t["terminalId"] == terminal_id && t.get("workspaceId") == space.get("id")
+                        t.terminal_id == terminal_id
+                            && t.workspace_id.as_deref() == Some(space.id.as_str())
                     })
                     .ok_or("Choose a running terminal in this space.")?;
-                let created = self.space_request("pane.split", json!({"workspace_id":space["id"],"target_pane_id":terminal["paneId"],"direction":direction,"focus":false})).await?;
-                Ok(json!({"workspaceId":space["id"],"terminalId":created["pane"]["terminal_id"]}))
+                let created = self.space_request("pane.split", json!({"workspace_id":space.id,"target_pane_id":terminal.pane_id,"direction":direction,"focus":false})).await?;
+                Ok(json!({"workspaceId":space.id,"terminalId":created["pane"]["terminal_id"]}))
             }
             Action::CreateSpace {
                 workspace_id,
@@ -428,20 +437,16 @@ impl Target {
                     return Err("This space has closed.".into());
                 }
                 let terminal = terminals.iter().find(|t| {
-                    t["terminalId"].as_str() == terminal_id.as_deref()
-                        && t.get("workspaceId") == space.and_then(|s| s.get("id"))
+                    Some(t.terminal_id.as_str()) == terminal_id.as_deref()
+                        && t.workspace_id.as_deref() == space.map(|space| space.id.as_str())
                 });
                 let cwd = terminal
-                    .and_then(|t| t["cwd"].as_str())
+                    .map(|t| t.cwd.as_str())
                     .filter(|s| !s.is_empty())
-                    .or_else(|| {
-                        space
-                            .and_then(|s| s["cwd"].as_str())
-                            .filter(|s| !s.is_empty())
-                    });
+                    .or_else(|| space.map(|s| s.cwd.as_str()).filter(|s| !s.is_empty()));
                 let mut params = json!({"focus":false});
                 if let Some(space) = space {
-                    params["source_workspace_id"] = space["id"].clone();
+                    params["source_workspace_id"] = json!(space.id);
                 }
                 if let Some(cwd) = cwd {
                     params["cwd"] = json!(cwd);
@@ -464,7 +469,7 @@ impl Target {
                     return Err("This space has closed.".into());
                 }
                 if let Some(before) = &before_workspace_id
-                    && (before == &workspace_id || !spaces.iter().any(|s| s["id"] == *before))
+                    && (before == &workspace_id || !spaces.iter().any(|s| s.id == *before))
                 {
                     return Err("Choose another existing space.".into());
                 }
@@ -492,7 +497,7 @@ impl Target {
                 }) {
                     return Err("Enter an absolute working directory.".into());
                 }
-                let mut params = json!({"workspace_id":space["id"],"label":label,"focus":false});
+                let mut params = json!({"workspace_id":space.id,"label":label,"focus":false});
                 if let Some(cwd) = cwd {
                     params["cwd"] = json!(cwd);
                 }
@@ -519,7 +524,7 @@ impl Target {
                 let space = space.ok_or("This space has closed.")?;
                 self.request(
                     "workspace.rename",
-                    json!({"workspace_id":space["id"],"label":name(&json!(label))?}),
+                    json!({"workspace_id":space.id,"label":name(&json!(label))?}),
                 )
                 .await
             }
@@ -527,7 +532,7 @@ impl Target {
                 let space = space.ok_or("This space has closed.")?;
                 self.request(
                     "workspace.close",
-                    json!({"workspace_id":space["id"],"close_group":false}),
+                    json!({"workspace_id":space.id,"close_group":false}),
                 )
                 .await
             }
@@ -540,18 +545,18 @@ impl Target {
                 };
                 let agent = terminals
                     .iter()
-                    .find(|t| t["terminalId"] == *id)
+                    .find(|t| t.terminal_id == *id)
                     .ok_or("This agent has ended.")?;
                 match action {
                     Action::Rename { name: label, .. } => {
                         self.request(
                             "pane.rename",
-                            json!({"pane_id":agent["paneId"],"label":name(&json!(label))?}),
+                            json!({"pane_id":agent.pane_id,"label":name(&json!(label))?}),
                         )
                         .await
                     }
                     _ => {
-                        self.request("pane.close", json!({"pane_id":agent["paneId"]}))
+                        self.request("pane.close", json!({"pane_id":agent.pane_id}))
                             .await
                     }
                 }
@@ -721,11 +726,11 @@ impl Target {
             repairs: Default::default(),
         })
     }
-    pub async fn preview(&self, agent: &Value) -> String {
+    pub async fn preview(&self, agent: &Terminal) -> String {
         let work = async {
-            let current = self.request("pane.get", json!({"pane_id":agent["paneId"]})).await?;
-            if current["pane"]["terminal_id"] != agent["terminalId"] { return Ok::<_, String>(String::new()); }
-            let response = self.request("pane.read", json!({"pane_id":agent["paneId"],"source":"recent_unwrapped","format":"ansi","lines":40,"strip_ansi":false})).await?;
+            let current = self.request("pane.get", json!({"pane_id":agent.pane_id})).await?;
+            if current["pane"]["terminal_id"] != agent.terminal_id { return Ok::<_, String>(String::new()); }
+            let response = self.request("pane.read", json!({"pane_id":agent.pane_id,"source":"recent_unwrapped","format":"ansi","lines":40,"strip_ansi":false})).await?;
             Ok(response["read"]["text"].as_str().map(response_preview).unwrap_or_default())
         }.await;
         work.unwrap_or_default()
@@ -781,7 +786,7 @@ fn truthy(value: &Value) -> bool {
         _ => true,
     }
 }
-pub use crate::herdr_snapshot::normalize;
+pub use crate::herdr_snapshot::{Snapshot, Space, Terminal, normalize};
 
 pub fn response_preview(screen: &str) -> String {
     static COMPOSER: LazyLock<Regex> =
@@ -831,9 +836,21 @@ pub fn notification_body(cwd: &str, preview: &str) -> String {
         .join("\n")
 }
 
+#[derive(Clone, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum Metadata {
+    Snapshot { snapshot: Arc<Snapshot> },
+    Error { message: String },
+}
+impl Metadata {
+    pub fn value(&self) -> Value {
+        serde_json::to_value(self).expect("metadata message")
+    }
+}
+
 pub async fn metadata(
     target: Target,
-    send: tokio::sync::mpsc::Sender<Value>,
+    send: tokio::sync::mpsc::Sender<Metadata>,
     cancel: CancellationToken,
 ) {
     let mut previous = None;
@@ -842,11 +859,13 @@ pub async fn metadata(
             break;
         }
         let work = async {
-            let snapshot = target.snapshot().await?;
+            let snapshot = Arc::new(target.snapshot().await?);
             if previous.as_ref() != Some(&snapshot) {
-                send.send(json!({"type":"snapshot","snapshot":snapshot}))
-                    .await
-                    .map_err(|_| "Viewer closed".to_owned())?;
+                send.send(Metadata::Snapshot {
+                    snapshot: snapshot.clone(),
+                })
+                .await
+                .map_err(|_| "Viewer closed".to_owned())?;
                 previous = Some(snapshot.clone());
             }
             let stream = target.open().await?;
@@ -870,9 +889,10 @@ pub async fn metadata(
             .map(|kind| json!({"type":kind}))
             .collect();
             subscriptions.extend(
-                array(&snapshot, "agents")
+                snapshot
+                    .agents
                     .iter()
-                    .map(|a| json!({"type":"pane.agent_status_changed","pane_id":a["paneId"]})),
+                    .map(|a| json!({"type":"pane.agent_status_changed","pane_id":a.pane_id})),
             );
             stream.get_mut().write_all(format!("{}\n",json!({"id":"events","method":"events.subscribe","params":{"subscriptions":subscriptions}})).as_bytes()).await.map_err(|e| e.to_string())?;
             let mut pane_key = pane_key(&snapshot);
@@ -898,13 +918,15 @@ pub async fn metadata(
                             .into());
                     }
                 }
-                let snapshot = target.snapshot().await?;
+                let snapshot = Arc::new(target.snapshot().await?);
                 let changed = pane_key != self::pane_key(&snapshot);
                 pane_key = self::pane_key(&snapshot);
                 if previous.as_ref() != Some(&snapshot) {
-                    send.send(json!({"type":"snapshot","snapshot":snapshot}))
-                        .await
-                        .map_err(|_| "Viewer closed".to_owned())?;
+                    send.send(Metadata::Snapshot {
+                        snapshot: snapshot.clone(),
+                    })
+                    .await
+                    .map_err(|_| "Viewer closed".to_owned())?;
                     previous = Some(snapshot);
                 }
                 if changed {
@@ -915,21 +937,18 @@ pub async fn metadata(
         };
         let result = tokio::select! { biased; _=cancel.cancelled()=>break, result=work=>result };
         if let Err(message) = result {
-            if send
-                .send(json!({"type":"error","message":message}))
-                .await
-                .is_err()
-            {
+            if send.send(Metadata::Error { message }).await.is_err() {
                 break;
             }
             tokio::select! { biased; _=cancel.cancelled()=>break, _=tokio::time::sleep(Duration::from_secs(2))=>{} }
         }
     }
 }
-fn pane_key(snapshot: &Value) -> Vec<String> {
-    let mut result: Vec<_> = array(snapshot, "agents")
+fn pane_key(snapshot: &Snapshot) -> Vec<String> {
+    let mut result: Vec<_> = snapshot
+        .agents
         .iter()
-        .filter_map(|a| a["paneId"].as_str().map(str::to_owned))
+        .map(|agent| agent.pane_id.clone())
         .collect();
     result.sort();
     result

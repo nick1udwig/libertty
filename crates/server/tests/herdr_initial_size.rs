@@ -43,9 +43,9 @@ async fn initial_mobile_geometry_opens_control_directly_and_does_not_replay_othe
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(first["width"], 40);
-    assert_eq!(first["height"], 30);
-    assert_eq!(first["full"], true);
+    assert_eq!(first.value()["width"], 40);
+    assert_eq!(first.value()["height"], 30);
+    assert_eq!(first.value()["full"], true);
     let entries: Vec<Value> = std::fs::read_to_string(&log)
         .unwrap()
         .lines()
@@ -60,7 +60,7 @@ async fn initial_mobile_geometry_opens_control_directly_and_does_not_replay_othe
     );
     std::fs::write(root.path().join("frame"), json!({"type":"terminal.frame","encoding":"ansi","width":40,"height":30,"full":false,"bytes":"YWJj"}).to_string()).unwrap();
     tokio::time::timeout(Duration::from_secs(3), async {
-        while receive.recv().await.unwrap()["full"] != false {}
+        while receive.recv().await.unwrap().value()["full"] != false {}
     })
     .await
     .unwrap();
@@ -77,9 +77,10 @@ async fn initial_mobile_geometry_opens_control_directly_and_does_not_replay_othe
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(baseline["width"], 40);
+    assert_eq!(baseline.value()["width"], 40);
     assert_eq!(
-        baseline["full"], true,
+        baseline.value()["full"],
+        true,
         "Joining an incremental stream must request a complete baseline"
     );
     drop(same_size);
@@ -97,12 +98,13 @@ async fn initial_mobile_geometry_opens_control_directly_and_does_not_replay_othe
         .unwrap()
         .unwrap();
     assert_eq!(
-        first["width"], 38,
+        first.value()["width"],
+        38,
         "Do not replay the previous viewer's grid"
     );
     drop(other);
     tokio::time::timeout(Duration::from_secs(3), async {
-        while receive.recv().await.unwrap()["width"] != 40 {}
+        while receive.recv().await.unwrap().value()["width"] != 40 {}
     })
     .await
     .unwrap();

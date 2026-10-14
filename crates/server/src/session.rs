@@ -1,3 +1,4 @@
+use crate::protocol::{DictationSource, DictationState, EngineMode, ServerMessage};
 use crate::{
     context,
     engine::NativeEngine,
@@ -43,6 +44,8 @@ pub struct ShellState {
     pub exit_code: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_scroll: Option<bool>,
 }
 #[derive(Clone)]
 pub enum Transport {
@@ -138,7 +141,7 @@ struct Inner {
     input: crate::input_controller::Controller,
     captured: Option<Value>,
     captured_result: Option<Value>,
-    results: VecDeque<(String, Value)>,
+    results: VecDeque<(String, ServerMessage)>,
     reading: Captures,
     transfers: Transfers,
     reading_queue: VecDeque<(String, String, u8)>,
@@ -192,13 +195,13 @@ impl Inner {
             && self.state.input_revision == guard.revision
     }
 
-    fn command_result(&self, id: &str) -> Option<Value> {
+    fn command_result(&self, id: &str) -> Option<ServerMessage> {
         self.results
             .iter()
             .find(|(key, _)| key == id)
             .map(|(_, v)| v.clone())
     }
-    fn remember_command(&mut self, id: &str, result: Value) {
+    fn remember_command(&mut self, id: &str, result: ServerMessage) {
         self.results.push_back((id.into(), result));
         if self.results.len() > 1000 {
             self.results.pop_front();
@@ -208,16 +211,18 @@ impl Inner {
         if self.captured.is_none() {
             let id = storage::random_hex(16);
             self.captured = Some(json!({"id":id,"command":command,"kind":kind}));
-            self.send(json!({"type":format!("{kind}-command"),"id":id,"command":command}));
+            self.send(ServerMessage::captured(kind, id, command));
         }
     }
-    fn send(&self, value: Value) {
+    fn send(&self, value: ServerMessage) {
         if let Some(socket) = &self.socket {
-            let _ = socket.send.send(Transport::Message(value));
+            let _ = socket.send.send(Transport::Message(value.value()));
         }
     }
     fn state(&self) {
-        self.send(json!({"type":"state","state":self.state}));
+        self.send(ServerMessage::State {
+            state: (self.state).clone(),
+        });
     }
     fn flush(&mut self) {
         if self.socket.is_none() {
@@ -225,7 +230,10 @@ impl Inner {
         }
         while !self.pending.is_empty() && self.outstanding_bytes < 128 * 1024 {
             let output = self.pending.pop_front().unwrap();
-            self.send(json!({"type":"output","seq":output.seq,"data":output.data}));
+            self.send(ServerMessage::Output {
+                seq: output.seq,
+                data: (output.data).clone(),
+            });
             self.sent_seq = output.seq;
             self.outstanding.push_back((output.seq, output.bytes));
             self.outstanding_bytes += output.bytes;
@@ -239,7 +247,13 @@ impl Inner {
             if let Some(reply) = request.internal {
                 let _ = reply.send(None);
             } else {
-                self.send(json!({"type":"input-line","id":request.id,"prompt":request.prompt,"revision":request.revision}));
+                self.send(ServerMessage::InputLine {
+                    id: (request.id).to_string(),
+                    prompt: request.prompt,
+                    revision: request.revision,
+                    cursor: None,
+                    text: None,
+                });
             }
         }
     }
@@ -268,6 +282,7 @@ impl Inner {
                         exited: false,
                         exit_code: Some(code),
                         input_target: Some("shell".into()),
+                        terminal_scroll: None,
                     };
                     let line = history_prefix.replace(&history, "").trim_end().to_owned();
                     if had_prompt
@@ -312,28 +327,34 @@ impl Inner {
                 }
                 Event::InputLine { text, cursor } => {
                     if let Some(request) = self.input_line.take() {
-                        let mut reply = json!({"type":"input-line","id":request.id,"prompt":request.prompt,"revision":request.revision});
-                        if self.state.ready
+                        let valid = self.state.ready
                             && !self.state.exited
                             && self.captured.is_none()
                             && request.prompt == self.state.prompt
-                            && request.revision == self.state.input_revision
-                        {
-                            reply["text"] = json!(text);
-                            reply["cursor"] = json!(cursor);
-                        }
-                        if let Some(sender) = request.internal {
-                            let _ = sender.send(reply["text"].as_str().map(str::to_owned));
+                            && request.revision == self.state.input_revision;
+                        let (text, cursor) = if valid {
+                            (Some(text), Some(cursor))
                         } else {
-                            self.send(reply);
+                            (None, None)
+                        };
+                        if let Some(sender) = request.internal {
+                            let _ = sender.send(text);
+                        } else {
+                            self.send(ServerMessage::InputLine {
+                                id: request.id,
+                                prompt: request.prompt,
+                                revision: request.revision,
+                                text,
+                                cursor,
+                            });
                         }
                     }
                 }
                 Event::Ssh { command } => self.capture("ssh", command),
                 Event::Herdr { command } => self.capture("herdr", command),
-                Event::ReadingFile { path } => {
-                    self.send(json!({"type":"reading-file","path":path}))
-                }
+                Event::ReadingFile { path } => self.send(ServerMessage::ReadingFile {
+                    path: (path).to_string(),
+                }),
                 Event::ReadingCapture {
                     file,
                     name,
@@ -341,7 +362,9 @@ impl Inner {
                 } => {
                     if self.reading_queue.len() + usize::from(self.reading_running) >= 16 {
                         (self.capture_cleanup)(path::join(&[directory, &file]));
-                        self.send(json!({"type":"reading-error","message":"Too many outputs are waiting for Reading Mode."}));
+                        self.send(ServerMessage::ReadingError {
+                            message: ("Too many outputs are waiting for Reading Mode.").to_string(),
+                        });
                     } else {
                         self.reading_queue.push_back((file, name, exit_code));
                     }
@@ -350,7 +373,7 @@ impl Inner {
                 | Event::TransferDownload { .. }
                 | Event::TransferCapture { .. }) => {
                     let request = self.transfers.add(event, directory);
-                    self.send(json!({"type":"transfer","request":request}));
+                    self.send(ServerMessage::Transfer { request });
                 }
             }
         }
@@ -482,6 +505,7 @@ impl Session {
                     exited: false,
                     exit_code: None,
                     input_target: None,
+                    terminal_scroll: None,
                 },
                 pty: None,
                 markers: Markers::new(&nonce),
@@ -779,7 +803,14 @@ impl Session {
         let first = inner.outputs.front().map_or(1, |o| o.seq);
         let changed = stream.is_some_and(|s| !s.is_empty() && s != self.stream_id);
         let gap = changed || after > inner.seq || (after > 0 && after < first - 1);
-        inner.send(json!({"type":"hello","streamId":self.stream_id,"engine":"server","reset":after==0||gap,"truncated":((after==0||changed)&&inner.truncated)||(gap&&!changed),"firstSeq":first,"lastSeq":inner.seq}));
+        inner.send(ServerMessage::Hello {
+            stream_id: (self.stream_id).to_string(),
+            engine: EngineMode::Server,
+            reset: after == 0 || gap,
+            truncated: ((after == 0 || changed) && inner.truncated) || (gap && !changed),
+            first_seq: first,
+            last_seq: Some(inner.seq),
+        });
         inner.pending = inner
             .outputs
             .iter()
@@ -789,19 +820,21 @@ impl Session {
         inner.state();
         inner.flush();
         for capture in inner.reading.pending() {
-            let mut message = capture;
-            message["type"] = json!("reading-capture");
-            inner.send(message);
+            inner.send(ServerMessage::ReadingCapture(capture));
         }
         for request in inner.transfers.pending() {
-            inner.send(json!({"type":"transfer","request":request}));
+            inner.send(ServerMessage::Transfer { request });
         }
         if let Some(capture) = inner.captured.as_ref().or(inner
             .captured_result
             .as_ref()
             .filter(|r| r["acknowledged"] != true))
         {
-            inner.send(json!({"type":format!("{}-command",capture["kind"].as_str().unwrap_or("ssh")),"id":capture["id"],"command":capture["command"]}));
+            inner.send(ServerMessage::captured(
+                capture["kind"].as_str().unwrap_or("ssh"),
+                capture["id"].as_str().unwrap_or("").into(),
+                capture["command"].as_str().unwrap_or("").into(),
+            ));
         }
         drop(inner);
         (id, receive)
@@ -853,7 +886,9 @@ impl Session {
         if let Some(result) = inner.captured_result.as_mut().filter(|r| r["id"] == id) {
             result["acknowledged"] = json!(true);
         }
-        inner.send(json!({"type":"ssh-released","id":id}));
+        inner.send(ServerMessage::SshReleased {
+            id: (id).to_string(),
+        });
     }
     pub fn release_capture(
         &self,
@@ -875,7 +910,9 @@ impl Session {
             result["acknowledged"] = json!(false);
             inner.captured_result = Some(result);
         }
-        inner.send(json!({"type":"ssh-released","id":id}));
+        inner.send(ServerMessage::SshReleased {
+            id: (id).to_string(),
+        });
         if native && let Some(pty) = &inner.pty {
             pty.write(&format!(
                 "\x07\x05\x15\x1b[200~{}\x1b[201~\n",
@@ -917,7 +954,7 @@ impl Session {
         prompt: u64,
         revision: u64,
         replace: bool,
-        source: Option<&str>,
+        source: Option<DictationSource>,
     ) -> bool {
         let mut inner = self.inner.lock().unwrap();
         if !inner.state.ready
@@ -940,11 +977,14 @@ impl Session {
                 if replace { "\x07\x05\x15" } else { "" }
             ));
         }
-        let mut message = json!({"type":"pasted","text":text,"replace":replace,"prompt":inner.state.prompt,"revision":inner.state.input_revision});
-        if let Some(source) = source {
-            message["source"] = json!(source);
-        }
-        inner.send(message);
+        inner.send(ServerMessage::Pasted {
+            text: text.into(),
+            replace,
+            prompt: inner.state.prompt,
+            revision: inner.state.input_revision,
+            source,
+            repairing: None,
+        });
         true
     }
     fn schedule_reading(self: &Arc<Self>) {
@@ -986,19 +1026,16 @@ impl Session {
                     .unwrap()
                     .and_then(|file| inner.reading.add(&name, file.data, code));
                 match result {
-                    Ok(mut capture) => {
-                        capture["type"] = json!("reading-capture");
-                        inner.send(capture);
-                    }
-                    Err(error) => {
-                        inner.send(json!({"type":"reading-error","message":error.message}))
-                    }
+                    Ok(capture) => inner.send(ServerMessage::ReadingCapture(capture)),
+                    Err(error) => inner.send(ServerMessage::ReadingError {
+                        message: (error.message).to_string(),
+                    }),
                 }
             }
         });
     }
-    pub fn receive(self: &Arc<Self>, attachment: u64, message: Value) {
-        let Ok(message) = serde_json::from_value::<ClientMessage>(message) else {
+    pub fn receive(self: &Arc<Self>, attachment: u64, message: impl TryInto<ClientMessage>) {
+        let Ok(message) = message.try_into() else {
             return;
         };
         let mut inner = self.inner.lock().unwrap();
@@ -1044,7 +1081,18 @@ impl Session {
                         || request.revision != Some(inner.state.input_revision)
                         || request.target() != target
                     {
-                        inner.send(json!({"type":"dictation","id":id,"state":"error","message":if target.is_some()&&inner.captured.is_none(){"Terminal input changed. Try dictating again."}else{"Wait for terminal input before dictating."}}));
+                        inner.send(ServerMessage::Dictation {
+                            id: (id).to_string(),
+                            state: DictationState::Error,
+                            message: Some(
+                                (if target.is_some() && inner.captured.is_none() {
+                                    "Terminal input changed. Try dictating again."
+                                } else {
+                                    "Wait for terminal input before dictating."
+                                })
+                                .to_string(),
+                            ),
+                        });
                         return;
                     }
                     let target = target.unwrap().to_owned();
@@ -1122,7 +1170,11 @@ impl Session {
                         inner.state();
                     }
                 }
-                inner.send(json!({"type":"edit-result","id":id,"accepted":accepted,"revision":inner.state.input_revision}));
+                inner.send(ServerMessage::EditResult {
+                    id: (id).to_string(),
+                    accepted,
+                    revision: inner.state.input_revision,
+                });
             }
             ClientMessage::Command { command, id, .. } => {
                 {
@@ -1135,12 +1187,7 @@ impl Session {
                         && !command.is_empty()
                         && command.encode_utf16().count() <= 4000
                         && !control(&command);
-                    let mut result = json!({"type":"result","id":id,"accepted":accepted});
-                    if !accepted {
-                        result["message"] = json!(
-                            "The shell is not at the same prompt. Review the command and try again."
-                        );
-                    }
+                    let result = ServerMessage::Result { id: id.clone(), accepted, message: (!accepted).then(|| "The shell is not at the same prompt. Review the command and try again.".into()) };
                     inner.remember_command(&id, result.clone());
                     if accepted {
                         inner.state.input_revision += 1;
@@ -1160,9 +1207,13 @@ impl Session {
                 revision,
             } => {
                 if !same || inner.input_line.is_some() || revision != inner.state.input_revision {
-                    inner.send(
-                        json!({"type":"input-line","id":id,"prompt":prompt,"revision":revision}),
-                    );
+                    inner.send(ServerMessage::InputLine {
+                        id: (id).to_string(),
+                        prompt,
+                        revision,
+                        cursor: None,
+                        text: None,
+                    });
                     return;
                 }
                 inner.input_serial += 1;
@@ -1324,7 +1375,14 @@ impl Session {
                 inner.paste.paste(text)
             });
         }
-        inner.send(json!({"type":"pasted","text":text,"replace":false,"source":"dictation","repairing":target == "shell" && text.encode_utf16().count() <= 2000,"prompt":prompt,"revision":inner.state.input_revision}));
+        inner.send(ServerMessage::Pasted {
+            text: (text).to_string(),
+            replace: false,
+            source: Some(DictationSource::Dictation),
+            repairing: Some(target == "shell" && text.encode_utf16().count() <= 2000),
+            prompt,
+            revision: inner.state.input_revision,
+        });
         true
     }
     pub async fn suggest(&self, text: &str, cancel: &CancellationToken) -> Result<Value, String> {
@@ -1400,7 +1458,15 @@ impl Session {
     fn send_backend_failure(&self, prompt: u64, revision: u64) {
         let inner = self.inner.lock().unwrap();
         if inner.state.prompt == prompt && inner.state.input_revision == revision {
-            inner.send(json!({"type":"repair-result","source":"dictation","id":"","accepted":false,"prompt":prompt,"revision":revision,"original":"","selected":"","candidates":[],"error":"Input snapshot unavailable. Original text kept."}));
+            let mut reply = crate::protocol::RepairReply::new(
+                String::new(),
+                String::new(),
+                prompt,
+                revision,
+                true,
+            );
+            reply.error = Some("Input snapshot unavailable. Original text kept.".into());
+            inner.send(ServerMessage::RepairResult(reply));
         }
     }
     fn start_repair(
@@ -1581,7 +1647,7 @@ impl crate::input_coordinator::RepairTarget for Session {
             if !reply.backend() && inner.attached(guard.attachment) {
                 reply.prompt = inner.state.prompt;
                 reply.revision = inner.state.input_revision;
-                inner.send(reply.value());
+                inner.send(ServerMessage::RepairResult(reply.clone()));
             }
             return false;
         }
@@ -1620,7 +1686,7 @@ impl crate::input_coordinator::RepairTarget for Session {
         }
         reply.revision = inner.state.input_revision;
         inner.input.finish_repair(&reply.id);
-        inner.send(reply.value());
+        inner.send(ServerMessage::RepairResult(reply));
     }
 }
 impl crate::input_coordinator::RecordingTarget for Session {
@@ -1682,7 +1748,7 @@ impl crate::input_coordinator::RecordingTarget for Session {
         id: &str,
         serial: u64,
         state: &str,
-        reply: Value,
+        reply: ServerMessage,
     ) {
         let mut inner = self.inner.lock().unwrap();
         if inner.attached(guard.line.attachment) && inner.input.status(id, serial, state) {

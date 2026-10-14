@@ -42,7 +42,7 @@ struct Worktree {
     checkout_path: Option<String>,
 }
 #[derive(Deserialize)]
-struct Snapshot {
+struct WireSnapshot {
     agents: Vec<Pane>,
     tabs: Vec<Pane>,
     workspaces: Vec<Workspace>,
@@ -52,23 +52,57 @@ struct Snapshot {
     version: Option<Value>,
     protocol: Option<Value>,
 }
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct Terminal {
-    terminal_id: String,
-    pane_id: String,
+pub struct Terminal {
+    pub terminal_id: String,
+    pub pane_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    workspace_id: Option<String>,
+    pub workspace_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tab_id: Option<String>,
-    workspace: String,
-    name: String,
-    kind: String,
-    status: String,
-    sequence: f64,
+    pub tab_id: Option<String>,
+    pub workspace: String,
+    pub name: String,
+    pub kind: String,
+    pub status: String,
+    pub sequence: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    completion: Option<f64>,
-    cwd: String,
+    pub completion: Option<f64>,
+    pub cwd: String,
+}
+#[derive(Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Space {
+    pub id: String,
+    pub name: String,
+    pub terminal_ids: Vec<String>,
+    pub cwd: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_terminal_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linked_worktree: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checkout_path: Option<String>,
+}
+#[derive(Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Snapshot {
+    pub agents: Vec<Terminal>,
+    pub terminals: Vec<Terminal>,
+    pub spaces: Vec<Space>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_directory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<Value>,
+}
+impl Snapshot {
+    pub fn terminal(&self, id: &str) -> Option<&Terminal> {
+        self.terminals
+            .iter()
+            .find(|terminal| terminal.terminal_id == id)
+    }
 }
 fn first<'a>(values: impl IntoIterator<Item = Option<&'a str>>, fallback: &'a str) -> String {
     values
@@ -140,8 +174,8 @@ fn terminal(
         ),
     })
 }
-pub fn normalize(raw: &Value) -> Result<Value, String> {
-    let snapshot: Snapshot = serde_json::from_value(raw["snapshot"].clone())
+pub fn normalize(raw: &Value) -> Result<Snapshot, String> {
+    let snapshot = WireSnapshot::deserialize(&raw["snapshot"])
         .map_err(|_| "This Herdr server does not provide a session snapshot.")?;
     let names: HashMap<_, _> = snapshot
         .workspaces
@@ -242,30 +276,67 @@ pub fn normalize(raw: &Value) -> Result<Value, String> {
             members.entry(id).or_default().push(terminal);
         }
     }
-    let spaces: Vec<_> = snapshot.workspaces.iter().map(|workspace| {
-        let members = members.get(workspace.workspace_id.as_str()).map(Vec::as_slice).unwrap_or_default();
-        let focused = order.iter().map(|id| panes[id]).find(|p| p.workspace_id.as_deref() == Some(&workspace.workspace_id) && p.tab_id == workspace.active_tab_id && p.focused);
-        let selected = focused.and_then(|p| p.terminal_id.as_deref()).filter(|s| !s.is_empty())
-            .or_else(|| members.iter().find(|t| t.tab_id == workspace.active_tab_id).map(|t| t.terminal_id.as_str()))
-            .or_else(|| members.first().map(|t| t.terminal_id.as_str()));
-        let cwd = selected.and_then(|id| members.iter().find(|t| t.terminal_id == id)).map(|t| t.cwd.as_str());
-        let mut space = serde_json::json!({"id":workspace.workspace_id,"name":names[workspace.workspace_id.as_str()],"terminalIds":members.iter().map(|t| &t.terminal_id).collect::<Vec<_>>(),"cwd":first([cwd,workspace.worktree.as_ref().and_then(|w| w.checkout_path.as_deref())], "")});
-        if let Some(id) = selected { space["selectedTerminalId"] = id.into(); }
-        if let Some(worktree) = &workspace.worktree {
-            if let Some(linked) = worktree.is_linked_worktree { space["linkedWorktree"] = linked.into(); }
-            if let Some(path) = &worktree.checkout_path { space["checkoutPath"] = path.clone().into(); }
-        }
-        space
-    }).collect();
-    let mut result = serde_json::json!({"agents":agents,"terminals":terminals,"spaces":spaces});
-    if let Some(directory) = snapshot.worktree_directory {
-        result["worktreeDirectory"] = directory.into();
-    }
-    if let Some(version) = snapshot.version {
-        result["version"] = version;
-    }
-    if let Some(protocol) = snapshot.protocol {
-        result["protocol"] = protocol;
-    }
-    Ok(result)
+    let spaces: Vec<_> = snapshot
+        .workspaces
+        .iter()
+        .map(|workspace| {
+            let members = members
+                .get(workspace.workspace_id.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            let focused = order.iter().map(|id| panes[id]).find(|p| {
+                p.workspace_id.as_deref() == Some(&workspace.workspace_id)
+                    && p.tab_id == workspace.active_tab_id
+                    && p.focused
+            });
+            let selected = focused
+                .and_then(|p| p.terminal_id.as_deref())
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    members
+                        .iter()
+                        .find(|t| t.tab_id == workspace.active_tab_id)
+                        .map(|t| t.terminal_id.as_str())
+                })
+                .or_else(|| members.first().map(|t| t.terminal_id.as_str()));
+            let cwd = selected
+                .and_then(|id| members.iter().find(|t| t.terminal_id == id))
+                .map(|t| t.cwd.as_str());
+            Space {
+                id: workspace.workspace_id.clone(),
+                name: names[workspace.workspace_id.as_str()].clone(),
+                terminal_ids: members
+                    .iter()
+                    .map(|terminal| terminal.terminal_id.clone())
+                    .collect(),
+                cwd: first(
+                    [
+                        cwd,
+                        workspace
+                            .worktree
+                            .as_ref()
+                            .and_then(|worktree| worktree.checkout_path.as_deref()),
+                    ],
+                    "",
+                ),
+                selected_terminal_id: selected.map(str::to_owned),
+                linked_worktree: workspace
+                    .worktree
+                    .as_ref()
+                    .and_then(|worktree| worktree.is_linked_worktree),
+                checkout_path: workspace
+                    .worktree
+                    .as_ref()
+                    .and_then(|worktree| worktree.checkout_path.clone()),
+            }
+        })
+        .collect();
+    Ok(Snapshot {
+        agents,
+        terminals,
+        spaces,
+        worktree_directory: snapshot.worktree_directory,
+        version: snapshot.version,
+        protocol: snapshot.protocol,
+    })
 }

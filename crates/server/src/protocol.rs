@@ -1,7 +1,186 @@
 //! Validated client messages shared by native terminals and Herdr viewers.
 use crate::alternatives::Intent;
-use serde::{Deserialize, Deserializer, de::Error};
+use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use serde_json::Value;
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EngineMode {
+    Server,
+}
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DictationSource {
+    Dictation,
+}
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DictationState {
+    Ready,
+    Done,
+    Error,
+}
+impl DictationState {
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "ready" => Some(Self::Ready),
+            "done" => Some(Self::Done),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Serialize)]
+pub struct HerdrFrame {
+    pub width: u16,
+    pub height: u16,
+    pub full: bool,
+    pub bytes: std::sync::Arc<str>,
+}
+#[derive(Clone, Serialize)]
+#[serde(
+    tag = "type",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ServerMessage {
+    RepairResult(RepairReply),
+    InputLine {
+        id: String,
+        prompt: u64,
+        revision: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cursor: Option<usize>,
+    },
+    Transfer {
+        request: crate::transfers::Request,
+    },
+    Pasted {
+        text: String,
+        replace: bool,
+        prompt: u64,
+        revision: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<DictationSource>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        repairing: Option<bool>,
+    },
+    Dictation {
+        id: String,
+        state: DictationState,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+    ReadingFile {
+        path: String,
+    },
+    ReadingCapture(crate::reading::Descriptor),
+    ReadingError {
+        message: String,
+    },
+    SshCommand {
+        id: String,
+        command: String,
+    },
+    HerdrCommand {
+        id: String,
+        command: String,
+    },
+    SshReleased {
+        id: String,
+    },
+    Output {
+        seq: u64,
+        data: std::sync::Arc<str>,
+    },
+    Screen {
+        text: std::sync::Arc<str>,
+    },
+    HerdrLayout {
+        cols: u16,
+        rows: u16,
+        ready: bool,
+    },
+    HerdrFrame(HerdrFrame),
+    State {
+        state: crate::session::ShellState,
+    },
+    Hello {
+        engine: EngineMode,
+        reset: bool,
+        truncated: bool,
+        first_seq: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        last_seq: Option<u64>,
+        stream_id: String,
+    },
+    EditResult {
+        id: String,
+        accepted: bool,
+        revision: u64,
+    },
+    Result {
+        id: String,
+        accepted: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+}
+impl ServerMessage {
+    pub fn value(&self) -> Value {
+        serde_json::to_value(self).expect("server message")
+    }
+    pub fn captured(kind: &str, id: String, command: String) -> Self {
+        if kind == "herdr" {
+            Self::HerdrCommand { id, command }
+        } else {
+            Self::SshCommand { id, command }
+        }
+    }
+}
+#[derive(Clone, Serialize)]
+pub struct RepairReply {
+    pub id: String,
+    pub prompt: u64,
+    pub revision: u64,
+    pub accepted: bool,
+    #[serde(flatten)]
+    pub prepared: crate::alternatives::Prepared,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source: Option<DictationSource>,
+}
+impl RepairReply {
+    pub fn new(id: String, text: String, prompt: u64, revision: u64, backend: bool) -> Self {
+        Self {
+            id,
+            prompt,
+            revision,
+            accepted: false,
+            prepared: crate::alternatives::Prepared {
+                original: text.clone(),
+                selected: text,
+                candidates: vec![],
+            },
+            error: None,
+            source: backend.then_some(DictationSource::Dictation),
+        }
+    }
+    pub fn backend(&self) -> bool {
+        self.source.is_some()
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum ViewerMessage {
+    NotificationPresence { device: String, focused: bool },
+    NotificationAck { device: String, event: Value },
+}
+pub mod requests;
 
 pub const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
 pub fn integer(value: &Value) -> Option<f64> {
@@ -174,6 +353,12 @@ pub enum ClientMessage {
         #[serde(default, rename = "readingPhrases")]
         reading_phrases: Value,
     },
+}
+impl TryFrom<Value> for ClientMessage {
+    type Error = serde_json::Error;
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        serde_json::from_value(value)
+    }
 }
 impl ClientMessage {
     pub fn prompt(&self) -> Option<u64> {

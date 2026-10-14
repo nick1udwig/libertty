@@ -269,19 +269,19 @@ fn reading_snapshots_preserve_binary_strip_terminal_codes_and_bound_retention() 
         .add("git diff", b"\x1b[31m+hello\x1b[0m\n".to_vec(), 7)
         .unwrap();
     assert_eq!(captures.pending(), vec![first.clone()]);
-    let capture = captures.get(first["id"].as_str().unwrap()).unwrap();
+    let capture = captures.get(&first.id).unwrap();
     assert_eq!(capture.data, b"+hello\n");
     assert_eq!(capture.exit_code, 7);
     assert!(captures.pending().is_empty());
     let png = vec![137, 80, 78, 71, 13, 10, 26, 10, 0, 255];
     let picture = captures.add("Command output", png.clone(), 0).unwrap();
-    let capture = captures.get(picture["id"].as_str().unwrap()).unwrap();
+    let capture = captures.get(&picture.id).unwrap();
     assert_eq!(capture.mime, "image/png");
     assert_eq!(capture.data, png);
     for _ in 0..16 {
         captures.add("output", b"text".to_vec(), 0).unwrap();
     }
-    assert!(captures.get(first["id"].as_str().unwrap()).is_none());
+    assert!(captures.get(&first.id).is_none());
     assert_eq!(captures.pending().len(), 16);
     assert!(
         captures

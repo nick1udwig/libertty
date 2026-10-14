@@ -81,7 +81,7 @@ impl Intent {
         }
     }
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Prepared {
     pub original: String,
     pub selected: String,
@@ -106,8 +106,8 @@ pub async fn prepare<'a>(
         return Err("Expected command text under 2,000 characters.".into());
     }
     let result = suggest(query).await?;
-    let mut candidates: Vec<Candidate> =
-        serde_json::from_value(result["candidates"].clone()).map_err(|error| error.to_string())?;
+    let mut candidates: Vec<Candidate> = serde::Deserialize::deserialize(&result["candidates"])
+        .map_err(|error| error.to_string())?;
     candidates.retain(|candidate| !candidate.is_literal());
     let mut fallback = false;
     if let Intent::ReadingFile { operand, .. } = intent {
@@ -117,7 +117,7 @@ pub async fn prepare<'a>(
         });
         if candidates.is_empty() {
             let result = suggest(operand.clone()).await?;
-            candidates = serde_json::from_value(result["candidates"].clone())
+            candidates = serde::Deserialize::deserialize(&result["candidates"])
                 .map_err(|error| error.to_string())?;
             candidates.retain(|candidate| !candidate.is_literal());
             fallback = true;

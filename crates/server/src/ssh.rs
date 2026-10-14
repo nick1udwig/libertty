@@ -886,7 +886,22 @@ pub(crate) async fn bounded<T>(
     }
 }
 pub async fn route_probe(input: &Value, cancel: &CancellationToken) -> Result<f64, String> {
-    let address = system_ssh::address(input)?;
+    probe_address(system_ssh::address(input)?, cancel).await
+}
+pub async fn route_probe_request(
+    input: &crate::protocol::requests::SshAddress,
+    cancel: &CancellationToken,
+) -> Result<f64, String> {
+    probe_address(
+        system_ssh::address_parts(&input.host, input.port.unwrap_or(22.0), &input.username)?,
+        cancel,
+    )
+    .await
+}
+async fn probe_address(
+    address: system_ssh::Address,
+    cancel: &CancellationToken,
+) -> Result<f64, String> {
     let start = std::time::Instant::now();
     tokio::select! {
         biased; _=cancel.cancelled()=>Err(ABORTED.into()),

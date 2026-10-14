@@ -133,3 +133,12 @@ test('the Rust client parser accepts every declared client message and rejects m
   const actual = execFileSync(rustExample('protocol_check'), { input: cases.map(test => JSON.stringify(test.value)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map(value => value === 'true');
   assert.deepEqual(actual, cases.map(test => test.accepted));
 });
+
+
+test('every Rust server-message variant matches the declared wire contract', () => {
+  const messages = JSON.parse(execFileSync(rustExample('protocol_check'), ['--server'], { encoding: 'utf8' }));
+  const declared = schemas.$defs.ServerMessage.anyOf.map(variant => variant.properties.type.const).sort();
+  assert.deepEqual(messages.map(message => message.type).sort(), declared);
+  const check = validate('ServerMessage');
+  for (const message of messages) assert.ok(check(message), JSON.stringify({ message, errors: check.errors }));
+});

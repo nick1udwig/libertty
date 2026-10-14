@@ -15,9 +15,9 @@ pub(super) async fn api_connect(
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let mut owner = app.owner(req.headers());
-    let input = body(&mut req, 16384).await?;
+    let input: crate::protocol::requests::Connect = typed_body(&mut req, 16384).await?;
     if owner.is_none() {
-        if !token_matches(&app.token, text(&input, "token")) {
+        if !token_matches(&app.token, input.token.as_deref().unwrap_or("")) {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 "Enter the pairing token shown by your termai server.".into(),
@@ -34,8 +34,8 @@ pub(super) async fn api_connect(
         owner = Some(registry.issue().map_err(|e| fail(e.to_string()))?);
     }
     let owner = owner.unwrap();
-    let sid = session_id(input.get("session"))?;
-    let result = if input["noSession"] == true {
+    let sid = session_id_text(input.session.as_deref())?;
+    let result = if input.no_session {
         json!({"accessToken":owner,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
     } else {
         if sid != "default"
@@ -114,7 +114,7 @@ pub(super) async fn api_sessions_post(
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
-    let input = body(&mut req, 16384).await?;
+    let input: crate::protocol::requests::Sessions = typed_body(&mut req, 16384).await?;
     let raw = storage::random_hex(16);
     let sid = format!(
         "{}-{}-{}-{}-{}",
@@ -124,10 +124,13 @@ pub(super) async fn api_sessions_post(
         &raw[16..20],
         &raw[20..]
     );
-    let name = if text(&input, "name").trim().is_empty() {
+    let name = if input.name.as_deref().unwrap_or("").trim().is_empty() {
         "Terminal".into()
     } else {
-        text(&input, "name")
+        input
+            .name
+            .as_deref()
+            .unwrap_or("")
             .trim()
             .chars()
             .scan(0, |n, c| {
@@ -136,24 +139,16 @@ pub(super) async fn api_sessions_post(
             })
             .collect::<String>()
     };
-    let session = if input.get("ssh").is_some_and(|v| !v.is_null()) {
+    let session = if let Some(ssh) = &input.ssh {
         match app
-            .get_remote_session(
-                &owner,
-                &sid,
-                &name,
-                &input["ssh"],
-                None,
-                input["files"] == true,
-            )
+            .get_remote_session(&owner, &sid, &name, ssh, None, input.files)
             .await
         {
             Ok(session) => session,
             Err(error) => return Ok(ssh_error(error)),
         }
     } else {
-        app.get_session(&owner, &sid, &name, input["files"] == true)
-            .await?
+        app.get_session(&owner, &sid, &name, input.files).await?
     };
     ok(json!({"id":sid,"name":name,"state":session.state()}))
 }

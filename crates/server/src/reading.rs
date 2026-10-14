@@ -2,7 +2,7 @@ use crate::{
     files::{self, Error, Result},
     storage,
 };
-use serde_json::{Value, json};
+use serde::Serialize;
 use std::collections::VecDeque;
 use tokio::io::AsyncReadExt;
 pub const MAX_READING_BYTES: usize = 20 * 1024 * 1024;
@@ -113,6 +113,13 @@ pub fn strip_vt(text: &str) -> String {
         .replace_all(text, "")
         .into_owned()
 }
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Descriptor {
+    pub id: String,
+    pub name: String,
+    pub exit_code: u8,
+}
 #[derive(Clone)]
 pub struct Capture {
     pub id: String,
@@ -123,8 +130,12 @@ pub struct Capture {
     pub exit_code: u8,
 }
 impl Capture {
-    pub fn descriptor(&self) -> Value {
-        json!({"id":self.id,"name":self.name,"exitCode":self.exit_code})
+    pub fn descriptor(&self) -> Descriptor {
+        Descriptor {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            exit_code: self.exit_code,
+        }
     }
 }
 #[derive(Default)]
@@ -133,7 +144,7 @@ pub struct Captures {
     bytes: usize,
 }
 impl Captures {
-    pub fn add(&mut self, name: &str, mut data: Vec<u8>, exit_code: u8) -> Result<Value> {
+    pub fn add(&mut self, name: &str, mut data: Vec<u8>, exit_code: u8) -> Result<Descriptor> {
         if data.len() > MAX_READING_BYTES {
             return Err(Error::new(
                 "Reading Mode output exceeds the 20 MB limit.",
@@ -184,7 +195,7 @@ impl Captures {
         entry.pending = false;
         Some(entry.clone())
     }
-    pub fn pending(&self) -> Vec<Value> {
+    pub fn pending(&self) -> Vec<Descriptor> {
         self.entries
             .iter()
             .filter(|c| c.pending)

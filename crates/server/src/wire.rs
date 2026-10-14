@@ -102,11 +102,14 @@ pub fn encode(value: &Value, mode: Mode) -> Encoded {
         bytes,
     }
 }
-pub enum Incoming {
-    Message(Value),
+pub enum Incoming<T = Value> {
+    Message(T),
     Audio(Vec<u8>),
 }
 pub fn decode(bytes: &[u8]) -> Result<Incoming, String> {
+    decode_as(bytes)
+}
+pub fn decode_as<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<Incoming<T>, String> {
     if bytes.len() > MAX_DECODED {
         return Err("Wire message exceeded its limit.".into());
     }
@@ -131,16 +134,22 @@ pub fn decode(bytes: &[u8]) -> Result<Incoming, String> {
         0 => Ok(Incoming::Message(
             serde_json::from_slice(payload).map_err(|e| e.to_string())?,
         )),
-        3 => Ok(Incoming::Message(json!({"type":"input","data":text()?}))),
+        3 => Ok(Incoming::Message(
+            serde_json::from_value(json!({"type":"input","data":text()?}))
+                .map_err(|error| error.to_string())?,
+        )),
         4 if payload.len() == 8 => Ok(Incoming::Message(
-            json!({"type":"ack","seq":integer(payload)?}),
+            serde_json::from_value(json!({"type":"ack","seq":integer(payload)?}))
+                .map_err(|error| error.to_string())?,
         )),
         5 if payload.len() == 5 && payload[4] <= 2 => {
             let mut message = json!({"type":"resize","cols":u16::from_le_bytes(payload[..2].try_into().unwrap()),"rows":u16::from_le_bytes(payload[2..4].try_into().unwrap())});
             if payload[4] < 2 {
                 message["mobile"] = json!(payload[4] == 1);
             }
-            Ok(Incoming::Message(message))
+            Ok(Incoming::Message(
+                serde_json::from_value(message).map_err(|error| error.to_string())?,
+            ))
         }
         6 => Ok(Incoming::Audio(payload.to_vec())),
         _ => Err("Unsupported incoming wire message.".into()),

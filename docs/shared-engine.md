@@ -19,6 +19,8 @@ Native help, script and completion adapters retain probe-pool capacity and cance
 Cancellation, attachment, prompt and revision guards protect concurrent edits.
 `crates/server/src/input_coordinator.rs` shares repair deadlines, cancellation and microphone callbacks across native terminals and Herdr.
 The adapters retain attachment, shell and screen checks when applying text.
+Rust terminal replies use the `ServerMessage` enum and are checked against the shared wire schemas.
+HTTP requests and normalized Herdr snapshots use typed structures, while unknown saved notification-device fields are preserved.
 Backend microphone dictation repairs its transcript locally and publishes alternatives.
 Herdr additionally checks ownership, foreground shell identity and the last dictated span before replacement.
 

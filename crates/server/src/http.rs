@@ -203,23 +203,27 @@ fn json_response(status: StatusCode, data: Value) -> Response<Body> {
 fn error(status: StatusCode, message: impl Into<String>) -> Response<Body> {
     json_response(status, json!({"error":message.into()}))
 }
-fn text<'a>(value: &'a Value, field: &str) -> &'a str {
-    value[field].as_str().unwrap_or("")
-}
 fn safe_integer(value: f64) -> bool {
     value.is_finite() && value.fract() == 0.0 && (0.0..=9007199254740991.0).contains(&value)
 }
 fn session_id(value: Option<&Value>) -> Result<String, Failure> {
-    if value.is_none_or(Value::is_null) || value.and_then(Value::as_str) == Some("default") {
-        return Ok("default".into());
+    if value.is_none_or(Value::is_null) {
+        return session_id_text(None);
     }
-    let id = value
-        .and_then(Value::as_str)
-        .ok_or_else(|| fail("Invalid terminal session."))?;
+    session_id_text(Some(
+        value
+            .and_then(Value::as_str)
+            .ok_or_else(|| fail("Invalid terminal session."))?,
+    ))
+}
+fn session_id_text(value: Option<&str>) -> Result<String, Failure> {
+    let Some(id) = value.filter(|id| *id != "default") else {
+        return Ok("default".into());
+    };
     if id.len() != 36
         || !id
             .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || b == b'-')
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) || byte == b'-')
     {
         return Err(fail("Invalid terminal session."));
     }
@@ -693,12 +697,15 @@ async fn security(State(app): State<Arc<App>>, req: Request<Body>, next: Next) -
     }
     response
 }
-async fn body(req: &mut Request<Body>, limit: usize) -> Result<Value, Failure> {
+async fn typed_body<T: serde::de::DeserializeOwned>(
+    req: &mut Request<Body>,
+    limit: usize,
+) -> Result<T, Failure> {
     if !req
         .headers()
         .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|s| s.starts_with("application/json"))
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("application/json"))
     {
         return Err(fail("Expected JSON"));
     }
@@ -715,19 +722,17 @@ async fn body(req: &mut Request<Body>, limit: usize) -> Result<Value, Failure> {
     if content.encode_utf16().count() > limit {
         return Err(fail("Request too large"));
     }
-    let parsed: Value = serde_json::from_str(if content.is_empty() { "{}" } else { &content })
-        .map_err(|_| fail("Invalid JSON"))?;
-    if !parsed.is_object() {
+    let content = if content.is_empty() { "{}" } else { &content };
+    if !content.trim_start().starts_with('{') {
         return Err(fail("Expected an object"));
     }
-    Ok(parsed)
-}
-async fn typed_body<T: serde::de::DeserializeOwned>(
-    req: &mut Request<Body>,
-    limit: usize,
-) -> Result<T, Failure> {
-    serde_json::from_value(body(req, limit).await?)
-        .map_err(|error| fail(format!("Invalid request: {error}")))
+    serde_json::from_str(content).map_err(|error| {
+        if error.is_syntax() || error.is_eof() {
+            fail("Invalid JSON")
+        } else {
+            fail(format!("Invalid request: {error}"))
+        }
+    })
 }
 struct CancelOnDrop(CancellationToken);
 impl Drop for CancelOnDrop {
@@ -915,7 +920,7 @@ async fn herdr_socket_session(
             loop {
                 let message = tokio::select! {biased;_=lifetime.cancelled()=>break,message=receive.recv()=>message};
                 let Some(message) = message else { break };
-                if !send.send(Transport::Message(message)) {
+                if !send.send(Transport::Message(message.value())) {
                     break;
                 }
             }
@@ -923,12 +928,9 @@ async fn herdr_socket_session(
         None
     } else {
         let snapshot = tokio::select! {biased;_=cancel.cancelled()=>return,snapshot=ticket.target.snapshot()=>snapshot};
-        let agent = snapshot.ok().and_then(|snapshot| {
-            snapshot["terminals"]
-                .as_array()
-                .and_then(|a| a.iter().find(|a| a["terminalId"] == ticket.terminal))
-                .cloned()
-        });
+        let agent = snapshot
+            .ok()
+            .and_then(|snapshot| snapshot.terminal(&ticket.terminal).cloned());
         let Some(agent) = agent else {
             let mut socket = socket;
             let _ = socket
@@ -940,7 +942,7 @@ async fn herdr_socket_session(
             return;
         };
         let revision = if ticket.size.is_some() {
-            crate::herdr_redraw::revision(&ticket.target, &agent["paneId"], &cancel).await
+            crate::herdr_redraw::revision(&ticket.target, &agent.pane_id, &cancel).await
         } else {
             None
         };
@@ -978,19 +980,18 @@ async fn herdr_socket_session(
             },
             message=receive.next()=>match message{
                 Some(Ok(Message::Text(bytes)))=>if let Some(view)=&view{
-                    if serde_json::from_str::<Value>(&bytes).map_err(|_|"Invalid terminal message".to_owned()).and_then(|message|view.receive(message)).is_err(){
+                    if serde_json::from_str::<crate::protocol::ClientMessage>(&bytes).map_err(|_|"Invalid terminal message".to_owned()).and_then(|message|view.receive(message)).is_err(){
                         let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid terminal message".into()}))).await;break;
                     }
-                } else if bytes.len()<=2048 && let Ok(message)=serde_json::from_str::<Value>(&bytes) {
-                    if message["type"]=="notification-presence" && let Some(focused)=message["focused"].as_bool(){
-                        let _=app.notifications.presence(id,&ticket.owner,&message["device"],focused);
-                    } else if message["type"]=="notification-ack" {
-                        let _=app.notifications.acknowledge(&ticket.owner,&message["device"],&ticket.source,&notification_target,&message["event"]);
+                } else if bytes.len()<=2048 && let Ok(message)=serde_json::from_str::<crate::protocol::ViewerMessage>(&bytes) {
+                    match message {
+                        crate::protocol::ViewerMessage::NotificationPresence { device, focused } => { let _=app.notifications.presence(id,&ticket.owner,&json!(device),focused); }
+                        crate::protocol::ViewerMessage::NotificationAck { device, event } => { let _=app.notifications.acknowledge(&ticket.owner,&json!(device),&ticket.source,&notification_target,&event); }
                     }
                 },
                 Some(Ok(Message::Binary(bytes)))=>if let Some(view)=&view{
                     if mode==wire::Mode::Json { view.audio(bytes.to_vec()); }
-                    else { match wire::decode(&bytes) { Ok(wire::Incoming::Audio(audio)) => view.audio(audio), Ok(wire::Incoming::Message(message)) => { if view.receive(message).is_err() { break; } }, Err(_) => { let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid wire message".into()}))).await; break; } } }
+                    else { match wire::decode_as::<crate::protocol::ClientMessage>(&bytes) { Ok(wire::Incoming::Audio(audio)) => view.audio(audio), Ok(wire::Incoming::Message(message)) => { if view.receive(message).is_err() { break; } }, Err(_) => { let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid wire message".into()}))).await; break; } } }
                 },
                 Some(Ok(Message::Ping(bytes)))=>if send.send(Message::Pong(bytes)).await.is_err(){break;},
                 Some(Ok(Message::Pong(_)))=>alive=true,
@@ -1087,11 +1088,11 @@ async fn socket_session(
                 None=>break,
             },
             event=receive.next()=>match event {
-                Some(Ok(Message::Text(value)))=>match serde_json::from_str::<Value>(&value) { Ok(message)=>session.receive(id,message),Err(_)=>{let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid message".into()}))).await;break} },
+                Some(Ok(Message::Text(value)))=>match serde_json::from_str::<crate::protocol::ClientMessage>(&value) { Ok(message)=>session.receive(id,message),Err(_)=>{let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid message".into()}))).await;break} },
                 Some(Ok(Message::Ping(bytes)))=>if send.send(Message::Pong(bytes)).await.is_err(){break},
                 Some(Ok(Message::Binary(bytes)))=>{
                     if mode==wire::Mode::Json { session.receive_binary(id,bytes.to_vec()); }
-                    else { match wire::decode(&bytes) { Ok(wire::Incoming::Audio(audio))=>session.receive_binary(id,audio), Ok(wire::Incoming::Message(message))=>session.receive(id,message), Err(_)=>{let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid wire message".into()}))).await;break;} } }
+                    else { match wire::decode_as::<crate::protocol::ClientMessage>(&bytes) { Ok(wire::Incoming::Audio(audio))=>session.receive_binary(id,audio), Ok(wire::Incoming::Message(message))=>session.receive(id,message), Err(_)=>{let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid wire message".into()}))).await;break;} } }
                 },
                 Some(Ok(Message::Pong(_)))=>{},
                 _=>break,
