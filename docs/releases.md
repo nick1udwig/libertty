@@ -27,8 +27,9 @@ The tag must exactly match `v` followed by the package version, including any pr
 The workflow checks out the tag and records its commit in every archive.
 The publication job creates a draft with the three platform archives, individual `.sha256` files, `SHA256SUMS` and `install.sh`, then publishes the complete release.
 Rerunning a failed publication replaces assets in its existing draft only after every target passes again.
-The publisher refuses to overwrite an already public release, so use a new version for a subsequent release.
-Existing public releases without assets are not automatically repaired by this workflow change.
+If the tag was created by publishing an empty release in GitHub's UI, the publisher first moves that release back to draft and confirms its draft status before uploading.
+Upload failures leave the recovered release in draft so publication can be retried safely.
+The publisher refuses to overwrite any assets in an already public release, so use a new version for a subsequent release.
 The one-liner requires the first complete stable release to exist, so adding these files alone does not make its download URL live.
 
 ## Validate before publishing
@@ -74,7 +75,7 @@ Point `VOXTYPE_MOBILE_CHECKOUT` to that checkout before packaging a distributabl
 npm ci
 npm run verify:local
 VOXTYPE_MOBILE_CHECKOUT=/path/to/pinned/voxtype-mobile npm run release:package
-npm run verify:package -- release/termai-v0.2.3-linux-x64.tar.gz
+npm run verify:package -- release/termai-v0.2.4-linux-x64.tar.gz
 ```
 
 Packaging requires a clean checkout, the pinned Node version and a complete Linux companion bundle.

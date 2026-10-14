@@ -30,7 +30,14 @@ export async function publishRelease({ directory, tag, installer, gh = args => s
   const existing = gh(view);
   if (existing.error) throw existing.error;
   if (existing.status === 0) {
-    assert.equal(JSON.parse(existing.stdout).isDraft, true, 'Release is already public; use a new version instead of replacing published assets.');
+    const release = JSON.parse(existing.stdout);
+    if (!release.isDraft) {
+      assert.equal(release.assets.length, 0, 'Release already has public assets; use a new version instead of replacing published assets.');
+      // Creating a release in GitHub's UI can publish an empty release while the
+      // tag-triggered builds are still running.
+      run(['release', 'edit', tag, '--draft=true', '--verify-tag']);
+      assert.equal(JSON.parse(run(view)).isDraft, true, 'Release must be a draft before uploading assets.');
+    }
     run(['release', 'upload', tag, ...files, '--clobber']);
   } else {
     run(['release', 'create', tag, ...files, '--draft', '--verify-tag', '--title', tag, '--generate-notes']);
