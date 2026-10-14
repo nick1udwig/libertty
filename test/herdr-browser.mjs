@@ -226,11 +226,19 @@ try {
   const hold = async locator => {
     let rect;
     await until(async () => {
-      try { await locator.scrollIntoViewIfNeeded(); rect = await locator.boundingBox(); return !!rect; }
+      try {
+        await locator.scrollIntoViewIfNeeded();
+        rect = await locator.boundingBox();
+        return !!rect && await locator.evaluate(element => {
+          const box = element.getBoundingClientRect();
+          return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+        });
+      }
       catch (error) { if (!error.message.includes('not attached')) throw error; return false; }
     }, 'attached tab for long press');
+    const menu = await locator.evaluate(element => element.closest('#tabs') ? 'body > .host-terminal-menu' : '.herdr-tab-menu');
     await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2);
-    await page.waitForFunction(() => [...document.querySelectorAll('.herdr-tab-menu, .host-terminal-menu')].some(menu => menu.checkVisibility({ checkVisibilityCSS: true })));
+    await page.waitForFunction(selector => [...document.querySelectorAll(selector)].some(menu => menu.checkVisibility({ checkVisibilityCSS: true })), menu);
     await touch('touchEnd');
   };
   const swipeStrip = async mode => {
@@ -459,7 +467,10 @@ try {
   await page.waitForFunction(previous => JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === previous.id && tab.session !== previous.session && tab.herdrSource === tab.session && !tab.ended), localHerdr);
   await agentFrame(); assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the local Herdr tab');
   assert.equal(await page.getByRole('button', { name: 'Reconnect', exact: true }).count(), 0, 'An expired source restores without a manual reconnect');
+  // Exercise the opening transition before using touch coordinates for the tab menu.
+  const drawerMotion = await page.addStyleTag({ content: '#terminal-tabs-drawer, #terminal-tabs-drawer .terminal-header { transition-duration: 1s !important; }' });
   await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
+  await drawerMotion.evaluate(element => element.remove());
   const controlsBeforeSSH = fixture.actions.filter(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control').length;
   // A real disposable SSH server exercises command capture and Unix socket forwarding.
   await mkdir(fixture.directory + '/remote');
