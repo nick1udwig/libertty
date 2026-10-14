@@ -2,10 +2,15 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pair with termai</title>
 <style>
-body { color: #d7e6d9; background: #0c1310; font: 16px system-ui; margin: 0; padding: 24px; }
-main { max-width: 420px; margin: 10vh auto; } label, input, button { display: block; }
-input, button { box-sizing: border-box; width: 100%; margin-top: 12px; padding: 12px; font: inherit; }
-button { background: #bbf6b4; border: 0; border-radius: 6px; } #login-error { color: #e6a68b; }
+:root { color-scheme: dark; --bg: #0b0f0d; --overlay: #1e2622; --line-strong: #34403a; --text: #e4ebe6; --text-2: #b4c0b9; --muted: #8a9790; --accent: #a8f0a0; --accent-hover: #c2f6bb; --accent-ink: #0f220e; --accent-line: #a8f0a06b; --danger: #f09a9a; }
+* { box-sizing: border-box; }
+body { color: var(--text); background: var(--bg); font: 15px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 24px 16px; min-height: 100dvh; display: grid; place-items: center; }
+main { width: 100%; max-width: 420px; padding: 24px; background: var(--overlay); border: 1px solid var(--line-strong); border-radius: 14px; box-shadow: 0 24px 80px #000000b0; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 8px; } p { color: var(--muted); font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
+label, input, button { display: block; width: 100%; } label { color: var(--text-2); font-size: 13px; }
+input { margin: 6px 0 14px; padding: 12px; font-family: inherit; font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line-strong); border-radius: 10px; outline: none; } input:focus { border-color: var(--accent-line); }
+button { min-height: 44px; padding: 0 18px; font-family: inherit; font-size: 14px; font-weight: 600; color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 10px; cursor: pointer; } button:hover:enabled { background: var(--accent-hover); } button:disabled { opacity: .45; cursor: wait; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } #login-error { color: var(--danger); margin: 0 0 12px; } #login-error:empty { display: none; }
 </style></head><body><main><h1>Pair with termai</h1>
 <p>Enter the pairing token shown in the server’s startup output. Pairing is required even on this machine.</p>
 <form id="login-form"><label for="token">Pairing token</label><input id="token" type="password" autocomplete="current-password" required autofocus>
