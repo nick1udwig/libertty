@@ -117,7 +117,7 @@ const fontFamily = getComputedStyle(document.documentElement).fontFamily;
 const [ghostty] = await Promise.all([Ghostty.load(), document.fonts.load(`14px ${fontFamily}`).catch(() => {})]);
 const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 / 3, fontFamily,
   scrollback: 5000, cursorBlink: true, smoothScrollDuration: 0,
-  theme: { background: '#0c1310', foreground: '#d7e6d9', cursor: '#bbf6b4', selectionBackground: '#3c6242', green: '#bbf6b4', cyan: '#9bcec3', blue: '#92b8d6', yellow: '#e5cf91', red: '#e6a68b' } });
+  theme: { background: '#0b0f0d', foreground: '#dfe7e1', cursor: '#a8f0a0', selectionBackground: '#2e4732', green: '#a8f0a0', cyan: '#8fd3e0', blue: '#93b4d8', yellow: '#e8c27a', red: '#f09a9a' } });
 term.open($('terminal'));
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);

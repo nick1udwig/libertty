@@ -1,0 +1,29 @@
+/* Shared design tokens for the workspace shell and the terminal document. */
+@font-face{font-family:"JetBrains Mono";src:url("./fonts/JetBrainsMono-Regular.woff2") format("woff2");font-style:normal;font-weight:400;font-display:swap}
+:root{
+  color-scheme:dark;font-synthesis:none;-webkit-tap-highlight-color:transparent;
+  --bg:#0b0f0d;--surface:#121815;--raised:#1a211d;--overlay:#1e2622;--hover:#242e29;--press:#2b3630;
+  --line:#242d28;--line-strong:#34403a;
+  --text:#e4ebe6;--text-2:#b4c0b9;--muted:#8a9790;--faint:#5f6b65;
+  --accent:#a8f0a0;--accent-hover:#c2f6bb;--accent-ink:#0f220e;--accent-soft:#a8f0a01c;--accent-line:#a8f0a06b;
+  --info:#8fd3e0;--warn:#e8c27a;--danger:#f09a9a;--danger-soft:#f09a9a1a;
+  --font-ui:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r-sm:6px;--r-md:10px;--r-lg:14px;
+  --shadow-pop:0 12px 32px #00000080;--shadow-sheet:0 24px 80px #000000b0;
+  --scrim:#030504b8;
+  font-family:var(--font-ui);color:var(--text);background:var(--bg);
+}
+::selection{background:#a8f0a040}
+
+/* Shortcut keys look identical in the terminal dock and the workspace bar. */
+.key-bar{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;min-width:0}
+.key-bar::-webkit-scrollbar{display:none}
+.key-bar button{flex:0 0 auto;min-width:44px;min-height:36px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--raised);color:var(--text-2);font:12px var(--font-mono);padding:0 11px;white-space:nowrap}
+.key-bar button:hover{background:var(--hover);color:var(--text)}
+.key-bar button:active{background:var(--press)}
+.key-bar button[aria-pressed=true]{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
+.key-bar button.command-shortcut{color:var(--accent)}
+
+/* Shared spinners are the only perpetual motion, and they mean real waiting. */
+@keyframes spin{to{transform:rotate(360deg)}}

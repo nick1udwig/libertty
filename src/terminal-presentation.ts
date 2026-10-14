@@ -27,7 +27,7 @@ export class TerminalPresentation {
     const source = canvas.getBoundingClientRect(), scale = devicePixelRatio || 1;
     this.snapshot.width = Math.ceil(bounds.width * scale); this.snapshot.height = Math.ceil(bounds.height * scale);
     const context = this.snapshot.getContext('2d')!;
-    context.fillStyle = '#0c1310'; context.fillRect(0, 0, this.snapshot.width, this.snapshot.height);
+    context.fillStyle = '#0b0f0d'; context.fillRect(0, 0, this.snapshot.width, this.snapshot.height);
     context.drawImage(canvas, (source.left - bounds.left) * scale, (source.top - bounds.top) * scale, source.width * scale, source.height * scale);
     this.layer.style.height = bounds.height + 'px';
     this.layer.hidden = false; this.held = true;
