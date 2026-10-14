@@ -110,7 +110,7 @@ function authorizeTerminals(backend: BackendProfile, accessToken: string) {
 async function api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string, recoverAuth = true): Promise<T> {
   const url = new URL(name, backend.url); if (session) url.searchParams.set('session', session);
   const token = tokenFor(backend);
-  const timeout = name === 'api/herdr/action' && ['list-worktrees', 'new-worktree', 'open-worktree'].includes((data as any)?.action) ? 135000 : ['api/sessions', 'api/ssh/captured'].includes(name) ? 25000 : 12000;
+  const timeout = url.pathname.endsWith('/api/herdr/action') && ['list-worktrees', 'new-worktree', 'open-worktree', 'delete-worktree'].includes((data as any)?.action) ? 135000 : ['api/sessions', 'api/ssh/captured'].includes(name) ? 25000 : 12000;
   const response = await fetch(url, { method: data === undefined ? 'GET' : 'POST', cache: 'no-store', credentials: 'same-origin', signal: AbortSignal.timeout(timeout),
     headers: { ...(constrainedLink() ? { 'X-Termai-Link': 'constrained' } : {}), ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   const result = await response.json();

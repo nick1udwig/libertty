@@ -313,7 +313,7 @@ impl Target {
             }
         }
         Ok(
-            json!({"kinds":kinds,"actions":["list-worktrees","new-worktree","open-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
+            json!({"kinds":kinds,"actions":["list-worktrees","new-worktree","open-worktree","delete-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
         )
     }
     pub async fn action(&self, input: &Value) -> Result<Value, String> {
@@ -324,6 +324,29 @@ impl Target {
             .iter()
             .find(|s| s.get("id") == input.get("workspaceId"));
         match input["action"].as_str().unwrap_or("") {
+            "delete-worktree" => {
+                let space = space.ok_or("This space has closed.")?;
+                if space["linkedWorktree"] != true {
+                    return Err("Only a linked worktree checkout can be deleted.".into());
+                }
+                let path = space["checkoutPath"]
+                    .as_str()
+                    .filter(|path| !path.is_empty())
+                    .ok_or(
+                        "Herdr did not provide the checkout folder. Update Herdr on this host.",
+                    )?;
+                if input["path"].as_str() != Some(path) {
+                    return Err(
+                        "The checkout folder changed. Reopen the confirmation before deleting."
+                            .into(),
+                    );
+                }
+                self.space_request(
+                    "worktree.remove",
+                    json!({"workspace_id":space["id"],"force":false,"trust_repository":false}),
+                )
+                .await
+            }
             "list-worktrees" | "new-worktree" | "open-worktree" => {
                 let space = space.ok_or("This space has closed.")?;
                 if space["linkedWorktree"] == true {
@@ -927,6 +950,9 @@ pub fn normalize(raw: &Value) -> Result<Value, String> {
         }
         if let Some(linked) = workspace["worktree"].get("is_linked_worktree") {
             space["linkedWorktree"] = linked.clone();
+        }
+        if let Some(path) = workspace["worktree"].get("checkout_path") {
+            space["checkoutPath"] = path.clone();
         }
         spaces.push(space);
     }

@@ -1861,6 +1861,9 @@
               "type": "boolean"
             }
           ]
+        },
+        "checkoutPath": {
+          "type": "string"
         }
       },
       "required": [

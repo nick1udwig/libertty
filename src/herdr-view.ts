@@ -439,11 +439,43 @@ export class HerdrView {
     const close = node('button', '', agent.space ? 'Close' : 'Close tab'); close.role = 'menuitem'; close.disabled = this.closing.has(agent.terminalId); close.onclick = () => void this.closeTab(agent);
     this.menu.append(rename, close); this.popup(anchor); rename.focus({ preventScroll: true });
     if (agent.space) {
-      for (const [label, action] of [['New worktree', 'new-worktree'], ['Open worktree', 'open-worktree'], ['Split', 'split']] as const) {
-        const button = node('button', '', label); button.role = 'menuitem'; button.onclick = () => void this.spaceAction(agent, action); this.menu.insertBefore(button, close);
+      if (agent.space.linkedWorktree) {
+        const remove = node('button', 'danger', 'Delete worktree checkout'); remove.role = 'menuitem';
+        remove.disabled = this.closing.has(agent.terminalId) || !agent.space.checkoutPath;
+        remove.onclick = () => this.deleteWorktree(agent); this.menu.append(remove);
+      } else {
+        for (const [label, action] of [['New worktree', 'new-worktree'], ['Open worktree', 'open-worktree'], ['Split', 'split']] as const) {
+          const button = node('button', '', label); button.role = 'menuitem'; button.onclick = () => void this.spaceAction(agent, action); this.menu.insertBefore(button, close);
+        }
       }
       this.popup(anchor);
     }
+  }
+  private deleteWorktree(item: StripItem) {
+    const space = item.space;
+    if (!space?.linkedWorktree || !space.checkoutPath || this.actionDialog || this.closing.has(item.terminalId)) return;
+    this.menu.hidden = true;
+    const modal = this.actionDialog = node('dialog', 'herdr-space-action herdr-delete-worktree'), form = node('form');
+    const title = node('h2', '', 'Delete worktree checkout?'); title.id = 'delete-worktree-title'; modal.setAttribute('aria-labelledby', title.id);
+    const explanation = node('p', '', 'This removes the checkout folder:');
+    const path = node('p', 'herdr-checkout-path', space.checkoutPath);
+    const hint = node('p', '', 'The branch is not deleted. The Herdr workspace will close.');
+    const progress = node('p'), error = node('p', 'form-error'), actions = node('div', 'actions'); progress.role = 'status'; error.role = 'alert';
+    const cancel = node('button', 'secondary', 'Cancel'), remove = node('button', 'danger', 'Delete worktree checkout'); cancel.type = 'button'; remove.type = 'submit';
+    let busy = false;
+    cancel.onclick = () => modal.close(); modal.oncancel = event => { if (busy) event.preventDefault(); };
+    modal.onclose = () => { if (this.actionDialog === modal) this.actionDialog = undefined; modal.remove(); };
+    form.onsubmit = async event => {
+      event.preventDefault(); if (busy) return;
+      busy = true; this.closing.add(item.terminalId); remove.disabled = cancel.disabled = true; error.textContent = ''; progress.textContent = 'Deleting worktree checkout…';
+      try {
+        await this.host.api('api/herdr/action', { action: 'delete-worktree', workspaceId: space.id, path: space.checkoutPath });
+        if (!this.disposed) this.receive({ type: 'snapshot', snapshot: await this.host.api('api/herdr/snapshot') });
+        modal.close();
+      } catch (reason: any) { if (modal.open) error.textContent = reason.message; }
+      finally { busy = false; this.closing.delete(item.terminalId); remove.disabled = cancel.disabled = false; progress.textContent = ''; }
+    };
+    actions.append(cancel, remove); form.append(title, explanation, path, hint, progress, error, actions); modal.append(form); document.body.append(modal); modal.showModal(); cancel.focus();
   }
   private async spaceAction(item: StripItem, action: 'new-worktree' | 'open-worktree' | 'split') {
     if (!item.space || this.actionDialog) return;

@@ -4,6 +4,79 @@ use termai_server::herdr;
 mod support;
 
 #[tokio::test]
+async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals() {
+    let fixture = support::Fixture::new().await;
+    let request =
+        json!({"action":"delete-worktree","workspaceId":"w1","path":"/worktrees/repo/review"});
+    assert!(
+        fixture
+            .target
+            .action(&request)
+            .await
+            .unwrap_err()
+            .contains("linked worktree")
+    );
+    fixture.snapshot.lock().unwrap()["workspaces"][0]["worktree"] =
+        json!({"is_linked_worktree":true,"checkout_path":"/worktrees/repo/review"});
+    // A pane can cd into a subdirectory without changing the checkout being removed.
+    fixture.snapshot.lock().unwrap()["panes"][0]["foreground_cwd"] =
+        json!("/worktrees/repo/review/src");
+    fixture.snapshot.lock().unwrap()["agents"][0]["cwd"] = json!("/worktrees/repo/review/src");
+    let snapshot = fixture.target.snapshot().await.unwrap();
+    assert_eq!(snapshot["spaces"][0]["cwd"], "/worktrees/repo/review/src");
+    assert_eq!(
+        snapshot["spaces"][0]["checkoutPath"],
+        "/worktrees/repo/review"
+    );
+    assert!(fixture.target.action(&json!({"action":"delete-worktree","workspaceId":"missing","path":"/worktrees/repo/review"})).await.unwrap_err().contains("closed"));
+    for path in [json!("/other"), json!(null)] {
+        assert!(
+            fixture
+                .target
+                .action(&json!({"action":"delete-worktree","workspaceId":"w1","path":path}))
+                .await
+                .unwrap_err()
+                .contains("folder changed")
+        );
+    }
+    assert!(fixture.actions.lock().unwrap().is_empty());
+    *fixture.close_error.lock().unwrap() = "Checkout contains uncommitted changes.".into();
+    assert!(
+        fixture
+            .target
+            .action(&request)
+            .await
+            .unwrap_err()
+            .contains("uncommitted")
+    );
+    assert_eq!(
+        fixture.target.snapshot().await.unwrap()["spaces"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    fixture.close_error.lock().unwrap().clear();
+    fixture.target.action(&request).await.unwrap();
+    assert!(
+        fixture.target.snapshot().await.unwrap()["spaces"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .actions
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|action| action["method"] == "worktree.remove"
+                && action["params"]
+                    == json!({"workspace_id":"w1","force":false,"trust_repository":false}))
+    );
+}
+
+#[tokio::test]
 async fn worktrees_and_splits_are_scoped_to_the_held_space() {
     let fixture = support::Fixture::new().await;
     for input in [

@@ -141,6 +141,20 @@ impl Fixture {
                                 actions.lock().unwrap().push(request.clone());
                                 json!({"workspace":{"workspace_id":"w2"},"root_pane":{"terminal_id":"term_1"}})
                             }
+                            "worktree.remove" => {
+                                actions.lock().unwrap().push(request.clone());
+                                let message = close_error.lock().unwrap().clone();
+                                if !message.is_empty() {
+                                    error = Some(message);
+                                } else {
+                                    let mut snapshot = snapshot.lock().unwrap();
+                                    snapshot["workspaces"] = json!([]);
+                                    snapshot["agents"] = json!([]);
+                                    snapshot["panes"] = json!([]);
+                                    changed = true;
+                                }
+                                json!({"type":"worktree.removed"})
+                            }
                             "pane.split" => {
                                 actions.lock().unwrap().push(request.clone());
                                 let message = split_error.lock().unwrap().clone();
