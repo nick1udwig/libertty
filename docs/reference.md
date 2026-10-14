@@ -271,7 +271,7 @@ The service uses `TERMAI_BASE_PATH=/t` and explicitly allows the tailnet hostnam
 Assets, API requests, WebSockets, cookies, the manifest and service worker are scoped to `/t/`.
 This route requires the pairing token as well as tailnet access.
 Read the token in the service’s startup journal.
-To rebuild changes, run `npm run build` and restart the service.
+To rebuild changes, run `npm run build:release` and restart the service.
 
 For another subpath deployment, set `TERMAI_BASE_PATH` at runtime and use a reverse proxy that preserves the Host header.
 Both prefix-preserving and prefix-stripping proxies are supported.
