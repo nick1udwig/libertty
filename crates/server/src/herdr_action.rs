@@ -10,6 +10,8 @@ pub enum Action {
     DeleteWorktree {
         workspace_id: String,
         path: Option<String>,
+        #[serde(default)]
+        force: bool,
     },
     ListWorktrees {
         workspace_id: String,

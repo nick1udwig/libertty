@@ -15,6 +15,8 @@ let herdr, desktop, backend, browser;
 try {
   await mkdir(dir + '/alpha', { recursive: true }); await mkdir(dir + '/beta project');
   execFileSync('git', ['init', '-b', 'main', dir + '/alpha'], { stdio: 'ignore' });
+  await writeFile(dir + '/alpha/tracked.txt', 'Original content');
+  execFileSync('git', ['-C', dir + '/alpha', 'add', 'tracked.txt'], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir + '/alpha', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'Initial'], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir + '/alpha', 'switch', '-c', 'review/existing'], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir + '/alpha', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-m', 'Existing branch commit'], { stdio: 'ignore' });
@@ -206,24 +208,53 @@ try {
   assert.ok(checkout && checkout !== dir + '/alpha');
   assert.equal(await deletion.locator('.herdr-checkout-path').textContent(), checkout);
   assert.match(await deletion.textContent(), /The branch is not deleted\. The Herdr workspace will close\./);
+  const forceDelete = deletion.getByRole('button', { name: 'Force delete', exact: true });
+  assert.equal(await forceDelete.isVisible(), false, 'Force deletion is unavailable before a force-required refusal');
   await deletion.getByRole('button', { name: 'Cancel', exact: true }).click();
   await access(checkout);
   assert.ok((await order()).includes(worktreeSpace.id), 'Cancel preserves the checkout and workspace');
   await writeFile(checkout + '/uncommitted.txt', 'Keep this change');
+  await writeFile(checkout + '/tracked.txt', 'Modified content');
   await hold(worktreeSpace.id); await menuAction('Delete worktree checkout');
+  const denyDelete = async route => {
+    if (route.request().postDataJSON()?.action !== 'delete-worktree') return route.continue();
+    return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Permission denied while deleting checkout.' }) });
+  };
+  await page.route('**/api/herdr/action*', denyDelete);
   await deletion.getByRole('button', { name: 'Delete worktree checkout', exact: true }).click();
-  await deletion.locator('.form-error').filter({ hasText: /.+/ }).waitFor();
+  await deletion.locator('.form-error').filter({ hasText: 'Permission denied' }).waitFor();
+  assert.equal(await forceDelete.isVisible(), false, 'Unrelated errors do not offer force deletion');
+  await page.unroute('**/api/herdr/action*', denyDelete);
+  await deletion.getByRole('button', { name: 'Delete worktree checkout', exact: true }).click();
+  await deletion.locator('.form-error').filter({ hasText: /--force/ }).waitFor();
+  await forceDelete.waitFor({ state: 'visible' });
+  assert.match(await deletion.textContent(), /Force delete permanently discards modified and untracked files/);
   await access(checkout + '/uncommitted.txt');
+  assert.equal(await readFile(checkout + '/tracked.txt', 'utf8'), 'Modified content');
   assert.ok((await order()).includes(worktreeSpace.id), 'Refused deletion preserves the workspace');
-  await rm(checkout + '/uncommitted.txt');
+  const modalBounds = await deletion.boundingBox();
+  for (const button of await deletion.getByRole('button').all()) {
+    const bounds = await button.boundingBox();
+    assert.ok(bounds.x >= modalBounds.x && bounds.x + bounds.width <= modalBounds.x + modalBounds.width, 'Deletion buttons fit the mobile dialog');
+  }
+  await deletion.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await access(checkout + '/uncommitted.txt');
+  await hold(worktreeSpace.id); await menuAction('Delete worktree checkout');
+  assert.equal(await forceDelete.isVisible(), false, 'Reopening the dialog requires a fresh force-required refusal');
+  await deletion.getByRole('button', { name: 'Delete worktree checkout', exact: true }).click();
+  await forceDelete.waitFor({ state: 'visible' });
   let deletes = 0;
   await page.route('**/api/herdr/action*', async route => {
     if (route.request().postDataJSON()?.action !== 'delete-worktree') return route.continue();
+    assert.equal(route.request().postDataJSON().force, true, 'Only an explicit Force delete submits force');
     deletes++; await delay(300); await route.continue();
   });
-  await deletion.locator('form').evaluate(form => { form.requestSubmit(); form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+  await deletion.locator('form').evaluate(form => {
+    const submitter = [...form.querySelectorAll('button')].find(button => button.textContent === 'Force delete');
+    form.requestSubmit(submitter); form.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter }));
+  });
   await deletion.waitFor({ state: 'detached' });
-  assert.equal(deletes, 1, 'Duplicate submits remove the checkout once');
+  assert.equal(deletes, 1, 'Duplicate force submits remove the checkout once');
   await page.unroute('**/api/herdr/action*');
   assert.equal(await access(checkout).then(() => true, () => false), false, 'Deletion removes the checkout folder');
   assert.equal((await order()).includes(worktreeSpace.id), false, 'Deletion closes the Herdr workspace');

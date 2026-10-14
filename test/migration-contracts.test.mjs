@@ -75,6 +75,9 @@ test('Herdr space action contracts include splits and worktrees with scoped oper
   assert.ok(action({ action: 'list-worktrees', workspaceId: 'w1' }));
   assert.ok(action({ action: 'new-worktree', workspaceId: 'w1', branch: 'review/mobile' }));
   assert.ok(action({ action: 'open-worktree', workspaceId: 'w1', path: '/worktrees/review' }));
+  for (const force of [undefined, false, true]) assert.ok(action({ action: 'delete-worktree', workspaceId: 'w1', path: '/worktrees/review', ...(force === undefined ? {} : { force }) }));
+  for (const force of ['true', 1, null]) assert.equal(action({ action: 'delete-worktree', workspaceId: 'w1', path: '/worktrees/review', force }), false);
+  assert.equal(action({ action: 'delete-worktree', workspaceId: 'w1', force: true }), false);
   for (const input of [{ action: 'split', workspaceId: 'w1', direction: 'right' }, { action: 'split', workspaceId: 'w1', terminalId: 'term_0', direction: 'left' }, { action: 'new-worktree', branch: 'review' }, { action: 'open-worktree', workspaceId: 'w1' }]) assert.equal(action(input), false);
 });
 

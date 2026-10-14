@@ -7304,6 +7304,32 @@
           "type": "object",
           "properties": {
             "action": {
+              "const": "delete-worktree"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^[^\\u0000]*$"
+            },
+            "force": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "action",
+            "workspaceId",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
               "const": "split"
             },
             "workspaceId": {

@@ -97,6 +97,8 @@ New worktree creates a branch from `HEAD` in Herdr’s configured worktree direc
 Split offers Right and Down and targets the held space’s remembered terminal, falling back to its desktop-selected terminal.
 The refreshed terminal dropdown immediately includes the new pane, and both desktop and mobile see the same worktrees and splits.
 The dialogs show progress and errors, prevent repeated submissions, and preserve selection on cancellation or failure.
+Linked worktree spaces offer Delete worktree checkout, which removes the checkout folder and closes its Herdr workspace while preserving the Git branch.
+If deletion reports that `--force` is required, the dialog shows a Force delete button that discards modified and untracked files in that checkout.
 Local and SSH connections route these actions through their selected Herdr server and session, with update guidance if its API is unavailable.
 Split checks that the Termai backend supports the action before submitting it, so an older running backend reports the version mismatch.
 After rebuilding the interface and backend, restart the Termai service to activate the backend changes.

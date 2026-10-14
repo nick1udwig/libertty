@@ -77,6 +77,48 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
 }
 
 #[tokio::test]
+async fn forced_checkout_deletion_keeps_scope_guards_and_requires_a_boolean() {
+    let fixture = support::Fixture::new().await;
+    let request = json!({"action":"delete-worktree","workspaceId":"w1","path":"/worktrees/repo/review","force":true});
+    assert!(
+        fixture
+            .target
+            .action(&request)
+            .await
+            .unwrap_err()
+            .contains("linked worktree")
+    );
+    fixture.snapshot.lock().unwrap()["workspaces"][0]["worktree"] =
+        json!({"is_linked_worktree":true,"checkout_path":"/worktrees/repo/review"});
+    for invalid in [
+        json!({"workspaceId":"missing"}),
+        json!({"path":"/other"}),
+        json!({"path":null}),
+        json!({"force":"true"}),
+        json!({"force":1}),
+        json!({"force":null}),
+    ] {
+        let mut changed = request.clone();
+        for (key, value) in invalid.as_object().unwrap() {
+            changed[key] = value.clone();
+        }
+        assert!(fixture.target.action(&changed).await.is_err());
+    }
+    assert!(fixture.actions.lock().unwrap().is_empty());
+    fixture.target.action(&request).await.unwrap();
+    assert_eq!(
+        fixture.actions.lock().unwrap()[0]["params"],
+        json!({"workspace_id":"w1","force":true,"trust_repository":false})
+    );
+    assert!(
+        fixture.target.snapshot().await.unwrap()["spaces"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn worktree_branch_suggestions_read_only_local_refs_from_the_held_repository() {
     let fixture = support::Fixture::new().await;
     let repo = fixture.directory.path().join("repo with 'quotes'");

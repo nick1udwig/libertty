@@ -327,7 +327,7 @@ impl Target {
             .workspace()
             .and_then(|id| spaces.iter().find(|s| s["id"] == id));
         match input {
-            Action::DeleteWorktree { path, .. } => {
+            Action::DeleteWorktree { path, force, .. } => {
                 let space = space.ok_or("This space has closed.")?;
                 if space["linkedWorktree"] != true {
                     return Err("Only a linked worktree checkout can be deleted.".into());
@@ -346,7 +346,7 @@ impl Target {
                 }
                 self.space_request(
                     "worktree.remove",
-                    json!({"workspace_id":space["id"],"force":false,"trust_repository":false}),
+                    json!({"workspace_id":space["id"],"force":force,"trust_repository":false}),
                 )
                 .await
             }

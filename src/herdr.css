@@ -41,3 +41,4 @@
 .herdr-branch-option:hover,.herdr-branch-option[aria-selected=true]{background:#153e3c;color:#83ffd0}.herdr-branch-option:disabled{cursor:default;opacity:.55}
 .herdr-branch-status{flex:none;font:11px system-ui;color:#989bad}
 @media(prefers-reduced-motion:reduce){.herdr-tabs-toggle svg{transition:none}}
+.herdr-delete-worktree .actions{flex-wrap:wrap}
