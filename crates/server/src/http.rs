@@ -643,12 +643,14 @@ impl App {
     pub fn router(self: &Arc<Self>) -> Router {
         let api = routes::router();
         let router = if self.config.base_path == "/" {
-            api
+            api.fallback(static_request)
         } else {
-            Router::new().nest(&self.config.base_path, api)
+            // The fallback also accepts proxies that strip the public mount prefix.
+            Router::new()
+                .nest(&self.config.base_path, api.clone())
+                .fallback_service(api.fallback(static_request).with_state(self.clone()))
         };
         router
-            .fallback(static_request)
             .layer(middleware::from_fn(compression))
             .layer(middleware::from_fn_with_state(self.clone(), security))
             .with_state(self.clone())

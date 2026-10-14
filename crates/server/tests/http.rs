@@ -23,6 +23,9 @@ impl Response {
 }
 impl Backend {
     fn start(engine: &str) -> Self {
+        Self::start_with_base(engine, "/terminal")
+    }
+    fn start_with_base(engine: &str, base: &str) -> Self {
         let root = tempfile::tempdir().unwrap();
         let port = TcpListener::bind("127.0.0.1:0")
             .unwrap()
@@ -42,7 +45,7 @@ impl Backend {
             .env("HOST", "127.0.0.1")
             .env("PORT", port.to_string())
             .env("TERMAI_ENGINE", engine)
-            .env("TERMAI_BASE_PATH", "/terminal")
+            .env("TERMAI_BASE_PATH", base)
             .env("TERMAI_CWD", root.path())
             .env("HOME", root.path())
             .env("TERMAI_NO_RC", "1")
@@ -70,12 +73,21 @@ impl Backend {
         headers: &[(&str, &str)],
         bytes: &[u8],
     ) -> Response {
+        self.raw_request(method, &format!("/terminal{path}"), headers, bytes)
+    }
+    fn raw_request(
+        &self,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        bytes: &[u8],
+    ) -> Response {
         let mut stream = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .unwrap();
         let mut request = format!(
-            "{method} /terminal{path} HTTP/1.1\r\nConnection: close\r\nContent-Length: {}\r\n",
+            "{method} {path} HTTP/1.1\r\nConnection: close\r\nContent-Length: {}\r\n",
             bytes.len()
         );
         if !headers
@@ -129,6 +141,76 @@ impl Drop for Backend {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[test]
+fn mounted_apis_accept_prefix_preserving_and_prefix_stripping_proxies() {
+    let backend = Backend::start("server");
+    let origin = format!("http://127.0.0.1:{}", backend.port);
+    for prefix in ["/terminal", ""] {
+        let response = backend.raw_request("GET", &format!("{prefix}/healthz"), &[], &[]);
+        assert_eq!(
+            response.status, 200,
+            "Health route through {prefix:?} proxy"
+        );
+        assert_eq!(response.json()["ok"], true);
+        let response = backend.raw_request(
+            "GET",
+            &format!("{prefix}/api/ping"),
+            &[("Origin", origin.as_str())],
+            &[],
+        );
+        assert_eq!(
+            response.status, 401,
+            "Stripped routes retain authentication"
+        );
+        for socket in ["/ws", "/herdr/ws"] {
+            let response = backend.raw_request(
+                "GET",
+                &format!("{prefix}{socket}"),
+                &[("Origin", origin.as_str())],
+                &[],
+            );
+            assert_eq!(
+                response.status, 403,
+                "WebSocket route through {prefix:?} proxy retains its ticket checks"
+            );
+        }
+        let response = backend.raw_request(
+            "POST",
+            &format!("{prefix}/api/connect"),
+            &[
+                ("Origin", origin.as_str()),
+                ("Content-Type", "application/json"),
+            ],
+            br#"{"token":"test-local-pairing-token-123456789","noSession":true}"#,
+        );
+        assert_eq!(response.status, 200);
+        assert!(
+            response.headers.contains("Path=/terminal/"),
+            "Cookie scope retains the public mount"
+        );
+        let token = response.json()["accessToken"].as_str().unwrap().to_owned();
+        let bearer = format!("Bearer {token}");
+        let response = backend.raw_request(
+            "GET",
+            &format!("{prefix}/api/ping"),
+            &[
+                ("Origin", origin.as_str()),
+                ("Authorization", bearer.as_str()),
+            ],
+            &[],
+        );
+        assert_eq!(response.status, 200, "Paired API through {prefix:?} proxy");
+    }
+}
+
+#[test]
+fn public_mounts_can_overlap_unmounted_route_names() {
+    let backend = Backend::start_with_base("server", "/herdr");
+    for path in ["/herdr/healthz", "/healthz"] {
+        assert_eq!(backend.raw_request("GET", path, &[], &[]).status, 200);
     }
 }
 
