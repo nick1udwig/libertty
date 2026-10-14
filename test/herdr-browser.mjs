@@ -167,7 +167,7 @@ try {
   await until(async () => (await text()).includes('Live Herdr terminal'), 'restore initial terminal');
   assert.equal(await tab(0).getAttribute('data-status'), 'idle'); assert.equal(await tab(1).getAttribute('data-status'), 'working');
   const idle = await tab(0).locator('.herdr-status-dot').evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderColor }));
-  assert.equal(idle.fill, 'rgba(0, 0, 0, 0)'); assert.equal(idle.border, 'rgb(166, 227, 161)');
+  assert.equal(idle.fill, 'rgba(0, 0, 0, 0)'); assert.equal(idle.border, 'rgb(168, 240, 160)');
   assert.equal(await terminal.locator('#shortcut-buttons').textContent(), await shell.locator('#shortcut-buttons').textContent());
   await page.locator('#workspace-shortcuts').waitFor({ state: 'visible' });
   assert.equal(await terminal.locator('.input-dock').isVisible(), false, 'Embedded pane delegates shortcuts to the workspace');
