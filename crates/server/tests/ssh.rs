@@ -1,7 +1,7 @@
 use rand::rngs::OsRng;
 use serde_json::{Value, json};
 use ssh_key::{Algorithm, LineEnding, PrivateKey};
-use std::{os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
+use std::{net::SocketAddr, os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
 use termai_server::{
     files,
     filesystem::FileSystem,
@@ -12,6 +12,22 @@ use termai_server::{
 };
 use tokio::{io::AsyncReadExt, sync::mpsc};
 use tokio_util::sync::CancellationToken;
+
+async fn probe_sshd(socket: tokio::net::TcpSocket, address: SocketAddr) -> std::io::Result<()> {
+    // A loopback socket can connect to itself while sshd has not bound its port.
+    if socket.local_addr()? == address {
+        return Err(std::io::Error::other("SSH probe would connect to itself"));
+    }
+    let mut stream = socket.connect(address).await?;
+    let mut banner = [0; 4];
+    stream.read_exact(&mut banner).await?;
+    if &banner != b"SSH-" {
+        return Err(std::io::Error::other(
+            "SSH probe received an invalid banner",
+        ));
+    }
+    Ok(())
+}
 
 struct Fixture {
     directory: tempfile::TempDir,
@@ -62,8 +78,8 @@ impl Fixture {
         .trim()
         .to_owned();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
+        let address = listener.local_addr().unwrap();
+        let port = address.port();
         let config = format!("{root}/sshd_config");
         // The loopback remote must use the same supported Bash as local tests.
         let bash = termai_server::shell::local_bash(&std::env::vars().collect()).unwrap();
@@ -80,21 +96,40 @@ impl Fixture {
             }
             .into()
         });
-        let child = tokio::process::Command::new(executable)
+        let log = directory.path().join("sshd.log");
+        let stderr = std::fs::File::create(&log).unwrap();
+        // Reserve the server port until its configuration is ready to launch.
+        drop(listener);
+        let mut child = tokio::process::Command::new(executable)
             .args(["-D", "-e", "-f", &config])
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(stderr)
             .kill_on_drop(true)
             .spawn()
             .unwrap();
-        for _ in 0..100 {
-            if tokio::net::TcpStream::connect(("127.0.0.1", port))
-                .await
-                .is_ok()
-            {
-                break;
+        let readiness = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(status) = child.try_wait()? {
+                    return Err(std::io::Error::other(format!(
+                        "SSH fixture exited before readiness: {status}"
+                    )));
+                }
+                let socket = tokio::net::TcpSocket::new_v4()?;
+                socket.bind("127.0.0.1:0".parse().unwrap())?;
+                if matches!(
+                    tokio::time::timeout(Duration::from_millis(200), probe_sshd(socket, address))
+                        .await,
+                    Ok(Ok(()))
+                ) {
+                    return Ok(());
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+        })
+        .await;
+        if !matches!(readiness, Ok(Ok(()))) {
+            let diagnostics = tokio::fs::read_to_string(&log).await.unwrap_or_default();
+            panic!("SSH fixture failed to start: {readiness:?}\n{diagnostics}");
         }
         let input = json!({"host":"127.0.0.1","port":port,"username":user,"privateKey":identity.to_openssh(LineEnding::LF).unwrap().to_string(),"passphrase":"unused-for-plain-key"});
         let pin = fingerprint(&host.public_key().to_bytes().unwrap());
@@ -132,6 +167,59 @@ impl Fixture {
         self.child.wait().await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn sshd_probe_rejects_loopback_self_connections() {
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let address = socket.local_addr().unwrap();
+    assert!(
+        probe_sshd(socket, address)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("connect to itself")
+    );
+}
+
+#[tokio::test]
+async fn sshd_probe_waits_for_an_ssh_banner() {
+    use tokio::io::AsyncWriteExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let mut probe = tokio::spawn(probe_sshd(socket, address));
+    let (mut stream, _) = listener.accept().await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), &mut probe)
+            .await
+            .is_err()
+    );
+    stream.write_all(b"SSH-2.0-fixture\r\n").await.unwrap();
+    probe.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn sshd_probe_rejects_non_ssh_listeners() {
+    use tokio::io::AsyncWriteExt;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let socket = tokio::net::TcpSocket::new_v4().unwrap();
+    socket.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let probe = tokio::spawn(probe_sshd(socket, address));
+    let (mut stream, _) = listener.accept().await.unwrap();
+    stream.write_all(b"HTTP/1.1 200 OK\r\n").await.unwrap();
+    assert!(
+        probe
+            .await
+            .unwrap()
+            .unwrap_err()
+            .to_string()
+            .contains("invalid banner")
+    );
+}
+
 #[tokio::test]
 async fn remote_authentication_pins_facts_and_bounded_channels() {
     let fixture = Fixture::start().await;

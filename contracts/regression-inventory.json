@@ -601,6 +601,9 @@
       "source": "crates/server/tests/ssh.rs",
       "owner": "rust",
       "assertions": [
+        "sshd_probe_rejects_loopback_self_connections",
+        "sshd_probe_waits_for_an_ssh_banner",
+        "sshd_probe_rejects_non_ssh_listeners",
         "remote_authentication_pins_facts_and_bounded_channels",
         "remote_pty_and_sftp_share_session_guards_and_file_actions",
         "compressed_ssh_selected_file_unchanged_and_delta_preserve_remote_bytes",
