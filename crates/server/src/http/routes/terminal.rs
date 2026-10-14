@@ -260,87 +260,15 @@ pub(super) async fn api_reading_file(
     Ok(binary_response(file.mime, file.data))
 }
 
-pub(super) async fn api_context(
-    _app: &Arc<App>,
-    ctx: RequestContext<2>,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
-    return ok(
-        serde_json::to_value(session.snapshot(true).await.map_err(fail)?.0)
-            .map_err(|e| fail(e.to_string()))?,
-    );
-}
-
 pub(super) async fn api_suggest(
     _app: &Arc<App>,
     ctx: RequestContext<2>,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let session = ctx.session.unwrap();
-    if session.engine_mode != "server" {
-        return Err((
-            StatusCode::CONFLICT,
-            "This connection computes suggestions in the client.".into(),
-        ));
-    }
     let input: crate::protocol::SuggestRequest = typed_body(&mut req, 16384).await?;
     let text = input.text.as_str();
     return ok(bounded(async |cancel| session.suggest(text, cancel).await).await?);
-}
-
-pub(super) async fn api_facts(
-    _app: &Arc<App>,
-    ctx: RequestContext<2>,
-    mut req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
-    let input = body(&mut req, 16384).await?;
-    return ok(bounded(async |cancel| {
-        if input["kind"] == "context" {
-            session
-                .context(input["known"].as_str(), input["paths"] != false)
-                .await
-        } else if input["kind"] == "repair" {
-            if input.get("key").is_none() {
-                let prompt = session.state().prompt;
-                if input
-                    .get("prompt")
-                    .is_some_and(|value| value.as_u64() != Some(prompt))
-                {
-                    return Err("Shell context changed. Try again.".into());
-                }
-                let result = session
-                    .suggest(
-                        input["text"]
-                            .as_str()
-                            .filter(|text| text.encode_utf16().count() <= 2000)
-                            .ok_or("Expected command text under 2,000 characters.")?,
-                        cancel,
-                    )
-                    .await?;
-                if session.state().prompt != prompt {
-                    return Err("Shell context changed. Try again.".into());
-                }
-                return Ok(result["candidates"].clone());
-            }
-            session
-                .repair(
-                    input["key"].as_str().ok_or("Expected a context key.")?,
-                    input["catalogKey"]
-                        .as_str()
-                        .ok_or("Expected a catalog key.")?,
-                    input["text"].as_str().ok_or("Expected command text.")?,
-                    cancel,
-                )
-                .await
-        } else if let Some(key) = input["key"].as_str() {
-            session.read_facts(key, &input["operations"], cancel).await
-        } else {
-            Err("Expected a context key.".into())
-        }
-    })
-    .await?);
 }
 
 pub(super) async fn api_new(

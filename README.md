@@ -33,12 +33,11 @@ Linux x86_64, Linux ARM64 and macOS Apple Silicon are release targets, with auto
 
 ## Build and run
 
-Building from source requires **Rust 1.89+**, the **wasm32-unknown-unknown** target, **Node.js 22.18+**, a native C/C++ build toolchain, **Bash 4.4+**, **Python 3.8+**, and `base64`.
+Building from source requires **Rust 1.89+**, **Node.js 22.18+**, a native C/C++ build toolchain, **Bash 4.4+**, **Python 3.8+**, and `base64`.
 On macOS, install modern Bash with `brew install bash`.
-The Rust server uses a native PTY, and the same Rust engine runs natively or as browser WebAssembly.
+The Rust server uses a native PTY and runs the repair engine beside local or SSH host facts.
 
 ```sh
-rustup target add wasm32-unknown-unknown
 npm ci
 npm run build
 npm start
@@ -96,7 +95,7 @@ Keep termai running; Tailscale Serve does not start it for you.
 - [Technical reference](docs/reference.md): shell integration, command repair, deployment and testing.
 - [Herdr details](docs/herdr.md): sessions, mobile sizing and notifications.
 - [Runtime plugin experiment](docs/plugins.md): loading packages, plugin API and connection lifetimes.
-- [Workspace architecture](docs/workspace.md), [shared engine](docs/shared-engine.md), and [client architecture](docs/client-architecture.md).
+- [Workspace architecture](docs/workspace.md), [shared engine](docs/shared-engine.md), and [historical client architecture](docs/client-architecture.md).
 - [Pairing security review](docs/pairing-security.md).
 - [Rust migration](docs/rust-migration.md): contracts, active regression coverage and platform verification.
 

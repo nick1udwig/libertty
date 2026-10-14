@@ -46,16 +46,11 @@ test('all migration schemas compile and every API route has a resolvable request
   }
 });
 
-test('request contracts reject malformed objects, UTF-16 overflow, invalid fact variants and numeric bounds', () => {
+test('request contracts reject malformed objects, UTF-16 overflow, numeric bounds', () => {
   const suggest = validate('SuggestRequest');
   assert.ok(suggest({ text: 'echo hello', future: true })); assert.ok(suggest({ text: '🌍'.repeat(1000) }));
   for (const body of [null, [], 'text', {}, { text: 1 }, { text: '🌍'.repeat(1001) }]) assert.equal(suggest(body), false, JSON.stringify(body));
-  const facts = validate('FactsRequest');
-  assert.ok(facts({ key: 'context', operations: [{ kind: 'entries', path: '/fixture', limit: 10000 }, { kind: 'stat', path: '/fixture/file' }] }));
-  for (const operations of [[], Array(65).fill({ kind: 'stat', path: '/' }), [null], [{ kind: 'exec', command: 'touch file' }],
-    [{ kind: 'stat', path: 'relative' }], [{ kind: 'stat', path: '/bad\0path' }], [{ kind: 'entries', path: '/', limit: 0 }],
-    [{ kind: 'entries', path: '/', limit: 10001 }], [{ kind: 'entries', path: '/', limit: 1.5 }], [{ kind: 'help', command: 'tool', route: ['unknown;command'] }],
-    [{ kind: 'syntax', command: 'echo\ncontrol' }]]) assert.equal(facts({ key: 'context', operations }), false, JSON.stringify(operations));
+
 });
 
 test('optional properties remain distinct from null and file editing measures encoded bytes', () => {
@@ -96,7 +91,7 @@ test('persisted pairing credentials require hashed version-one records and bound
     { version: 1, tokenHash: hash, credentials: Array(257).fill(hash) }, { version: 1, tokenHash: hash, credentials: [null] }]) assert.equal(pairings(value), false);
 });
 
-test('asynchronous native/Wasm messages obey their contracts', () => {
+test('asynchronous native engine messages obey their contracts', () => {
   const request = validate('AsyncEngineRequest');
   assert.ok(request({ request: 1, operation: 'tokens', args: ['echo hello'], now: 0 }));
   assert.equal(request({ request: 0, operation: 'tokens', args: ['echo hello'], now: 0 }), false);

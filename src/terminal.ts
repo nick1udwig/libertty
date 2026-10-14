@@ -490,7 +490,6 @@ function socketMessage(event: MessageEvent) {
     if (capturedConnection === message.id) capturedConnection = undefined;
   } else if (message.type === 'hello') {
     replayTarget = message.lastSeq ?? after;
-    suggestions.setMode(message.engine);
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
@@ -512,10 +511,8 @@ function socketMessage(event: MessageEvent) {
     state = message.state; notify('terminal-state', { state }); $('cwd').textContent = state.cwd; $('cwd').title = state.cwd;
     dictation.prompt();
     updateRun();
-    inline.onState(state); suggestions.onState(state.prompt);
+    inline.onState(state);
     revealReplay();
-  } else if (message.type === 'context') {
-    if (message.context.prompt === state.prompt && state.ready) suggestions.updateContext(message);
   } else if (message.type === 'edit-result') {
     edits.get(message.id)?.(message.accepted); edits.delete(message.id);
     if (!message.accepted) state.inputRevision = message.revision;

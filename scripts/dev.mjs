@@ -22,7 +22,6 @@ async function build(command, args) {
   if (code !== 0) throw new Error(`${command} failed: ${signal || code}`);
 }
 try {
-  await build(process.execPath, ['scripts/build-rust-engine.mjs']);
   await build('cargo', ['build', '--locked', '-p', 'termai-server', '--bin', 'termai']);
   const segments = (process.env.TERMAI_BASE_PATH || '').split('/').filter(Boolean);
   if (segments.some(segment => !/^[A-Za-z0-9_-]+$/.test(segment))) throw Error('Invalid TERMAI_BASE_PATH.');

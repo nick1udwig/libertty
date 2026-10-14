@@ -39,7 +39,6 @@ pub struct Config {
     pub public_base: String,
     pub data_directory: PathBuf,
     pub dist: PathBuf,
-    pub engine: String,
     pub allowed_hosts: HashSet<String>,
     pub allowed_origins: HashSet<String>,
     pub release: Option<Value>,
@@ -104,10 +103,6 @@ impl Config {
             "TERMAI_DATA_DIR",
             &format!("{home}/.local/share/termai"),
         ));
-        let engine = setting("TERMAI_ENGINE", "server");
-        if !["server", "client"].contains(&engine.as_str()) {
-            return Err("TERMAI_ENGINE must be server or client.".into());
-        }
         let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let packaged = crate::release::packaged_root().map(|root| root.join("dist"));
         let dist = std::env::var_os("TERMAI_DIST_DIR")
@@ -121,7 +116,6 @@ impl Config {
             public_base,
             data_directory,
             dist,
-            engine,
             allowed_hosts,
             allowed_origins: set("TERMAI_ALLOWED_ORIGINS", ""),
             release: crate::release::metadata(),
@@ -400,15 +394,9 @@ impl App {
                     .to_string_lossy()
                     .into_owned()
             });
-        let session = Session::start(
-            cwd,
-            self.commands.clone(),
-            self.config.engine.clone(),
-            files,
-            self.services.clone(),
-        )
-        .await
-        .map_err(fail)?;
+        let session = Session::start(cwd, self.commands.clone(), files, self.services.clone())
+            .await
+            .map_err(fail)?;
         if cancel.is_cancelled() || !self.owners.lock().unwrap().has(owner) {
             session.dispose().await;
             return Err(fail("Session ended."));
@@ -473,13 +461,7 @@ impl App {
         }
         drop(registry);
         let host = ssh::SSHHost::connect(input, self.vault.clone(), system, files, &cancel).await?;
-        let session = Session::start_remote(
-            host.clone(),
-            self.config.engine.clone(),
-            files,
-            self.services.clone(),
-        )
-        .await;
+        let session = Session::start_remote(host.clone(), files, self.services.clone()).await;
         let session = match session {
             Ok(session) => session,
             Err(error) => {

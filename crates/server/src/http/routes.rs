@@ -271,16 +271,8 @@ pub(super) fn router() -> Router<Arc<App>> {
             axum::routing::post(endpoint!(ssh_routes::api_ssh_captured, RequestContext<2>)),
         )
         .route(
-            "/api/context",
-            axum::routing::get(endpoint!(terminal_routes::api_context, RequestContext<2>)),
-        )
-        .route(
             "/api/suggest",
             axum::routing::post(endpoint!(terminal_routes::api_suggest, RequestContext<2>)),
-        )
-        .route(
-            "/api/facts",
-            axum::routing::post(endpoint!(terminal_routes::api_facts, RequestContext<2>)),
         )
         .route(
             "/api/new",

@@ -8,12 +8,11 @@ The MVP uses **Ghostty `0.4.0-next.20.g1858a59`**, pinned to the browser build s
 
 ## Run locally
 
-Source builds require Rust **1.89+**, the `wasm32-unknown-unknown` target, Node **22.18+**, a C/C++ build toolchain, Bash **4.4+**, Python 3 (for static Python argument discovery), and `base64`.
+Source builds require Rust **1.89+**, Node **22.18+**, a C/C++ build toolchain, Bash **4.4+**, Python 3 (for static Python argument discovery), and `base64`.
 Developed and tested on Linux with Node 26 and Chromium.
 The Rust server uses `portable-pty` for terminal processes and one shared engine crate for native and browser WebAssembly execution.
 
 ```sh
-rustup target add wasm32-unknown-unknown
 npm ci
 npm run dev
 ```
@@ -106,11 +105,10 @@ Exact executable names take precedence, quoted text and free-form arguments are 
 
 ## What runs where
 
-Both execution modes use the same [shared repair library](shared-engine.md).
-By default (`TERMAI_ENGINE=server`), `/api/suggest` runs the engine on the host with direct filesystem and subprocess access.
-With `TERMAI_ENGINE=client`, a dedicated browser worker runs that engine and obtains bounded host facts through `/api/facts`.
-The WebSocket handshake announces the mode without an additional request.
-SSH sessions use the browser engine through a remote facts adapter; see [workspace architecture](workspace.md).
+The [shared repair library](shared-engine.md) runs on the backend with direct filesystem and subprocess access.
+`/api/suggest` provides suggestions for tools, while terminal repair and dictation use the existing WebSocket.
+Local and SSH sessions use this same native engine.
+The retired `TERMAI_ENGINE` setting is ignored for compatibility with installed configurations.
 
 The browser uses Ghostty’s native terminal input textarea for dictation, a Ghostty canvas for terminal output, and a direct WebSocket connection.
 Output bypasses UI state and is drained in bounded animation-frame batches.
@@ -153,12 +151,11 @@ Only when these methods fail does parsing expand referenced paths and search liv
 History matching preserves explicit flags and quoted values: `-m "add init commit"` cannot match a historical `. m` or a different message.
 Bash syntax results are also cached, while file existence is still checked against the current filesystem.
 
-History and matching indexes, discovery traversal and learned schemas live with the engine, on the server or in the browser worker.
-Metadata is learned on demand and cached for ten minutes, scoped to directory and an opaque exported-environment identity.
-Server mode prewarms command metadata at prompts using a lightweight catalog.
-Client mode leaves command-help prewarming disabled; while the connected shell is at a prompt, lightweight context is pushed every two seconds with changed catalog fields and bounded prefetching of small cwd/home listings.
-Browser directory snapshots are verified in the final fact batch before a repair is accepted; changed directories trigger a bounded retry.
-Reloading the page loses worker caches, while native process-result caches remain on the server.
+History and matching indexes, discovery traversal and learned schemas live with the native backend engine.
+Metadata is learned on demand and cached for ten minutes, scoped to directory and exported-environment identity.
+The backend prewarms command metadata at prompts using a lightweight catalog.
+Host directory listings are verified before accepting repair, with a bounded retry when they change.
+Reloading the page retains backend engine caches until the session ends.
 New commands still work through live discovery when needed.
 
 When ordinary matching has no strong result, compact dictation such as `LSL` is split at each possible character boundary, retaining only real command names and known flags (for example, `ls -l` and `ls -L`).
@@ -283,8 +280,7 @@ Tailscale Serve strips its mount prefix.
 npm test
 npm run test:rust
 npm run build
-TEST_ENGINE=server npm run test:browser
-TEST_ENGINE=client TEST_BASE_PATH=/terminal npm run test:browser
+TEST_BASE_PATH=/terminal npm run test:browser
 npm run test:reconnect
 ```
 

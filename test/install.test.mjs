@@ -89,11 +89,11 @@ test('declining a missing Python prerequisite leaves the installation untouched'
 });
 test('upgrades retain custom environment settings and previous versions', async t => {
   const f = await fixture(t), installed = await install({ yes: true, 'no-service': true }, f.dependencies);
-  const config = JSON.parse(await readFile(installed.configFile, 'utf8')); config.env.PORT = '7600'; config.env.TERMAI_ENGINE = 'client';
+  const config = JSON.parse(await readFile(installed.configFile, 'utf8')); config.env.PORT = '7600'; config.env.TERMAI_CWD = '/custom/workspace';
   await writeFile(installed.configFile, JSON.stringify(config));
   f.metadata.commit = '2'.repeat(40); await writeFile(f.bundle + '/release.json', JSON.stringify(f.metadata));
   const updated = await install({ yes: true, 'no-service': true }, f.dependencies);
-  assert.equal(updated.config.env.PORT, '7600'); assert.equal(updated.config.env.TERMAI_ENGINE, 'client');
+  assert.equal(updated.config.env.PORT, '7600'); assert.equal(updated.config.env.TERMAI_CWD, '/custom/workspace');
   assert.ok(await stat(installed.releaseDir)); assert.notEqual(updated.releaseDir, installed.releaseDir);
 });
 test('machines without a user bus get a manual launcher without system service mutation', async t => {

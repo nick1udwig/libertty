@@ -74,19 +74,19 @@ esac
     }
     const load = (file: string) => import(pathToFileURL(path.join(root, file)).href);
     // Archived reference revisions remain available from Git for comparisons.
-    // The working tree runs exclusively through native Rust and its Wasm build.
+    // The working tree runs exclusively through native Rust.
     const rust = variant.ref === '.';
     const engine = rust ? undefined : await load(variant.client ? 'src/engine/suggestions.ts' : 'server/suggestions.ts');
     const discovery = rust ? undefined : await load(variant.client ? 'src/engine/discovery.ts' : 'server/discovery.ts');
-    const modules = variant.client ? {
+    const modules = variant.client && !rust ? {
       ...await load('src/remote-host.ts'), ...await load('src/directory-cache.ts'),
-      ...(rust ? await load('src/engine/wasm.ts') : { ...await load('server/facts.ts'), ...await load('server/help.ts'), ...await load('server/directories.ts'), ...await load('src/engine/path-repair.ts') }),
+      ...await load('server/facts.ts'), ...await load('server/help.ts'), ...await load('server/directories.ts'), ...await load('src/engine/path-repair.ts'),
     } : {};
     loaded.push({ ...variant, revision, engine, discovery, modules, rust });
   }
   if (process.env.BENCH_REVERSE === '1') loaded.reverse();
   for (const variant of loaded) {
-    const adapter = variant.rust ? await rustArchitectureAdapter(catalog, env, false, variant.modules.WasmEngine) : undefined;
+    const adapter = variant.rust ? await rustArchitectureAdapter(catalog, env) : undefined;
     rustPeers.push(adapter);
     Object.assign(variant, { adapter });
   }
@@ -102,9 +102,9 @@ esac
         await rust?.reset();
         const help = variant.client && !rust ? new m.HelpProvider() : undefined;
         const source = { state: { cwd, prompt: 1, ready: true, exited: false }, catalog: async (includePaths = true) => includePaths ? catalog : { ...catalog, paths: [] }, environment: async () => env, help };
-        const facts = variant.client ? rust || new m.Facts(source) : undefined;
-        const cache = variant.client ? new m.ContextCache() : undefined;
-        const syntax = new Map<string, boolean>(), directories = variant.client && variant.optimized ? new m.DirectoryCache() : undefined;
+        const facts = variant.client && !rust ? new m.Facts(source) : undefined;
+        const cache = variant.client && !rust ? new m.ContextCache() : undefined;
+        const syntax = new Map<string, boolean>(), directories = variant.client && variant.optimized && !rust ? new m.DirectoryCache() : undefined;
         let host: any, requests = 0, bytes = 0, hostMs = 0, pushKey: string | undefined, pushDirectoryVersion: string | undefined;
         const discovery = rust ? { dispose() {} } : variant.client ? new variant.discovery!.Discovery({ help: (command: string, route: string[]) => host.help(command, route), describe: (command: string) => host.describe(command) }) : new variant.discovery!.Discovery();
         const transport = async (body: any, signal: AbortSignal) => {

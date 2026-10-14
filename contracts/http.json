@@ -85,29 +85,6 @@
       ]
     },
     {
-      "method": "GET",
-      "path": "/api/context",
-      "authentication": "paired-client",
-      "origin": "optional",
-      "request": null,
-      "response": {
-        "$ref": "#/$defs/Catalog"
-      },
-      "requestEncoding": "none",
-      "responseEncoding": "application/json",
-      "bodyLimitUTF16": 0,
-      "error": {
-        "$ref": "#/$defs/Error"
-      },
-      "statuses": [
-        200,
-        400,
-        401,
-        403,
-        404
-      ]
-    },
-    {
       "method": "POST",
       "path": "/api/suggest",
       "authentication": "paired-client",
@@ -131,47 +108,6 @@
         403,
         404,
         409
-      ],
-      "engine": "server",
-      "timeoutMs": 5000
-    },
-    {
-      "method": "POST",
-      "path": "/api/facts",
-      "authentication": "paired-client",
-      "origin": "required",
-      "request": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/ContextRequest"
-          },
-          {
-            "$ref": "#/$defs/FactsRequest"
-          }
-        ]
-      },
-      "response": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/ContextReply"
-          },
-          {
-            "$ref": "#/$defs/FactsReply"
-          }
-        ]
-      },
-      "requestEncoding": "application/json",
-      "responseEncoding": "application/json",
-      "bodyLimitUTF16": 16384,
-      "error": {
-        "$ref": "#/$defs/Error"
-      },
-      "statuses": [
-        200,
-        400,
-        401,
-        403,
-        404
       ],
       "timeoutMs": 5000
     },

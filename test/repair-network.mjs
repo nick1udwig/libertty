@@ -18,7 +18,7 @@ await writeFile(join(fixture, 'tool.py'), "import argparse\np=argparse.ArgumentP
 await writeFile(join(fixture, 'history'), 'git init\n');
 const server = spawn(join(root, 'target/debug/termai'), [], { cwd: root, env: {
   ...process.env, HOME: fixture, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: token,
-  TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_DATA_DIR: join(fixture, 'data'), TERMAI_ENGINE: process.env.TEST_ENGINE || 'server',
+  TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_DATA_DIR: join(fixture, 'data'),
   TERMAI_HISTORY_FILE: join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: join(fixture, 'missing-history'),
 }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = '', socket;

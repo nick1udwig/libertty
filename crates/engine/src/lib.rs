@@ -18,8 +18,6 @@ pub mod transfer_command;
 pub mod types;
 mod util;
 pub mod validation;
-#[cfg(target_arch = "wasm32")]
-mod wasm;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -259,7 +257,7 @@ pub fn dispatch(request: &Request) -> Result<Value, String> {
         _ => Err("Unknown engine operation.".into()),
     }
 }
-/// Native and Wasm expose exactly the same JSON calling convention.
+/// JSON calling convention for native parity tools.
 pub fn exchange(bytes: &[u8]) -> Vec<u8> {
     let response = if bytes.len() > INPUT_LIMIT {
         Err("Engine request exceeds 64 MiB.".to_owned())

@@ -215,7 +215,8 @@ fn public_mounts_can_overlap_unmounted_route_names() {
 }
 
 #[test]
-fn coarse_repair_reads_its_own_context_and_rejects_stale_prompts() {
+fn suggestions_use_native_context_and_legacy_fact_routes_are_absent() {
+    // Old installed configs continue to start, always using the native engine.
     let backend = Backend::start("client");
     let owner = backend.pair();
     let id = backend
@@ -224,19 +225,13 @@ fn coarse_repair_reads_its_own_context_and_rejects_stale_prompts() {
         .as_str()
         .unwrap()
         .to_owned();
-    let path = format!("/api/facts?session={id}");
+    let path = format!("/api/suggest?session={id}");
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        let result = backend.api(
-            "POST",
-            &path,
-            Some(&owner),
-            Some(json!({"kind":"repair","text":"LSL"})),
-        );
+        let result = backend.api("POST", &path, Some(&owner), Some(json!({"text":"LSL"})));
         if result.status == 200 {
             assert!(
-                result
-                    .json()
+                result.json()["candidates"]
                     .as_array()
                     .unwrap()
                     .iter()
@@ -246,21 +241,27 @@ fn coarse_repair_reads_its_own_context_and_rejects_stale_prompts() {
         }
         assert!(
             Instant::now() < deadline,
-            "Repair did not become ready: {}",
+            "Suggestions did not become ready: {}",
             result.json()
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert_ne!(
+    assert_eq!(
         backend
             .api(
                 "POST",
-                &path,
+                "/api/facts",
                 Some(&owner),
-                Some(json!({"kind":"repair","text":"LSL","prompt":999999}))
+                Some(json!({"kind":"context"}))
             )
             .status,
-        200
+        404
+    );
+    assert_eq!(
+        backend
+            .api("GET", "/api/context", Some(&owner), None)
+            .status,
+        404
     );
 }
 

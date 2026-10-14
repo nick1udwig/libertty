@@ -30,7 +30,7 @@ The HttpOnly session cookie is persistent and renewed on reconnect.
 Changing the pairing token revokes saved credentials.
 
 Native sessions retain the existing server/client engine selection and transport.
-SSH sessions use the browser worker and shared repair library with `SSHHost` as the remote facts adapter: SFTP directory data, shell context, syntax checks, verified help routes and static Python inspection.
+SSH sessions use the native repair library on the backend with `SSHHost` supplying SFTP directory data, shell context, syntax checks, verified help routes and static Python inspection.
 Terminal output and fact channels share one SSH connection.
 No termai daemon is installed on the SSH target.
 SSH needs a POSIX environment with Bash, SFTP, `mktemp` and `base64`.

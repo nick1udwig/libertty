@@ -1,83 +1,47 @@
-# One repair engine and coarse network operations
+# Native repair engine and coarse network operations
 
-`crates/engine` implements the shared library in Rust.
-The backend links it natively, and parity tools can load its WebAssembly build through `src/engine/wasm.ts`.
+`crates/engine` implements the repair library in Rust, linked natively by the backend.
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
-The library's types live in `crates/engine/src/types.rs`, and it has no filesystem, subprocess, browser, network or terminal effects.
-Historical TypeScript revisions remain available in Git for parity comparisons.
+The library has no filesystem, subprocess, browser, network or terminal effects.
+The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.
+Historical TypeScript revisions remain in Git for benchmark comparisons.
 
-The default remains server execution: `npm start` or `npm run dev`.
-Use `TERMAI_ENGINE=client npm start` (or `npm run dev`) to retain the alternate coordinator for tool and protocol compatibility.
-Both production modes keep interpretation and dependent host facts on the backend, avoiding sequential browser fact exchanges.
-The WebSocket hello message announces the choice to the frontend, without an additional request.
+## Execution and adapters
 
-## Adapters
+All repairs execute beside local or SSH host facts on the backend.
+The retired `TERMAI_ENGINE` setting is ignored, and the hello message always announces `server`.
+The former browser worker, Wasm bridge, `/api/context` and `/api/facts` endpoints have been removed.
+Tools can request suggestions through `/api/suggest`.
 
-- `crates/server/src/engine.rs` supplies native host facts and delegates to the library's bounded asynchronous runtime.
-  Native help, script and completion adapters retain probe-pool capacity and cancellation.
-- `src/terminal.ts` sends one `repair` message over the existing terminal connection and receives the applied line and alternatives in `repair-result`.
-  Explicit reading intent keeps reader actions intact, and cancellation, attachment, prompt, and revision guards protect concurrent edits.
-- Backend microphone dictation repairs its transcript locally and publishes alternatives without a browser relay.
-  Herdr checks ownership, foreground shell identity, and the last dictated span before replacement.
-- `src/suggestion-worker.ts` retains a coarse suggestion-only adapter for tools without fetching context keys or catalogs first.
-- Each `Discovery` instance owns a session's learned metadata.
-  Request-owned host futures keep cancellation and fact memoization isolated between overlapping repairs.
-- Terminal edits and execution remain outside the library.
-  Host adapters obtain facts; the engine decides how to interpret and rank them.
+`crates/server/src/engine.rs` supplies native host facts and delegates to the library's bounded asynchronous runtime.
+Native help, script and completion adapters retain probe-pool capacity and cancellation.
+`src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
+Cancellation, attachment, prompt and revision guards protect concurrent edits.
+Backend microphone dictation repairs its transcript locally and publishes alternatives.
+Herdr additionally checks ownership, foreground shell identity and the last dictated span before replacement.
 
-Native execution calls the filesystem and subprocess providers directly.
-It does not serialize intermediate facts, start a browser repair worker or push periodic catalogs.
-Prompt-time metadata prewarming is retained.
-Native discovery uses routes already verified by the engine instead of rewalking every help ancestor as an HTTP boundary must.
-File-operand validation requests metadata without an extra executable-access check, preserving master's original I/O behavior.
-
-Managed SSH sessions honor the configured mode instead of forcing browser interpretation.
-Both coordinators obtain lightweight context on the backend and fetch targeted facts during repair.
-Periodic catalog and directory pushes are removed, and prompt-time prewarming is shared between coordinators.
+Each engine owns its learned metadata, while request-owned host futures isolate cancellation and fact memoization.
+Prompt-time metadata prewarming remains shared by local and SSH sessions.
 Herdr retains an engine and help provider per terminal context and invalidates them when the shell or environment changes.
+Terminal edits and execution remain outside the engine library.
 
 ## Validation and performance
 
-The architecture benchmark compares historical implementations with the native backend used by both current coordinators.
-Candidate arrays must agree within each implementation cohort, while intentional coverage improvements may differ from historical expectations.
+Run `npm run verify:local` for native Rust, JavaScript, installer, saved-data and browser coverage.
+The browser suite runs each application harness once, including mounted-path checks.
+Run `BENCH_SUITE=shared npm run bench:architecture` for native engine comparisons with historical TypeScript implementations.
+The benchmark retains candidate correctness, cold and warm latency, request-count budgets and reversed-order confirmation.
+Its adapter uses the native `engine_host` example without emulating the retired fact protocol.
+`BENCH_RTT`, `BENCH_REPEATS`, `BENCH_COLD_REPEATS` and `BENCH_OUTPUT` control measurement.
 Prepared-input timings exclude terminal application and real SSH traffic.
 
-Run `BENCH_SUITE=shared BENCH_BEFORE_MASTER=. BENCH_BEFORE_CLIENT=. BENCH_AFTER=. BENCH_RUST=1 BENCH_REPEATS=3 npm run bench:architecture`.
-By default, the after variants use a copied snapshot of the working tree; set `BENCH_AFTER` to a commit for a reproducible revision.
-`BENCH_RTT`, `BENCH_REPEATS`, `BENCH_COLD_REPEATS` and `BENCH_OUTPUT` control the measurement.
-Cold latency uses the median of fresh application-cache trials and retains the first call and individual cold samples separately.
-The original four-way architecture benchmark remains available without `BENCH_SUITE`.
+Run `node test/repair-network.mjs` for terminal transactions at injected 0/80/200 ms RTT.
+Known-buffer repair uses one request; an unknown browser-tracked line requires a guarded Readline snapshot first.
+The backend microphone obtains that snapshot directly through shell markers.
+SSH filesystem traversal, listing freshness, verified help ancestors and completion planning remain backend dependencies.
 
-Run `npm test`, `npm run test:rust` and `npm run build`, then `TEST_ENGINE=server npm run test:browser` and `TEST_ENGINE=client npm run test:browser`.
-`TEST_BASE_PATH=/t` checks a mounted deployment.
-Both browser modes reject worker creation, repair HTTP relays, and context pushes during dictation.
-Their directory regression requires one terminal request for repair and guarded application.
-Run `node test/repair-network.mjs` for actual terminal transactions at injected 0/80/200 ms RTT, including script, path, history, expression, and compound repair.
-
-The October 2026 transaction check sent 30 requests per coordinator across five cases, two sequential trials, and three injected RTTs, with exactly one repair request in every trial.
-It includes authoritative context acquisition, repair, guarded application, and the result acknowledgement, but excludes frontend painting and actual SSH transport latency.
-The initial trial at each RTT is labeled `first`, and only the first occurrence of each case starts without its case-specific metadata cache.
-Browser regressions separately check the resulting UI and reject any repair HTTP relay or separate replacement in the known-buffer directory case.
-Microphone and Herdr regressions check backend-produced alternatives, preserved surrounding input, and rejection after external edits.
-An unknown browser-tracked line still requires a guarded Readline snapshot before the repair transaction, so that path uses two dependent browser exchanges.
-The backend microphone obtains that snapshot directly through the shell markers, without a browser exchange.
-
-The remaining SSH dependencies are filesystem traversal, listing freshness checks, verified help ancestors, and completion planning.
-SFTP directory enumeration requires open, repeated read, and close operations, while a path walk must learn each intermediate directory before requesting its children.
-Independent operands and completion contexts now run concurrently, ordinary operand stats avoid `test -x`, and the complete repair runs beside the SSH adapter.
-Executable version checks use parallel PATH metadata requests, but SFTP timestamps can miss same-size rewrites within their timestamp resolution.
-The existing SSH integration suite verifies remote fact semantics and terminal guards, while these transaction measurements do not measure SSH packet counts or WAN latency.
-Retain the SFTP compatibility path and defer a persistent remote worker until an actual WAN trace shows that its remaining dependent filesystem or help phases dominate the latency budget.
-A worker should then accept bounded compound operations, share the Rust traversal and schema logic, and return independently validated results under a versioned protocol.
-Changing the browser transport alone cannot remove those backend-to-SSH dependencies.
-
-Terminal presentation now retains the last painted viewport during foreground recovery and shows a loading bar over it.
-The hello message includes the last replay sequence, so native terminals reveal their new canvas after replay drains and the renderer paints.
-Herdr uses its existing geometry and presentation acknowledgements, and the workspace retains its displayed tab across hidden states.
-Input and shortcuts remain unavailable while a retained viewport is being replaced.
-
-See the [Rust migration report](rust-migration.md) for current parity results, browser initialization measurements and platform gates.
-The [workspace implementation](workspace.md) supplies SSH and multiple backends through adapters to this engine.
+See the [CI checks](ci.md), [workspace implementation](workspace.md) and historical [Rust migration report](rust-migration.md).
+The results below describe the earlier TypeScript consolidation and its retired client coordinator.
 
 ## Historical TypeScript consolidation results (`516ad8f`)
 

@@ -1,5 +1,9 @@
 # Rust migration
 
+This report records the migration and its historical native/Wasm measurements.
+The client coordinator and Wasm tools have since been retired; current validation and build instructions are in [ci.md](ci.md) and [shared-engine.md](shared-engine.md).
+
+
 Issue [#10](https://github.com/nick1udwig/termai/issues/10) migrates the backend and shared engine while preserving the frontend and saved backend data.
 The reference revision is `455386b`, and the implementation branch is `feat/rust-backend`.
 Migration contracts, reference fixtures and benchmark baselines were captured before production conversion and remain available in Git history.
@@ -52,24 +56,20 @@ The release workflow requires Linux regression checks and packaged smoke checks 
 
 ## Run the migration checks
 
-Install Rust 1.89 or later and add the `wasm32-unknown-unknown` target before building the browser artifact.
-The browser Wasm harness requires Chromium, selected through `CHROME_PATH` when it is not available at `/usr/bin/chromium`.
+Install Rust 1.89 or later for native engine validation.
+The application browser harness requires Chromium, selected through `CHROME_PATH` when it is not available at `/usr/bin/chromium`.
 
 ```sh
 npm ci
-rustup target add wasm32-unknown-unknown
 npm run test:contracts
 npm run contracts:vocabulary -- --check
 npm run test:contracts
 npm run test:rust
 npm run test:rust-state
-npm run build:rust-engine
-npm run test:rust-browser
 npm run build
 npm test
 cargo build --locked -p termai-server --bin termai
-TEST_ENGINE=server TEST_PORT=3137 npm run test:browser
-TEST_ENGINE=client TEST_PORT=3138 TEST_BASE_PATH=/terminal npm run test:browser
+TEST_PORT=3137 TEST_BASE_PATH=/terminal npm run test:browser
 TEST_BASE_PATH=/terminal npm run test:reading
 node test/files-browser.mjs
 npm run test:herdr
@@ -267,7 +267,7 @@ The full architecture gate passes 1,440 exact candidate-array comparisons across
 ## Post-migration cleanup
 
 Rust is the only backend in the working tree and release packages.
-The frontend retains TypeScript wire types, its Wasm bridge and the shell helpers used by reading and transfer actions.
+The frontend retains TypeScript wire types, the shell helpers used by reading and transfer actions.
 Command and speech vocabulary comes from the canonical contract data rather than a second engine implementation.
 Archived migration fixtures, corpus-only checks, the retired regression ledger and recorded benchmark outputs are removed from the cleanup branch.
 Historical benchmark references are recovered into temporary directories from Git revision `0e0646c`, so performance comparisons remain available without shipping a Node backend.

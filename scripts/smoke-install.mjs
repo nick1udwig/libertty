@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
@@ -22,9 +22,6 @@ try {
   assert.match(execFileSync(launcher, ['--version'], { env, encoding: 'utf8' }), /termai \d+\.\d+\.\d+/);
   const configFile = home + '/.config/termai/config.json';
   const config = JSON.parse(await readFile(configFile, 'utf8'));
-  for (const engine of ['server', 'client']) {
-  config.env.TERMAI_ENGINE = engine;
-  await writeFile(configFile, JSON.stringify(config));
   // The managed config must set cwd, port and data paths even outside the release directory.
   backend = spawn(launcher, [], { env: { ...env, TERMAI_NO_RC: '1' }, cwd: home, stdio: 'ignore' });
   let ready = false;
@@ -40,8 +37,7 @@ try {
   assert.ok(ready, 'Installed launcher must start the packaged server.');
   const token = await readFile(home + '/.local/share/termai/pairing-token', 'utf8'); assert.ok(token.trim().length >= 32);
   const exited = once(backend, 'exit'); backend.kill(); await exited; backend = undefined;
-  }
-  console.log('Installed release passed: verified bootstrap, private config, user launcher and server readiness in both engine modes.');
+  console.log('Installed release passed: verified bootstrap, private config, user launcher and server readiness.');
 } finally {
   if (backend && backend.exitCode === null) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
   await rm(home, { recursive: true, force: true });

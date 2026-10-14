@@ -7,7 +7,6 @@ run('npm', ['run', 'ci:quick']);
 run('npm', ['run', 'contracts:vocabulary', '--', '--check']);
 run('cargo', ['fmt', '--all', '--', '--check']);
 run('cargo', ['clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings']);
-run('cargo', ['clippy', '--package', 'termai-engine', '--target', 'wasm32-unknown-unknown', '--lib', '--locked', '--', '-D', 'warnings']);
 run('npm', ['run', 'test:rust']);
 run('npm', ['run', 'build']);
 run('npm', ['test']);

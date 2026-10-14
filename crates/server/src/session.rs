@@ -2,7 +2,7 @@ use crate::{
     context,
     dictation::Recording,
     engine::NativeEngine,
-    facts::{self, Facts},
+    facts,
     help::HelpProvider,
     history,
     host::{HostServices, NativeHost},
@@ -26,7 +26,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use termai_engine::{Request, path, path_repair::directory_input, types::Catalog};
+use termai_engine::{Request, path, types::Catalog};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -134,7 +134,6 @@ struct Inner {
     input: crate::input_controller::Controller,
     captured: Option<Value>,
     captured_result: Option<Value>,
-    facts: Facts,
     results: VecDeque<(String, Value)>,
     reading: Captures,
     transfers: Transfers,
@@ -145,7 +144,6 @@ struct Inner {
 pub struct Session {
     inner: Mutex<Inner>,
     pub stream_id: String,
-    pub engine_mode: String,
     pub files_only: bool,
     pub directory: String,
     pub capture_flight: tokio::sync::Mutex<()>,
@@ -365,22 +363,19 @@ impl Session {
     pub async fn start(
         cwd: String,
         base_commands: Vec<String>,
-        engine_mode: String,
         files_only: bool,
         services: HostServices,
     ) -> Result<Arc<Self>, String> {
-        Self::start_host(cwd, base_commands, engine_mode, files_only, services, None).await
+        Self::start_host(cwd, base_commands, files_only, services, None).await
     }
     pub async fn start_remote(
         remote: Arc<crate::ssh::SSHHost>,
-        engine_mode: String,
         files_only: bool,
         services: HostServices,
     ) -> Result<Arc<Self>, String> {
         Self::start_host(
             remote.cwd.clone(),
             vec![],
-            engine_mode,
             files_only,
             services,
             Some(remote),
@@ -390,7 +385,6 @@ impl Session {
     async fn start_host(
         cwd: String,
         base_commands: Vec<String>,
-        engine_mode: String,
         files_only: bool,
         services: HostServices,
         remote: Option<Arc<crate::ssh::SSHHost>>,
@@ -448,7 +442,6 @@ impl Session {
         };
         let session = Arc::new(Self {
             stream_id: storage::random_hex(16),
-            engine_mode,
             files_only,
             directory: directory.clone(),
             capture_flight: tokio::sync::Mutex::new(()),
@@ -498,7 +491,6 @@ impl Session {
                 input_serial: 0,
                 captured: None,
                 captured_result: None,
-                facts: Facts::default(),
                 results: VecDeque::new(),
                 reading: Captures::default(),
                 transfers: Transfers::new(capture_cleanup.clone()),
@@ -769,7 +761,7 @@ impl Session {
         let first = inner.outputs.front().map_or(1, |o| o.seq);
         let changed = stream.is_some_and(|s| !s.is_empty() && s != self.stream_id);
         let gap = changed || after > inner.seq || (after > 0 && after < first - 1);
-        inner.send(json!({"type":"hello","streamId":self.stream_id,"engine":self.engine_mode,"reset":after==0||gap,"truncated":((after==0||changed)&&inner.truncated)||(gap&&!changed),"firstSeq":first,"lastSeq":inner.seq}));
+        inner.send(json!({"type":"hello","streamId":self.stream_id,"engine":"server","reset":after==0||gap,"truncated":((after==0||changed)&&inner.truncated)||(gap&&!changed),"firstSeq":first,"lastSeq":inner.seq}));
         inner.pending = inner
             .outputs
             .iter()
@@ -1404,40 +1396,6 @@ impl Session {
         inner.send(json!({"type":"pasted","text":text,"replace":false,"source":"dictation","repairing":target == "shell" && text.encode_utf16().count() <= 2000,"prompt":prompt,"revision":inner.state.input_revision}));
         true
     }
-    pub async fn context(&self, known: Option<&str>, include_paths: bool) -> Result<Value, String> {
-        let (catalog, env, prompt) = self.snapshot(include_paths).await?;
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
-            .facts
-            .context(prompt, catalog, &env, known, include_paths))
-    }
-    pub async fn read_facts(
-        &self,
-        key: &str,
-        operations: &Value,
-        cancel: &CancellationToken,
-    ) -> Result<Value, String> {
-        let operations = facts::validate(operations)?;
-        let (catalog, env, prompt) = self.snapshot(false).await?;
-        if facts::context_key(prompt, &catalog, &env) != key {
-            return Err("Shell context changed. Try again.".into());
-        }
-        let mut host = NativeHost::new(
-            self.services.clone(),
-            catalog.clone(),
-            env,
-            self.help.clone(),
-        );
-        host.remote = self.remote.clone();
-        let values = facts::read(&host, operations, cancel).await?;
-        let state = self.state();
-        if state.prompt != prompt || state.cwd != catalog.cwd || state.exited {
-            return Err("Shell context changed. Try again.".into());
-        }
-        Ok(json!(values))
-    }
     pub async fn suggest(&self, text: &str, cancel: &CancellationToken) -> Result<Value, String> {
         let (catalog, env, prompt) = self.snapshot(false).await?;
         let key = facts::context_key(prompt, &catalog, &env);
@@ -1610,61 +1568,6 @@ impl Session {
             inner.send(reply);
         });
     }
-    pub async fn repair(
-        &self,
-        key: &str,
-        catalog_key: &str,
-        text: &str,
-        cancel: &CancellationToken,
-    ) -> Result<Value, String> {
-        if text.encode_utf16().count() > 2000 {
-            return Err("Keep a command under 2,000 characters.".into());
-        }
-        let (current, env, prompt) = self.snapshot(false).await?;
-        if facts::context_key(prompt, &current, &env) != key {
-            return Err("Shell context changed. Try again.".into());
-        }
-        let mut catalog = self
-            .inner
-            .lock()
-            .unwrap()
-            .facts
-            .repair_catalog(key, catalog_key)
-            .ok_or("Shell context changed. Try again.")?;
-        if catalog.paths.is_empty() && directory_input(text).is_none() {
-            let (rich, rich_env, rich_prompt) = self.snapshot(true).await?;
-            if rich_prompt != prompt || facts::context_key(rich_prompt, &rich, &rich_env) != key {
-                return Err("Shell context changed. Try again.".into());
-            }
-            catalog.paths = rich.paths;
-        }
-        let mut host = NativeHost::new(
-            self.services.clone(),
-            catalog.clone(),
-            env.clone(),
-            self.help.clone(),
-        );
-        host.remote = self.remote.clone();
-        let mut candidates = None;
-        for _ in 0..3 {
-            host.verify_listings();
-            let value = self.engine.suggest(text, &host, cancel).await?;
-            if host.listings_unchanged(cancel).await? {
-                candidates = Some(value);
-                break;
-            }
-        }
-        let candidates = candidates.ok_or("Directory changed. Try again.")?;
-        let (latest, latest_env, latest_prompt) = self.snapshot(false).await?;
-        if latest_prompt != prompt
-            || latest.cwd != catalog.cwd
-            || self.state().exited
-            || facts::context_key(latest_prompt, &latest, &latest_env) != key
-        {
-            return Err("Shell context changed. Try again.".into());
-        }
-        Ok(candidates)
-    }
     fn schedule_prewarm(self: &Arc<Self>) {
         if self.lifetime.is_cancelled() || self.prewarming.swap(true, Ordering::SeqCst) {
             return;
@@ -1825,15 +1728,9 @@ mod tests {
         fn kill(&self) {}
     }
     async fn fixture() -> (Arc<Session>, Stub, u64, mpsc::UnboundedReceiver<Transport>) {
-        let session = Session::start(
-            "/tmp".into(),
-            vec![],
-            "client".into(),
-            true,
-            HostServices::new(),
-        )
-        .await
-        .unwrap();
+        let session = Session::start("/tmp".into(), vec![], true, HostServices::new())
+            .await
+            .unwrap();
         let stub = Stub::default();
         {
             let mut inner = session.inner.lock().unwrap();

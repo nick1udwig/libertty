@@ -5,16 +5,8 @@
   "description": "Reference wire types; optional fields are omitted, and explicit null is accepted only where declared.",
   "$defs": {
     "EngineMode": {
-      "anyOf": [
-        {
-          "const": "server",
-          "type": "string"
-        },
-        {
-          "const": "client",
-          "type": "string"
-        }
-      ]
+      "const": "server",
+      "type": "string"
     },
     "DictationTarget": {
       "anyOf": [
@@ -635,46 +627,6 @@
           "type": "object",
           "properties": {
             "type": {
-              "const": "context",
-              "type": "string"
-            },
-            "context": {
-              "$ref": "#/$defs/ContextReply"
-            },
-            "directories": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "path": {
-                    "type": "string",
-                    "maxLength": 4096,
-                    "x-utf16MaxLength": 4096,
-                    "pattern": "^[^\\u0000]*$"
-                  },
-                  "snapshot": {
-                    "$ref": "#/$defs/DirectorySnapshot"
-                  }
-                },
-                "required": [
-                  "path",
-                  "snapshot"
-                ],
-                "additionalProperties": true
-              }
-            }
-          },
-          "required": [
-            "type",
-            "context",
-            "directories"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
               "const": "hello",
               "type": "string"
             },
@@ -1213,442 +1165,6 @@
           "additionalProperties": true
         }
       ]
-    },
-    "Fact": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "scoped",
-              "type": "string"
-            },
-            "cwd": {
-              "type": "string"
-            },
-            "operation": {
-              "$ref": "#/$defs/Fact"
-            }
-          },
-          "required": [
-            "kind",
-            "cwd",
-            "operation"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "stat",
-              "type": "string"
-            },
-            "path": {
-              "type": "string",
-              "maxLength": 4096,
-              "x-utf16MaxLength": 4096,
-              "pattern": "^/[^\\u0000]*$"
-            }
-          },
-          "required": [
-            "kind",
-            "path"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "lookup",
-              "type": "string"
-            },
-            "path": {
-              "type": "string",
-              "maxLength": 4096,
-              "x-utf16MaxLength": 4096,
-              "pattern": "^/[^\\u0000]*$"
-            }
-          },
-          "required": [
-            "kind",
-            "path"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "directory",
-              "type": "string"
-            },
-            "path": {
-              "type": "string",
-              "maxLength": 4096,
-              "x-utf16MaxLength": 4096,
-              "pattern": "^/[^\\u0000]*$"
-            },
-            "version": {
-              "type": "string",
-              "maxLength": 256,
-              "x-utf16MaxLength": 256
-            }
-          },
-          "required": [
-            "kind",
-            "path"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "entries",
-              "type": "string"
-            },
-            "path": {
-              "type": "string",
-              "maxLength": 4096,
-              "x-utf16MaxLength": 4096,
-              "pattern": "^/[^\\u0000]*$"
-            },
-            "limit": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 10000
-            }
-          },
-          "required": [
-            "kind",
-            "path",
-            "limit"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "syntax",
-              "type": "string"
-            },
-            "command": {
-              "type": "string",
-              "maxLength": 4000,
-              "x-utf16MaxLength": 4000,
-              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
-            }
-          },
-          "required": [
-            "kind",
-            "command"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "completion",
-              "type": "string"
-            },
-            "words": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "kind",
-            "words"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "help",
-              "type": "string"
-            },
-            "command": {
-              "type": "string",
-              "maxLength": 4000,
-              "x-utf16MaxLength": 4000,
-              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
-            },
-            "route": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[a-zA-Z][A-Za-z0-9_-]*$"
-              },
-              "maxItems": 3
-            }
-          },
-          "required": [
-            "kind",
-            "command",
-            "route"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "describe",
-              "type": "string"
-            },
-            "command": {
-              "type": "string",
-              "maxLength": 4000,
-              "x-utf16MaxLength": 4000,
-              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
-            }
-          },
-          "required": [
-            "kind",
-            "command"
-          ],
-          "additionalProperties": true
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "version",
-              "type": "string"
-            },
-            "command": {
-              "type": "string",
-              "maxLength": 4000,
-              "x-utf16MaxLength": 4000,
-              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
-            }
-          },
-          "required": [
-            "kind",
-            "command"
-          ],
-          "additionalProperties": true
-        }
-      ]
-    },
-    "FactValue": {
-      "anyOf": [
-        {
-          "type": "null"
-        },
-        {
-          "type": "string"
-        },
-        {
-          "const": false,
-          "type": "boolean"
-        },
-        {
-          "const": true,
-          "type": "boolean"
-        },
-        {
-          "$ref": "#/$defs/DirectoryUpdate"
-        },
-        {
-          "$ref": "#/$defs/DirectoryLookup"
-        },
-        {
-          "$ref": "#/$defs/FileInfo"
-        },
-        {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/DirectoryEntry"
-          }
-        },
-        {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        {
-          "$ref": "#/$defs/Help"
-        },
-        {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Flag"
-          }
-        }
-      ]
-    },
-    "Snapshot": {
-      "type": "object",
-      "properties": {
-        "prompt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "pathsIncluded": {
-          "type": "boolean"
-        },
-        "key": {
-          "type": "string"
-        },
-        "catalogKey": {
-          "type": "string"
-        },
-        "catalog": {
-          "$ref": "#/$defs/Catalog"
-        },
-        "home": {
-          "type": "string"
-        },
-        "discoveryKey": {
-          "type": "string"
-        },
-        "compoundRepair": {
-          "anyOf": [
-            {
-              "const": false,
-              "type": "boolean"
-            },
-            {
-              "const": true,
-              "type": "boolean"
-            }
-          ]
-        }
-      },
-      "required": [
-        "prompt",
-        "pathsIncluded",
-        "key",
-        "catalogKey",
-        "catalog",
-        "home",
-        "discoveryKey"
-      ],
-      "additionalProperties": true
-    },
-    "ContextReply": {
-      "type": "object",
-      "properties": {
-        "catalog": {
-          "$ref": "#/$defs/Catalog"
-        },
-        "patch": {
-          "type": "object",
-          "properties": {
-            "cwd": {
-              "type": "string"
-            },
-            "commands": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "paths": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "history": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "functions": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "historyCwds": {
-              "type": "object",
-              "additionalProperties": {
-                "type": "string"
-              }
-            }
-          },
-          "additionalProperties": true
-        },
-        "base": {
-          "type": "string"
-        },
-        "prompt": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "pathsIncluded": {
-          "type": "boolean"
-        },
-        "key": {
-          "type": "string"
-        },
-        "catalogKey": {
-          "type": "string"
-        },
-        "home": {
-          "type": "string"
-        },
-        "discoveryKey": {
-          "type": "string"
-        },
-        "compoundRepair": {
-          "anyOf": [
-            {
-              "const": false,
-              "type": "boolean"
-            },
-            {
-              "const": true,
-              "type": "boolean"
-            }
-          ]
-        }
-      },
-      "required": [
-        "prompt",
-        "pathsIncluded",
-        "key",
-        "catalogKey",
-        "home",
-        "discoveryKey"
-      ],
-      "additionalProperties": true
-    },
-    "DirectoryUpdate": {
-      "type": "object",
-      "properties": {
-        "entries": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/DirectoryEntry"
-          }
-        },
-        "version": {
-          "type": "string"
-        },
-        "complete": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "version",
-        "complete"
-      ],
-      "additionalProperties": true
     },
     "FileEntry": {
       "type": "object",
@@ -2602,53 +2118,6 @@
         "cwd"
       ],
       "additionalProperties": true
-    },
-    "ContextRequest": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "const": "context"
-        },
-        "known": {
-          "type": "string"
-        },
-        "paths": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "kind"
-      ],
-      "additionalProperties": true
-    },
-    "FactsRequest": {
-      "type": "object",
-      "properties": {
-        "key": {
-          "type": "string"
-        },
-        "operations": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Fact"
-          },
-          "minItems": 1,
-          "maxItems": 64
-        }
-      },
-      "required": [
-        "key",
-        "operations"
-      ],
-      "additionalProperties": true
-    },
-    "FactsReply": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/FactValue"
-      },
-      "minItems": 1,
-      "maxItems": 64
     },
     "SessionsRequest": {
       "type": "object",
@@ -8206,6 +7675,301 @@
           "additionalProperties": true
         }
       ]
+    },
+    "Fact": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "scoped",
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "operation": {
+              "$ref": "#/$defs/Fact"
+            }
+          },
+          "required": [
+            "kind",
+            "cwd",
+            "operation"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "stat",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^/[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "lookup",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^/[^\\u0000]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "directory",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^/[^\\u0000]*$"
+            },
+            "version": {
+              "type": "string",
+              "maxLength": 256,
+              "x-utf16MaxLength": 256
+            }
+          },
+          "required": [
+            "kind",
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "entries",
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "maxLength": 4096,
+              "x-utf16MaxLength": 4096,
+              "pattern": "^/[^\\u0000]*$"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          "required": [
+            "kind",
+            "path",
+            "limit"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "syntax",
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 4000,
+              "x-utf16MaxLength": 4000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "command"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "completion",
+              "type": "string"
+            },
+            "words": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "words"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "help",
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 4000,
+              "x-utf16MaxLength": 4000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            },
+            "route": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-zA-Z][A-Za-z0-9_-]*$"
+              },
+              "maxItems": 3
+            }
+          },
+          "required": [
+            "kind",
+            "command",
+            "route"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "describe",
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 4000,
+              "x-utf16MaxLength": 4000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "command"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "version",
+              "type": "string"
+            },
+            "command": {
+              "type": "string",
+              "maxLength": 4000,
+              "x-utf16MaxLength": 4000,
+              "pattern": "^[^\\u0000-\\u001f\\u007f]*$"
+            }
+          },
+          "required": [
+            "kind",
+            "command"
+          ],
+          "additionalProperties": true
+        }
+      ]
+    },
+    "FactValue": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "const": false,
+          "type": "boolean"
+        },
+        {
+          "const": true,
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/DirectoryUpdate"
+        },
+        {
+          "$ref": "#/$defs/DirectoryLookup"
+        },
+        {
+          "$ref": "#/$defs/FileInfo"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DirectoryEntry"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "$ref": "#/$defs/Help"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Flag"
+          }
+        }
+      ]
+    },
+    "DirectoryUpdate": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DirectoryEntry"
+          }
+        },
+        "version": {
+          "type": "string"
+        },
+        "complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "version",
+        "complete"
+      ],
+      "additionalProperties": true
     }
   }
 }
