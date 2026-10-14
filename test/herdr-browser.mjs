@@ -120,7 +120,7 @@ try {
   assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('termai.hosts'))).some(host => host.kind === 'herdr'), 'Typing herdr saves its host automatically');
   const agentFrame = async () => {
     const element = await page.locator('.herdr-terminal').elementHandle(), frame = await element.contentFrame();
-    await frame.waitForFunction(() => window.__testTerminal && window.__state?.inputTarget === 'program' && document.querySelector('#connection-label').textContent === 'Connected' && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && frameElement.checkVisibility({checkVisibilityCSS:true}));
+    await frame.waitForFunction(() => window.__testTerminal && window.__state?.inputTarget === 'program' && document.querySelector('#connection-label').textContent === 'Connected' && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && document.querySelector('#terminal-viewport').getAttribute('aria-busy') !== 'true' && frameElement.checkVisibility({checkVisibilityCSS:true}));
     return frame;
   };
   const tab = id => page.locator('.herdr-agent-tab[data-terminal="term_' + id + '"]');
@@ -500,6 +500,7 @@ try {
   const remoteCols = await terminal.evaluate(() => window.__testTerminal.cols);
   await until(async () => await terminal.evaluate(cols => window.__testProjection.nativeColumns === cols, remoteCols), 'SSH controller frames match the mobile grid');
   assert.equal((await request('herdr/ticket?herdrSource=' + remote.id, {}, bearer)).status, 404, 'Another pairing cannot use an SSH host it does not own');
+  await terminal.waitForFunction(() => document.querySelector('#terminal-viewport').getAttribute('aria-busy') !== 'true');
   await terminal.evaluate(() => window.__testTerminal.focus());
   assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Explicit terminal focus must enable SSH input');
   await page.keyboard.type('SSH input');
