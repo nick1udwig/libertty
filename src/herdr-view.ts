@@ -55,6 +55,7 @@ export class HerdrView {
   private spaces: HerdrSpace[] = [];
   private rendered = false;
   private handoffHeld = false;
+  private navigationResize = 0;
   private held = false;
   private dragOrderChanged = false;
   private dropTarget?: { id: string; drop: SpaceDrop };
@@ -188,6 +189,16 @@ export class HerdrView {
   setTerminalTabsExpanded(expanded: boolean) {
     this.tabsToggle.setAttribute('aria-expanded', String(expanded));
     this.tabsToggle.setAttribute('aria-label', expanded ? 'Hide terminal tabs' : 'Show terminal tabs');
+  }
+  holdTerminalSize() {
+    const generation = ++this.navigationResize, frame = this.displayed;
+    if (frame && !frame.style.flexBasis) frame.style.flexBasis = frame.getBoundingClientRect().height + 'px';
+    this.screen.classList.add('herdr-navigation-resizing');
+    return () => {
+      if (generation !== this.navigationResize) return;
+      if (frame) frame.style.flexBasis = '';
+      this.screen.classList.remove('herdr-navigation-resizing');
+    };
   }
   setHeld(held: boolean) {
     if (this.handoffHeld === held) return;

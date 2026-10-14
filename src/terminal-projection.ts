@@ -42,6 +42,7 @@ export class TerminalProjection {
   private live = false;
   private complete = false;
   private awaitingFrame = false;
+  private awaitingNativeResize = false;
   private columns: number;
   private rows: number;
   constructor(term: Terminal, ghostty: Ghostty) {
@@ -57,13 +58,13 @@ export class TerminalProjection {
     this.rebuild();
     // History reads can arrive after a newer frame. Cache them for fallback,
     // but never replace the live TUI with an older polled snapshot.
-    if (this.live && this.canRenderLive()) return;
+    if (this.awaitingNativeResize || this.live && this.canRenderLive()) return;
     this.paint();
   }
   frame(frame: { width: number; height: number; full: boolean; bytes: string | Uint8Array }) {
     const wasLive = this.live;
     if (!frame.width || !frame.height) {
-      this.native?.free(); this.native = undefined; this.complete = this.live = this.awaitingFrame = false;
+      this.native?.free(); this.native = undefined; this.complete = this.live = this.awaitingFrame = this.awaitingNativeResize = false;
       this.cursorControl = ''; this.hide(); return false;
     }
     if (!this.native || this.native.cols !== frame.width || this.native.rows !== frame.height) {
@@ -75,6 +76,10 @@ export class TerminalProjection {
     if (frame.full) { this.native.write('\x1bc\x1b[2J\x1b[H'); this.awaitingFrame = false; }
     this.native.write(bytes);
     this.complete ||= frame.full;
+    if (this.awaitingNativeResize && this.complete && frame.width === this.term.cols && frame.height === this.term.rows) {
+      this.awaitingNativeResize = false;
+      if (!this.canRenderLive()) this.paint();
+    }
     if (this.canRenderLive() && (this.live || frame.full)) {
       preserveScrollback(this.term, () => {
         // Reset only when entering the stream. Subsequent full frames and
@@ -203,7 +208,11 @@ export class TerminalProjection {
   }
   resize(mobile = this.mobile) {
     if (this.mobile === mobile && this.columns === this.term.cols && this.rows === this.term.rows) return;
+    this.awaitingNativeResize = this.mobile && mobile && (this.live || this.awaitingNativeResize);
     this.mobile = mobile; this.columns = this.term.cols; this.rows = this.term.rows; this.live = this.awaitingFrame = false;
+    // Keep the live application visible until its resized native frame arrives.
+    // Repainting polled history here briefly restores the old layout mid-resize.
+    if (this.awaitingNativeResize) return;
     if (this.initialized) this.update(this.previous, true);
   }
   dispose() { this.native?.free(); this.history?.free(); this.probe?.free(); this.local?.free(); }

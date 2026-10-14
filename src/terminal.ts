@@ -237,7 +237,7 @@ function replaceLine(text: string): Promise<boolean> {
   });
 }
 const suggestions = new SuggestionClient(baseURL.href, session, () => accessToken);
-const inline = new InlineSuggestions(term, { latencyKey: baseURL.href, state: () => state, replace: replaceLine,
+const inline = new InlineSuggestions(term, { state: () => state, replace: replaceLine,
   repair: (text, intent, signal) => {
     if (capturedConnection || !state.ready || state.exited || transport.socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Terminal input changed.'));
     const id = crypto.randomUUID(), prompt = state.prompt, revision = state.inputRevision;
@@ -248,7 +248,7 @@ const inline = new InlineSuggestions(term, { latencyKey: baseURL.href, state: ()
       if (!send({ type: 'repair', id, text, intent, prompt, revision })) finish({ accepted: false, candidates: [], original: text, selected: text, prompt, revision });
     });
   },
-  ...(herdrTerminal ? { dictate: (text: string, applied: boolean, replace: boolean) => { send({ type: 'dictation-paste', text, applied, replace, prompt: state.prompt, revision: state.inputRevision }); } } : {}),
+  ...(herdrTerminal ? { dictate: (text: string, applied: boolean, replace: boolean) => { if (!send({ type: 'dictation-paste', text, applied, replace, prompt: state.prompt, revision: state.inputRevision })) inline.disconnect(); } } : {}),
   readLine: () => {
     const id = crypto.randomUUID(), prompt = state.prompt, revision = state.inputRevision;
     return new Promise(resolve => {
@@ -263,7 +263,7 @@ const inline = new InlineSuggestions(term, { latencyKey: baseURL.href, state: ()
   }, raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, key: baseURL.href,
   audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data, transport.socket.protocol)); return true; },
-  prepare: () => inline.prepareExternalPaste(), notice: toast, focus: () => term.focus() });
+  prepare: () => inline.prepareExternalPaste(), waiting: active => inline.dictationPending(active), notice: toast, focus: () => term.focus() });
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
   const workspace = new URL('.', document.baseURI);
@@ -471,6 +471,7 @@ function socketMessage(event: MessageEvent) {
   } else if (message.type === 'reading-capture') {
     showReading({ capture: message.id, name: message.name, exitCode: message.exitCode });
   } else if (message.type === 'reading-error') {
+    inline.dictationPending(false);
     toast(message.message);
   } else if (message.type === 'ssh-command' || message.type === 'herdr-command') {
     capturedConnection = message.id; inline.disconnect();
@@ -490,7 +491,6 @@ function socketMessage(event: MessageEvent) {
   } else if (message.type === 'hello') {
     replayTarget = message.lastSeq ?? after;
     suggestions.setMode(message.engine);
-    inline.setLatencyProfile(baseURL.href + ':' + message.engine);
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.

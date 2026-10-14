@@ -9,7 +9,7 @@ function fixture(command: string) {
   const replacements: string[] = [];
   let requested = false;
   const inline = Object.assign(Object.create(InlineSuggestions.prototype), {
-    generation: 0, latency: 0, literal: '', speech: '', choices: [], autoOpen: true, line: new InputLine(), status: {}, render() {}, armInput() {},
+    generation: 0, literal: '', speech: '', choices: [], autoOpen: true, line: new InputLine(), status: {}, render() {}, armInput() {},
     host: {
       state: () => ({ prompt: 1, ready: true }),
       replace: (text: string) => { replacements.push(text); return replacements.length === 1 ? acknowledgement : Promise.resolve(true); },
@@ -27,7 +27,6 @@ test('fast suggestions replace the shell line once without flashing the transcri
   await new Promise(resolve => setImmediate(resolve));
   assert.deepEqual(f.replacements, ['git init']);
   assert.equal(f.inline.loading, true);
-  assert.equal(f.inline.showOriginal, false);
   f.acknowledge(true); await pending;
   assert.equal(f.inline.loading, false);
   assert.deepEqual(f.replacements, ['git init']);
@@ -92,20 +91,17 @@ test('reader command alternatives use the command engine and execute only after 
 });
 
 
-test('loading presentation is predicted up front and stays fixed even past 500 ms', async () => {
-  for (const latency of [0, 700]) {
-    const f = fixture('git init'); f.inline.latency = latency;
-    let finish!: (value: any) => void;
-    f.inline.host.suggest = () => new Promise(resolve => finish = resolve);
-    const pending = f.inline.dictate('Get in it.', false);
-    assert.equal(f.inline.showOriginal, latency >= 500);
-    await new Promise(resolve => setTimeout(resolve, 520));
-    assert.equal(f.inline.showOriginal, latency >= 500);
-    assert.deepEqual(f.replacements, latency ? ['Get in it.'] : []);
-    f.acknowledge(true); finish({ candidates: [{ command: 'git init', score: 100, changes: [] }] }); await pending;
-    assert.deepEqual(f.replacements, latency ? ['Get in it.', 'git init'] : ['git init']);
-    assert.ok(f.inline.latency >= 500, 'The completed slow request informs future predictions');
-  }
+test('slow suggestions keep the transcript out of the entry until the final replacement', async () => {
+  const f = fixture('git init');
+  let finish!: (value: any) => void;
+  f.inline.host.suggest = () => new Promise(resolve => finish = resolve);
+  const pending = f.inline.dictate('Get in it.', false);
+  await new Promise(resolve => setTimeout(resolve, 520));
+  assert.equal(f.inline.loading, true);
+  assert.deepEqual(f.replacements, []);
+  f.acknowledge(true); finish({ candidates: [{ command: 'git init', score: 100, changes: [] }] }); await pending;
+  assert.deepEqual(f.replacements, ['git init']);
+  assert.equal(f.inline.loading, false);
 });
 
 test('typing while suggestions load preserves the pending transcript and ignores late repairs', async () => {
@@ -123,7 +119,7 @@ test('typing while suggestions load preserves the pending transcript and ignores
 });
 
 test('fused repair avoids separate replacements and cancellation waits for its authoritative result', async () => {
-  const f = fixture('git init'); f.inline.latency = 700;
+  const f = fixture('git init');
   const sent: string[] = [], raw: string[] = [];
   let finish!: (result: any) => void;
   f.inline.host.repair = (text: string, intent: any, signal: AbortSignal) => {

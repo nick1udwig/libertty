@@ -3,10 +3,10 @@ import { transferAction, downloadPipeline } from './transfer-command.ts';
 import type { Terminal } from 'ghostty-web';
 import type { Candidate, ShellState, RepairIntent, RepairResult } from './protocol.ts';
 import { InputLine } from './input-line.ts';
+import { TerminalPresentation } from './terminal-presentation.ts';
 import { cursorSteps } from './touch-cursor.ts';
 import { defaultReadingPhrases, readingPath, readingPhrases, readingPipeline, readingRequest, readingSuggestionChoice, readingSuggestionInput } from './reading-request.ts';
 interface Host {
-  latencyKey?: string;
   state(): ShellState;
   replace(text: string): Promise<boolean>;
   readLine?(): Promise<{ text: string; cursor: number } | undefined>;
@@ -30,8 +30,9 @@ export class InlineSuggestions {
   private suffix = '';
   private speech = '';
   private loading = false;
-  private showOriginal = false;
-  private latency = 0;
+  private transcribing = false;
+  private pendingPresentation?: TerminalPresentation;
+  private pendingCursor?: { x: number; row: number };
   private literalReplacement?: Promise<boolean>;
   private application?: Promise<RepairResult>;
   private flushing?: string[];
@@ -51,7 +52,7 @@ export class InlineSuggestions {
   private positionFrame = 0;
   private canvas?: HTMLCanvasElement;
   private pane?: HTMLElement;
-  private toggle = document.getElementById('alternatives-toggle')!;
+  private toggle = document.getElementById('alternatives-toggle')! as HTMLButtonElement;
   private menu = document.getElementById('alternatives-menu')!;
   private items = document.getElementById('alternative-items')!;
   private status = document.getElementById('suggestion-status')!;
@@ -59,7 +60,9 @@ export class InlineSuggestions {
   private host: Host;
   constructor(term: Terminal, host: Host) {
     this.term = term; this.host = host;
-    this.setLatencyProfile(host.latencyKey);
+    this.pendingPresentation = new TerminalPresentation(document.getElementById('terminal-viewport')!, () => {
+      this.pendingCursor = undefined; this.render();
+    }, false);
     try { this.phrases = readingPhrases(JSON.parse(localStorage.getItem('termai.readingPhrases') || 'null')); } catch {}
     const setting = document.getElementById('auto-alternatives') as HTMLInputElement;
     try { this.autoOpen = localStorage.getItem('termai.autoAlternatives') !== 'false' && localStorage.getItem('termai.justRun') !== 'true'; } catch {}
@@ -188,10 +191,6 @@ export class InlineSuggestions {
     this.compositionText = text;
   }
   private collapse() { if (this.open) { this.open = false; this.render(); } }
-  setLatencyProfile(key?: string) {
-    this.host.latencyKey = key; this.latency = 0;
-    try { this.latency = Math.max(0, Math.min(30000, Number(localStorage.getItem('termai.suggestionLatency:' + key)) || 0)); } catch {}
-  }
   setReadingPhrases(value: unknown) { this.phrases = readingPhrases(value); }
   onState(state: ShellState) {
     if (this.suspendedRevision !== undefined) {
@@ -207,12 +206,31 @@ export class InlineSuggestions {
     if (state.prompt !== this.prompt) {
       this.clear(); this.prompt = state.prompt; this.line.reset();
       this.line.known = state.ready && state.inputRevision === state.promptRevision;
-    } else if (!state.ready || state.exited) { this.clear(); this.line.known = false; }
+    } else if (!state.ready || state.exited) {
+      if (state.exited || state.inputTarget !== 'program' || !this.transcribing) this.clear();
+      this.line.known = false;
+    }
   }
   disconnect() { this.clear(); this.line.known = false; this.prompt = -1; }
   prepareExternalPaste() { this.clear(); }
+  dictationPending(pending: boolean) {
+    if (pending) {
+      this.clear(true); this.transcribing = true; this.holdInput();
+      this.status.textContent = 'Transcribing';
+    } else {
+      this.transcribing = false;
+      if (!this.loading) this.pendingPresentation?.reveal();
+    }
+    this.render();
+  }
+  private holdInput() {
+    if (!this.pendingPresentation) return;
+    const buffer = this.term.buffer.active;
+    this.pendingPresentation.freeze();
+    if (this.pendingPresentation.pending) this.pendingCursor ||= { x: buffer.cursorX, row: buffer.baseY + buffer.cursorY - buffer.viewportY };
+  }
   private async nativeDictation(text: string, replacement: boolean, alreadyApplied = false) {
-    if (this.host.dictate) { const replace = replacement && !!this.literal; this.clear(); this.host.dictate(text, alreadyApplied, replace); return; }
+    if (this.host.dictate) { const replace = replacement && !!this.literal; this.dictationPending(true); this.host.dictate(text, alreadyApplied, replace); return; }
     if (this.line.known) return this.dictate(text, replacement, alreadyApplied);
     if (!this.host.readLine) { if (!alreadyApplied) this.term.paste(text); return; }
     this.clear(); const request = this.generation;
@@ -248,13 +266,15 @@ export class InlineSuggestions {
     else if (this.line.known) this.line.insert(text);
   }
   backendLoading(text: string, isolated = false) {
-    this.externalPaste(text, false, false, isolated);
+    this.clear(true);
+    if (!this.host.state().ready || this.host.state().exited) { this.disconnect(); return; }
+    if (this.line.known) this.line.insert(text);
     if (isolated) this.line.reset(text);
     this.literal = this.line.known ? this.line.text : text;
     this.speech = text; this.selected = this.literal;
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true), pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
     this.reading = pipeline?.command || reading?.path;
-    this.loading = true; this.open = this.autoOpen; this.showOriginal = true;
+    this.transcribing = false; this.loading = true; this.open = this.autoOpen;
     this.status.textContent = 'Finding alternatives'; this.render();
   }
   backendResult(result: RepairResult) {
@@ -263,7 +283,8 @@ export class InlineSuggestions {
     this.choices = [...new Set(result.candidates.filter(candidate => !candidate.literal && candidate.command !== this.literal).map(candidate => candidate.command))].slice(0, 3);
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true), pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
     this.reading = pipeline?.command || reading?.path;
-    this.loading = false; this.open = this.autoOpen; this.status.textContent = 'Alternatives ready'; this.render();
+    this.transcribing = false; this.loading = false; this.open = this.autoOpen; this.status.textContent = 'Alternatives ready';
+    this.pendingPresentation?.reveal(); this.render();
   }
   suspend() {
     if (!this.literal) { this.disconnect(); return; }
@@ -275,12 +296,13 @@ export class InlineSuggestions {
     this.render();
   }
   refresh() {
-    if (!this.literal || this.positionFrame) return;
+    if ((!this.literal && !this.transcribing) || this.positionFrame) return;
     this.positionFrame = requestAnimationFrame(() => { this.positionFrame = 0; this.position(); });
   }
   raw(data: string): boolean {
     queueMicrotask(() => this.armInput());
     if (data === '\x1b[I' || data === '\x1b[O') return true;
+    if (this.transcribing) this.clear();
     if (this.flushing) { this.flushing.push(data); return false; }
     if (this.loading) {
       const literal = this.literal, pending = this.literalReplacement, application = this.application;
@@ -307,13 +329,14 @@ export class InlineSuggestions {
     }
     this.clear(); this.line.feed(data); return true;
   }
-  private clear() {
+  private clear(keepPresentation = false) {
     this.application = undefined;
-    this.literalReplacement = undefined; this.showOriginal = false;
-    const visible = !!this.literal || this.loading || this.open || !!this.choices.length;
+    this.literalReplacement = undefined;
+    const visible = !!this.literal || this.loading || this.transcribing || this.open || !!this.choices.length;
     ++this.generation; this.controller?.abort(); this.literal = ''; this.speech = ''; this.choices = []; this.reading = undefined;
     this.suspendedRevision = undefined; this.retryOnResume = false;
-    this.loading = false; this.open = false;
+    this.transcribing = false; this.loading = false; this.open = false;
+    if (!keepPresentation) this.pendingPresentation?.reveal();
     if (this.positionFrame) cancelAnimationFrame(this.positionFrame);
     this.positionFrame = 0;
     if (visible) this.render();
@@ -341,18 +364,14 @@ export class InlineSuggestions {
       this.clear(); if (!alreadyApplied) this.host.raw(text); return;
     }
     this.controller?.abort(); this.controller = new AbortController();
-    this.literalReplacement = alreadyApplied ? Promise.resolve(true) : undefined; this.showOriginal = false;
+    this.literalReplacement = alreadyApplied ? Promise.resolve(true) : undefined;
     const request = ++this.generation, prompt = this.host.state().prompt;
-    const started = performance.now();
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true);
     const pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
     this.reading = pipeline?.command || reading?.path;
     this.loading = true; this.open = this.autoOpen; this.choices = []; this.selected = this.literal;
-    // Choose once from previous completed requests. Never reveal the transcript
-    // midway through a request: it could finish immediately after that reveal.
-    this.showOriginal = this.latency >= 500;
+    this.holdInput();
     this.line.reset(this.literal); this.status.textContent = 'Finding alternatives'; this.render();
-    if (this.showOriginal && !alreadyApplied && !this.host.repair) this.literalReplacement = this.host.replace(this.literal).catch(() => false);
     try {
       if (this.host.repair) {
         const intent: RepairIntent = pipeline ? { kind: 'reading-pipeline', ...pipeline } : reading ? { kind: 'reading-file', phrase: reading.phrase, operand: reading.operand } : { kind: 'shell' };
@@ -362,7 +381,6 @@ export class InlineSuggestions {
         this.application = undefined;
         if (!result.accepted) { if (result.error) throw new Error(result.error); this.disconnect(); return; }
         this.backendResult(result);
-        this.recordLatency(started);
         return;
       }
       const suggestion = this.host.suggest(pipeline ? pipeline.command : reading ? readingSuggestionInput(reading) : this.literal, this.controller.signal).then(result => ({ result }), error => ({ error }));
@@ -386,21 +404,17 @@ export class InlineSuggestions {
       this.line.reset(top);
       if ((!replacement || top !== this.literal) && !await this.host.replace(top)) { if (request === this.generation) this.disconnect(); return; }
       if (request !== this.generation) return;
-      this.recordLatency(started);
       this.selected = top; this.line.reset(top); this.loading = false;
+      this.pendingPresentation?.reveal();
       this.status.textContent = 'Alternatives ready'; this.render();
     } catch (error: any) {
       if (request !== this.generation || error.name === 'AbortError') return;
       if (!await (this.literalReplacement || this.host.replace(this.literal))) { if (request === this.generation) this.disconnect(); return; }
       if (request !== this.generation) return;
       this.loading = false; this.open = true;
+      this.pendingPresentation?.reveal();
       this.status.textContent = 'Alternatives unavailable. Original text kept.'; this.render();
     }
-  }
-  private recordLatency(started: number) {
-    const elapsed = performance.now() - started;
-    this.latency = this.latency ? this.latency * .6 + elapsed * .4 : elapsed;
-    try { if (this.host.latencyKey) localStorage.setItem('termai.suggestionLatency:' + this.host.latencyKey, String(this.latency)); } catch {}
   }
   private async choose(text: string) {
     if (this.reading) {
@@ -422,19 +436,20 @@ export class InlineSuggestions {
   private openRead(operand: string) { this.host.execute('look at ' + operand); }
   private render() {
     this.armInput();
-    const visible = !!this.literal && this.host.state().ready;
-    this.toggle.hidden = !visible; this.menu.hidden = !visible || !this.open;
-    this.toggle.classList.toggle('loading', this.loading);
-    this.toggle.setAttribute('aria-expanded', String(this.open));
-    this.toggle.setAttribute('aria-label', this.open ? 'Hide alternatives' : 'Show alternatives');
-    this.menu.setAttribute('aria-busy', String(this.loading));
+    const busy = this.loading || this.transcribing || !!this.pendingPresentation?.pending;
+    const state = this.host.state(), available = state.ready || busy && state.inputTarget === 'program';
+    const visible = (!!this.literal || this.transcribing) && available && !state.exited;
+    this.toggle.hidden = !visible; this.menu.hidden = !visible || !this.open || busy;
+    this.toggle.classList.toggle('loading', busy);
+    this.toggle.disabled = busy;
+    this.toggle.setAttribute('aria-expanded', String(this.open && !busy));
+    this.toggle.setAttribute('aria-label', busy ? this.transcribing ? 'Transcribing' : 'Finding alternatives' : this.open ? 'Hide alternatives' : 'Show alternatives');
+    this.menu.setAttribute('aria-busy', String(busy));
     this.items.replaceChildren();
-    if (this.loading) {
-      const row = document.createElement('div'); row.className = 'alternative-loading'; row.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>Finding alternatives…</span>'; this.items.append(row);
-    } else {
+    if (!busy) {
       this.choices.forEach((text, index) => this.addChoice(text, index, false));
     }
-    if (this.literal && (!this.loading || this.showOriginal)) this.addChoice(this.literal, this.loading ? 0 : this.choices.length, true);
+    if (this.literal && !busy) this.addChoice(this.literal, this.choices.length, true);
     this.refresh();
   }
   private addChoice(text: string, index: number, literal: boolean) {
@@ -456,7 +471,7 @@ export class InlineSuggestions {
     button.onclick = () => void this.choose(text); this.items.append(button);
   }
   private position() {
-    if (!this.literal) return;
+    if (!this.literal && !this.transcribing) return;
     if (!this.canvas?.isConnected) {
       this.canvas = document.querySelector<HTMLCanvasElement>('#terminal canvas') || undefined;
       this.pane = this.canvas?.closest<HTMLElement>('.terminal-pane') || undefined;
@@ -464,13 +479,13 @@ export class InlineSuggestions {
     if (!this.canvas || !this.pane) return;
     const bounds = this.canvas.getBoundingClientRect(), pane = this.pane.getBoundingClientRect();
     const buffer = this.term.buffer.active;
-    const row = buffer.baseY + buffer.cursorY - buffer.viewportY;
+    const row = this.pendingCursor?.row ?? buffer.baseY + buffer.cursorY - buffer.viewportY;
     if (row < 0 || row >= this.term.rows || this.term.getViewportY() > 0) { this.toggle.hidden = true; this.menu.hidden = true; return; }
     // Read geometry before writes. The menu observer schedules a follow-up if its
     // width or height changes, without forcing another layout in this frame.
     const menuHeight = this.menu.offsetHeight;
     const cellWidth = bounds.width / this.term.cols, cellHeight = bounds.height / this.term.rows;
-    const x = bounds.left - pane.left + (buffer.cursorX + 1) * cellWidth;
+    const x = bounds.left - pane.left + (this.pendingCursor ? this.pendingCursor.x : buffer.cursorX + 1) * cellWidth;
     const y = bounds.top - pane.top + row * cellHeight;
     const left = Math.max(4, Math.min(pane.width - 36, x));
     const menuWidth = Math.min(330, pane.width - 16);
@@ -479,7 +494,9 @@ export class InlineSuggestions {
     const above = y - 12;
     const upward = below < 210 && above > below;
     const available = Math.max(44, upward ? above : below);
-    this.toggle.hidden = !this.host.state().ready; this.menu.hidden = !this.host.state().ready || !this.open;
+    const busy = this.loading || this.transcribing || !!this.pendingPresentation?.pending;
+    const state = this.host.state(), inputAvailable = !state.exited && (state.ready || busy && state.inputTarget === 'program');
+    this.toggle.hidden = !inputAvailable; this.menu.hidden = !state.ready || !this.open || busy;
     this.toggle.style.left = `${left}px`; this.toggle.style.top = `${Math.max(0, y - 8)}px`;
     this.menu.style.width = `${menuWidth}px`; this.menu.style.left = `${menuLeft}px`;
     this.menu.style.maxHeight = `${available}px`;

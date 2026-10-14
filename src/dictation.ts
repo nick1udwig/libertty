@@ -12,6 +12,7 @@ interface Host {
   prepare(): void;
   notice(message: string): void;
   focus(): void;
+  waiting?(active: boolean): void;
   key: string;
 }
 export class DictationControl {
@@ -268,6 +269,7 @@ export class DictationControl {
     if (this.phase !== 'recording') return;
     if (this.capturePaused) { this.captureFailed('Recording was interrupted. Keep the screen on and try dictating again.'); return; }
     this.phase = 'finishing'; this.wakeLock.stop(); clearInterval(this.captureTimer); clearTimeout(this.audioTimer); this.processor!.port.postMessage('flush');
+    this.host.waiting?.(true);
     this.audioTimer = setTimeout(() => { this.host.notice('Dictation timed out.'); this.cancel(); }, 180000);
     this.render();
   }
@@ -302,5 +304,6 @@ export class DictationControl {
     this.releaseAudio(); clearTimeout(this.audioTimer); clearTimeout(this.readyTimer); clearTimeout(this.uploadTimer);
     this.pendingAudio = []; this.pendingBytes = 0; this.daemonReady = this.captureFlushed = false;
     this.phase = 'idle'; this.render();
+    this.host.waiting?.(false);
   }
 }

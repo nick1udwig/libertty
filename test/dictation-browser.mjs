@@ -223,6 +223,19 @@ try {
   await page.waitForFunction(() => window.__wakeLocks.length === 2 && !window.__wakeLocks.at(-1).released);
   await page.locator('#termai-dictation').click();
   await page.getByText('Transcribing…', { exact: true }).waitFor({ state: 'visible' });
+  await page.locator('#alternatives-toggle.loading .spinner').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#alternatives-menu').isVisible(), false, 'Transcription waits at the entry without opening a partial menu');
+  assert.equal(await page.locator('.dictation-presentation').isVisible(), true, 'The entry holds its previous paint while the transcript and alternatives load');
+  await page.evaluate(() => {
+    window.__dictationPaints = [];
+    const sample = () => {
+      const toggle = document.querySelector('#alternatives-toggle'), menu = document.querySelector('#alternatives-menu');
+      const busy = toggle.classList.contains('loading'), bounds = toggle.getBoundingClientRect();
+      window.__dictationPaints.push({ busy, menu: !menu.hidden, x: bounds.x, y: bounds.y });
+      if (busy) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
   assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Finish releases wake locks before transcription');
   assert.equal(await mic.locator('.dictation-dots').isVisible(), true);
   assert.equal(await page.getByLabel('Cancel dictation', { exact: true }).isVisible(), true);
@@ -235,6 +248,11 @@ try {
   assert.equal(await page.evaluate(() => window.__state.ready), true, 'Dictation must not submit the command');
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'git init');
   assert.deepEqual(await page.locator('.alternative-choice .choice-command').allTextContents(), ['git init', 'Get in it.']);
+  await page.locator('.dictation-presentation').waitFor({ state: 'hidden' });
+  const pendingPaints = (await page.evaluate(() => window.__dictationPaints)).filter(paint => paint.busy);
+  assert.ok(pendingPaints.length > 1, 'Observe multiple loading paints');
+  assert.ok(pendingPaints.every(paint => !paint.menu), 'The menu only appears with the completed alternatives');
+  assert.equal(new Set(pendingPaints.map(paint => paint.x + ',' + paint.y)).size, 1, 'The spinner stays at the insertion point as the backend edits the line');
   assert.equal(await access(path.join(fixture, '.git')).then(() => true, () => false), false, 'Repair must not execute a command');
   assert.equal(await page.evaluate(() => window.__sent.some(m => m.type === 'replace' && m.text === 'Get in it.' || m.type === 'input' && m.data.includes('Get in it.'))), false, 'Transcript must not be sent back for duplicate insertion');
   assert.equal(await page.evaluate(() => window.__sent.some(message => ['repair', 'replace'].includes(message.type))), false, 'Backend dictation must repair and apply without a browser relay');

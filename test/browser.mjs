@@ -156,10 +156,12 @@ try {
   await dictate(page, 'Python three hello world dot py myarg food');
   await page.waitForSelector('#alternatives-toggle.loading');
   await page.waitForTimeout(80);
-  assert.equal(await page.locator('.literal-choice').count(), 0, 'Fast pending lookup should show only a spinner');
-  assert.equal(await page.locator('.alternative-loading .spinner').isVisible(), true);
+  assert.equal(await page.locator('.literal-choice').count(), 0, 'Pending lookup should show only the entry spinner');
+  assert.equal(await page.locator('#alternatives-toggle.loading .spinner').isVisible(), true);
+  assert.equal(await page.locator('#alternatives-menu').isVisible(), false);
+  assert.equal(await page.locator('.dictation-presentation').isVisible(), true);
   await page.waitForTimeout(500);
-  assert.equal(await page.locator('.literal-choice').count(), 0, 'A predicted fast request must not reveal the transcript partway through');
+  assert.equal(await page.locator('.literal-choice').count(), 0, 'A slow request must not reveal the transcript partway through');
   assert.equal(await page.locator('#alternatives-toggle.loading').count(), 1);
   await page.screenshot({ path: path.join(root, '.test-artifacts/inline-loading.png') });
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'python3 hello_world.py --myarg food').catch(async error => { throw new Error(JSON.stringify(await page.evaluate(() => ({ result: window.__lastRepairResult, state: window.__shellState, sent: window.__sent.slice(-8), choices: [...document.querySelectorAll('.choice-command')].map(el => el.textContent) }))), { cause: error }); });

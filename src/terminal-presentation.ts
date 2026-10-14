@@ -7,13 +7,15 @@ export class TerminalPresentation {
   private held = false;
   private viewport: HTMLElement;
   private ready: () => void;
-  constructor(viewport: HTMLElement, ready: () => void = () => {}) {
+  constructor(viewport: HTMLElement, ready: () => void = () => {}, progress = true) {
     this.viewport = viewport; this.ready = ready;
-    this.layer.className = 'terminal-presentation'; this.layer.hidden = true;
+    this.layer.className = progress ? 'terminal-presentation' : 'dictation-presentation'; this.layer.hidden = true;
     this.snapshot.setAttribute('aria-hidden', 'true');
     this.progress.className = 'terminal-loading-bar'; this.progress.role = 'progressbar';
     this.progress.setAttribute('aria-label', 'Loading terminal');
-    this.layer.append(this.snapshot, this.progress); viewport.parentElement!.append(this.layer);
+    this.layer.append(this.snapshot);
+    if (progress) this.layer.append(this.progress);
+    viewport.parentElement!.append(this.layer);
   }
   get pending() { return this.held; }
   freeze() {

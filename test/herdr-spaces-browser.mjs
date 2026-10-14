@@ -54,17 +54,37 @@ try {
   await tab(alpha).waitFor(); await tab(beta).waitFor();
   assert.equal(await page.locator('#add-tab').count(), 0, 'The duplicate terminal plus is removed');
   const toggle = page.locator('.herdr-agent-strip:visible .herdr-tabs-toggle');
+  await page.locator('.herdr-terminal').waitFor({ state: 'visible' });
+  const sampleDrawer = async () => page.evaluate(() => {
+    window.__drawerPaints = [];
+    const generation = window.__drawerSample = (window.__drawerSample || 0) + 1, deadline = performance.now() + 1000;
+    const sample = () => {
+      if (generation !== window.__drawerSample) return;
+      const frame = document.querySelector('.herdr-terminal'), drawer = document.querySelector('#terminal-tabs-drawer');
+      window.__drawerPaints.push({ terminal: frame.getBoundingClientRect().height, drawer: drawer.getBoundingClientRect().height });
+      if (performance.now() < deadline) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  const assertDrawer = async () => {
+    const paints = await page.evaluate(() => window.__drawerPaints);
+    const moving = paints.filter(paint => paint.drawer > 0 && paint.drawer < 44);
+    assert.ok(moving.length > 1, 'The drawer moves across multiple paints');
+    assert.equal(new Set(moving.map(paint => paint.terminal)).size, 1, 'The terminal keeps one height throughout the drawer animation');
+  };
   assert.equal(await toggle.getAttribute('aria-expanded'), 'false', 'Herdr starts with one navigation row');
   await wait(async () => await page.locator('#terminal-tabs-drawer').evaluate(el => el.getBoundingClientRect().height) === 0, 'terminal row collapsed');
   assert.equal(await page.locator('#terminal-tabs-drawer').evaluate(el => el.inert), true);
-  await toggle.click();
+  await sampleDrawer(); await toggle.click();
   await wait(async () => await page.locator('#terminal-tabs-drawer').evaluate(el => el.getBoundingClientRect().height) === 44, 'terminal row revealed');
   const rows = await page.evaluate(() => ({ terminals: document.querySelector('#terminal-header').getBoundingClientRect().bottom, herdr: document.querySelector('.herdr-agent-strip:not([hidden])').getBoundingClientRect().top }));
   assert.equal(rows.terminals, rows.herdr, 'The terminal row opens directly above Herdr');
   assert.equal(await toggle.getAttribute('aria-label'), 'Hide terminal tabs');
+  await assertDrawer();
   await page.screenshot({ path: '/tmp/termai-herdr-tabs-expanded.png' });
-  await toggle.click();
+  await sampleDrawer(); await toggle.click();
   await wait(async () => await page.locator('#terminal-tabs-drawer').evaluate(el => el.getBoundingClientRect().height) === 0, 'terminal row tucked behind Herdr');
+  await assertDrawer();
   await page.screenshot({ path: '/tmp/termai-herdr-tabs-collapsed.png' });
   await page.evaluate(() => document.fonts.ready);
   const order = async () => (await herdrSnapshot(target)).spaces.map(space => space.id);

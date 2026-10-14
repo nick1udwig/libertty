@@ -66,7 +66,13 @@ for (const plugin of builtinPlugins({
   connect: (host, id) => configureConnection(host, id), closeSession: closeTabSession, reconnectHerdr, store, notice, terminalURL, openReading,
   frame(tab, frame) { if (frame) frames.set(tab.id, frame); else frames.delete(tab.id); },
   herdr(tab, view) { if (view) { herdrViews.set(tab.id, view); $('workspace-navigation').append(view.navigationElement); } else { herdrViews.delete(tab.id); herdrAttention.delete(tab.id); } },
-  toggleTerminalTabs(tab) { if (tab.id === active) { terminalTabsExpanded = !terminalTabsExpanded; updateWorkspaceNavigation(); } },
+  toggleTerminalTabs(tab) {
+    if (tab.id !== active) return;
+    const release = herdrViews.get(tab.id)?.holdTerminalSize();
+    terminalTabsExpanded = !terminalTabsExpanded; updateWorkspaceNavigation();
+    // Animate the surrounding bars with one terminal geometry change at the end.
+    void Promise.allSettled($('terminal-tabs-drawer').getAnimations().map(animation => animation.finished)).then(() => release?.());
+  },
   ready(tab) { if (tab.id === active) updateViewVisibility(); },
   attention(tab, count) { herdrAttention.set(tab.id, count); const badge = $('tabs').querySelector<HTMLElement>('[aria-controls="herdr-' + tab.id + '"] .herdr-attention'); if (badge) { badge.textContent = String(count); badge.hidden = !count; badge.setAttribute('aria-label', count + ' agents need attention'); } if (tab.id === active) queueMicrotask(renderWorkspaceShortcuts); },
   notification: (connection, event) => herdrSounds.play(connection, event), notificationDevice: id => herdrNotifications.device(id),
