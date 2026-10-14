@@ -20,7 +20,7 @@ npm run contracts:vocabulary -- --check
 
 ## Full local and release checks
 
-[AGENTS.md](../AGENTS.md) requires local validation before creating a commit or merging because ordinary pushes and pull requests only run fast CI.
+[AGENTS.md](../AGENTS.md) routes agents to the [code changes skill](../.agents/skills/termai-code-changes/SKILL.md) for required local validation before creating a commit or merging because ordinary pushes and pull requests only run fast CI.
 Run the following with the Node version pinned in `build/release-config.json`, Rust with the `wasm32-unknown-unknown` target, native dependency build tools, Chromium, OpenSSH server and Bash completion available.
 
 ```sh
@@ -55,7 +55,7 @@ See [releases.md](releases.md) for pins, packaging and publication.
 
 ## Local performance checks
 
-Performance comparisons run on the developer's machine through standalone scripts, with the commit and merge requirements in [AGENTS.md](../AGENTS.md).
+Performance comparisons run on the developer's machine through standalone scripts, with the commit and merge requirements in the [code changes skill](../.agents/skills/termai-code-changes/SKILL.md).
 The manual GitHub performance workflow has been removed because shared runners add noise to latency comparisons.
 
 ```sh
