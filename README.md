@@ -6,9 +6,9 @@ Run the server on your Linux machine, connect from your phone over Tailscale, an
 termai repairs dictation using your shell’s commands, files and history, with the original text available as an alternative.
 
 <p>
-  <img src="docs/images/example-git-init.png" width="250" alt="Mobile terminal and shortcut bar with alternatives correcting Get in it. to git init, with the original text still available.">
-  <img src="docs/images/example-ls.png" width="250" alt="Mobile terminal and shortcut bar with alternatives offering ls -l and ls -L for LSL.">
-  <img src="docs/images/example-python.png" width="250" alt="Mobile terminal and shortcut bar with alternatives resolving the spoken Python filename and myarg option to python3 hello_world.py --myarg food.">
+  <img src="docs/images/example-cd.png" width="250" alt="Mobile terminal with alternatives correcting dictation to valid cd command.">
+  <img src="docs/images/example-python.png" width="250" alt="Mobile terminal with alternatives correcting dictation to valid python command.">
+  <img src="docs/images/example-herdr.png" width="250" alt="Mobile terminal herdr integration.">
 </p>
 
 termai integrates with [voxtype-mobile](https://github.com/nick1udwig/voxtype-mobile) if you don't have a dictation service.
