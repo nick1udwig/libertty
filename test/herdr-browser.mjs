@@ -80,6 +80,14 @@ try {
   });
   await installWireObserver(context);
   await context.addInitScript(() => {
+    const delayedPaints = new WeakSet();
+    window.addEventListener('message', event => {
+      if (!window.__delayHerdrPaint || event.data?.type !== 'terminal-rendered' || delayedPaints.has(event)) return;
+      event.stopImmediatePropagation();
+      const delayed = new MessageEvent('message', { data: event.data, origin: event.origin, source: event.source });
+      delayedPaints.add(delayed);
+      setTimeout(() => window.dispatchEvent(delayed), 2000);
+    });
     window.__wakeLocks = [];
     Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { async request() {
       const lock = new EventTarget(); lock.released = false;
@@ -121,7 +129,7 @@ try {
   assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('termai.hosts'))).some(host => host.kind === 'herdr'), 'Typing herdr saves its host automatically');
   const agentFrame = async () => {
     const element = await page.locator('.herdr-terminal').elementHandle(), frame = await element.contentFrame();
-    await frame.waitForFunction(() => window.__testTerminal && window.__state?.inputTarget === 'program' && document.querySelector('#connection-label').textContent === 'Connected' && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && document.querySelector('#terminal-viewport').getAttribute('aria-busy') !== 'true' && frameElement.checkVisibility({checkVisibilityCSS:true}));
+    await frame.waitForFunction(() => window.__testTerminal && window.__state?.inputTarget === 'program' && document.querySelector('#connection-label').textContent === 'Connected' && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && document.querySelector('#terminal-viewport').getAttribute('aria-busy') !== 'true' && !frameElement.inert && frameElement.checkVisibility({checkVisibilityCSS:true}));
     return frame;
   };
   const tab = id => page.locator('.herdr-agent-tab[data-terminal="term_' + id + '"]');
@@ -343,12 +351,16 @@ try {
   await page.locator('#herdr-layout').selectOption('full-width'); await page.locator('#page-back').click();
   assert.ok(await terminal.evaluate(() => window.__testTerminal.cols < 80), 'Mobile always fits the PTY to its screen despite a saved full-width preference');
   await page.setViewportSize({ width: 1100, height: 900 });
+  // Delay the parent handoff so geometry alone cannot make this gesture ready.
+  await page.evaluate(() => { window.__delayHerdrPaint = true; });
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#font-size').fill('24'); await page.locator('#page-back').click();
   await until(async () => await terminal.evaluate(() => window.__testTerminal.cols === 80), 'Desktop full-width layout retains the native column count after releasing mobile geometry');
   await terminal.waitForFunction(() => {
     const viewport = document.querySelector('#terminal-viewport');
     return window.__testTerminal.options.fontSize === 32 && viewport.classList.contains('full-width') && viewport.scrollWidth > viewport.clientWidth + 160;
   });
+  terminal = await agentFrame();
+  await page.evaluate(() => { window.__delayHerdrPaint = false; });
   const wideBounds = await terminal.locator('#terminal-viewport').boundingBox();
   await touch('touchStart', wideBounds.x + 250, wideBounds.y + 200); await delay(30); await touch('touchMove', wideBounds.x + 90, wideBounds.y + 200); await touch('touchEnd');
   await terminal.waitForFunction(() => document.querySelector('#terminal-viewport').scrollLeft > 100);

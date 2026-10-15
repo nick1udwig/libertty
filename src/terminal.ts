@@ -238,7 +238,7 @@ function sizeTerminal() {
       preserveScrollback(term, () => term.resize(nextCols, dimensions.rows));
       notifyHerdrSizing();
     }
-    projection?.resize(mobileTerminal());
+    if (projection?.resize(mobileTerminal())) scheduleHerdrRendered();
     // Herdr resolves the selected pane asynchronously after the WS upgrade.
     // Send geometry only after its state acknowledges that the handler is ready.
     if (!herdrTerminal || herdrReady) send({ type: 'resize', cols: term.cols, rows: term.rows, ...(herdrTerminal ? { mobile: mobileTerminal() && tabVisible && keepingGeometry() } : {}) }); inline.refresh();

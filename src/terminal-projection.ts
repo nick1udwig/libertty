@@ -220,13 +220,14 @@ export class TerminalProjection {
     }
   }
   resize(mobile = this.mobile) {
-    if (this.mobile === mobile && this.columns === this.term.cols && this.rows === this.term.rows) return;
+    if (this.mobile === mobile && this.columns === this.term.cols && this.rows === this.term.rows) return false;
     this.awaitingNativeResize = this.mobile && mobile && (this.live || this.awaitingNativeResize);
     this.mobile = mobile; this.columns = this.term.cols; this.rows = this.term.rows; this.live = this.awaitingFrame = false;
     // Keep the live application visible until its resized native frame arrives.
     // Repainting polled history here briefly restores the old layout mid-resize.
-    if (this.awaitingNativeResize) return;
-    if (this.initialized) this.update(this.previous, true);
+    if (this.awaitingNativeResize || !this.initialized) return false;
+    this.update(this.previous, true);
+    return true;
   }
   dispose() { this.native?.free(); this.history?.free(); this.probe?.free(); this.local?.free(); }
 }

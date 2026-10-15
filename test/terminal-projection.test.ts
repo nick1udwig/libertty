@@ -11,7 +11,7 @@ test('mobile native resizing keeps stale polled history out of the visible appli
     previous: 'old application', history: { getScrollbackLength: () => 0 },
     rebuild() {}, paint() { historyPaints.push(this.previous); }, cursor() {},
   });
-  term.rows = 27; projection.resize(true);
+  term.rows = 27; assert.equal(projection.resize(true), false, 'A pending native resize has not painted yet');
   projection.update('stale poll during the first resize');
   term.rows = 26; projection.resize(true);
   projection.update('stale poll during a reversed toggle');
@@ -36,9 +36,10 @@ test('live native screens defer history parsing until the projection is needed',
   projection.update('live 界😀');
   projection.update('new live 界😀');
   assert.equal(rebuilds, 0, 'Native animation needs no history parser');
-  projection.resize(false);
+  assert.equal(projection.resize(false), true, 'Switching to reflow paints the current history');
   assert.equal(rebuilds, 1);
   assert.deepEqual(paints, ['new live 界😀']);
+  assert.equal(projection.resize(false), false, 'Unchanged geometry does not need another paint acknowledgement');
   projection.mobile = true; projection.live = true;
   projection.update('line\n'.repeat(20));
   assert.equal(rebuilds, 2, 'Growing scrollback must be detected even while native frames are live');
