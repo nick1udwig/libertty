@@ -4,6 +4,7 @@
   <base href="/" data-termai-base>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0b0f0d"><meta name="description" content="Your terminals, hosts, and SSH keys in one place.">
+  <script>/* Apply the saved theme before first paint, matching src/theme.ts. */try{let t=JSON.parse(localStorage.getItem('termai.theme')||'null');if(t==='auto')t=matchMedia('(prefers-color-scheme: light)').matches?'paper':'ink';if(t==='paper'||t==='ink')document.documentElement.dataset.theme=t}catch(e){}</script>
   <link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./icon.svg" type="image/svg+xml">
   <title>termai</title>
 </head>
@@ -27,6 +28,8 @@
       <p id="list-empty" class="empty" hidden></p>
     </div>
     <section id="settings-pane" hidden aria-label="Settings">
+      <label for="theme">Theme</label><select id="theme"><option value="forest">Forest</option><option value="paper">Paper — light, for e-paper and daylight</option><option value="ink">Ink — high-contrast black</option><option value="auto">Auto — Paper or Ink with the system</option></select><p class="hint">Paper and Ink stay readable on grayscale and amber-lit screens.
+        Open terminals reload to apply a new theme.</p>
       <label for="font-size">Terminal font size (pt)</label><input id="font-size" type="number" min="6" max="24" step="0.5" value="10" required>
       <label class="toggle"><input id="show-downloads" type="checkbox" checked>Show download progress and completion</label>
       <label class="toggle"><input id="auto-alternatives" type="checkbox" checked>Open alternatives after dictation</label>
