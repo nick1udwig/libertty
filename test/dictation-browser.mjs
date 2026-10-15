@@ -195,7 +195,8 @@ try {
   assert.equal(await page.evaluate(() => window.__captureContext.state), 'running', 'Startup resumes audio after a permission/device interruption');
   assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Recording holds a screen wake lock');
   assert.deepEqual(await mic.boundingBox(), micPosition, 'Expanding controls must keep the button under the finger');
-  assert.equal(await mic.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(168, 240, 160)');
+  assert.equal(await mic.evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(168, 240, 160, 0.11)');
+  assert.equal(await mic.evaluate(el => getComputedStyle(el).color), 'rgb(168, 240, 160)');
   assert.equal(await mic.locator('.dictation-check').isVisible(), true);
   assert.equal(await page.locator('.dictation-activity line').count(), 11);
   assert.equal((await page.locator('.dictation-cancel').boundingBox()).width, 48);

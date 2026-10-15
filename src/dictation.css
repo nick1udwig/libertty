@@ -3,7 +3,7 @@
 .dictation-mic { position: fixed; z-index: 25; }
 .dictation-mic:active, .dictation-cancel:active { background: var(--press); }
 .dictation-mic:focus-visible, .dictation-cancel:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.dictation-mic.recording { border-radius: 24px; border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.dictation-mic.recording { border-radius: 24px; border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
 .dictation-mic.paused { border-color: var(--warn); background: var(--warn); color: var(--accent-ink); }
 .dictation-microphone-icon { display: block; width: 46px; height: 46px; background: currentColor; mask: url('./assets/voxtype-microphone.png') center / 24px 24px no-repeat; }
 .dictation-mic svg, .dictation-cancel svg { display: block; width: 46px; height: 46px; fill: currentColor; pointer-events: none; }
