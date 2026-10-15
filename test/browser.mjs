@@ -1,5 +1,6 @@
 import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
+import { installBackgroundGrace } from './support/background-grace.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, access, mkdir, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -57,6 +58,7 @@ try {
   await until(async () => { try { return (await fetch(base)).ok; } catch { if (server.exitCode !== null) throw new Error(logs); return false; } });
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  await installBackgroundGrace(context);
   const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(String(e)));
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(page.context());
@@ -364,6 +366,7 @@ try {
       await page.evaluate(() => {
         Object.defineProperty(document, 'hidden', { configurable: true, value: true });
         document.dispatchEvent(new Event('visibilitychange'));
+        window.__expireBackground();
       });
       await page.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Reconnecting');
       await page.evaluate(() => {

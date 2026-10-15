@@ -2,6 +2,7 @@ import { launchBrowser, freePort, startBackend, delay, until, waitForBackend, pa
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { herdrFixture } from './herdr-fixture.ts';
+import { installBackgroundGrace } from './support/background-grace.mjs';
 
 const fixturePort3192 = await freePort();
 
@@ -14,6 +15,7 @@ try {
   const owner = await pair(base, token);
   browser = await launchBrowser({ });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  await installBackgroundGrace(context);
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await context.addInitScript(({ base, owner }) => {
     if (parent !== window) return;
@@ -39,9 +41,10 @@ try {
   await page.reload();
   await page.waitForFunction(() => { const tab = JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === 'saved-herdr'); return tab && !tab.ended && tab.herdrSource === tab.session && tab.session !== '22222222-2222-4222-8222-222222222222'; });
   await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
+  await delay(500);
   const before = tickets;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
-  await until(() => tickets > before);
+  await delay(200); assert.equal(tickets, before, 'Short app switching keeps the metadata connection');
   await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
   // A ticket fetch left behind by a suspended PWA must not block foreground recovery.
   let stalled, metadataAttempts = 0;
@@ -53,6 +56,7 @@ try {
   });
   const foreground = () => page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'));
+    window.__expireBackground();
     Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange'));
   });
   await delay(200); await foreground(); await until(() => !!stalled, 'held metadata ticket');

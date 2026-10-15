@@ -42,6 +42,8 @@ export class HerdrView {
   private get ws() { return this.transport?.socket; }
   private offeredWire?: string[];
   private supportsHeartbeat = false;
+  private backgroundExpired = false;
+  private backgroundTimer?: ReturnType<typeof setTimeout>;
   private recovering?: Promise<void>;
   private recoveryRetry?: ReturnType<typeof setTimeout>;
   private disposed = false;
@@ -125,10 +127,16 @@ export class HerdrView {
     const presence = () => this.updatePresence();
     document.addEventListener('visibilitychange', presence); window.addEventListener('focus', presence); window.addEventListener('blur', presence);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', presence), () => window.removeEventListener('focus', presence), () => window.removeEventListener('blur', presence));
-    const resume = () => {
+    const resume = (event: Event) => {
       if (this.disposed) return;
-      if (document.hidden || !navigator.onLine) { this.transport.suspend(); return; }
-      void this.transport.resume(true);
+      clearTimeout(this.backgroundTimer);
+      if (!navigator.onLine) { this.transport.suspend(); return; }
+      if (document.hidden) {
+        this.backgroundTimer = setTimeout(() => { this.backgroundExpired = true; this.transport.suspend(); }, 20000);
+        return;
+      }
+      this.backgroundExpired = false;
+      void this.transport.resume(event.type === 'online' || !this.transport.healthy);
     };
     document.addEventListener('visibilitychange', resume); window.addEventListener('online', resume); window.addEventListener('pageshow', resume);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', resume), () => window.removeEventListener('online', resume), () => window.removeEventListener('pageshow', resume));
@@ -140,7 +148,7 @@ export class HerdrView {
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const items = [...this.menu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement); items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus(); }
     };
     this.transport = new ReconnectingSocket({
-      available: () => !this.disposed && !this.recovering && !document.hidden && navigator.onLine,
+      available: () => !this.disposed && !this.recovering && (!document.hidden || !this.backgroundExpired) && navigator.onLine,
       protocols: () => wireProtocols(this.offeredWire),
       heartbeat: () => this.supportsHeartbeat,
       prepare: async signal => {
@@ -739,7 +747,7 @@ export class HerdrView {
     if (this.disposed) return; this.disposed = true;
     this.actionDialog?.close();
     this.dropIndicator.remove();
-    clearTimeout(this.recoveryRetry); this.transport.suspend(); clearInterval(this.presenceTimer); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.strip.remove(); this.element.remove();
+    clearTimeout(this.backgroundTimer); clearTimeout(this.recoveryRetry); this.transport.suspend(); clearInterval(this.presenceTimer); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
   }
 }

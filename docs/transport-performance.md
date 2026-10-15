@@ -246,3 +246,11 @@ Ready replies forward the accepted-frame checkpoint, allowing exact suffix uploa
 A previously accepted finish retrieves the cached final without uploading audio again, and a lost finish control can be sent after an already accepted final audio frame.
 A changed input context or daemon error retains the encoded recording for an explicit retry at the current prompt or cancellation.
 Recordings remain in browser memory and are discarded when the page exits or the user cancels them.
+
+## Reconnect and background grace
+
+An authorized same-origin terminal reconnects directly with its session cookie, and a Herdr pane with a remembered credential requests only a fresh scoped ticket.
+A failed direct terminal handshake falls back to authorization so expired cookies, revocation and ended sessions still reach the normal recovery flow.
+Cross-origin native terminals retain their authorization and single-use ticket flow.
+Terminal and Herdr metadata sockets stay connected for twenty seconds after the document becomes hidden, retaining the mobile PTY size and live picture during short app switches.
+After the grace expires, Herdr releases mobile geometry and idle terminals disconnect, while active dictation may retain its audio transport.

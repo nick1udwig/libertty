@@ -36,6 +36,10 @@ let herdrPresentation = '';
 let offeredWire: string[] | undefined;
 let supportsHeartbeat = false, supportsInputContexts = false;
 let accessToken: string | undefined = backendAccess(baseURL.href);
+let authorized = false, directAttempt = false;
+let hiddenExpired = false, hiddenTimer: ReturnType<typeof setTimeout> | undefined;
+const backgroundGrace = 20000;
+const keepingGeometry = () => !document.hidden || !hiddenExpired;
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
 function herdrEndpoint(name: string) {
   const url = new URL(name, baseURL);
@@ -47,7 +51,7 @@ function notify(type: string, data: object = {}) { if (embedded) parent.postMess
 if (embedded) document.documentElement.classList.add('embedded-terminal');
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const transport = new ReconnectingSocket({
-  available: () => !document.hidden && (!herdrTerminal || tabVisible) && navigator.onLine,
+  available: () => (keepingGeometry() || dictation.active) && (!herdrTerminal || tabVisible) && navigator.onLine,
   protocols: () => wireProtocols(offeredWire),
   heartbeat: () => supportsHeartbeat,
   stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
@@ -237,7 +241,7 @@ function sizeTerminal() {
     projection?.resize(mobileTerminal());
     // Herdr resolves the selected pane asynchronously after the WS upgrade.
     // Send geometry only after its state acknowledges that the handler is ready.
-    if (!herdrTerminal || herdrReady) send({ type: 'resize', cols: term.cols, rows: term.rows, ...(herdrTerminal ? { mobile: mobileTerminal() && tabVisible && !document.hidden } : {}) }); inline.refresh();
+    if (!herdrTerminal || herdrReady) send({ type: 'resize', cols: term.cols, rows: term.rows, ...(herdrTerminal ? { mobile: mobileTerminal() && tabVisible && keepingGeometry() } : {}) }); inline.refresh();
     refreshHerdrFrame();
   } catch { /* hidden during layout */ }
 }
@@ -394,7 +398,7 @@ async function socketURL(signal: AbortSignal) {
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
   if (herdrTerminal) {
     sizeTerminal();
-    const geometry = { historyDelta: true, frameAck: true, cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && !document.hidden };
+    const geometry = { historyDelta: true, frameAck: true, cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && keepingGeometry() };
     cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutMatched = false;
     herdrPreserve = false; herdrMobileRendered = false;
     herdrLayoutPending = geometry.mobile;
@@ -408,8 +412,11 @@ async function socketURL(signal: AbortSignal) {
   return socketURL;
 }
 async function prepareConnection(signal: AbortSignal, token?: string) {
+  directAttempt = !token && (herdrTerminal ? !!accessToken : authorized && baseURL.origin === location.origin);
+  if (directAttempt) return socketURL(signal);
   const result = await api<{ state?: ShellState; accessToken: string; heartbeat?: boolean; wire?: string[] }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
   signal.throwIfAborted(); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
+  authorized = true;
   if (result.state) state = result.state; accessToken = result.accessToken; notify('terminal-authorized', { accessToken });
   rememberBackendAccess(baseURL.href, accessToken);
   $<HTMLInputElement>('token').value = '';
@@ -575,6 +582,7 @@ function socketMessage(event: MessageEvent) {
 
 }
 function socketClosed(event?: CloseEvent) {
+  if (directAttempt && !replayState) authorized = false;
   disconnectedContext = inputContext() || disconnectedContext;
   dictation.connected(false); synchronizedConnection = false;
   echo.reset();
@@ -610,16 +618,17 @@ const connect = (token?: string) => transport.connect(token);
 document.addEventListener('pointerdown', () => transport.activity(), { passive: true });
 $('login-form').onsubmit = e => { e.preventDefault(); void connect($<HTMLInputElement>('token').value); };
 document.addEventListener('visibilitychange', () => {
+  clearTimeout(hiddenTimer);
   if (document.hidden) {
     echo.cancel();
-    presentation.freeze();
-    // Dictation may keep the transport alive through lock; geometry still
-    // belongs to the desktop while this pane is no longer visible.
-    if (herdrTerminal) send({ type: 'resize', cols: term.cols, rows: term.rows, mobile: false });
-    // Keep both audio transport and shell input context while dictating through lock.
-    if (!dictation.active) { inline.suspend(); transport.suspend(); }
+    hiddenExpired = false;
+    hiddenTimer = setTimeout(() => {
+      hiddenExpired = true;
+      if (herdrTerminal) send({ type: 'resize', cols: term.cols, rows: term.rows, mobile: false });
+      if (!dictation.active) { inline.suspend(); transport.suspend(); }
+    }, backgroundGrace);
   }
-  else { void transport.resume(transport.socket?.readyState !== WebSocket.OPEN); sizeTerminal(); revealReplay(); }
+  else { hiddenExpired = false; void transport.resume(!transport.healthy); sizeTerminal(); revealReplay(); }
 });
 window.addEventListener('online', () => void transport.resume(true));
 window.addEventListener('offline', () => transport.suspend());

@@ -1,5 +1,6 @@
 import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
+import { installBackgroundGrace } from './support/background-grace.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -52,6 +53,7 @@ try {
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
+  await installBackgroundGrace(context);
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
   await context.addInitScript(() => {
@@ -174,7 +176,7 @@ try {
   // Reopen a fullscreen alternate-buffer app after releasing mobile ownership.
   await page.bringToFront();
   await page.evaluate(() => {
-    Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); window.__expireBackground();
   });
   await wait(async () => (await state()).cols > geometry.cols, 'background restores desktop geometry');
   await page.evaluate(() => {
