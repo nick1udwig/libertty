@@ -82,6 +82,7 @@ const transfersSeen = new Set<string>();
 let ctrl = false;
 let shortcutState = '';
 let uploadingImage = false;
+let dictationWaiting = false;
 let toastTimer: ReturnType<typeof setTimeout>;
 const queue = new Queue<Extract<ServerMessage, { type: 'output' }>>();
 let frameQueued = false;
@@ -103,11 +104,12 @@ function updateRun() {
   $('shell-status').textContent = state.exited ? 'Exited' : state.ready ? 'At prompt' : 'Running';
   for (const button of document.querySelectorAll<HTMLButtonElement>('.command-shortcut')) button.disabled = !available;
   for (const button of document.querySelectorAll<HTMLButtonElement>('.image-upload')) button.disabled = !canUploadImage();
+  $<HTMLButtonElement>('terminal-enter').disabled = !canSendReturn();
   publishShortcuts(available);
 }
 function publishShortcuts(available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand && !presentation.pending) {
   if (!embedded) return;
-  const snapshot = { shortcuts, ctrl, available, imageAvailable: canUploadImage() }, serialized = JSON.stringify(snapshot);
+  const snapshot = { shortcuts, ctrl, available, imageAvailable: canUploadImage(), returnAvailable: canSendReturn() }, serialized = JSON.stringify(snapshot);
   if (serialized === shortcutState) return;
   shortcutState = serialized; notify('terminal-shortcuts', snapshot);
 }
@@ -316,7 +318,7 @@ const inline = new InlineSuggestions(term, { state: () => state, replace: replac
   }, raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, context: inputContext, key: baseURL.href,
   audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data, transport.socket.protocol)); return true; },
-  prepare: () => inline.prepareExternalPaste(), waiting: active => inline.dictationPending(active), notice: toast, focus: () => term.focus() });
+  prepare: () => inline.prepareExternalPaste(), waiting: active => { dictationWaiting = active; inline.dictationPending(active); updateRun(); }, notice: toast, focus: () => term.focus() });
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
   const workspace = new URL('.', document.baseURI);
@@ -326,6 +328,10 @@ function showReading(request: { path: string } | { capture: string; name: string
 term.onData(rawInput);
 function setCtrl(value: boolean) { ctrl = value; for (const button of document.querySelectorAll('[data-modifier]')) button.setAttribute('aria-pressed', String(value)); publishShortcuts(); }
 function canUploadImage() { return !presentation.pending && !uploadingImage && !capturedConnection && !state.exited && (!herdrTerminal || herdrReady) && transport.socket?.readyState === WebSocket.OPEN; }
+function canSendReturn() { return !dictationWaiting && !pendingCommand && !presentation.pending && !capturedConnection && !state.exited && (!herdrTerminal || herdrReady) && transport.socket?.readyState === WebSocket.OPEN; }
+function sendReturn() { if (canSendReturn()) rawInput('\r'); }
+$('terminal-enter').addEventListener('pointerdown', event => event.preventDefault());
+$('terminal-enter').onclick = sendReturn;
 const images = imagePicker(files => void attachImages(files)); document.body.append(images);
 async function attachImages(files: File[]) {
   if (!canUploadImage()) { toast('Connect to the terminal before attaching an image.'); return; }
@@ -693,6 +699,7 @@ if (embedded) {
       const index = event.data.index, shortcut = shortcuts[index];
       if (Number.isInteger(index) && shortcut && shortcut.kind === event.data.kind && shortcut.value === event.data.value) $('shortcut-buttons').querySelectorAll<HTMLButtonElement>('button')[index]?.click();
     }
+    if (event.data?.type === 'terminal-return' && tabVisible && !herdrParked) sendReturn();
     if (event.data?.type === 'terminal-images' && tabVisible && !herdrParked && Array.isArray(event.data.files) && event.data.files.every((file: unknown) => file instanceof File)) void attachImages(event.data.files);
     if (event.data?.type === 'herdr-present' && herdrTerminal && typeof event.data.presentation === 'string') {
       presentation.freeze();

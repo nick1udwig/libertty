@@ -65,7 +65,13 @@ export function createWorkspaceNavigation(options: Options) {
     mountGeneration = new Map<string, number>();
   const terminalShortcuts = new WeakMap<
     Window,
-    { shortcuts: Shortcut[]; ctrl: boolean; available: boolean; imageAvailable: boolean }
+    {
+      shortcuts: Shortcut[];
+      ctrl: boolean;
+      available: boolean;
+      imageAvailable: boolean;
+      returnAvailable: boolean;
+    }
   >();
   let shortcutPresentation = '';
   let shortcutWindow: Window | null | undefined;
@@ -364,6 +370,7 @@ export function createWorkspaceNavigation(options: Options) {
     else notice('Select the original terminal and attach the image again.');
   });
   document.body.append(images);
+  $('workspace-enter').addEventListener('pointerdown', (event) => event.preventDefault());
   function renderWorkspaceShortcuts() {
     const frame = shortcutFrame(),
       source = frame?.contentWindow,
@@ -381,11 +388,18 @@ export function createWorkspaceNavigation(options: Options) {
       ctrl: ready && state?.ctrl,
       available: state?.available,
       imageAvailable: state?.imageAvailable,
+      returnAvailable: state?.returnAvailable,
       ready,
     });
     if (source === shortcutWindow && presentation === shortcutPresentation) return;
     shortcutWindow = source;
     shortcutPresentation = presentation || '';
+    const enter = $<HTMLButtonElement>('workspace-enter');
+    enter.disabled = !ready || !state?.returnAvailable;
+    enter.onclick = () => {
+      if (!ready || !state?.returnAvailable || shortcutFrame()?.contentWindow !== source) return;
+      source!.postMessage({ type: 'terminal-return' }, location.origin);
+    };
     const buttons = $('workspace-shortcut-buttons'),
       scroll = buttons.scrollLeft;
     buttons.replaceChildren();
@@ -722,6 +736,7 @@ export function createWorkspaceNavigation(options: Options) {
             ctrl: event.data.ctrl === true,
             available: event.data.available === true,
             imageAvailable: event.data.imageAvailable === true,
+            returnAvailable: event.data.returnAvailable === true,
           });
           renderWorkspaceShortcuts();
         } catch {

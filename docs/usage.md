@@ -261,6 +261,8 @@ The backend consumes the daemon's revisable previews and inserts only final text
 Final text enters the same command repair and alternatives flow as keyboard dictation at a Bash prompt: the top correction is selected, with the original transcript available alongside other alternatives.
 The initial transcript is not sent back for duplicate insertion.
 While a foreground application such as the Codex CLI is running, dictation inserts the literal transcript into that application without command repair or alternatives.
+Tap **Enter ↵** beside the shortcut bar to send Return without opening the keyboard, including in Herdr panes.
+The Enter button stays visible when the shortcuts scroll and is disabled while dictation is being transcribed or the terminal is disconnected.
 Bash's private prompt and command-start markers identify the input target, including TUIs running without an alternate screen.
 Pasting respects the application's bracketed-paste mode and never sends Enter.
 Typing or changing the prompt during a recording rejects its late result.

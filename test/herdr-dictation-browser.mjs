@@ -95,6 +95,14 @@ try {
   await page.waitForFunction(() => window.__state?.inputTarget === 'program');
   await dictate('C D work space');
   assert.equal(await page.locator('#alternatives-menu').isVisible(), false, 'Foreground programs keep literal dictation');
+  await page.locator('#terminal textarea').evaluate(element => element.blur());
+  await page.evaluate(() => window.__sent = []);
+  await page.locator('#terminal-enter').tap();
+  await page.waitForFunction(() => window.__sent.some(message => message.type === 'input' && message.data === '\r'));
+  assert.equal(await page.evaluate(() => window.__sent.filter(message => message.type === 'input' && message.data === '\r').length), 1, 'Standalone Enter sends one Return');
+  assert.deepEqual(await page.locator('#terminal textarea').evaluate(element => ({ focused: element === document.activeElement, readOnly: element.readOnly, inputMode: element.inputMode })), { focused: false, readOnly: true, inputMode: 'none' }, 'Standalone Enter keeps the keyboard dismissed');
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
+  await page.waitForFunction(() => document.querySelector('#terminal-enter').disabled);
   assert.deepEqual(errors, []);
   console.log('PASS Herdr shell dictation: real process detection, retained microphone audio through reconnect, microphone and keyboard C D alternatives, scoped repair, preserved prefix/suffix, rejected external edits, selected command execution, literal foreground input');
 } catch (error) {

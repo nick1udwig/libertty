@@ -189,9 +189,10 @@ try {
   assert.ok(bottomControls.tabs.bottom <= bottomControls.spaces.top + 1, 'Terminal tabs sit above Herdr spaces');
   assert.ok(bottomControls.spaces.bottom <= bottomControls.shortcuts.top + 1, 'Herdr spaces sit above configurable buttons');
   assert.equal(bottomControls.shortcuts.bottom, bottomControls.height);
-  await terminal.locator('#terminal textarea').focus(); await page.keyboard.type('Split routes into handlers'); await page.keyboard.press('Enter');
+  await terminal.locator('#terminal textarea').focus(); await page.keyboard.type('Split routes into handlers'); await page.locator('#workspace-enter').tap();
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\r'), 'direct Enter delivery');
   assert.equal(fixture.actions.filter(a => a.method === 'pane.send_text').map(a => a.params.text).join(''), 'Split routes into handlers\r');
+  assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Enter preserves an already open keyboard');
   await page.locator('#workspace-shortcuts').getByRole('button', { name: 'Esc', exact: true }).click();
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\x1b'), 'shared Escape button');
   const mic = terminal.locator('#termai-dictation'); await mic.waitFor({ state: 'visible' });
@@ -214,6 +215,16 @@ try {
   assert.equal(fixture.actions.filter(a => a.method === 'pane.send_input').length, 1, 'Dictation inserts once without pressing Enter');
   assert.equal(await terminal.locator('.alternative-choice').count(), 0, 'Program dictation stays in the terminal');
   await terminal.locator('#terminal textarea').evaluate(el => el.blur());
+  const enter = page.locator('#workspace-enter');
+  const returnsBefore = fixture.actions.filter(action => action.method === 'pane.send_text' && action.params.text === '\r').length;
+  await page.locator('#workspace-shortcut-buttons').evaluate(el => el.scrollLeft = el.scrollWidth);
+  const enterBounds = await enter.boundingBox();
+  assert.ok(enterBounds.x >= 0 && enterBounds.x + enterBounds.width <= 390, 'Enter remains visible beside scrolled shortcuts');
+  await enter.tap();
+  await until(() => fixture.actions.filter(action => action.method === 'pane.send_text' && action.params.text === '\r').length === returnsBefore + 1, 'one Return after dictation');
+  assert.equal(fixture.actions.filter(action => action.method === 'pane.send_text' && action.params.text === '\r').at(-1).params.pane_id, 'w1:p0', 'Return reaches the selected pane');
+  assert.deepEqual(await terminal.locator('#terminal textarea').evaluate(el => ({ focused: el === document.activeElement, readOnly: el.readOnly, inputMode: el.inputMode })), { focused: false, readOnly: true, inputMode: 'none' }, 'Sending Return keeps the software keyboard dismissed');
+  await page.locator('#workspace-shortcut-buttons').evaluate(el => el.scrollLeft = 0);
   const touchHistory = Array.from({ length: 160 }, (_, i) => 'ROW-' + i + ' alpha beta gamma ' + 'long line '.repeat(8)).join('\n');
   fixture.setScreen(0, touchHistory);
   await until(async () => (await text()).includes('ROW-159'), 'unwrapped history');
