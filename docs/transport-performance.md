@@ -44,7 +44,8 @@ Without browser decompression support, raw binary remains available.
 Input, acknowledgements and geometry use compact binary fields, terminal output retains its sequence, and Herdr frames carry their original ANSI bytes directly.
 Decoding remains ordered across asynchronous decompression and discards results from replaced sockets.
 Connect and ticket replies advertise application heartbeat support independently of the encoding.
-After two idle seconds, browsers ping the terminal or metadata socket and report a stall after four seconds without incoming traffic.
+Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply within two more seconds.
+Live output and repeated state updates do not reset that deadline, so a working downlink cannot conceal a failed return path.
 A replacement handshake keeps the previous socket alive and the last painted screen visible until takeover, and user activity bypasses reconnect backoff.
 Older servers without the heartbeat capability retain their existing reconnect behavior.
 Audio retains its existing Opus bytes inside a distinct four-byte envelope and is never compressed.
@@ -275,3 +276,18 @@ The ordered input worker combines immediately queued plain-text keys into one pa
 Controls, commands, pastes, replacements, guarded dictation and completion-bearing requests remain separate and retain receive order.
 Every original input keeps its admission permit until the combined operation completes, and each received key still advances the input revision independently.
 The worker never waits to gather more typing.
+
+## Loss and outage profiles
+
+The `lossy` wire profile retains the mobile profile's 150 ms RTT, 1 Mbps and sixfold script CPU throttle, adds a 200 ms retransmission wait for every thirty-seventh simulated 1,460-byte packet, and introduces a 700 ms outage on every eighth request.
+It delays ordered TCP writes rather than discarding WebSocket bytes, modelling retransmission and head-of-line blocking without corrupting the reliable stream.
+Sample reports include injected retransmission and outage counts alongside the existing decoded-payload hashes, timing and byte counters.
+The existing fast and mobile budgets remain unchanged, while lossy typing and random-data tails allow one extra 200 ms retransmission because packet boundaries differ between representations.
+Lossy log and ANSI medians retain the existing 25 percent improvement target.
+The fast verification uses 101 warm samples to reduce browser frame-timing phase noise, and mobile profiles retain fifteen warm samples by default.
+
+The native Herdr browser suite also runs with `TEST_WIRE=gzip TEST_LINK=lossy`.
+Its final recovery scenario adds ordered downstream propagation and retransmission delays, then withholds all socket messages for 5.5 seconds while the real application continues animating.
+It requires a stalled-connection notice, the retained terminal picture, a replacement connection and a screen that has caught up within three seconds of signal returning.
+The harness saves counters and recovery timing in `.test-artifacts/herdr-lossy-link.json`.
+Run `npm run verify:performance` for all three wire profiles or use `WIRE_PROFILES=lossy WIRE_VARIANTS=json,gzip node test/transport-benchmark.mjs` for the new comparison alone.

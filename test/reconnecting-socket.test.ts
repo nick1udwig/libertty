@@ -214,6 +214,18 @@ test('incoming traffic prevents false stalls and heartbeat replies stay internal
   assert.equal(f.sockets.length, 1);
 });
 
+test('live output and repeated state updates cannot conceal missing heartbeat replies', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state'); socket.autoPong = false;
+  for (let i = 0; i < 4; i++) {
+    socket.message('live output'); socket.message('state');
+    t.mock.timers.tick(1000); await flush();
+  }
+  assert.deepEqual(socket.sent, ['{"type":"ping"}']);
+  assert.deepEqual(f.behavior.stalled, [4]);
+  assert.equal(f.sockets.length, 2);
+});
+
 test('typing or tapping retries immediately during backoff without overlapping attempts', async t => {
   const f = fixture(t);
   f.behavior.prepare = async () => { throw new Error('offline'); };

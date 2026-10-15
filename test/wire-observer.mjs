@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
+import { installLossyLink } from './support/lossy-link.mjs';
 
 /** Browser harnesses inspect the same logical messages on either transport. */
 export async function installWireObserver(context) {
+  if (process.env.TEST_LINK === 'lossy') await installLossyLink(context);
   const source = stripTypeScriptTypes(await readFile(new URL('../src/wire.ts', import.meta.url), 'utf8')).replace(/^export /gm, '');
   if (process.env.TEST_WIRE === 'gzip') await context.addInitScript(() => Object.defineProperty(navigator, 'connection', { configurable: true, value: { effectiveType: '3g', downlink: 1 } }));
   await context.addInitScript({ content: '(() => {' + source + String.raw`

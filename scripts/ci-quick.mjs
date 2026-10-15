@@ -44,6 +44,7 @@ const tests = [
   'herdr-spaces.test.ts',
   'inline-suggestions.test.ts',
   'input-line.test.ts',
+  'lossy-link.test.mjs',
   'paste-mode.test.ts',
   'plugin-file.test.ts',
   'plugins.test.ts',

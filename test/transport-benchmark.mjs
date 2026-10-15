@@ -8,13 +8,14 @@ import { createHash, randomBytes } from 'node:crypto';
 import { stripTypeScriptTypes } from 'node:module';
 import { WebSocketServer } from 'ws';
 import { chromium } from 'playwright-core';
+import { LinkSchedule, LOSSY_PROFILE } from './support/lossy-link.mjs';
 
 const peer = spawn(new URL('../target/release/examples/wire', import.meta.url).pathname, [], { stdio: ['pipe', 'pipe', 'inherit'] });
 const replies = [], lines = createInterface({ input: peer.stdout });
 lines.on('line', line => replies.shift()?.(JSON.parse(line)));
 const encode = (value, mode) => new Promise(resolve => { replies.push(resolve); peer.stdin.write(JSON.stringify({ value, mode }) + '\n'); });
 const variants = process.env.WIRE_VARIANTS?.split(',') || ['json', 'pmd-json', 'json-gzip', 'binary', 'gzip', 'gzip-fast'];
-const profiles = [{ name: 'fast', rtt: 2, mbps: 100, cpu: 1 }, { name: 'mobile', rtt: 150, mbps: 1, cpu: 6 }].filter(p => !process.env.WIRE_PROFILES || process.env.WIRE_PROFILES.split(',').includes(p.name));
+const profiles = [{ name: 'fast', rtt: 2, mbps: 100, cpu: 1 }, { name: 'mobile', rtt: 150, mbps: 1, cpu: 6 }, LOSSY_PROFILE].filter(p => !process.env.WIRE_PROFILES || process.env.WIRE_PROFILES.split(',').includes(p.name));
 const samples = Number(process.env.WIRE_SAMPLES || 15);
 const payloads = {
   typing: { type: 'output', seq: 1, data: 'hello 世界\r\n' },
@@ -39,26 +40,28 @@ server.on('upgrade', (req, socket, head) => {
   if (!profile) { socket.destroy(); return; }
   const selected = url.pathname === '/pmd-json' ? pmd : plain;
   selected.handleUpgrade(req, socket, head, ws => {
-    const original = ws._socket.write.bind(ws._socket); let departure = 0;
+    const original = ws._socket.write.bind(ws._socket), link = new LinkSchedule(profile);
     ws._socket.write = (chunk, encoding, callback) => {
       if (typeof encoding === 'function') { callback = encoding; encoding = undefined; }
-      departure = Math.max(departure, performance.now()) + Buffer.byteLength(chunk) * 8 / (profile.mbps * 1000);
-      setTimeout(() => original(chunk, encoding, callback), Math.max(0, departure + profile.rtt / 2 - performance.now()));
+      const arrival = link.write(Buffer.byteLength(chunk), performance.now());
+      setTimeout(() => original(chunk, encoding, callback), Math.max(0, arrival - performance.now()));
       return true;
     };
     let lastRead = ws._socket.bytesRead;
     ws.on('message', async (data, binary) => {
       const logical = binary ? { type: 'input', data: new TextDecoder().decode(data.subarray(4)) } : JSON.parse(String(data));
       const request = JSON.parse(logical.data), value = payloads[request.case], upstream = ws._socket.bytesRead - lastRead;
+      link.request(request.case);
       lastRead = ws._socket.bytesRead;
       await new Promise(resolve => setTimeout(resolve, profile.rtt / 2));
       const before = ws._socket.bytesWritten, begin = performance.now();
       const reply = await encode(value, request.variant === 'pmd-json' ? 'json' : request.variant);
       const encodeAndIpcMs = performance.now() - begin;
       const bytes = Buffer.from(reply.bytes, 'base64');
+      const losses = link.losses, stalls = link.stalls;
       ws.send(reply.binary ? bytes : bytes.toString(), { binary: reply.binary, compress: true }, error => {
         if (error) return;
-        stats.set(request.id, { upstream, downstream: ws._socket.bytesWritten - before, logical: Buffer.byteLength(JSON.stringify(value)), encoded: reply.length, nativeEncodeMs: reply.encodeMs, encodeAndIpcMs });
+        stats.set(request.id, { upstream, downstream: ws._socket.bytesWritten - before, logical: Buffer.byteLength(JSON.stringify(value)), encoded: reply.length, nativeEncodeMs: reply.encodeMs, encodeAndIpcMs, losses: link.losses - losses, stalls: link.stalls - stalls });
       });
     });
   });
@@ -108,7 +111,7 @@ try {
         for (const sample of all) assert.equal(sample.hash, expectedHash);
         assert.equal(warm[0].type, payloads[name].type);
         if (payloads[name].bytes) assert.equal(warm[0].size, Buffer.from(payloads[name].bytes, 'base64').length);
-        const row = { profile: profile.name, variant, case: name, coldMs: all[0].ms, medianMs: quantile('ms', .5), p95Ms: quantile('ms', .95), encodeMs: quantile('nativeEncodeMs', .5), decodeMs: quantile('decodeMs', .5), upstreamBytes: quantile('upstream', .5), downstreamBytes: quantile('downstream', .5), samples: warm };
+        const row = { profile: profile.name, variant, case: name, coldMs: all[0].ms, medianMs: quantile('ms', .5), p95Ms: quantile('ms', .95), encodeMs: quantile('nativeEncodeMs', .5), decodeMs: quantile('decodeMs', .5), upstreamBytes: quantile('upstream', .5), downstreamBytes: quantile('downstream', .5), losses: all.reduce((sum, sample) => sum + sample.losses, 0), stalls: all.reduce((sum, sample) => sum + sample.stalls, 0), samples: warm };
         rows.push(row); console.log(JSON.stringify({ ...row, samples: undefined }));
       }
     }

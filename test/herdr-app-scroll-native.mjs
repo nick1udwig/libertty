@@ -187,6 +187,34 @@ try {
   await page.waitForFunction(() => window.__terminal?.buffer.active.getLine(0)?.translateToString(true).includes('Application transcript') && document.querySelector('#connection-label').textContent === 'Connected');
   const tick = await page.evaluate(() => window.__terminal.buffer.active.getLine(0).translateToString(true));
   await page.waitForFunction(before => window.__terminal.buffer.active.getLine(0).translateToString(true) !== before, tick);
+  if (process.env.TEST_LINK === 'lossy') {
+    await page.evaluate(() => { window.__linkProfile.enabled = true; });
+    await page.waitForFunction(() => window.__linkProfile.losses > 0);
+    const before = await page.evaluate(() => Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]));
+    await page.waitForFunction(before => Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) > before + 10, before);
+    let heldTicket, release;
+    const gate = new Promise(resolve => release = resolve);
+    const hold = async route => { if (!heldTicket) { heldTicket = route; await gate; } await route.continue().catch(() => {}); };
+    await page.route('**/api/herdr/ticket?**', hold);
+    const started = Date.now();
+    const stalledTick = await page.evaluate(() => {
+      const tick = Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]);
+      window.__linkProfile.pause(5500); return tick;
+    });
+    try {
+      await page.waitForFunction(() => document.querySelector('#connection-label').textContent.startsWith('Connection stalled'), undefined, { timeout: 8000 });
+      await wait(() => !!heldTicket, 'replacement ticket during the outage');
+      assert.equal(await page.locator('.terminal-presentation').isVisible(), true, 'An outage retains the previous terminal picture');
+    } finally { release(); await page.unroute('**/api/herdr/ticket?**', hold); }
+    await page.waitForFunction(tick => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('.terminal-presentation').hidden
+      && Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) > tick + 150, stalledTick, { timeout: 12000 });
+    const recoveryMs = Date.now() - started;
+    assert.ok(recoveryMs < 8500, 'The recovered screen must catch up within three seconds of signal returning: ' + recoveryMs);
+    const link = await page.evaluate(() => { window.__linkProfile.enabled = false; const { messages, losses, stalls } = window.__linkProfile; return { messages, losses, stalls }; });
+    assert.ok(link.losses > 0 && link.stalls === 1);
+    await writeFile(root + '.test-artifacts/herdr-lossy-link.json', JSON.stringify({ ...link, outageMs: 5500, recoveryMs }, null, 2));
+    console.log('PASS lossy gzip Herdr: ordered retransmission delays, retained picture during a silent outage, replacement connection, and fresh-screen catch-up in ' + recoveryMs + ' ms.');
+  }
   assert.deepEqual(errors, []);
   console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; shell-to-TUI/joining baselines, incremental frames, stale snapshots, cursor, native touch scrolling, hold/copy, plain/OSC-8 links and keyboard behavior and fullscreen background/reopen recovery passed.');
 } finally {

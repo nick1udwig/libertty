@@ -22,6 +22,7 @@ export class ReconnectingSocket {
   private retained?: WebSocket;
   private heartbeat?: ReturnType<typeof setTimeout>;
   private lastContact = 0;
+  private established?: WebSocket;
   private pingAt?: number;
   private stalled = false;
   private options: ReconnectingSocketOptions;
@@ -57,6 +58,8 @@ export class ReconnectingSocket {
 
   ready() {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    if (this.established === this.socket) return;
+    this.established = this.socket;
     clearTimeout(this.deadline);
     this.attempt = undefined;
     this.delay = 1000;
@@ -67,7 +70,7 @@ export class ReconnectingSocket {
 
   private checkHeartbeat() {
     if (this.stopped) return;
-    if (this.pingAt !== undefined && Date.now() - this.lastContact >= 4000) {
+    if (this.pingAt !== undefined && Date.now() - this.pingAt >= 2000) {
       if (!this.stalled) {
         this.stalled = true;
         void this.begin(undefined, true);
@@ -83,6 +86,7 @@ export class ReconnectingSocket {
   private release(event?: CloseEvent, retain = false) {
     const socket = this.socket;
     this.socket = undefined;
+    this.established = undefined;
     const attempt = this.attempt;
     this.attempt = undefined;
     clearTimeout(this.deadline);
@@ -136,10 +140,11 @@ export class ReconnectingSocket {
       };
       socket.onmessage = event => {
         if (this.socket !== socket) return;
-        this.lastContact = Date.now(); this.pingAt = undefined;
         const deliver = (value: unknown) => {
           if (this.socket !== socket) return;
-          if (value === '{"type":"pong"}' || typeof value === 'object' && value !== null && 'type' in value && value.type === 'pong') return;
+          if (value === '{"type":"pong"}' || typeof value === 'object' && value !== null && 'type' in value && value.type === 'pong') {
+            this.lastContact = Date.now(); this.pingAt = undefined; return;
+          }
           this.options.message(new MessageEvent('message', { data: value }));
         };
         if (!socket.protocol?.startsWith('termai.')) { deliver(event.data); return; }
