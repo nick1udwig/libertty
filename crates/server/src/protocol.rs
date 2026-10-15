@@ -33,6 +33,8 @@ impl DictationState {
 }
 #[derive(Clone, Serialize)]
 pub struct HerdrFrame {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u64>,
     pub width: u16,
     pub height: u16,
     pub full: bool,

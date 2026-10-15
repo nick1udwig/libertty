@@ -48,6 +48,10 @@ After two idle seconds, browsers ping the terminal or metadata socket and report
 A replacement handshake keeps the previous socket alive and the last painted screen visible until takeover, and user activity bypasses reconnect backoff.
 Older servers without the heartbeat capability retain their existing reconnect behavior.
 Audio retains its existing Opus bytes inside a distinct four-byte envelope and is never compressed.
+Herdr viewers opt into sequenced frames in their ticket request and acknowledge parsed frames through the existing acknowledgement control.
+Each viewer has two frames in flight and one pending ANSI update, with ordered deltas merged until they exceed the last full screen size.
+Oversized pending updates are discarded and replaced by a fresh full screen when acknowledgement credit returns, preserving the current geometry.
+Legacy viewers retain unsequenced frames, and sequenced binary frames use envelope kind 7.
 Each compressed message uses gzip level 1 with an independent dictionary and must save at least one eighth of the original representation.
 Constrained links compress messages from 2 KiB, while ordinary links compress only messages from 128 KiB.
 The browser selects the constrained profile only when its connection information reports 2G/3G or at most 2 Mbps.

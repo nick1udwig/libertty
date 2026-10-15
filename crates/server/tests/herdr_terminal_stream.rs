@@ -278,3 +278,43 @@ async fn failed_controllers_retry_with_a_bound_and_stop_when_the_last_viewer_lea
     tokio::time::sleep(Duration::from_millis(2200)).await;
     assert_eq!(fixture.events("open").len(), 1);
 }
+
+#[tokio::test]
+async fn backpressure_snapshots_refresh_observers_without_releasing_mobile_geometry() {
+    let fixture = Fixture::new(false);
+    let hub = Hub::default();
+    let (send, mut observer_frames) = mpsc::channel(128);
+    let observer = hub
+        .subscribe(fixture.target.clone(), "term_0".into(), send)
+        .unwrap();
+    frame(&mut observer_frames, 80, true).await;
+    observer.snapshot();
+    frame(&mut observer_frames, 80, true).await;
+    assert_eq!(fixture.events("open").len(), 2);
+    assert_eq!(fixture.reaped(), 1);
+    let (send, mut mobile_frames) = mpsc::channel(128);
+    let mobile = hub
+        .subscribe_sized(
+            fixture.target.clone(),
+            "term_0".into(),
+            send,
+            Some(Size { cols: 40, rows: 30 }),
+        )
+        .unwrap();
+    frame(&mut mobile_frames, 40, true).await;
+    frame(&mut observer_frames, 40, true).await;
+    observer.snapshot();
+    frame(&mut observer_frames, 40, true).await;
+    frame(&mut mobile_frames, 40, true).await;
+    assert_eq!(
+        fixture.events("open").len(),
+        3,
+        "Snapshot recovery must retain the mobile controller"
+    );
+    assert_eq!(
+        fixture.events("command").last().unwrap()["message"],
+        json!({"type":"terminal.resize","cols":40,"rows":30})
+    );
+    drop((observer, mobile));
+    until(|| fixture.reaped() == 3).await;
+}

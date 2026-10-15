@@ -19,8 +19,8 @@ const samples = Number(process.env.WIRE_SAMPLES || 15);
 const payloads = {
   typing: { type: 'output', seq: 1, data: 'hello 世界\r\n' },
   logs: { type: 'output', seq: 1, data: ('INFO completed task こんにちは\r\n').repeat(2000) },
-  ansi: { type: 'herdr-frame', width: 80, height: 40, full: true, bytes: Buffer.from(('\x1b[2;1H\x1b[32mStatus: running こんにちは\x1b[0m').repeat(600)).toString('base64') },
-  random: { type: 'herdr-frame', width: 80, height: 40, full: true, bytes: randomBytes(64 * 1024).toString('base64') },
+  ansi: { type: 'herdr-frame', seq: 1, width: 80, height: 40, full: true, bytes: Buffer.from(('\x1b[2;1H\x1b[32mStatus: running こんにちは\x1b[0m').repeat(600)).toString('base64') },
+  random: { type: 'herdr-frame', seq: 1, width: 80, height: 40, full: true, bytes: randomBytes(64 * 1024).toString('base64') },
   metadata: { type: 'snapshot', snapshot: { agents: Array.from({ length: 100 }, (_, i) => ({ terminalId: 'term_' + i, name: 'Agent ' + i, workspace: 'Workspace', status: 'working', cwd: '/fixture/project' })) } },
   plugin: { type: 'file', path: '/fixture/application.log', text: 'Application event: completed\n'.repeat(8000) },
 };

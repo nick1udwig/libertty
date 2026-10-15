@@ -69,6 +69,7 @@ fn server_samples() -> Vec<ServerMessage> {
             ready: true,
         },
         ServerMessage::HerdrFrame(HerdrFrame {
+            seq: Some(1),
             width: 40,
             height: 30,
             full: true,

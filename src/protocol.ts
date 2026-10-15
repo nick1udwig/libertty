@@ -32,7 +32,7 @@ export type ServerMessage =
   | { type: 'output'; seq: number; data: string }
   | { type: 'screen'; text: string }
   | { type: 'herdr-layout'; cols: number; rows: number; ready: boolean }
-  | { type: 'herdr-frame'; width: number; height: number; full: boolean; bytes: string }
+  | { type: 'herdr-frame'; seq?: number; width: number; height: number; full: boolean; bytes: string }
   | { type: 'state'; state: ShellState }
   | { type: 'hello'; engine: EngineMode; reset: boolean; truncated: boolean; firstSeq: number; lastSeq?: number; streamId: string }
   | { type: 'edit-result'; id: string; accepted: boolean; revision: number }

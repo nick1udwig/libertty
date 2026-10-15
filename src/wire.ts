@@ -31,7 +31,12 @@ export async function decodeWire(data: string | ArrayBuffer | Blob): Promise<any
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
   if (kind === 0) return JSON.parse(decoder.decode(payload));
   if (kind === 1 && payload.length >= 8) { const seq = view.getFloat64(0, true); if (!Number.isSafeInteger(seq) || seq < 0) throw new Error('Invalid output sequence.'); return { type: 'output', seq, data: decoder.decode(payload.subarray(8)) }; }
-  if (kind === 2 && payload.length >= 5 && payload[4] <= 1) return { type: 'herdr-frame', width: view.getUint16(0, true), height: view.getUint16(2, true), full: payload[4] === 1, bytes: payload.subarray(5) };
+  if ((kind === 2 || kind === 7) && payload.length >= (kind === 7 ? 13 : 5)) {
+    const offset = kind === 7 ? 8 : 0, seq = kind === 7 ? view.getFloat64(0, true) : undefined;
+    if (seq !== undefined && (!Number.isSafeInteger(seq) || seq < 0)) throw new Error('Invalid frame sequence.');
+    if (payload[offset + 4] > 1) throw new Error('Invalid frame flags.');
+    return { type: 'herdr-frame', ...(seq !== undefined ? { seq } : {}), width: view.getUint16(offset, true), height: view.getUint16(offset + 2, true), full: payload[offset + 4] === 1, bytes: payload.subarray(offset + 5) };
+  }
   throw new Error('Unsupported outgoing wire message.');
 }
 export function encodeWire(message: { type: string; [key: string]: unknown }, protocol: string): string | ArrayBuffer {

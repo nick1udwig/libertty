@@ -356,7 +356,7 @@ async function socketURL(signal: AbortSignal) {
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
   if (herdrTerminal) {
     sizeTerminal();
-    const geometry = { cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && !document.hidden };
+    const geometry = { frameAck: true, cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && !document.hidden };
     cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutMatched = false;
     herdrPreserve = false; herdrMobileRendered = false;
     herdrLayoutPending = geometry.mobile;
@@ -423,17 +423,19 @@ function socketMessage(event: MessageEvent) {
     return;
   }
   if (message.type === 'herdr-frame') {
-    if (herdrParked || herdrLayoutPending && herdrPreserve && !herdrBarrierReady) return;
-    if (herdrLayoutPending) {
-      if (message.width !== term.cols || message.height !== term.rows) {
-        herdrLayoutMatched = false; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; return;
+    try {
+      if (herdrParked || herdrLayoutPending && herdrPreserve && !herdrBarrierReady) return;
+      if (herdrLayoutPending) {
+        if (message.width !== term.cols || message.height !== term.rows) {
+          herdrLayoutMatched = false; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; return;
+        }
+        if (!herdrLayoutMatched && !message.full) return;
+        herdrLayoutMatched = true;
       }
-      if (!herdrLayoutMatched && !message.full) return;
-      herdrLayoutMatched = true;
-    }
-    if (projection?.frame(message) && !herdrLayoutPending) scheduleHerdrRendered();
-    revealHerdrLayout();
-    if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
+      if (projection?.frame(message) && !herdrLayoutPending) scheduleHerdrRendered();
+      revealHerdrLayout();
+      if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
+    } finally { if (message.seq !== undefined) send({ type: 'ack', seq: message.seq }); }
   }
   if (message.type === 'screen') { if (herdrLayoutPending || herdrParked) return; projection?.update(message.text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return; }
   if (message.type === 'input-line') {

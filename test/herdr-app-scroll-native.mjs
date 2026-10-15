@@ -57,6 +57,13 @@ try {
   await context.addInitScript(() => {
     window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0;
     window.WebSocket = class extends WebSocket {
+      send(data) {
+        if (window.__holdAcks && window.__wireSent(data).type === 'ack') {
+          window.__releaseFrames = () => super.send(data);
+          return;
+        }
+        super.send(data);
+      }
       set onmessage(handler) {
         window.__receive = message => handler.call(this, { data: JSON.stringify(message) });
         super.onmessage = async event => {
@@ -103,6 +110,14 @@ try {
   });
   assert.ok(animation.paints >= 15, 'Live text keeps animating faster than the snapshot ceiling: ' + JSON.stringify(animation));
   assert.ok(animation.deltas > 0, 'Incremental native frames render without needing a new full snapshot');
+  await page.evaluate(() => { window.__holdAcks = true; });
+  await delay(250);
+  const held = await page.evaluate(() => ({ frames: window.__frames, tick: Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) }));
+  await delay(1500);
+  assert.equal(await page.evaluate(() => window.__frames), held.frames, 'The two-frame acknowledgement window stops stale frames from queueing');
+  await page.evaluate(() => { window.__holdAcks = false; window.__releaseFrames(); });
+  await page.waitForFunction(tick => Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) > tick + 30, held.tick, { timeout: 1500 });
+  assert.equal(await page.locator('#connection-label').textContent(), 'Connected', 'Backpressure does not reconnect a slow viewer');
   assert.equal(await page.evaluate(() => {
     const t = window.__terminal, before = t.buffer.active.getLine(0)?.translateToString(true);
     window.__receive(window.__staleScreen);

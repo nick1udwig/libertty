@@ -38,6 +38,7 @@ enum Command {
     Remove(u64),
     Resize(u64, Option<Size>),
     Refresh(u64),
+    Snapshot(u64),
     Claim(u64),
     Scroll(
         u64,
@@ -119,6 +120,16 @@ impl Subscription {
     }
     pub fn claim(&self) {
         let _ = self.handle.send.try_send(Command::Claim(self.id));
+    }
+    pub fn snapshot(&self) {
+        if let Err(mpsc::error::TrySendError::Full(command)) =
+            self.handle.send.try_send(Command::Snapshot(self.id))
+        {
+            let send = self.handle.send.clone();
+            tokio::spawn(async move {
+                let _ = send.send(command).await;
+            });
+        }
     }
     pub fn refresh(&self) {
         let _ = self.handle.send.try_send(Command::Refresh(self.id));
@@ -279,6 +290,7 @@ fn reset(viewers: &mut Vec<Viewer>, frame: &mut Option<HerdrFrame>) {
     broadcast(
         viewers,
         ServerMessage::HerdrFrame(HerdrFrame {
+            seq: None,
             width: 0,
             height: 0,
             full: true,
@@ -326,7 +338,7 @@ async fn run(
                     Ok(Some(raw)) if raw["type"] != "terminal.closed"=>{
                         if raw["type"] == "terminal.frame" && raw["encoding"] == "ansi" {
                             if let (Some(width),Some(height),Some(bytes)) = (dimension(&raw["width"]), dimension(&raw["height"]),raw["bytes"].as_str()) {
-                                let message = HerdrFrame { width, height, full: raw["full"] == true, bytes: Arc::from(bytes) };
+                                let message = HerdrFrame { seq: None, width, height, full: raw["full"] == true, bytes: Arc::from(bytes) };
                                 frame=if raw["full"]==true { Some(message.clone()) } else { None };
                                 broadcast(&mut viewers, ServerMessage::HerdrFrame(message));
                                 if !viewers.is_empty() { continue; }
@@ -409,6 +421,18 @@ async fn run(
                     sequence += 1;
                     viewer.order = sequence;
                     refresh = true;
+                }
+            }
+            Command::Snapshot(id) => {
+                if viewers.iter().any(|viewer| viewer.id == id) {
+                    if running.as_ref().is_some_and(|stream| stream.size.is_none()) {
+                        if let Some(stream) = running.take() {
+                            stream.close().await;
+                        }
+                        frame = None;
+                    } else {
+                        refresh = true;
+                    }
                 }
             }
             Command::Refresh(id) => {

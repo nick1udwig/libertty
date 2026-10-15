@@ -1,3 +1,4 @@
+mod frames;
 use crate::protocol::{DictationSource, DictationState, ServerMessage};
 use crate::{
     herdr::Target,
@@ -66,6 +67,7 @@ pub struct View {
     redraw_before: Mutex<Option<u64>>,
     baseline: Mutex<Option<Size>>,
     frame_ready: tokio::sync::Notify,
+    frames: Mutex<Option<frames::Frames>>,
     cancel: CancellationToken,
     services: crate::host::HostServices,
 }
@@ -116,6 +118,7 @@ impl View {
             redraw_before: Mutex::new(revision),
             baseline: Mutex::new(None),
             frame_ready: tokio::sync::Notify::new(),
+            frames: Mutex::new(None),
             cancel,
         });
         if let Some(size) = initial_size {
@@ -209,8 +212,20 @@ impl View {
                 if !*view.active.borrow() {
                     continue;
                 }
-                if !view.send.send(Transport::Message(frame.value())) {
-                    break;
+                if let ServerMessage::HerdrFrame(frame) = frame {
+                    let mut frames = view.frames.lock().unwrap();
+                    if let Some(frames) = frames.as_mut() {
+                        if frames.push(frame) {
+                            view.terminal.snapshot();
+                        }
+                        if let Some(frame) = frames.next() {
+                            view.send(ServerMessage::HerdrFrame(frame));
+                        }
+                    } else {
+                        view.send(ServerMessage::HerdrFrame(frame));
+                    }
+                } else {
+                    view.send(frame);
                 }
             }
         });
@@ -255,6 +270,9 @@ impl View {
             view.confirm_layout(size, revision, view.begin_layout());
         }
         Ok(view)
+    }
+    pub fn enable_frame_ack(&self) {
+        *self.frames.lock().unwrap() = Some(frames::Frames::default());
     }
     fn begin_layout(&self) -> u64 {
         self.layout.send_modify(|epoch| *epoch += 1);
@@ -590,7 +608,17 @@ impl View {
                 crate::input_coordinator::repair(self.clone(), guard, request, false);
                 Ok(())
             }
-            ClientMessage::Ack { .. } => Ok(()),
+            ClientMessage::Ack { seq } => {
+                if let Some(frames) = self.frames.lock().unwrap().as_mut() {
+                    if frames.acknowledge(seq) {
+                        self.terminal.snapshot();
+                    }
+                    if let Some(frame) = frames.next() {
+                        self.send(ServerMessage::HerdrFrame(frame));
+                    }
+                }
+                Ok(())
+            }
             ClientMessage::HerdrFrameRequest => {
                 self.terminal.refresh();
                 // Subscribe briefly to refresh the shared active resource.
