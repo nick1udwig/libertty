@@ -42,6 +42,21 @@ try {
   await page.waitForFunction(() => { const tab = JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === 'saved-herdr'); return tab && !tab.ended && tab.herdrSource === tab.session && tab.session !== '22222222-2222-4222-8222-222222222222'; });
   await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
   await delay(500);
+  let cachedTicket, releaseCache;
+  const cacheGate = new Promise(resolve => releaseCache = resolve);
+  const holdCache = async route => {
+    if (!new URL(route.request().url()).searchParams.has('terminalId') && !cachedTicket) { cachedTicket = route; await cacheGate; }
+    await route.continue();
+  };
+  await page.route('**/api/herdr/ticket?**', holdCache);
+  await page.reload();
+  await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
+  assert.ok(cachedTicket, 'Navigation metadata is displayed while the live ticket is pending');
+  assert.equal(await page.locator('.herdr-screen iframe').count(), 0, 'Cached metadata cannot attach stale terminal identities');
+  assert.equal(await page.locator('#herdr-strip-saved-herdr').evaluate(element => element.inert), true);
+  releaseCache(); await page.unroute('**/api/herdr/ticket?**', holdCache);
+  await page.waitForFunction(() => !document.querySelector('#herdr-strip-saved-herdr').inert);
+  await delay(500);
   const before = tickets;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await delay(200); assert.equal(tickets, before, 'Short app switching keeps the metadata connection');

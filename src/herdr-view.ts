@@ -3,6 +3,7 @@ import { wireProtocols } from './wire.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSpace, type HerdrWorktrees } from './herdr-protocol.ts';
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
+import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
 import { dropSpace, spaceLayout, spaceTerminal, worktreePath, type SpaceDrop } from './herdr-spaces.ts';
 import './herdr.css';
@@ -20,7 +21,7 @@ interface Host {
 }
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; retain:boolean; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
 type StripItem = HerdrAgent & { space?: HerdrSpace };
-interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; spaceTerminals?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']> }
+interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; spaceTerminals?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']>; snapshot?: unknown }
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
   private strip = node('div', 'herdr-agent-strip');
@@ -49,6 +50,8 @@ export class HerdrView {
   private disposed = false;
   private visible = false;
   private connected = false;
+  private liveSnapshot = false;
+  private cached = false;
   private quietSnapshot = true;
   private selected = '';
   private requestedTerminal = '';
@@ -81,6 +84,11 @@ export class HerdrView {
     delete (this.preferences as any).hidden; delete (this.preferences as any).hiddenSpaces;
     this.tracker = new HerdrState(this.preferences.state);
     this.selected = this.preferences.selected || '';
+    const cached = herdrCache(this.preferences.snapshot);
+    if (cached) {
+      this.cached = true; this.terminals = cached.terminals || cached.agents; this.spaces = cached.spaces || [];
+      this.tracker.agents = cached.agents; this.ensureSelection();
+    }
     this.element.setAttribute('aria-label', 'Herdr connection');
     this.element.role = 'tabpanel'; this.screen.id = 'herdr-terminal-' + crypto.randomUUID(); this.screen.role = 'tabpanel'; this.screen.setAttribute('aria-label', 'Agent terminal');
     this.strip.role = 'tablist'; this.strip.setAttribute('aria-label', 'Herdr agents');
@@ -173,6 +181,7 @@ export class HerdrView {
     });
     this.element.addEventListener('pointerdown', () => this.transport.activity(), { passive: true });
     this.render(); void this.connect();
+    if (this.cached) queueMicrotask(() => { if (!this.disposed) this.host.ready?.(); });
   }
   setVisible(visible: boolean) {
     const changed = this.visible !== visible;
@@ -196,7 +205,7 @@ export class HerdrView {
     for (const entry of this.terminalFrames.values()) entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible },location.origin);
     if (visible && !this.connected) void this.connect();
   }
-  get ready() { return this.rendered || !!this.status.textContent || this.connected && !this.selected; }
+  get ready() { return this.cached || this.rendered || !!this.status.textContent || this.connected && !this.selected; }
   get navigationElement() { return this.strip; }
   setTerminalTabsExpanded(expanded: boolean) {
     this.tabsToggle.setAttribute('aria-expanded', String(expanded));
@@ -241,6 +250,7 @@ export class HerdrView {
   private post(message: object) { this.frame?.contentWindow?.postMessage(message, location.origin); }
   get terminalFrame() { return this.frame; }
   private mountTerminal(force = false) {
+    if (!this.liveSnapshot) return;
     if (this.displayed && !this.terminals.some(agent => agent.terminalId === this.displayed!.dataset.terminal && agent.paneId === this.displayed!.dataset.pane)) { this.displayed.remove(); this.displayed = undefined; }
     for (const [id, entry] of this.terminalFrames) {
       if (!this.terminals.some(agent => agent.terminalId === id && agent.paneId === entry.pane)) { entry.frame.remove(); this.terminalFrames.delete(id); if (this.frame === entry.frame) this.frame = undefined; if (this.displayed === entry.frame) this.displayed = undefined; }
@@ -298,6 +308,7 @@ export class HerdrView {
     if (message.type === 'error') { this.status.textContent = message.message; this.setLoading(false); this.host.ready?.(); return; }
     if (message.type !== 'snapshot') return;
     this.transport.ready(); this.connected = this.ws?.readyState === WebSocket.OPEN;
+    this.liveSnapshot = true; this.cached = false; this.preferences.snapshot = herdrCache(message.snapshot);
     this.status.textContent = '';
     this.terminals = message.snapshot.terminals || message.snapshot.agents; this.spaces = message.snapshot.spaces || [];
     const notifications = this.tracker.update(message.snapshot);
@@ -365,6 +376,8 @@ export class HerdrView {
     try { localStorage.setItem(this.host.key, JSON.stringify(this.preferences)); } catch { /* This view still works without persistence. */ }
   }
   private render() {
+    this.strip.inert = !this.liveSnapshot;
+    this.strip.setAttribute('aria-busy', String(!this.liveSnapshot));
     this.host.changed(this.tracker.attention);
     this.strip.setAttribute('aria-label', this.spaceMode ? 'Herdr spaces' : 'Herdr agents');
     this.empty.hidden = !!this.selected;

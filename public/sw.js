@@ -18,18 +18,21 @@ self.addEventListener('fetch', event => {
   if (!(navigate || relative.startsWith('assets/') || known.has(canonical))) return;
   event.respondWith((async () => {
     const cache = await caches.open(CACHE);
-    if (!navigate) {
-      // Hashed assets are immutable; a waiting worker may already have the next build.
-      const cached = await cache.match(canonical) || (relative.startsWith('assets/') && await caches.match(canonical));
-      if (cached) return cached;
+    const key = navigate ? navigationKey : canonical;
+    // Hashed assets are immutable; a waiting worker may already have the next build.
+    const cached = await cache.match(key) || (!navigate && relative.startsWith('assets/') && await caches.match(canonical));
+    const refresh = async () => {
+      try {
+        const response = await fetch(event.request);
+        // Store only this build's finite manifest, and one canonical navigation entry.
+        if (response.ok && (navigate || known.has(canonical))) await cache.put(key, response.clone());
+        return response;
+      } catch { return undefined; }
+    };
+    if (cached) {
+      if (navigate) event.waitUntil(refresh());
+      return cached;
     }
-    try {
-      const response = await fetch(event.request);
-      // Store only this build's finite manifest, and one canonical navigation entry.
-      if (response.ok && (navigate || known.has(canonical))) event.waitUntil(cache.put(navigate ? navigationKey : canonical, response.clone()));
-      return response;
-    } catch {
-      return (await cache.match(navigate ? navigationKey : canonical)) || new Response('Offline', { status: 503 });
-    }
+    return await refresh() || new Response('Offline', { status: 503 });
   })());
 });

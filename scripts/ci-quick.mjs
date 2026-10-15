@@ -40,6 +40,7 @@ const tests = [
   'dictation.test.ts',
   'file-options.test.ts',
   'herdr-notifications.test.ts',
+  'herdr-cache.test.ts',
   'herdr-spaces.test.ts',
   'inline-suggestions.test.ts',
   'input-line.test.ts',
