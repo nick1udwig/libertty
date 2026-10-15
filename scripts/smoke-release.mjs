@@ -14,11 +14,10 @@ try {
   execFileSync('tar', ['-xzf', path.resolve(process.argv[2]), '-C', directory]);
   const version = JSON.parse(await readFile(path.join(directory, 'release.json'), 'utf8'));
   assert.ok(execFileSync(path.join(directory, 'bin/termai'), ['--version'], { encoding: 'utf8' }).includes(version.version));
-  for (const engine of ['server', 'client']) {
   const listener = net.createServer().listen(0, '127.0.0.1'); await once(listener, 'listening');
   const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
   const base = `http://127.0.0.1:${port}/smoke/`;
-  backend = spawn(path.join(directory, 'bin/termai'), [], { env: { ...process.env, HOME: directory, PORT: String(port), HOST: '127.0.0.1', TERMAI_ENGINE: engine, TERMAI_BASE_PATH: '/smoke', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_DATA_DIR: directory + '/data', TERMAI_NO_RC: '1' }, stdio: 'ignore' });
+  backend = spawn(path.join(directory, 'bin/termai'), [], { env: { ...process.env, HOME: directory, PORT: String(port), HOST: '127.0.0.1', TERMAI_BASE_PATH: '/smoke', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_DATA_DIR: directory + '/data', TERMAI_NO_RC: '1' }, stdio: 'ignore' });
   const exited = once(backend, 'exit');
   for (let i = 0; i < 100; i++) {
     try { if ((await fetch(base + 'healthz')).ok) break; } catch {}
@@ -41,13 +40,12 @@ try {
   await once(socket, 'open');
   const wait = async predicate => { for (let i = 0; i < 150; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error('Packaged PTY smoke check timed out.'); };
   await wait(() => messages.some(message => message.type === 'state' && message.state.ready));
-  assert.equal(messages.find(message => message.type === 'hello').engine, engine);
+  assert.equal(messages.find(message => message.type === 'hello').engine, 'server');
   socket.send(JSON.stringify({ type: 'input', data: 'printf "RELEASE_PTY_OK\\n"\r' }));
   await wait(() => messages.some(message => message.type === 'output' && message.data.includes('RELEASE_PTY_OK')) && messages.filter(message => message.type === 'state' && message.state.ready).length > 1);
   socket.close();
   backend.kill(); await exited; backend = undefined;
-  }
-  console.log('Packaged release passed: version, mounted frontend, pairing, real PTY and Bash prompt hooks in both engine modes (' + (version.backend || 'node') + ').');
+  console.log('Packaged release passed: version, mounted frontend, pairing, real PTY and Bash prompt hooks (' + (version.backend || 'node') + ').');
 } finally {
   if (backend && backend.exitCode === null) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
   await rm(directory, { recursive: true, force: true });

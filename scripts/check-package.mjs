@@ -17,9 +17,7 @@ run('scripts/smoke-install.mjs', [archive]);
 const directory = await mkdtemp(path.join(os.tmpdir(), 'termai-package-browser-'));
 try {
   execFileSync('tar', ['-xzpf', archive, '-C', directory]);
-  for (const [engine, port] of [['server', '3137'], ['client', '3138']]) {
-    run('test/browser.mjs', [], {
-      TEST_EXECUTABLE: path.join(directory, 'bin/termai'), TEST_ENGINE: engine, TEST_PORT: port, TEST_BASE_PATH: '/terminal',
-    });
-  }
+  run('test/browser.mjs', [], {
+    TEST_EXECUTABLE: path.join(directory, 'bin/termai'), TEST_PORT: '3137', TEST_BASE_PATH: '/terminal',
+  });
 } finally { await rm(directory, { recursive: true, force: true }); }

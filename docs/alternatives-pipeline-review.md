@@ -1,5 +1,9 @@
 # Dictation alternatives review and proposals
 
+This review describes historical commit `fe09474`.
+Its browser worker, Wasm adapter and separate fact protocol have since been retired; see [shared-engine.md](shared-engine.md) for current architecture.
+
+
 The shared Rust engine is a sound foundation, but the overall pipeline is only partly general: command repair, path repair, shell composition, history, and discovery use different rules for when to stop searching.
 The best improvements are to reduce dependent network exchanges, make repair compose across shell syntax, and retain plausible candidates until validation has established which ones deserve the three visible slots.
 Keep the shared engine and its effect boundary, and refactor the orchestration around them incrementally.
@@ -39,7 +43,7 @@ These mechanisms provide a useful base for improving coverage without weakening 
 6. The browser chooses the leading parsed candidate, sends a separate replacement request, waits for acceptance, and exposes up to three alternatives alongside the original.
    Consequently, “one suggestion request” is not the complete user-visible network path.
 
-The primary entry points are [inline-suggestions.ts](../src/inline-suggestions.ts), [suggestion-worker.ts](../src/suggestion-worker.ts), [suggestions.rs](../crates/engine/src/suggestions.rs), and [session.rs](../crates/server/src/session.rs).
+The primary entry points are [inline-suggestions.ts](../src/inline-suggestions.ts), the former `suggestion-worker.ts`, [suggestions.rs](../crates/engine/src/suggestions.rs), and [session.rs](../crates/server/src/session.rs).
 Herdr uses the same repair library through a separate [suggestion adapter](../crates/server/src/herdr.rs).
 
 **Where network round trips accumulate**
@@ -58,7 +62,7 @@ Likewise, putting multiple operations in one HTTP request helps only if the back
 | Remote Herdr | Pane and process checks, executable enumeration, optional path scan, repair, final process check, then replacement | One browser suggestion request can conceal substantial remote work |
 
 The SSH mode override is explicit in `Session::start_remote`, which ignores its requested engine mode and selects `client`.
-The selective delegation rule in [compound-repair.ts](../src/compound-repair.ts) already acknowledges that some inputs benefit from coarse backend execution, but input length is an unreliable estimate of fact dependencies.
+The selective delegation rule in the former `compound-repair.ts` already acknowledges that some inputs benefit from coarse backend execution, but input length is an unreliable estimate of fact dependencies.
 For example, `cat ~/docs/my-notes.txt` has only two words and can require a filesystem walk, while a long command with fully known options may need little discovery.
 
 Tracing the current native runtime with real host facts produced the following dependency phases.

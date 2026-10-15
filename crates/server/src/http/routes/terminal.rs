@@ -1,4 +1,5 @@
 use super::*;
+use termai_engine::truncate_utf16;
 
 pub(super) async fn healthz(
     app: &Arc<App>,
@@ -15,9 +16,9 @@ pub(super) async fn api_connect(
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let mut owner = app.owner(req.headers());
-    let input = body(&mut req, 16384).await?;
+    let input: crate::protocol::requests::Connect = typed_body(&mut req, 16384).await?;
     if owner.is_none() {
-        if !token_matches(&app.token, text(&input, "token")) {
+        if !token_matches(&app.token, input.token.as_deref().unwrap_or("")) {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 "Enter the pairing token shown by your termai server.".into(),
@@ -34,8 +35,8 @@ pub(super) async fn api_connect(
         owner = Some(registry.issue().map_err(|e| fail(e.to_string()))?);
     }
     let owner = owner.unwrap();
-    let sid = session_id(input.get("session"))?;
-    let result = if input["noSession"] == true {
+    let sid = session_id_text(input.session.as_deref())?;
+    let result = if input.no_session {
         json!({"accessToken":owner,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
     } else {
         if sid != "default"
@@ -76,7 +77,7 @@ pub(super) async fn api_connect(
 
 pub(super) async fn api_notifications_key(
     app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     ok(json!({"publicKey":app.notifications.public_key}))
@@ -84,7 +85,7 @@ pub(super) async fn api_notifications_key(
 
 pub(super) async fn api_dictation(
     _app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     return ok(dictation::detect(&std::env::vars().collect()).await);
@@ -92,7 +93,7 @@ pub(super) async fn api_dictation(
 
 pub(super) async fn api_ping(
     _app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     ok(json!({"ok":true}))
@@ -100,7 +101,7 @@ pub(super) async fn api_ping(
 
 pub(super) async fn api_sessions_get(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -110,11 +111,11 @@ pub(super) async fn api_sessions_get(
 
 pub(super) async fn api_sessions_post(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
-    let input = body(&mut req, 16384).await?;
+    let input: crate::protocol::requests::Sessions = typed_body(&mut req, 16384).await?;
     let raw = storage::random_hex(16);
     let sid = format!(
         "{}-{}-{}-{}-{}",
@@ -124,43 +125,28 @@ pub(super) async fn api_sessions_post(
         &raw[16..20],
         &raw[20..]
     );
-    let name = if text(&input, "name").trim().is_empty() {
+    let name = if input.name.as_deref().unwrap_or("").trim().is_empty() {
         "Terminal".into()
     } else {
-        text(&input, "name")
-            .trim()
-            .chars()
-            .scan(0, |n, c| {
-                *n += c.len_utf16();
-                if *n <= 100 { Some(c) } else { None }
-            })
-            .collect::<String>()
+        truncate_utf16(input.name.as_deref().unwrap_or("").trim(), 100).to_owned()
     };
-    let session = if input.get("ssh").is_some_and(|v| !v.is_null()) {
+    let session = if let Some(ssh) = &input.ssh {
         match app
-            .get_remote_session(
-                &owner,
-                &sid,
-                &name,
-                &input["ssh"],
-                None,
-                input["files"] == true,
-            )
+            .get_remote_session(&owner, &sid, &name, ssh, None, input.files)
             .await
         {
             Ok(session) => session,
             Err(error) => return Ok(ssh_error(error)),
         }
     } else {
-        app.get_session(&owner, &sid, &name, input["files"] == true)
-            .await?
+        app.get_session(&owner, &sid, &name, input.files).await?
     };
     ok(json!({"id":sid,"name":name,"state":session.state()}))
 }
 
 pub(super) async fn api_sessions_close(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -171,7 +157,7 @@ pub(super) async fn api_sessions_close(
 
 pub(super) async fn api_ticket(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -205,10 +191,10 @@ pub(super) async fn api_ticket(
 
 pub(super) async fn api_dictation_install(
     _app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let input: crate::protocol::InputStamp = typed_body(&mut req, 16384).await?;
     let command = dictation::install_command(&std::env::vars().collect())
         .await
@@ -223,11 +209,11 @@ pub(super) async fn api_dictation_install(
 
 pub(super) async fn api_reading_capture(
     _app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let get = *req.method() == Method::GET;
     let id = query.get("id").map(String::as_str).unwrap_or("");
     if *req.method() == Method::DELETE {
@@ -247,11 +233,11 @@ pub(super) async fn api_reading_capture(
 
 pub(super) async fn api_reading_file(
     _app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
     let path = query
         .get("path")
@@ -260,97 +246,25 @@ pub(super) async fn api_reading_file(
     Ok(binary_response(file.mime, file.data))
 }
 
-pub(super) async fn api_context(
-    _app: &Arc<App>,
-    ctx: RequestContext<2>,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
-    return ok(
-        serde_json::to_value(session.snapshot(true).await.map_err(fail)?.0)
-            .map_err(|e| fail(e.to_string()))?,
-    );
-}
-
 pub(super) async fn api_suggest(
     _app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
-    if session.engine_mode != "server" {
-        return Err((
-            StatusCode::CONFLICT,
-            "This connection computes suggestions in the client.".into(),
-        ));
-    }
+    let session = ctx.session;
     let input: crate::protocol::SuggestRequest = typed_body(&mut req, 16384).await?;
     let text = input.text.as_str();
     return ok(bounded(async |cancel| session.suggest(text, cancel).await).await?);
 }
 
-pub(super) async fn api_facts(
-    _app: &Arc<App>,
-    ctx: RequestContext<2>,
-    mut req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
-    let input = body(&mut req, 16384).await?;
-    return ok(bounded(async |cancel| {
-        if input["kind"] == "context" {
-            session
-                .context(input["known"].as_str(), input["paths"] != false)
-                .await
-        } else if input["kind"] == "repair" {
-            if input.get("key").is_none() {
-                let prompt = session.state().prompt;
-                if input
-                    .get("prompt")
-                    .is_some_and(|value| value.as_u64() != Some(prompt))
-                {
-                    return Err("Shell context changed. Try again.".into());
-                }
-                let result = session
-                    .suggest(
-                        input["text"]
-                            .as_str()
-                            .filter(|text| text.encode_utf16().count() <= 2000)
-                            .ok_or("Expected command text under 2,000 characters.")?,
-                        cancel,
-                    )
-                    .await?;
-                if session.state().prompt != prompt {
-                    return Err("Shell context changed. Try again.".into());
-                }
-                return Ok(result["candidates"].clone());
-            }
-            session
-                .repair(
-                    input["key"].as_str().ok_or("Expected a context key.")?,
-                    input["catalogKey"]
-                        .as_str()
-                        .ok_or("Expected a catalog key.")?,
-                    input["text"].as_str().ok_or("Expected command text.")?,
-                    cancel,
-                )
-                .await
-        } else if let Some(key) = input["key"].as_str() {
-            session.read_facts(key, &input["operations"], cancel).await
-        } else {
-            Err("Expected a context key.".into())
-        }
-    })
-    .await?);
-}
-
 pub(super) async fn api_new(
     app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sid = ctx.sid;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     if session.remote.is_some() {
         return Err(fail(
             "Open the saved SSH host again to start another shell.",

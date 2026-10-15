@@ -1,8 +1,12 @@
 use serde_json::{Value, json};
+#[path = "support/herdr.rs"]
+mod herdr_support;
 use std::{
+    collections::HashSet,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     process::{Child, Command, Stdio},
+    sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
@@ -27,11 +31,17 @@ impl Backend {
     }
     fn start_with_base(engine: &str, base: &str) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        static PORTS: LazyLock<Mutex<HashSet<u16>>> = LazyLock::new(Default::default);
+        let port = loop {
+            let port = TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            if PORTS.lock().unwrap().insert(port) {
+                break port;
+            }
+        };
         std::fs::create_dir(root.path().join("dist")).unwrap();
         std::fs::create_dir(root.path().join("dist/assets")).unwrap();
         std::fs::write(
@@ -41,6 +51,7 @@ impl Backend {
         .unwrap();
         std::fs::write(root.path().join("dist/assets/test.wasm"), b"\0asm").unwrap();
         std::fs::write(root.path().join("dist/assets/test.wasm.br"), b"compressed").unwrap();
+        let stderr = std::fs::File::create(root.path().join("stderr.log")).unwrap();
         let child = Command::new(env!("CARGO_BIN_EXE_termai"))
             .env("HOST", "127.0.0.1")
             .env("PORT", port.to_string())
@@ -48,6 +59,7 @@ impl Backend {
             .env("TERMAI_BASE_PATH", base)
             .env("TERMAI_CWD", root.path())
             .env("HOME", root.path())
+            .env("HERDR_SOCKET_PATH", root.path().join("herdr.sock"))
             .env("TERMAI_NO_RC", "1")
             .env("TERMAI_DIST_DIR", root.path().join("dist"))
             .env("TERMAI_DATA_DIR", root.path().join("data"))
@@ -55,16 +67,28 @@ impl Backend {
             .env("TERMAI_ALLOWED_HOSTS", "127.0.0.1,localhost")
             .env("TERMAI_ALLOWED_ORIGINS", "")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr))
             .spawn()
             .unwrap();
-        let backend = Self { child, root, port };
+        let mut backend = Self { child, root, port };
         let deadline = Instant::now() + Duration::from_secs(10);
-        while TcpStream::connect(("127.0.0.1", port)).is_err() {
+        loop {
+            if let Some(status) = backend.child.try_wait().unwrap() {
+                panic!(
+                    "Rust HTTP backend exited with {status}: {}",
+                    backend.stderr()
+                );
+            }
+            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
             assert!(Instant::now() < deadline, "Rust HTTP startup timeout");
             std::thread::sleep(Duration::from_millis(10));
         }
         backend
+    }
+    fn stderr(&self) -> String {
+        std::fs::read_to_string(self.root.path().join("stderr.log")).unwrap_or_default()
     }
     fn request(
         &self,
@@ -104,7 +128,16 @@ impl Backend {
         stream.write_all(bytes).unwrap();
         let mut data = vec![];
         stream.read_to_end(&mut data).unwrap();
-        let split = data.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        let split = data
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .unwrap_or_else(|| {
+                panic!(
+                    "No HTTP response to {method} {path} on port {}: {}",
+                    self.port,
+                    self.stderr()
+                )
+            });
         let headers = String::from_utf8(data[..split].to_vec()).unwrap();
         let status = headers.split_whitespace().nth(1).unwrap().parse().unwrap();
         Response {
@@ -141,6 +174,130 @@ impl Drop for Backend {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let fixture = herdr_support::Fixture::new().await;
+    let backend = Backend::start("server");
+    std::os::unix::fs::symlink(
+        fixture.target.path().unwrap(),
+        backend.root.path().join("herdr.sock"),
+    )
+    .unwrap();
+    let origin = format!("http://127.0.0.1:{}", backend.port);
+    let paired = backend.request(
+        "POST",
+        "/api/connect",
+        &[("Origin", &origin), ("Content-Type", "application/json")],
+        br#"{"token":"test-local-pairing-token-123456789"}"#,
+    );
+    assert_eq!(paired.status, 200);
+    let bearer = format!("Bearer {}", paired.json()["accessToken"].as_str().unwrap());
+    for herdr in [false, true] {
+        for protocol in [
+            None,
+            Some(termai_server::wire::BINARY),
+            Some(termai_server::wire::GZIP),
+            Some(termai_server::wire::GZIP_FAST),
+        ] {
+            let (ticket_path, socket_path, query) = if herdr {
+                (
+                    "/api/herdr/ticket?terminalId=term_0",
+                    "/herdr/ws",
+                    "&terminalId=term_0",
+                )
+            } else {
+                ("/api/ticket", "/ws", "")
+            };
+            let ticket = backend.request(
+                "POST",
+                ticket_path,
+                &[
+                    ("Origin", &origin),
+                    ("Authorization", &bearer),
+                    ("Content-Type", "application/json"),
+                ],
+                b"{}",
+            );
+            assert_eq!(ticket.status, 200);
+            let url = format!(
+                "ws://127.0.0.1:{}/terminal{socket_path}?ticket={}{}",
+                backend.port,
+                ticket.json()["ticket"].as_str().unwrap(),
+                query
+            );
+            let mut request = url.into_client_request().unwrap();
+            request
+                .headers_mut()
+                .insert("origin", origin.parse().unwrap());
+            if let Some(protocol) = protocol {
+                request
+                    .headers_mut()
+                    .insert("sec-websocket-protocol", protocol.parse().unwrap());
+            }
+            let (mut socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
+            assert_eq!(
+                response
+                    .headers()
+                    .get("sec-websocket-protocol")
+                    .map(|value| value.to_str().unwrap()),
+                protocol
+            );
+            // Idle audio is accepted in legacy/raw and negotiated compact modes.
+            let audio = if protocol.is_some() {
+                vec![b'T', b'M', 1, 6, 0, 255]
+            } else {
+                vec![0, 255]
+            };
+            socket.send(Message::Binary(audio.into())).await.unwrap();
+            let ping = vec![0, 255, 42];
+            socket
+                .send(Message::Ping(ping.clone().into()))
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    match socket.next().await.unwrap().unwrap() {
+                        Message::Pong(bytes) => {
+                            assert_eq!(&bytes[..], &ping);
+                            break;
+                        }
+                        Message::Close(frame) => panic!("socket closed before pong: {frame:?}"),
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            let malformed = if protocol == Some(termai_server::wire::BINARY) {
+                Message::Binary(vec![b'T', b'M', 2, 3].into())
+            } else {
+                Message::Text("{invalid".into())
+            };
+            socket.send(malformed).await.unwrap();
+            let frame = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Message::Close(frame) = socket.next().await.unwrap().unwrap() {
+                        break frame.unwrap();
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(u16::from(frame.code), 1008);
+            let reason = if protocol == Some(termai_server::wire::BINARY) {
+                "Invalid wire message"
+            } else if herdr {
+                "Invalid terminal message"
+            } else {
+                "Invalid message"
+            };
+            assert_eq!(frame.reason, reason);
+        }
     }
 }
 
@@ -215,7 +372,8 @@ fn public_mounts_can_overlap_unmounted_route_names() {
 }
 
 #[test]
-fn coarse_repair_reads_its_own_context_and_rejects_stale_prompts() {
+fn suggestions_use_native_context_and_legacy_fact_routes_are_absent() {
+    // Old installed configs continue to start, always using the native engine.
     let backend = Backend::start("client");
     let owner = backend.pair();
     let id = backend
@@ -224,19 +382,13 @@ fn coarse_repair_reads_its_own_context_and_rejects_stale_prompts() {
         .as_str()
         .unwrap()
         .to_owned();
-    let path = format!("/api/facts?session={id}");
+    let path = format!("/api/suggest?session={id}");
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        let result = backend.api(
-            "POST",
-            &path,
-            Some(&owner),
-            Some(json!({"kind":"repair","text":"LSL"})),
-        );
+        let result = backend.api("POST", &path, Some(&owner), Some(json!({"text":"LSL"})));
         if result.status == 200 {
             assert!(
-                result
-                    .json()
+                result.json()["candidates"]
                     .as_array()
                     .unwrap()
                     .iter()
@@ -246,21 +398,27 @@ fn coarse_repair_reads_its_own_context_and_rejects_stale_prompts() {
         }
         assert!(
             Instant::now() < deadline,
-            "Repair did not become ready: {}",
+            "Suggestions did not become ready: {}",
             result.json()
         );
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert_ne!(
+    assert_eq!(
         backend
             .api(
                 "POST",
-                &path,
+                "/api/facts",
                 Some(&owner),
-                Some(json!({"kind":"repair","text":"LSL","prompt":999999}))
+                Some(json!({"kind":"context"}))
             )
             .status,
-        200
+        404
+    );
+    assert_eq!(
+        backend
+            .api("GET", "/api/context", Some(&owner), None)
+            .status,
+        404
     );
 }
 

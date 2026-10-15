@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use termai_engine::utf16_len;
 use termai_engine::{
     shell_structure::{Separator, command_list},
     types::Candidate,
@@ -81,7 +82,7 @@ impl Intent {
         }
     }
 }
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Prepared {
     pub original: String,
     pub selected: String,
@@ -97,8 +98,8 @@ pub async fn prepare<'a>(
         Intent::Shell => "",
         Intent::ReadingFile { phrase, .. } | Intent::ReadingPipeline { phrase, .. } => phrase,
     };
-    if text.encode_utf16().count() > 2000
-        || query.encode_utf16().count() > 2000
+    if utf16_len(text) > 2000
+        || utf16_len(&query) > 2000
         || text.chars().chain(query.chars()).any(char::is_control)
         || phrase.len() > 50
         || phrase.chars().any(char::is_control)
@@ -106,8 +107,8 @@ pub async fn prepare<'a>(
         return Err("Expected command text under 2,000 characters.".into());
     }
     let result = suggest(query).await?;
-    let mut candidates: Vec<Candidate> =
-        serde_json::from_value(result["candidates"].clone()).map_err(|error| error.to_string())?;
+    let mut candidates: Vec<Candidate> = serde::Deserialize::deserialize(&result["candidates"])
+        .map_err(|error| error.to_string())?;
     candidates.retain(|candidate| !candidate.is_literal());
     let mut fallback = false;
     if let Intent::ReadingFile { operand, .. } = intent {
@@ -117,7 +118,7 @@ pub async fn prepare<'a>(
         });
         if candidates.is_empty() {
             let result = suggest(operand.clone()).await?;
-            candidates = serde_json::from_value(result["candidates"].clone())
+            candidates = serde::Deserialize::deserialize(&result["candidates"])
                 .map_err(|error| error.to_string())?;
             candidates.retain(|candidate| !candidate.is_literal());
             fallback = true;

@@ -22,6 +22,7 @@ use std::{
     },
     time::Duration,
 };
+use termai_engine::utf16_len;
 use termai_engine::{path, repair::shell_quote, validation::Environment};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
@@ -714,7 +715,7 @@ impl SSHHost {
             reading::{File, MAX_READING_BYTES, mime},
         };
         if input.is_empty()
-            || input.encode_utf16().count() > 4096
+            || utf16_len(input) > 4096
             || input.chars().any(|c| c < '\x20' || c == '\x7f')
         {
             return Err(Error::new("Enter a file path.", 400));
@@ -886,7 +887,22 @@ pub(crate) async fn bounded<T>(
     }
 }
 pub async fn route_probe(input: &Value, cancel: &CancellationToken) -> Result<f64, String> {
-    let address = system_ssh::address(input)?;
+    probe_address(system_ssh::address(input)?, cancel).await
+}
+pub async fn route_probe_request(
+    input: &crate::protocol::requests::SshAddress,
+    cancel: &CancellationToken,
+) -> Result<f64, String> {
+    probe_address(
+        system_ssh::address_parts(&input.host, input.port.unwrap_or(22.0), &input.username)?,
+        cancel,
+    )
+    .await
+}
+async fn probe_address(
+    address: system_ssh::Address,
+    cancel: &CancellationToken,
+) -> Result<f64, String> {
     let start = std::time::Instant::now();
     tokio::select! {
         biased; _=cancel.cancelled()=>Err(ABORTED.into()),

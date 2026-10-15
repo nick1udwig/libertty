@@ -81,3 +81,10 @@ impl Action {
         }
     }
 }
+
+impl TryFrom<&serde_json::Value> for Action {
+    type Error = serde_json::Error;
+    fn try_from(value: &serde_json::Value) -> Result<Self, Self::Error> {
+        Self::deserialize(value)
+    }
+}

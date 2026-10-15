@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use subtle::ConstantTimeEq;
+use termai_engine::utf16_len;
 
 pub fn digest(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
@@ -23,7 +24,7 @@ fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 fn validate(token: &str) -> io::Result<String> {
-    if token.encode_utf16().count() < 24 || token.trim() != token || token.contains(['\r', '\n']) {
+    if utf16_len(token) < 24 || token.trim() != token || token.contains(['\r', '\n']) {
         return Err(invalid(
             "The pairing token must contain at least 24 characters with no surrounding whitespace. Check TERMAI_TOKEN or pairing-token in TERMAI_DATA_DIR.",
         ));

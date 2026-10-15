@@ -12,11 +12,11 @@ pub(super) async fn api_files_download_download(
 
 pub(super) async fn api_plugins_read(
     _app: &Arc<App>,
-    ctx: RequestContext<1>,
+    ctx: FileContext,
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
     let home = session.home();
     let path = query.get("path").ok_or_else(|| fail("Select a file."))?;
@@ -63,11 +63,11 @@ pub(super) async fn api_plugins_read(
 
 pub(super) async fn api_files_list(
     _app: &Arc<App>,
-    ctx: RequestContext<1>,
+    ctx: FileContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
     let home = session.home();
     return ok(serde_json::to_value(
@@ -89,22 +89,19 @@ pub(super) async fn api_files_list(
 
 pub(super) async fn api_files_mkdir(
     _app: &Arc<App>,
-    ctx: RequestContext<1>,
+    ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
     let home = session.home();
-    let input = body(&mut req, 16384).await?;
-    if !input["name"].is_string() || !input["path"].is_string() {
-        return Err(fail("Enter a folder name."));
-    }
+    let input: crate::protocol::requests::Folder = typed_body(&mut req, 16384).await?;
     return ok(files::make_directory_on(
         &session.filesystem(),
         &cwd,
         &home,
-        text(&input, "path"),
-        text(&input, "name"),
+        &input.path,
+        &input.name,
     )
     .await
     .map_err(file_failure)?);
@@ -112,25 +109,25 @@ pub(super) async fn api_files_mkdir(
 
 pub(super) async fn api_files_action(
     _app: &Arc<App>,
-    ctx: RequestContext<1>,
+    ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
     let home = session.home();
-    let input = body(&mut req, 256 * 1024).await?;
-    return ok(files::action_on(&session.filesystem(), &cwd, &home, &input)
+    let input: crate::protocol::requests::FileAction = typed_body(&mut req, 256 * 1024).await?;
+    return ok(files::action_on(&session.filesystem(), &cwd, &home, input)
         .await
         .map_err(file_failure)?);
 }
 
 pub(super) async fn api_images_upload(
     _app: &Arc<App>,
-    ctx: RequestContext<1>,
+    ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let payload = std::mem::take(req.body_mut());
     return ok(files::upload_image_on(
         &session.filesystem(),
@@ -143,11 +140,11 @@ pub(super) async fn api_images_upload(
 
 pub(super) async fn api_files_upload(
     _app: &Arc<App>,
-    ctx: RequestContext<1>,
+    ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
     let home = session.home();
     let length = req
@@ -175,36 +172,38 @@ pub(super) async fn api_files_upload(
 
 pub(super) async fn api_files_download(
     app: &Arc<App>,
-    ctx: RequestContext<1>,
+    ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sid = ctx.sid;
-    let session = ctx.session.unwrap();
-    let input = body(&mut req, 16384).await?;
+    let session = ctx.session;
+    let input: crate::protocol::requests::Path = typed_body(&mut req, 16384).await?;
     return ok(app
-        .download_ticket(&owner, &sid, &session, text(&input, "path"), None, None)
+        .download_ticket(&owner, &sid, &session, &input.path, None, None)
         .await?);
 }
 
 pub(super) async fn api_files_transfer(
     app: &Arc<App>,
-    ctx: RequestContext<1>,
+    ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sid = ctx.sid;
-    let session = ctx.session.unwrap();
-    let input = body(&mut req, 16384).await?;
-    let transfer = session.transfer(text(&input, "id")).ok_or((
+    let session = ctx.session;
+    let input: crate::protocol::requests::Transfer = typed_body(&mut req, 16384).await?;
+    let transfer = session.transfer(&input.id).ok_or((
         StatusCode::NOT_FOUND,
         "This transfer request expired. Run the command again.".into(),
     ))?;
-    if input["action"] == "ack" {
+    if input.action == crate::protocol::requests::TransferAction::Ack {
         session.acknowledge_transfer(&transfer.id);
         return ok(json!({"ok":true}));
     }
-    if input["action"] != "download" || transfer.action != "download" {
+    if input.action != crate::protocol::requests::TransferAction::Download
+        || transfer.action != "download"
+    {
         return Err(fail("Invalid transfer action."));
     }
     let ticket = app

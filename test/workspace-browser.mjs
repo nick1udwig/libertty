@@ -1,4 +1,4 @@
-import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
+import { launchBrowser, freePort, delay, until, waitForBackend } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access } from 'node:fs/promises';
@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import ssh2 from 'ssh2';
-import { sshdPath, sshFixturePath } from './support/sshd.mjs';
+import { sshdPath, sshdConfig } from './support/sshd.mjs';
 import { WebSocket } from 'ws';
 
 const fixturePort3153 = await freePort();
@@ -14,7 +14,7 @@ const fixturePort3154 = await freePort();
 const fixturePort3158 = await freePort();
 const root = path.resolve(import.meta.dirname, '..'), fixture = await mkdtemp('/tmp/termai-workspace-');
 const origin = 'http://127.0.0.1:' + fixturePort3153, secondary = 'http://127.0.0.1:' + fixturePort3154, sshPort = fixturePort3158;
-const processes = [], logs = [], errors = [], facts = [];
+const processes = [], logs = [], errors = [];
 let browser;
 function start(command, args, env = {}) { const proc = spawn(command, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(proc); proc.stdout.on('data', b => logs.push(String(b))); proc.stderr.on('data', b => logs.push(String(b))); return proc; }
 async function vaultData(name) {
@@ -36,12 +36,12 @@ try {
   await writeFile(fixture + '/remote/hello_world.py', "import argparse\np=argparse.ArgumentParser()\np.add_argument('--myarg')\n");
   await writeFile(fixture + '/remote/SKILL.md', '# Skill\n');
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'); await writeFile(fixture + '/host', hostKey.private, { mode: 0o600 }); await writeFile(fixture + '/authorized', '');
-  await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote PATH=${sshFixturePath()}\nSubsystem sftp internal-sftp\n`);
+  await sshdConfig(fixture, sshPort);
   start(sshdPath(), ['-D', '-e', '-f', fixture + '/sshd_config']);
   const backendSpecs = [[fixturePort3153, 'primary', ''], [fixturePort3154, 'secondary', 'test-backend-token-123456789']];
-  const startBackend = ([port, name, token]) => start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '', TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: token, TERMAI_ENGINE: 'server', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, HOME: fixture, TERMAI_DATA_DIR: fixture + '/' + name, TERMAI_HISTORY_FILE: fixture + '/no-history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/no-history' });
+  const startBackend = ([port, name, token]) => start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '', TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: token, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, HOME: fixture, TERMAI_DATA_DIR: fixture + '/' + name, TERMAI_HISTORY_FILE: fixture + '/no-history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/no-history' });
   const backends = backendSpecs.map(startBackend);
-  await until(async () => { try { return (await fetch(origin)).ok && (await fetch(secondary)).ok; } catch { return false; } });
+  await Promise.all([waitForBackend(origin, backends[0]), waitForBackend(secondary, backends[1])]);
   const primaryPairingToken = (await readFile(fixture + '/primary/pairing-token', 'utf8')).trim();
   const request = (base, api, token, data, from = origin) => fetch(base + '/api/' + api, { method: data === undefined ? 'GET' : 'POST', headers: { Origin: from, ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   assert.equal((await request(secondary, 'keychain')).status, 401);
@@ -70,7 +70,7 @@ try {
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
   });
-  page.on('response', async response => { if (response.url().includes('/api/facts')) { const request = response.request().postDataJSON(); const value = await response.json().catch(() => undefined); facts.push({ request, status: response.status(), result: request.kind === 'context' ? { home: value?.home, cwd: value?.catalog?.cwd, cd: value?.catalog?.commands.includes('cd'), prompt: value?.prompt } : value }); } });
+
   page.on('pageerror', error => errors.push(String(error))); page.on('dialog', d => d.accept());
   await installWireObserver(context);
   await context.addInitScript(() => {
@@ -404,22 +404,12 @@ try {
     await command(frame, `printf ${method} > capture-${method}.txt`);
     assert.equal(await readFile(fixture + '/remote/capture-' + method + '.txt', 'utf8'), method);
     if (method === 'typing') {
-      let fullPathRequests = 0;
-      await context.route(secondary + '/api/facts?**', async route => {
-        const body = route.request().postDataJSON();
-        if (body.kind === 'context' && body.paths) fullPathRequests++;
-        await route.continue();
-      });
       for (const [input, expected] of [['Alice', 'ls'], ['Alas', 'ls'], ['L S', 'ls'], ['L. S.', 'ls'], ['vi skill dot md', 'vi SKILL.md'], ['Python three hello world dot py myarg food', 'python3 hello_world.py --myarg food']]) {
         await frame.locator('#terminal textarea').evaluate((el, input) => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: input, bubbles: true, cancelable: true })), input);
         await frame.waitForFunction(expected => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === expected, expected);
         assert.ok((await frame.locator('.alternative-choice .choice-command').allTextContents()).includes(input));
         const prompt = await frame.evaluate(() => window.__shellState.prompt); await page.keyboard.press('Control+c');
         await frame.waitForFunction(prompt => window.__shellState.ready && window.__shellState.prompt > prompt, prompt);
-        if (input === 'L. S.') {
-          assert.equal(fullPathRequests, 0, 'Command alternatives should not scan remote paths');
-          await context.unroute(secondary + '/api/facts?**');
-        }
       }
       await frame.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'Cd ~ fas get fas pebble agent', bubbles: true, cancelable: true })));
       await frame.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'cd ~/git/pebble-agent');
@@ -493,5 +483,5 @@ try {
   assert.equal(replaced.status, 400); assert.match((await replaced.json()).error, /referenced SSH key has changed/);
   assert.deepEqual(errors, []);
   console.log('PASS workspace: Readline SSH capture (typing/history/search/completion/paste), remote alternatives, backend key references, recovered handoffs, clean prompt after nested SSH exit, terminal-first, settings pane and shared preferences, 10 pt, persistent isolated tabs, host reuse/count/menu, explicit new terminals, automatic ended-shell replacement, background output, direct cross-origin backend, local encrypted IndexedDB vault, offline backup restore, unlocked private export, explicit multi-device backups, backend restore, transient browser SSH keys, verified OpenSSH, automatic routing, remote directory/Python repair, SSH reconnect and close, CORS, owner isolation, single-use tickets, changed-host rejection and remembered pairing after backend and browser restarts');
-} catch (error) { console.error(logs.join('')); console.error(error); console.error(JSON.stringify(facts)); if (browser) { const pages = browser.contexts()[0]?.pages(); if (pages?.[0]) { await pages[0].screenshot({ path: root + '/.test-artifacts/workspace-failure.png' }); console.error(await pages[0].locator('body').innerText()); } } process.exitCode = 1; }
+} catch (error) { console.error(logs.join('')); console.error(error); if (browser) { const pages = browser.contexts()[0]?.pages(); if (pages?.[0]) { await pages[0].screenshot({ path: root + '/.test-artifacts/workspace-failure.png' }); console.error(await pages[0].locator('body').innerText()); } } process.exitCode = 1; }
 finally { await browser?.close(); for (const proc of processes) proc.kill('SIGTERM'); await delay(500); for (const proc of processes) if (proc.exitCode === null) proc.kill('SIGKILL'); await rm(fixture, { recursive: true, force: true }); }

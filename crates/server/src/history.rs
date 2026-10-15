@@ -4,6 +4,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 use termai_engine::path;
+use termai_engine::utf16_len;
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncSeekExt},
@@ -20,7 +21,7 @@ pub fn history_lines(raw: &str, partial: bool) -> Vec<String> {
                 && !(line.starts_with('#')
                     && line.len() > 1
                     && line[1..].bytes().all(|c| c.is_ascii_digit()))
-                && line.encode_utf16().count() <= 2000
+                && utf16_len(line) <= 2000
         })
         .map(str::to_owned)
         .collect();

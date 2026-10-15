@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import os from 'node:os';
 import ssh2 from 'ssh2';
-import { sshdPath, sshFixturePath } from './support/sshd.mjs';
+import { sshdPath, sshFixturePath, sshdConfig } from './support/sshd.mjs';
 import { fingerprint } from './support/ssh-key.ts';
 import { herdrFixture } from './herdr-fixture.ts';
 
@@ -485,8 +485,7 @@ try {
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'), identity = ssh2.utils.generateKeyPairSync('ed25519', { cipher: 'aes256-ctr', passphrase: 'fixture-passphrase' });
   await writeFile(fixture.directory + '/host-key', hostKey.private, { mode: 0o600 });
   await writeFile(fixture.directory + '/authorized', identity.public + '\n');
-  const config = ['Port ' + fixturePort3168, 'ListenAddress 127.0.0.1', 'HostKey ' + fixture.directory + '/host-key', 'PidFile ' + fixture.directory + '/sshd.pid', 'AuthorizedKeysFile ' + fixture.directory + '/authorized', 'StrictModes no', 'UsePAM no', 'PasswordAuthentication no', 'KbdInteractiveAuthentication no', 'AllowUsers ' + os.userInfo().username, 'SetEnv HOME=' + fixture.directory + '/remote HERDR_SOCKET_PATH=' + fixture.socketPath + ' PATH=' + sshFixturePath(fixture.directory), 'Subsystem sftp internal-sftp'].join('\n') + '\n';
-  await writeFile(fixture.directory + '/sshd_config', config);
+  await sshdConfig(fixture.directory, fixturePort3168, { hostKey: 'host-key', pid: 'sshd.pid', env: { HERDR_SOCKET_PATH: fixture.socketPath, PATH: sshFixturePath(fixture.directory) } });
   sshd = spawn(sshdPath(), ['-D', '-e', '-f', fixture.directory + '/sshd_config'], { stdio: ['ignore', 'pipe', 'pipe'] });
   sshd.stderr.on('data', bytes => logs += bytes); await delay(150);
   const trust = fingerprint(ssh2.utils.parseKey(hostKey.private).getPublicSSH());

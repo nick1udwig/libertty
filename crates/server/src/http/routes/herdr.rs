@@ -2,12 +2,12 @@ use super::*;
 
 pub(super) async fn api_herdr_connect(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner.as_str();
-    let input = body(&mut req, 16384).await?;
-    let sid = session_id(input.get("source"))?;
+    let input: crate::protocol::requests::HerdrConnect = typed_body(&mut req, 16384).await?;
+    let sid = session_id_text(input.source.as_deref())?;
     let source = app
         .sessions
         .lock()
@@ -16,7 +16,14 @@ pub(super) async fn api_herdr_connect(
         .map(|t| t.session.clone())
         .filter(|s| s.files_only)
         .ok_or_else(|| fail("Open a dedicated connection before connecting Herdr."))?;
-    let session_name = herdr::session(input.get("session")).map_err(fail)?;
+    let session_name = herdr::session(
+        input
+            .session
+            .as_ref()
+            .map(|session| json!(session))
+            .as_ref(),
+    )
+    .map_err(fail)?;
     let target = herdr::Target::from_source(&source, &session_name)
         .await
         .map_err(fail)?;
@@ -39,7 +46,7 @@ pub(super) async fn api_herdr_connect(
 
 pub(super) async fn api_herdr_captured(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner.as_str();
@@ -52,9 +59,9 @@ pub(super) async fn api_herdr_captured(
         .get(&format!("{owner}/{sid}"))
         .map(|t| t.session.clone())
         .ok_or_else(|| fail("The source terminal has ended."))?;
-    let input = body(&mut req, 16384).await?;
-    let id = text(&input, "id");
-    if input["action"] == "ack" {
+    let input: crate::protocol::requests::Capture = typed_body(&mut req, 16384).await?;
+    let id = input.id.as_str();
+    if input.action == crate::protocol::requests::CaptureAction::Ack {
         source.acknowledge_capture(id);
         return ok(json!({"ok":true}));
     }
@@ -66,9 +73,15 @@ pub(super) async fn api_herdr_captured(
         .captured()
         .filter(|c| c["kind"] == "herdr" && c["id"] == id)
         .ok_or_else(|| fail("This Herdr request is no longer active."))?;
-    if input["action"] == "cancel" || input["action"] == "native" {
+    if input.action == crate::protocol::requests::CaptureAction::Cancel
+        || input.action == crate::protocol::requests::CaptureAction::Native
+    {
         source
-            .release_capture(id, input["action"] == "native", None)
+            .release_capture(
+                id,
+                input.action == crate::protocol::requests::CaptureAction::Native,
+                None,
+            )
             .map_err(fail)?;
         return ok(json!({"native":true}));
     }
@@ -83,6 +96,7 @@ pub(super) async fn api_herdr_captured(
         socket_path: Some(socket_path.clone()),
         env,
         repairs: Default::default(),
+        shared: Default::default(),
     };
     target.ensure(&source.state().cwd).await.map_err(fail)?;
     if !app
@@ -115,39 +129,48 @@ pub(super) async fn api_herdr_captured(
 
 pub(super) async fn api_herdr_notifications(
     app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner.as_str();
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let source = ctx.source.as_str();
-    let input = body(&mut req, 16384).await?;
+    let input: crate::protocol::requests::Watch = typed_body(&mut req, 16384).await?;
     app.notifications
-        .add_view(owner, &input["device"], &input["tabId"], source, &target)
+        .add_view(
+            owner,
+            &json!(input.device),
+            &json!(input.tab_id),
+            source,
+            &target,
+        )
         .map_err(fail)?;
     ok(json!({"ok":true}))
 }
 
 pub(super) async fn api_herdr_snapshot(
     _app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let target = ctx.target.unwrap();
-    return ok(target.snapshot().await.map_err(fail)?);
+    let target = ctx.target;
+    return ok(json!(target.snapshot().await.map_err(fail)?));
 }
 
 pub(super) async fn api_herdr_images_upload(
     _app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = &ctx.query;
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
-    if !target.snapshot().await.map_err(fail)?["terminals"]
-        .as_array()
-        .is_some_and(|items| items.iter().any(|item| item["terminalId"] == terminal))
+    if target
+        .snapshot()
+        .await
+        .map_err(fail)?
+        .terminal(terminal)
+        .is_none()
     {
         return Err(fail("This terminal has ended."));
     }
@@ -166,20 +189,20 @@ pub(super) async fn api_herdr_images_upload(
 
 pub(super) async fn api_herdr_options(
     _app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     return ok(target.options().await.map_err(fail)?);
 }
 
 pub(super) async fn api_herdr_suggest(
     app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = &ctx.query;
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let input: crate::protocol::SuggestRequest = typed_body(&mut req, 16384).await?;
     let text = input.text.as_str();
     let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
@@ -193,25 +216,23 @@ pub(super) async fn api_herdr_suggest(
 
 pub(super) async fn api_herdr_action(
     _app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let target = ctx.target.unwrap();
-    return ok(target
-        .action(&body(&mut req, 65536).await?)
-        .await
-        .map_err(fail)?);
+    let target = ctx.target;
+    let input: crate::herdr_action::Action = typed_body(&mut req, 65536).await?;
+    return ok(target.action(input).await.map_err(fail)?);
 }
 
 pub(super) async fn api_herdr_ticket(
     app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner.as_str();
     let query = &ctx.query;
     let session_name = ctx.session_name;
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let source = ctx.source.as_str();
     let terminal = query.get("terminalId").cloned().unwrap_or_default();
     // Existing ticket callers may omit a JSON body entirely.
@@ -221,28 +242,26 @@ pub(super) async fn api_herdr_ticket(
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| value.starts_with("application/json"))
     {
-        body(&mut req, 2048).await?
+        typed_body::<crate::protocol::requests::HerdrTicket>(&mut req, 2048).await?
     } else {
-        json!({})
+        crate::protocol::requests::HerdrTicket::default()
     };
-    let size = if input["mobile"] == true && !terminal.is_empty() {
-        let dimension = |key: &str| {
-            input[key]
-                .as_u64()
-                .filter(|n| (1..=1000).contains(n))
-                .map(|n| n as u16)
-        };
+    let size = if input.mobile && !terminal.is_empty() {
+        let dimension = |value: Option<u16>| value.filter(|value| (1..=1000).contains(value));
         Some(herdr_terminal_stream::Size {
-            cols: dimension("cols").ok_or_else(|| fail("Invalid terminal size."))?,
-            rows: dimension("rows").ok_or_else(|| fail("Invalid terminal size."))?,
+            cols: dimension(input.cols).ok_or_else(|| fail("Invalid terminal size."))?,
+            rows: dimension(input.rows).ok_or_else(|| fail("Invalid terminal size."))?,
         })
     } else {
         None
     };
     if !terminal.is_empty()
-        && !target.snapshot().await.map_err(fail)?["terminals"]
-            .as_array()
-            .is_some_and(|a| a.iter().any(|a| a["terminalId"] == terminal))
+        && target
+            .snapshot()
+            .await
+            .map_err(fail)?
+            .terminal(&terminal)
+            .is_none()
     {
         return Err(fail("This agent has ended."));
     }

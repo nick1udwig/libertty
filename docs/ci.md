@@ -21,7 +21,7 @@ npm run contracts:vocabulary -- --check
 ## Full local and release checks
 
 [AGENTS.md](../AGENTS.md) routes agents to the [code changes skill](../.agents/skills/termai-code-changes/SKILL.md) for required local validation before creating a commit or merging because ordinary pushes and pull requests only run fast CI.
-Run the following with the Node version pinned in `build/release-config.json`, Rust with the `wasm32-unknown-unknown` target, native dependency build tools, Chromium, OpenSSH server and Bash completion available.
+Run the following with the Node version pinned in `build/release-config.json`, Rust with native dependency build tools, Chromium, OpenSSH server and Bash completion available.
 
 ```sh
 npm ci
@@ -29,12 +29,13 @@ npx --no-install playwright-core install --with-deps chromium
 npm run verify:local
 ```
 
-[scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native and Wasm Clippy, Rust tests, the complete build, JavaScript and contract tests, installer fixtures, saved-data compatibility and browser checks in sequence.
+[scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native Clippy, Rust tests, the complete build, JavaScript and contract tests, installer fixtures, saved-data compatibility and browser checks in sequence.
 [scripts/check-browser.mjs](../scripts/check-browser.mjs) contains the single explicit browser list used by both local validation and the Linux release checking job.
-It covers actual browser Wasm, both engine modes, SSH, reading, Herdr, plugins, pairing, reconnects, gestures, touch, dictation, files and workspace behavior.
+It covers native repairs, SSH, reading, Herdr, plugins, pairing, reconnects, gestures, touch, dictation, files and workspace behavior.
 It also downloads and verifies the pinned Herdr release before running dictation, spaces, resize, flash and fullscreen scrolling against the real native integration.
 Every existing application harness remains available through its original npm command or `node test/<harness>.mjs`.
-`npm run verify:package -- release/termai-vVERSION-PLATFORM.tar.gz` retains packaged browser coverage locally by running both smoke checks and both engine modes against the extracted archive.
+Use `npm run format:workspace` to format the workspace entry point and modules with the configured 100-column width, or `npm run check:workspace-format` to check them without editing.
+`npm run verify:package -- release/termai-vVERSION-PLATFORM.tar.gz` retains packaged browser coverage locally by running both smoke checks and the browser suite against the extracted archive.
 The deleted tests covered only the removed CI suite selector and build manifests, while useful package checksum, permission, metadata and companion checks remain in `test/package-release.test.mjs`.
 
 To rerun browser checks against an existing development build, use:

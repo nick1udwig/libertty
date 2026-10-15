@@ -17,7 +17,7 @@ try {
   await symlink(root + '/node_modules', before + '/node_modules');
   execFileSync('npm', ['run', 'build'], { cwd: before, stdio: 'pipe' });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
-  const variants = ['server', 'client'].flatMap(engine => [{ engine, name: 'before', cwd: before }, { engine, name: 'workspace', cwd: root }]);
+  const variants = [...['server', 'client'].map(engine => ({ engine, name: 'before', cwd: before })), { engine: 'server', name: 'workspace', cwd: root }];
   if (process.env.BENCH_REVERSE === '1') variants.reverse();
   let port = 3163;
   for (const variant of variants) {
@@ -25,7 +25,7 @@ try {
     const origin = 'http://127.0.0.1:' + port;
     // Historical comparisons run the archived release; the working tree uses Rust.
     const reference = variant.name === 'before';
-    const proc = spawn(reference ? process.execPath : path.join(variant.cwd,'target/debug/termai'), reference ? ['server/index.ts'] : [], { cwd: variant.cwd, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_ENGINE: variant.engine, TERMAI_BASE_PATH: '', HOST: '127.0.0.1', PORT: String(port), TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_TOKEN: 'benchmark-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_DATA_DIR: fixture + '/vault', TERMAI_HISTORY_FILE: fixture + '/history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/history' }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(proc);
+    const proc = spawn(reference ? process.execPath : path.join(variant.cwd,'target/debug/termai'), reference ? ['server/index.ts'] : [], { cwd: variant.cwd, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', ...(reference ? { TERMAI_ENGINE: variant.engine } : {}), TERMAI_BASE_PATH: '', HOST: '127.0.0.1', PORT: String(port), TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_TOKEN: 'benchmark-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_DATA_DIR: fixture + '/vault', TERMAI_HISTORY_FILE: fixture + '/history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/history' }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(proc);
     let logs = ''; proc.stdout.on('data', chunk => logs += chunk); proc.stderr.on('data', chunk => logs += chunk);
     for (let i = 0; ; i++) { if (await fetch(origin).then(r => r.ok).catch(() => false)) break; if (i >= 150 || proc.exitCode !== null) throw new Error(logs); await delay(40); }
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });

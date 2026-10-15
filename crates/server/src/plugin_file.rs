@@ -7,6 +7,7 @@ use crate::{
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, os::unix::fs::MetadataExt, sync::Arc};
+use termai_engine::utf16_len;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
@@ -60,7 +61,7 @@ impl Cache {
         cancel: &CancellationToken,
     ) -> Result<Snapshot> {
         if input.is_empty()
-            || input.encode_utf16().count() > 4096
+            || utf16_len(input) > 4096
             || input.chars().any(|c| c < '\x20' || c == '\x7f')
         {
             return Err(Error::new("Enter a file path.", 400));

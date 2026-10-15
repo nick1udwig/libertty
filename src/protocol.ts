@@ -1,7 +1,5 @@
 import type { TransferRequest } from './transfer-protocol.ts';
-import type { ContextReply } from './facts.ts';
-import type { DirectorySnapshot } from './directory-data.ts';
-export type EngineMode = 'server' | 'client';
+export type EngineMode = 'server';
 export type DictationTarget = 'shell' | 'program';
 export type RepairIntent = { kind: 'shell' } | { kind: 'reading-file'; phrase: string; operand: string } | { kind: 'reading-pipeline'; phrase: string; command: string };
 export interface RepairResult { candidates: import('./engine/types.ts').Candidate[]; original: string; selected: string; accepted: boolean; revision: number; prompt: number; error?: string }
@@ -35,7 +33,6 @@ export type ServerMessage =
   | { type: 'herdr-layout'; cols: number; rows: number; ready: boolean }
   | { type: 'herdr-frame'; width: number; height: number; full: boolean; bytes: string }
   | { type: 'state'; state: ShellState }
-  | { type: 'context'; context: ContextReply; directories: { path: string; snapshot: DirectorySnapshot }[] }
   | { type: 'hello'; engine: EngineMode; reset: boolean; truncated: boolean; firstSeq: number; lastSeq?: number; streamId: string }
   | { type: 'edit-result'; id: string; accepted: boolean; revision: number }
   | { type: 'result'; id: string; accepted: boolean; message?: string };

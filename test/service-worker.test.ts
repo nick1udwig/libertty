@@ -54,7 +54,7 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
   await first.dispatch('fetch', 'https://example.com/t/?two', 'navigate');
   await first.dispatch('fetch', 'https://example.com/t/assets/unlisted.js');
   assert.equal(storage.get('termai-shell:/t/:one')!.size, 6);
-  assert.equal(await first.dispatch('fetch', 'https://example.com/t/api/context'), undefined);
+  assert.equal(await first.dispatch('fetch', 'https://example.com/t/api/ping'), undefined);
   await first.dispatch('fetch', 'https://example.com/t/terminal.html?session=example', 'navigate');
   offline = true;
   assert.equal(await (await first.dispatch('fetch', 'https://example.com/t/', 'navigate'))?.text(), 'https://example.com/t/?two');

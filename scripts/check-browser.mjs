@@ -9,9 +9,7 @@ const env = { ...process.env, CHROME_PATH: browser, CHROMIUM: browser };
 const run = (file, overrides = {}) => execFileSync(process.execPath, [file], { cwd: root, env: { ...env, ...overrides }, stdio: 'inherit' });
 
 // One explicit list is shared by release validation and local pre-commit checks.
-run('test/rust-engine-browser.mjs');
-run('test/browser.mjs', { TEST_ENGINE: 'server', TEST_PORT: '3137' });
-run('test/browser.mjs', { TEST_ENGINE: 'client', TEST_PORT: '3138', TEST_BASE_PATH: '/terminal' });
+run('test/browser.mjs', { TEST_PORT: '3137', TEST_BASE_PATH: '/terminal' });
 run('test/reading-browser.mjs', { TEST_BASE_PATH: '/terminal' });
 for (const file of [
   'herdr-browser.mjs', 'herdr-loading-browser.mjs', 'plugins-browser.mjs', 'rust-herdr.mjs',

@@ -6,11 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-crate-type = ["rlib", "cdylib"]
-
-[[bin]]
-name = "termai-engine"
-path = "src/main.rs"
+crate-type = ["rlib"]
 
 [dependencies]
 serde.workspace = true

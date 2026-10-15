@@ -25,7 +25,10 @@ test('Rust shell utilities and pairing assets match their declared byte checksum
 test('all migration schemas compile and every API route has a resolvable request, response and error contract', async () => {
   for (const name of Object.keys(schemas.$defs)) validate(name);
   const source = await readFile(new URL('../crates/server/src/http/routes.rs', import.meta.url), 'utf8');
-  const endpoints = [...source.matchAll(/\.route\(\s*"(\/[^"]+)"/g)].map(match => match[1]);
+  const table = [...source.matchAll(/"(\/[^"]+)"\s*=>\s*([^;]+);/g)];
+  const endpoints = [...table.map(match => match[1]), ...[...source.matchAll(/\.route\(\s*"(\/[^"]+)"/g)].map(match => match[1])];
+  const registered = table.flatMap(([, path, handlers]) => [...handlers.matchAll(/\b(get|post|delete)\(/g)].map(match => match[1].toUpperCase() + ' ' + path));
+  assert.deepEqual(registered.sort(), http.routes.map(route => route.method + ' ' + route.path).sort(), 'Every declared HTTP method and path is registered exactly once');
   assert.ok(endpoints.length >= 35, 'The Axum route table must be covered');
   for (const path of new Set(endpoints)) assert.ok([...http.routes,...http.sockets].some(route => route.path === path), 'Missing HTTP contract: ' + path);
   const seen = new Set();
@@ -46,16 +49,11 @@ test('all migration schemas compile and every API route has a resolvable request
   }
 });
 
-test('request contracts reject malformed objects, UTF-16 overflow, invalid fact variants and numeric bounds', () => {
+test('request contracts reject malformed objects, UTF-16 overflow, numeric bounds', () => {
   const suggest = validate('SuggestRequest');
   assert.ok(suggest({ text: 'echo hello', future: true })); assert.ok(suggest({ text: '🌍'.repeat(1000) }));
   for (const body of [null, [], 'text', {}, { text: 1 }, { text: '🌍'.repeat(1001) }]) assert.equal(suggest(body), false, JSON.stringify(body));
-  const facts = validate('FactsRequest');
-  assert.ok(facts({ key: 'context', operations: [{ kind: 'entries', path: '/fixture', limit: 10000 }, { kind: 'stat', path: '/fixture/file' }] }));
-  for (const operations of [[], Array(65).fill({ kind: 'stat', path: '/' }), [null], [{ kind: 'exec', command: 'touch file' }],
-    [{ kind: 'stat', path: 'relative' }], [{ kind: 'stat', path: '/bad\0path' }], [{ kind: 'entries', path: '/', limit: 0 }],
-    [{ kind: 'entries', path: '/', limit: 10001 }], [{ kind: 'entries', path: '/', limit: 1.5 }], [{ kind: 'help', command: 'tool', route: ['unknown;command'] }],
-    [{ kind: 'syntax', command: 'echo\ncontrol' }]]) assert.equal(facts({ key: 'context', operations }), false, JSON.stringify(operations));
+
 });
 
 test('optional properties remain distinct from null and file editing measures encoded bytes', () => {
@@ -96,7 +94,7 @@ test('persisted pairing credentials require hashed version-one records and bound
     { version: 1, tokenHash: hash, credentials: Array(257).fill(hash) }, { version: 1, tokenHash: hash, credentials: [null] }]) assert.equal(pairings(value), false);
 });
 
-test('asynchronous native/Wasm messages obey their contracts', () => {
+test('asynchronous native engine messages obey their contracts', () => {
   const request = validate('AsyncEngineRequest');
   assert.ok(request({ request: 1, operation: 'tokens', args: ['echo hello'], now: 0 }));
   assert.equal(request({ request: 0, operation: 'tokens', args: ['echo hello'], now: 0 }), false);
@@ -137,4 +135,13 @@ test('the Rust client parser accepts every declared client message and rejects m
   for (const { value, accepted } of cases) assert.equal(check(value), accepted, JSON.stringify(value));
   const actual = execFileSync(rustExample('protocol_check'), { input: cases.map(test => JSON.stringify(test.value)).join('\n') + '\n', encoding: 'utf8' }).trim().split('\n').map(value => value === 'true');
   assert.deepEqual(actual, cases.map(test => test.accepted));
+});
+
+
+test('every Rust server-message variant matches the declared wire contract', () => {
+  const messages = JSON.parse(execFileSync(rustExample('protocol_check'), ['--server'], { encoding: 'utf8' }));
+  const declared = schemas.$defs.ServerMessage.anyOf.map(variant => variant.properties.type.const).sort();
+  assert.deepEqual(messages.map(message => message.type).sort(), declared);
+  const check = validate('ServerMessage');
+  for (const message of messages) assert.ok(check(message), JSON.stringify({ message, errors: check.errors }));
 });

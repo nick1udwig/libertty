@@ -1,4 +1,3 @@
-use serde_json::json;
 use std::time::Duration;
 use termai_server::herdr_history::Hub;
 #[path = "support/herdr.rs"]
@@ -10,15 +9,29 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
     let other = support::Fixture::new().await;
     let hub = Hub::default();
     let mut first = hub
-        .subscribe(fixture.target.clone(), json!("w1:p0"))
+        .subscribe(fixture.target.clone(), "w1:p0".into())
         .unwrap();
     first.receive.changed().await.unwrap();
     let mut second = hub
-        .subscribe(fixture.target.clone(), json!("w1:p0"))
+        .subscribe(fixture.target.clone(), "w1:p0".into())
         .unwrap();
     assert_eq!(
-        first.receive.borrow().as_ref().unwrap().as_ref().unwrap()["text"],
-        second.receive.borrow().as_ref().unwrap().as_ref().unwrap()["text"]
+        first
+            .receive
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .value()["text"],
+        second
+            .receive
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .value()["text"]
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(220), second.receive.changed())
@@ -32,7 +45,14 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
     second.refresh.notify_one();
     second.receive.changed().await.unwrap();
     assert_eq!(
-        second.receive.borrow().as_ref().unwrap().as_ref().unwrap()["text"],
+        second
+            .receive
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .value()["text"],
         "Live Herdr terminal"
     );
     assert!(
@@ -40,12 +60,19 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .await
             .is_err()
     );
-    let mut isolated = hub.subscribe(other.target.clone(), json!("w1:p0")).unwrap();
+    let mut isolated = hub.subscribe(other.target.clone(), "w1:p0".into()).unwrap();
     isolated.receive.changed().await.unwrap();
     *fixture.screen.lock().unwrap() = "changed 界😀".into();
     second.receive.changed().await.unwrap();
     assert_eq!(
-        second.receive.borrow().as_ref().unwrap().as_ref().unwrap()["text"],
+        second
+            .receive
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .value()["text"],
         "changed 界😀"
     );
     assert_eq!(
@@ -55,7 +82,8 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .as_ref()
             .unwrap()
             .as_ref()
-            .unwrap()["text"],
+            .unwrap()
+            .value()["text"],
         "Live Herdr terminal"
     );
     drop(first);
@@ -65,7 +93,7 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
     tokio::time::sleep(Duration::from_millis(220)).await;
     assert_eq!(fixture.actions.lock().unwrap().len(), count);
     let mut reopened = hub
-        .subscribe(fixture.target.clone(), json!("w1:p0"))
+        .subscribe(fixture.target.clone(), "w1:p0".into())
         .unwrap();
     reopened.receive.changed().await.unwrap();
     assert_eq!(
@@ -75,7 +103,8 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .as_ref()
             .unwrap()
             .as_ref()
-            .unwrap()["text"],
+            .unwrap()
+            .value()["text"],
         "changed 界😀"
     );
 }
@@ -90,7 +119,7 @@ async fn unchanged_metadata_is_suppressed_but_changed_status_is_delivered() {
         send,
         cancel.clone(),
     ));
-    assert_eq!(receive.recv().await.unwrap()["type"], "snapshot");
+    assert_eq!(receive.recv().await.unwrap().value()["type"], "snapshot");
     tokio::time::sleep(Duration::from_millis(100)).await;
     fixture.notify();
     assert!(
@@ -103,7 +132,8 @@ async fn unchanged_metadata_is_suppressed_but_changed_status_is_delivered() {
         tokio::time::timeout(Duration::from_secs(1), receive.recv())
             .await
             .unwrap()
-            .unwrap()["snapshot"]["agents"][0]["status"],
+            .unwrap()
+            .value()["snapshot"]["agents"][0]["status"],
         "idle"
     );
     cancel.cancel();

@@ -197,7 +197,7 @@ impl NativeHost {
         cancel: &CancellationToken,
     ) -> Result<termai_engine::host::FactValue, String> {
         self.engine_operation(
-            &serde_json::from_value(operation.clone()).map_err(|e| e.to_string())?,
+            &serde::Deserialize::deserialize(operation).map_err(|e| e.to_string())?,
             cancel,
         )
         .await
@@ -288,11 +288,8 @@ impl NativeHost {
         operation: &Value,
         cancel: &CancellationToken,
     ) -> Result<Vec<String>, String> {
-        let words: Vec<String> = serde_json::from_value(
-            operation
-                .get("words")
-                .cloned()
-                .ok_or("Invalid completion words.")?,
+        let words: Vec<String> = serde::Deserialize::deserialize(
+            operation.get("words").ok_or("Invalid completion words.")?,
         )
         .map_err(|e| e.to_string())?;
         let timeout = operation
@@ -403,11 +400,8 @@ impl NativeHost {
             ),
             "completion" => json!(self.complete(operation, cancel).await?),
             "help" => {
-                let route: Vec<String> = serde_json::from_value(
-                    operation
-                        .get("route")
-                        .cloned()
-                        .ok_or("Invalid help route.")?,
+                let route: Vec<String> = serde::Deserialize::deserialize(
+                    operation.get("route").ok_or("Invalid help route.")?,
                 )
                 .map_err(|e| e.to_string())?;
                 json!(

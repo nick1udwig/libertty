@@ -12,6 +12,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use termai_engine::repair::shell_quote;
+use termai_engine::utf16_len;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -258,10 +259,10 @@ impl CompletionProvider {
 }
 pub fn valid_completion_words(words: &[String]) -> bool {
     (2..=64).contains(&words.len())
-        && words.iter().all(|w| {
-            w.encode_utf16().count() <= 2000 && !w.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
-        })
-        && words.join(" ").encode_utf16().count() <= 4000
+        && words
+            .iter()
+            .all(|w| utf16_len(w) <= 2000 && !w.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}'))
+        && utf16_len(&words.join(" ")) <= 4000
         && !words[0].is_empty()
         && words[0]
             .chars()
@@ -289,7 +290,7 @@ pub fn completion_values(raw: &str) -> Vec<String> {
     let mut result = Vec::new();
     for value in raw.split('\0').map(str::trim_end) {
         if !value.is_empty()
-            && value.encode_utf16().count() <= 2000
+            && utf16_len(value) <= 2000
             && !value.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
             && !result.iter().any(|old| old == value)
         {

@@ -23,7 +23,12 @@ struct HistoryIndex {
 }
 fn history_index(history: &SharedList<String>) -> Arc<HistoryIndex> {
     static CACHE: OnceLock<Mutex<ArrayCache<HistoryIndex>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(Default::default);
+    cached_history_index(history, CACHE.get_or_init(Default::default))
+}
+fn cached_history_index(
+    history: &SharedList<String>,
+    cache: &Mutex<ArrayCache<HistoryIndex>>,
+) -> Arc<HistoryIndex> {
     let previous = {
         let mut cache = cache.lock().unwrap();
         if let Some(index) = cache.get_shared(history) {
@@ -203,8 +208,13 @@ mod tests {
     }
     #[test]
     fn refresh_reuses_parsed_entries_while_adding_and_evicting_commands() {
-        let first = history_index(&vec!["git init".into(), "git status".into()].into());
-        let second = history_index(&vec!["git status".into(), "git add .".into()].into());
+        let cache = Mutex::default();
+        let first =
+            cached_history_index(&vec!["git init".into(), "git status".into()].into(), &cache);
+        let second = cached_history_index(
+            &vec!["git status".into(), "git add .".into()].into(),
+            &cache,
+        );
         assert!(Arc::ptr_eq(
             &first.entries["git status"],
             &second.entries["git status"]

@@ -5,7 +5,9 @@ It builds on the single repair library at `2a99127`; master and the former exper
 
 ## Runtime boundaries
 
-`src/main.ts` manages the workspace and saved profiles.
+`src/main.ts` wires workspace services, backend authentication and startup.
+`workspace-storage.ts` validates and migrates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
+These modules share one live workspace state so replacing saved hosts, backends or tabs is visible to pending actions.
 Each terminal uses a same-origin `terminal.html` frame running the existing renderer and input pipeline.
 Frames stay mounted when switching tabs; background output continues draining so flow control cannot stall a hidden terminal.
 The tab header supplies new-tab and back controls.
@@ -29,8 +31,8 @@ The browser saves an issued credential per backend URL in local storage, and the
 The HttpOnly session cookie is persistent and renewed on reconnect.
 Changing the pairing token revokes saved credentials.
 
-Native sessions retain the existing server/client engine selection and transport.
-SSH sessions use the browser worker and shared repair library with `SSHHost` as the remote facts adapter: SFTP directory data, shell context, syntax checks, verified help routes and static Python inspection.
+Native sessions use the backend's Rust repair engine.
+SSH sessions use the native repair library on the backend with `SSHHost` supplying SFTP directory data, shell context, syntax checks, verified help routes and static Python inspection.
 Terminal output and fact channels share one SSH connection.
 No termai daemon is installed on the SSH target.
 SSH needs a POSIX environment with Bash, SFTP, `mktemp` and `base64`.

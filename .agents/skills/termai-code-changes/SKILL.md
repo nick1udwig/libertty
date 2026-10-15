@@ -10,7 +10,7 @@ Run commands from the repository root and select validation from the actual chan
 
 ## Find the implementation
 
-The browser frontend is TypeScript in `src/`, the native backend is Rust in `crates/server/`, and the shared native and WebAssembly engine is Rust in `crates/engine/`.
+The browser frontend is TypeScript in `src/`, the native backend is Rust in `crates/server/`, and the shared native engine is Rust in `crates/engine/`.
 Wire and API contracts and asset checksums live in `contracts/`, and `scripts/engine-vocabulary.mjs` maintains the canonical command and speech vocabulary.
 Read [docs/client-architecture.md](../../../docs/client-architecture.md) for frontend changes, [docs/shared-engine.md](../../../docs/shared-engine.md) for engine changes, and [docs/workspace.md](../../../docs/workspace.md) for workspace changes.
 Use [docs/ci.md](../../../docs/ci.md) for harness details and historical benchmark references.
@@ -31,5 +31,5 @@ For changes to the suggestion engine, discovery, fact fetching or directory cach
 For changes to workspace startup or input latency, also run `npm run bench:workspace` before creating a commit or merging.
 These standalone benchmarks retain their correctness assertions, latency budgets and reports in `.test-artifacts`, and the architecture and workspace commands use historical TypeScript references described in [docs/ci.md](../../../docs/ci.md).
 If packaging, launchers or installation change, build a local archive with `TERMAI_RELEASE_ALLOW_DIRTY=1 npm run release:package` and run `npm run verify:package -- release/termai-vVERSION-PLATFORM.tar.gz` before creating a commit or merging.
-The package verification script runs both smoke checks and browser checks in both engine modes against the extracted archive.
+The package verification script runs both smoke checks and the browser suite against the extracted archive.
 Report any failing or unavailable required check explicitly and do not claim it passed.

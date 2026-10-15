@@ -1,5 +1,9 @@
 # Initial client-driven terminal experiment (`17e629b`)
 
+This is a historical architecture report.
+The client coordinator, browser Wasm adapter and separate context/fact protocol have since been retired; see [shared-engine.md](shared-engine.md) for current behavior.
+
+
 The [follow-up directory optimizations](directory-optimizations.md) restore warm directory-repair latency to approximately master’s level.
 This document preserves the original experiment and its measurements; use the follow-up for current behavior and results.
 

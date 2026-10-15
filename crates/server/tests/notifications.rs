@@ -197,8 +197,24 @@ async fn alerts_preserve_ownership_focus_acknowledgements_previews_and_restart_w
     assert!(!stored.contains(&owner));
     assert!(!stored.contains("Updated the parser"));
     assert!(!stored.contains("Live Herdr terminal"));
+    let mut saved: Value = serde_json::from_str(&stored).unwrap();
+    saved["devices"][0]["futureDevice"] = json!({"retained":true});
+    saved["devices"][0]["views"][0]["futureView"] = json!(["retained"]);
+    std::fs::write(directory.join("herdr-push.json"), saved.to_string()).unwrap();
     manager =
         Notifications::open(&directory, check, Some(send), "https://example.com/termai").unwrap();
+    let mut updated = subscription();
+    updated["keys"]["auth"] = json!("BQUFBQUFBQUFBQUFBQUFBQ");
+    manager.subscribe(&owner, &updated).unwrap();
+    until(|| {
+        let saved: Value =
+            serde_json::from_slice(&std::fs::read(directory.join("herdr-push.json")).unwrap())
+                .unwrap();
+        saved["devices"][0]["subscription"]["keys"]["auth"] == updated["keys"]["auth"]
+            && saved["devices"][0]["futureDevice"] == json!({"retained":true})
+            && saved["devices"][0]["views"][0]["futureView"] == json!(["retained"])
+    })
+    .await;
     tokio::time::sleep(Duration::from_millis(250)).await;
     assert_eq!(sent.lock().unwrap().len(), 3);
     fixture.update("working");
@@ -265,7 +281,7 @@ async fn expired_devices_and_revoked_pairings_stop_deliveries_and_recycled_panes
     fixture.update("idle");
     tokio::time::sleep(Duration::from_millis(350)).await;
     assert_eq!(sends.load(Ordering::SeqCst), 1);
-    let agent = fixture.target.snapshot().await.unwrap()["agents"][0].clone();
+    let agent = fixture.target.snapshot().await.unwrap().agents[0].clone();
     fixture.snapshot.lock().unwrap()["panes"][0]["terminal_id"] = json!("replacement");
     fixture.actions.lock().unwrap().clear();
     assert!(fixture.target.preview(&agent).await.is_empty());

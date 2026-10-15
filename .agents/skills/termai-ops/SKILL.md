@@ -59,7 +59,6 @@ Install the source prerequisites listed in the README and select the pinned Node
 Use these commands for the README's source build and phone connection setup.
 
 ```sh
-rustup target add wasm32-unknown-unknown
 npm ci
 npm run build
 HOST=127.0.0.1 PORT=7321 TERMAI_ALLOWED_HOSTS=my-machine.tail1234.ts.net TERMAI_BASE_PATH=/termai npm start

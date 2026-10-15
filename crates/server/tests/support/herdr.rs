@@ -17,6 +17,8 @@ pub struct Fixture {
     pub target: Target,
     pub snapshot: Arc<Mutex<Value>>,
     pub actions: Arc<Mutex<Vec<Value>>>,
+    pub requests: Arc<Mutex<Vec<Value>>>,
+    pub connections: Arc<AtomicU64>,
     pub screen: Arc<Mutex<String>>,
     pub content_revision: Arc<AtomicU64>,
     pub close_error: Arc<Mutex<String>>,
@@ -36,6 +38,8 @@ impl Fixture {
             "agents":[{"terminal_id":"term_0","pane_id":"w1:p0","workspace_id":"w1","tab_id":"t1","name":"agent-address","agent":"fixture","agent_status":"working","state_change_seq":1,"revision":1,"cwd":"/workspace"}]
         })));
         let actions = Arc::new(Mutex::new(Vec::new()));
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let connections = Arc::new(AtomicU64::new(0));
         let screen = Arc::new(Mutex::new("Live Herdr terminal".into()));
         let content_revision = Arc::new(AtomicU64::new(6));
         let close_error = Arc::new(Mutex::new(String::new()));
@@ -51,9 +55,12 @@ impl Fixture {
                 binary: "herdr".into(),
                 env: std::env::vars().collect(),
                 repairs: Default::default(),
+                shared: Default::default(),
             },
             snapshot: snapshot.clone(),
             actions: actions.clone(),
+            requests: requests.clone(),
+            connections: connections.clone(),
             screen: screen.clone(),
             content_revision: content_revision.clone(),
             close_error: close_error.clone(),
@@ -64,6 +71,8 @@ impl Fixture {
         tokio::spawn(async move {
             loop {
                 let stream = tokio::select! {biased;_=cancel.cancelled()=>break,result=listener.accept()=>result.unwrap().0};
+                connections.fetch_add(1, Ordering::Relaxed);
+                let requests = requests.clone();
                 let snapshot = snapshot.clone();
                 let actions = actions.clone();
                 let screen = screen.clone();
@@ -77,6 +86,7 @@ impl Fixture {
                     loop {
                         let request = tokio::select! {biased;_=cancel.cancelled()=>break,result=read_line(&mut stream)=>result.unwrap_or(None)};
                         let Some(request) = request else { break };
+                        requests.lock().unwrap().push(request.clone());
                         let method = request["method"].as_str().unwrap_or("");
                         let params = &request["params"];
                         let mut error = None;

@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn api_ssh_probe(
     app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let _permit = app.ssh_probes.try_acquire().map_err(|_| {
@@ -11,31 +11,33 @@ pub(super) async fn api_ssh_probe(
             "Route probes are busy. Try again.".into(),
         )
     })?;
-    let input = body(&mut req, 16384).await?;
+    let input: crate::protocol::requests::SshAddress = typed_body(&mut req, 16384).await?;
     ok(
-        json!({"milliseconds":ssh::route_probe(&input,&CancellationToken::new()).await.map_err(fail)?}),
+        json!({"milliseconds":ssh::route_probe_request(&input,&CancellationToken::new()).await.map_err(fail)?}),
     )
 }
 
 pub(super) async fn api_ssh_captured(
     app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let key = ctx.key;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
-    let input = body(&mut req, 16384).await?;
-    let id = text(&input, "id");
-    if input["action"] == "ack" {
+    let input: crate::protocol::requests::Capture = typed_body(&mut req, 16384).await?;
+    let id = input.id.as_str();
+    if input.action == crate::protocol::requests::CaptureAction::Ack {
         session.acknowledge_capture(id);
         return ok(json!({"ok":true}));
     }
     if let Some(result) = session.capture_result(id) {
         return ok(result);
     }
-    if input["action"] == "cancel" || input["action"] == "native" {
+    if input.action == crate::protocol::requests::CaptureAction::Cancel
+        || input.action == crate::protocol::requests::CaptureAction::Native
+    {
         let _flight = session
             .capture_flight
             .try_lock()
@@ -48,9 +50,15 @@ pub(super) async fn api_ssh_captured(
             return Err(fail("This SSH request is no longer active."));
         }
         session
-            .release_capture(id, input["action"] == "native", None)
+            .release_capture(
+                id,
+                input.action == crate::protocol::requests::CaptureAction::Native,
+                None,
+            )
             .map_err(fail)?;
-        return ok(json!({"native":input["action"] == "native"}));
+        return ok(
+            json!({"native":input.action == crate::protocol::requests::CaptureAction::Native}),
+        );
     }
     let _flight = session.capture_flight.lock().await;
     if let Some(result) = session.capture_result(id) {
@@ -64,7 +72,7 @@ pub(super) async fn api_ssh_captured(
         capture["command"].as_str().unwrap_or(""),
         &session.environment().await,
         &cwd,
-        input["passphrase"].as_str(),
+        input.passphrase.as_deref(),
         &CancellationToken::new(),
     )
     .await;
@@ -99,7 +107,7 @@ pub(super) async fn api_ssh_captured(
         &id[20..]
     );
     let name = format!("{}@{}", system.address.username, system.address.host);
-    let input = json!({"host":system.address.host,"port":system.address.port,"username":system.address.username,"trust":input.get("trust")});
+    let input = json!({"host":system.address.host,"port":system.address.port,"username":system.address.username,"trust":input.trust});
     let child = match app
         .get_remote_session(&owner, &child_id, &name, &input, Some(system), false)
         .await

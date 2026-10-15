@@ -9,6 +9,7 @@ use std::{
     path::Path,
     time::{Duration, Instant},
 };
+use termai_engine::utf16_len;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const MAX_UPLOAD: u64 = 1024 * 1024 * 1024;
@@ -63,7 +64,7 @@ impl From<std::io::Error> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 pub fn file_path(cwd: &str, home: &str, input: &str) -> Result<String> {
-    if input.is_empty() || input.encode_utf16().count() > 4096 || input.contains('\0') {
+    if input.is_empty() || utf16_len(input) > 4096 || input.contains('\0') {
         return Err(Error::new("Enter a file path.", 400));
     }
     let expanded = if input == "~" {
@@ -259,13 +260,25 @@ async fn absent(fs: &FileSystem, file: &str) -> Result<()> {
 pub async fn action(cwd: &str, home: &str, input: &Value) -> Result<Value> {
     action_on(&FileSystem::default(), cwd, home, input).await
 }
-pub async fn action_on(fs: &FileSystem, cwd: &str, home: &str, input: &Value) -> Result<Value> {
-    let kind = input["action"].as_str().unwrap_or("");
+pub async fn action_on<I: TryInto<crate::protocol::requests::FileAction>>(
+    fs: &FileSystem,
+    cwd: &str,
+    home: &str,
+    input: I,
+) -> Result<Value>
+where
+    I::Error: std::fmt::Display,
+{
+    let input = input
+        .try_into()
+        .map_err(|error| Error::new(format!("Invalid file action: {error}"), 400))?;
+    let kind = input.action.as_str();
     if ["read", "write", "rename"].contains(&kind) {
-        let file = file_path(cwd, home, input["path"].as_str().unwrap_or(""))?;
+        let file = file_path(cwd, home, input.path.as_deref().unwrap_or(""))?;
         if kind == "rename" {
-            let name = input["name"]
-                .as_str()
+            let name = input
+                .name
+                .as_deref()
                 .filter(|s| valid_name(s))
                 .ok_or_else(|| Error::new("Enter a valid file name.", 400))?;
             let destination =
@@ -280,11 +293,12 @@ pub async fn action_on(fs: &FileSystem, cwd: &str, home: &str, input: &Value) ->
         if kind == "read" {
             return Ok(original);
         }
-        let content = input["text"]
-            .as_str()
+        let content = input
+            .text
+            .as_deref()
             .filter(|s| s.len() <= 32768 && !s.contains('\0'))
             .ok_or_else(|| Error::new("Edit supports text files up to 32 KB.", 400))?;
-        if input["version"] != original["version"] {
+        if json!(input.version) != original["version"] {
             return Err(Error::new(
                 "The file changed since you opened it. Reopen it before saving.",
                 409,
@@ -318,15 +332,16 @@ pub async fn action_on(fs: &FileSystem, cwd: &str, home: &str, input: &Value) ->
         .map_err(|_| Error::new("The operation was aborted due to timeout", 400))??;
         return Ok(json!({"ok":true}));
     }
-    let paths = input["paths"]
-        .as_array()
+    let paths = input
+        .paths
+        .as_deref()
         .filter(|p| !p.is_empty() && p.len() <= 100)
         .filter(|_| ["copy", "delete"].contains(&kind))
         .ok_or_else(|| Error::new("Select between 1 and 100 items.", 400))?;
     let mut seen = HashSet::new();
     let mut files = vec![];
     for value in paths {
-        let file = file_path(cwd, home, value.as_str().unwrap_or(""))?;
+        let file = file_path(cwd, home, value.as_str())?;
         if seen.insert(file.clone()) {
             files.push(file)
         }
@@ -335,7 +350,7 @@ pub async fn action_on(fs: &FileSystem, cwd: &str, home: &str, input: &Value) ->
         return Err(Error::new("The filesystem root cannot be changed.", 400));
     }
     let destination = if kind == "copy" {
-        file_path(cwd, home, input["destination"].as_str().unwrap_or(""))?
+        file_path(cwd, home, input.destination.as_deref().unwrap_or(""))?
     } else {
         String::new()
     };

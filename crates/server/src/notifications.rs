@@ -5,6 +5,7 @@ use crate::{
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -16,6 +17,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use termai_engine::utf16_len;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use web_push::{
@@ -53,7 +55,7 @@ fn decode(value: &Value) -> Option<Vec<u8>> {
 pub fn subscription(value: &Value) -> Result<Value, String> {
     let endpoint = value["endpoint"]
         .as_str()
-        .filter(|s| s.encode_utf16().count() <= 4096)
+        .filter(|s| utf16_len(s) <= 4096)
         .ok_or("Invalid push subscription.")?;
     let url = url::Url::parse(endpoint).map_err(|e| e.to_string())?;
     let host = url.host_str().unwrap_or("");
@@ -207,8 +209,30 @@ struct Presence {
 struct Watch {
     cancel: CancellationToken,
 }
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WatchView {
+    id: String,
+    source: String,
+    session: String,
+    #[serde(default)]
+    remote: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    socket_path: Option<String>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+#[derive(Clone, Deserialize, Serialize)]
+struct Device {
+    id: String,
+    owner: String,
+    subscription: Value,
+    views: Vec<WatchView>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
 struct State {
-    devices: Vec<Value>,
+    devices: Vec<Device>,
     checkpoints: Map<String, Value>,
     watches: HashMap<String, Watch>,
     presence: HashMap<String, Presence>,
@@ -224,12 +248,12 @@ pub struct Notifications {
     saving: AtomicBool,
     pending: Arc<Semaphore>,
 }
-fn key(owner: &str, view: &Value) -> String {
+fn key(owner: &str, view: &WatchView) -> String {
     json!([
         owner,
-        view["source"],
-        view["session"],
-        view["socketPath"].as_str().unwrap_or("")
+        view.source,
+        view.session,
+        view.socket_path.as_deref().unwrap_or("")
     ])
     .to_string()
 }
@@ -243,8 +267,8 @@ fn receipt(device: &str, key: &str, event: &Value) -> String {
     ])
     .to_string()
 }
-fn views(device: &Value) -> &[Value] {
-    device["views"].as_array().map(Vec::as_slice).unwrap_or(&[])
+fn views(device: &Device) -> &[WatchView] {
+    &device.views
 }
 impl Notifications {
     pub fn open(
@@ -277,19 +301,13 @@ impl Notifications {
                 if !device["owner"].as_str().is_some_and(|s| owner(s)) {
                     continue;
                 }
-                let mut device = device.clone();
-                device["subscription"] = subscription(&device["subscription"])?;
-                if device["views"].as_array().is_none_or(|v| {
-                    v.len() > 16
-                        || !v
-                            .iter()
-                            .all(|v| ["id", "session", "source"].iter().all(|f| v[f].is_string()))
-                }) {
+                let mut device = Device::deserialize(device)
+                    .map_err(|_| "Invalid saved Herdr notification device.")?;
+                device.subscription = subscription(&device.subscription)?;
+                if device.views.len() > 16 {
                     return Err("Invalid saved Herdr notification watches.".into());
                 }
-                if let Some(id) = device["id"].as_str() {
-                    devices.retain(|d: &Value| d["id"] != id);
-                }
+                devices.retain(|old: &Device| old.id != device.id);
                 devices.push(device);
             }
         }
@@ -315,10 +333,10 @@ impl Notifications {
         let devices = manager.state.lock().unwrap().devices.clone();
         for device in devices {
             for view in views(&device) {
-                if view["remote"] != true {
-                    let mut target = Target::local(view["session"].as_str().unwrap())?;
-                    target.socket_path = view["socketPath"].as_str().map(str::to_owned);
-                    manager.watch(device["owner"].as_str().unwrap(), view, &target)?;
+                if !view.remote {
+                    let mut target = Target::local(&view.session)?;
+                    target.socket_path = view.socket_path.clone();
+                    manager.watch(&device.owner, view, &target)?;
                 }
             }
         }
@@ -349,33 +367,38 @@ impl Notifications {
         )
         .map_err(|e| e.to_string())
     }
-    fn device<'a>(state: &'a mut State, owner: &str, id: &Value) -> Result<&'a mut Value, String> {
+    fn device<'a>(state: &'a mut State, owner: &str, id: &Value) -> Result<&'a mut Device, String> {
         let owner = hash(owner);
         state
             .devices
             .iter_mut()
-            .find(|d| d["id"] == *id && d["owner"] == owner)
+            .find(|d| Some(d.id.as_str()) == id.as_str() && d.owner == owner)
             .ok_or("Enable notifications on this device first.".into())
     }
     pub fn subscribe(self: &Arc<Self>, owner: &str, input: &Value) -> Result<String, String> {
         let subscription = subscription(input)?;
         let owner = hash(owner);
         let mut state = self.state.lock().unwrap();
-        let id = if let Some(device) = state.devices.iter_mut().find(|d| {
-            d["owner"] == owner && d["subscription"]["endpoint"] == subscription["endpoint"]
-        }) {
-            device["subscription"] = subscription;
-            device["id"].as_str().unwrap_or("").to_owned()
-        } else {
-            if state.devices.len() >= 256 {
-                return Err("The notification device limit has been reached.".into());
-            }
-            let id = storage::random_uuid();
-            state
-                .devices
-                .push(json!({"id":id,"owner":owner,"subscription":subscription,"views":[]}));
-            id
-        };
+        let id =
+            if let Some(device) = state.devices.iter_mut().find(|d| {
+                d.owner == owner && d.subscription["endpoint"] == subscription["endpoint"]
+            }) {
+                device.subscription = subscription;
+                device.id.clone()
+            } else {
+                if state.devices.len() >= 256 {
+                    return Err("The notification device limit has been reached.".into());
+                }
+                let id = storage::random_uuid();
+                state.devices.push(Device {
+                    id: id.clone(),
+                    owner,
+                    subscription,
+                    views: vec![],
+                    extra: Map::new(),
+                });
+                id
+            };
         drop(state);
         self.save();
         Ok(id)
@@ -396,14 +419,18 @@ impl Notifications {
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || b == b'-')
             })
             .ok_or("Invalid notification tab.")?;
-        let mut view = json!({"id":tab,"source":source,"session":target.session,"remote":false});
-        if let Some(path) = &target.socket_path {
-            view["socketPath"] = json!(path);
-        }
+        let view = WatchView {
+            id: tab.into(),
+            source: source.into(),
+            session: target.session.clone(),
+            remote: false,
+            socket_path: target.socket_path.clone(),
+            extra: Map::new(),
+        };
         {
             let mut state = self.state.lock().unwrap();
             let device = Self::device(&mut state, owner, id)?;
-            if !views(device).iter().any(|v| v["id"] == tab) && views(device).len() >= 16 {
+            if !views(device).iter().any(|v| v.id == tab) && views(device).len() >= 16 {
                 return Err("At most 16 Herdr tabs can send notifications per device.".into());
             }
         }
@@ -413,11 +440,11 @@ impl Notifications {
             let device = Self::device(&mut state, owner, id)?;
             let mut new_views: Vec<_> = views(device)
                 .iter()
-                .filter(|v| v["id"] != tab)
+                .filter(|v| v.id != tab)
                 .cloned()
                 .collect();
             new_views.push(view);
-            device["views"] = json!(new_views);
+            device.views = new_views;
         }
         self.prune();
         self.save();
@@ -432,12 +459,9 @@ impl Notifications {
         {
             let mut state = self.state.lock().unwrap();
             let device = Self::device(&mut state, owner, id)?;
-            device["views"] = json!(
-                views(device)
-                    .iter()
-                    .filter(|v| v["id"] != *tab)
-                    .collect::<Vec<_>>()
-            );
+            device
+                .views
+                .retain(|view| Some(view.id.as_str()) != tab.as_str());
         }
         self.prune();
         self.save();
@@ -447,13 +471,8 @@ impl Notifications {
         {
             let mut state = self.state.lock().unwrap();
             for device in &mut state.devices {
-                if device["owner"] == hash(owner) {
-                    device["views"] = json!(
-                        views(device)
-                            .iter()
-                            .filter(|v| v["source"] != source)
-                            .collect::<Vec<_>>()
-                    );
+                if device.owner == hash(owner) {
+                    device.views.retain(|view| view.source != source);
                 }
             }
         }
@@ -464,7 +483,9 @@ impl Notifications {
         {
             let mut state = self.state.lock().unwrap();
             Self::device(&mut state, owner, id)?;
-            state.devices.retain(|d| d["id"] != *id);
+            state
+                .devices
+                .retain(|device| Some(device.id.as_str()) != id.as_str());
         }
         self.prune();
         self.save();
@@ -480,8 +501,8 @@ impl Notifications {
         let mut state = self.state.lock().unwrap();
         let device = Self::device(&mut state, owner, id)?;
         let presence = Presence {
-            owner: device["owner"].as_str().unwrap().into(),
-            device: device["id"].as_str().unwrap().into(),
+            owner: device.owner.clone(),
+            device: device.id.clone(),
             focused,
             until: Instant::now() + Duration::from_secs(45),
         };
@@ -503,7 +524,7 @@ impl Notifications {
         let device = Self::device(&mut state, owner, id)?;
         if !event["terminalId"]
             .as_str()
-            .is_some_and(|s| s.encode_utf16().count() <= 256)
+            .is_some_and(|s| utf16_len(s) <= 256)
             || !["done", "request"].iter().any(|s| event["kind"] == *s)
             || !event["sequence"]
                 .as_f64()
@@ -512,10 +533,17 @@ impl Notifications {
             return Ok(());
         }
         let watch_key = key(
-            device["owner"].as_str().unwrap(),
-            &json!({"source":source,"session":target.session,"socketPath":target.socket_path.clone().unwrap_or_default()}),
+            &device.owner,
+            &WatchView {
+                id: String::new(),
+                source: source.into(),
+                session: target.session.clone(),
+                socket_path: target.socket_path.clone(),
+                remote: false,
+                extra: Map::new(),
+            },
         );
-        let receipt = receipt(device["id"].as_str().unwrap(), &watch_key, event);
+        let receipt = receipt(&device.id, &watch_key, event);
         state
             .acknowledgements
             .retain(|_, until| *until >= Instant::now());
@@ -533,7 +561,12 @@ impl Notifications {
             .insert(receipt, Instant::now() + Duration::from_secs(60));
         Ok(())
     }
-    fn watch(self: &Arc<Self>, owner: &str, view: &Value, target: &Target) -> Result<(), String> {
+    fn watch(
+        self: &Arc<Self>,
+        owner: &str,
+        view: &WatchView,
+        target: &Target,
+    ) -> Result<(), String> {
         let key = key(owner, view);
         let mut state = self.state.lock().unwrap();
         if state.watches.contains_key(&key) {
@@ -559,13 +592,12 @@ impl Notifications {
             loop {
                 let message = tokio::select! {biased;_=cancel.cancelled()=>break,message=receive.recv()=>message};
                 let Some(message) = message else { break };
-                if message["type"] != "snapshot" {
+                let herdr::Metadata::Snapshot { snapshot } = message else {
                     continue;
-                }
+                };
                 let Some(manager) = weak.upgrade() else { break };
-                let snapshot = &message["snapshot"];
-                for event in tracker.update(snapshot) {
-                    manager.notify(&key, &event, snapshot, &target);
+                for event in tracker.update(&snapshot) {
+                    manager.notify(&key, &event, &snapshot, &target);
                 }
                 let checkpoint = tracker.checkpoint();
                 let changed = {
@@ -584,11 +616,17 @@ impl Notifications {
         });
         Ok(())
     }
-    fn notify(self: &Arc<Self>, key: &str, event: &Value, snapshot: &Value, target: &Target) {
-        let Some(agent) = snapshot["agents"]
-            .as_array()
-            .and_then(|a| a.iter().find(|a| a["terminalId"] == event["terminalId"]))
-            .cloned()
+    fn notify(
+        self: &Arc<Self>,
+        key: &str,
+        event: &Value,
+        snapshot: &herdr::Snapshot,
+        target: &Target,
+    ) {
+        let Some(agent) = snapshot
+            .agents
+            .iter()
+            .find(|agent| Some(agent.terminal_id.as_str()) == event["terminalId"].as_str())
         else {
             return;
         };
@@ -597,10 +635,10 @@ impl Notifications {
         for device in devices {
             let view = views(&device)
                 .iter()
-                .find(|v| self::key(device["owner"].as_str().unwrap(), v) == key)
+                .find(|v| self::key(&device.owner, v) == key)
                 .cloned();
             let Some(view) = view else { continue };
-            if !(self.owner)(device["owner"].as_str().unwrap()) {
+            if !(self.owner)(&device.owner) {
                 continue;
             }
             let Ok(permit) = self.pending.clone().try_acquire_owned() else {
@@ -614,17 +652,17 @@ impl Notifications {
             let event = event.clone();
             tokio::spawn(async move {
                 let _permit = permit;
-                let receipt = receipt(device["id"].as_str().unwrap(), &key, &event);
+                let receipt = receipt(&device.id, &key, &event);
                 let payload = async {
                     let preview = preview.get_or_init(|| target.preview(&agent)).await;
-                    json!({"title":agent["name"],"body":herdr::notification_body(agent["cwd"].as_str().unwrap_or(""),preview),"tag":format!("herdr-{}",&hash(&(key.clone()+event["terminalId"].as_str().unwrap_or("")+event["kind"].as_str().unwrap_or("")))[..32]),"tabId":view["id"],"terminalId":event["terminalId"]}).to_string()
+                    json!({"title":agent.name,"body":herdr::notification_body(&agent.cwd,preview),"tag":format!("herdr-{}",&hash(&(key.clone()+event["terminalId"].as_str().unwrap_or("")+event["kind"].as_str().unwrap_or("")))[..32]),"tabId":view.id,"terminalId":event["terminalId"]}).to_string()
                 };
                 manager.deliver(device, &key, &receipt, payload).await;
             });
         }
     }
-    fn live(&self, device: &Value, key: &str, receipt: &str) -> bool {
-        if self.cancel.is_cancelled() || !(self.owner)(device["owner"].as_str().unwrap_or("")) {
+    fn live(&self, device: &Device, key: &str, receipt: &str) -> bool {
+        if self.cancel.is_cancelled() || !(self.owner)(&device.owner) {
             return false;
         }
         let state = self.state.lock().unwrap();
@@ -633,16 +671,13 @@ impl Notifications {
             .get(receipt)
             .is_some_and(|until| *until > Instant::now())
             && state.devices.iter().any(|d| {
-                d["id"] == device["id"]
-                    && views(d)
-                        .iter()
-                        .any(|v| self::key(d["owner"].as_str().unwrap_or(""), v) == key)
+                d.id == device.id && views(d).iter().any(|v| self::key(&d.owner, v) == key)
             })
     }
-    fn focused(&self, device: &Value) -> bool {
+    fn focused(&self, device: &Device) -> bool {
         self.state.lock().unwrap().presence.values().any(|p| {
-            device["owner"] == p.owner
-                && device["id"] == p.device
+            device.owner == p.owner
+                && device.id == p.device
                 && p.focused
                 && p.until > Instant::now()
         })
@@ -652,7 +687,7 @@ impl Notifications {
     }
     async fn deliver(
         &self,
-        device: Value,
+        device: Device,
         key: &str,
         receipt: &str,
         payload: impl std::future::Future<Output = String>,
@@ -679,7 +714,7 @@ impl Notifications {
             if !self.live(&device, key, receipt) || self.focused(&device) {
                 return;
             }
-            let send = (self.send)(device["subscription"].clone(), message.clone());
+            let send = (self.send)(device.subscription.clone(), message.clone());
             let result =
                 tokio::select! {biased;_=self.cancel.cancelled()=>return,result=send=>result};
             match result {
@@ -689,7 +724,7 @@ impl Notifications {
                         .lock()
                         .unwrap()
                         .devices
-                        .retain(|d| d["id"] != device["id"]);
+                        .retain(|d| d.id != device.id);
                     self.prune();
                     let _ = self.flush();
                     return;
@@ -708,11 +743,7 @@ impl Notifications {
         let live: std::collections::HashSet<_> = state
             .devices
             .iter()
-            .flat_map(|d| {
-                views(d)
-                    .iter()
-                    .map(|v| key(d["owner"].as_str().unwrap_or(""), v))
-            })
+            .flat_map(|d| views(d).iter().map(|v| key(&d.owner, v)))
             .collect();
         state.watches.retain(|key, watch| {
             if !live.contains(key) {

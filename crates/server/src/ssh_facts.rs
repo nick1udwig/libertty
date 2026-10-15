@@ -304,7 +304,7 @@ impl SSHHost {
                 Ok(json!(result))
             }
             "completion" => {
-                let words: Vec<String> = serde_json::from_value(operation["words"].clone())
+                let words: Vec<String> = serde::Deserialize::deserialize(&operation["words"])
                     .map_err(|e| e.to_string())?;
                 if !valid_completion_words(&words) {
                     return Ok(json!([]));
@@ -344,7 +344,7 @@ impl SSHHost {
                 }
             }
             "help" => {
-                let route: Vec<String> = serde_json::from_value(operation["route"].clone())
+                let route: Vec<String> = serde::Deserialize::deserialize(&operation["route"])
                     .map_err(|e| e.to_string())?;
                 Ok(json!(
                     self.read_help(text("command")?, &route, catalog, env, true, cancel)

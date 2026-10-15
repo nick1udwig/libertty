@@ -1,0 +1,279 @@
+use super::*;
+use crate::protocol::{ClientMessage, ViewerMessage};
+use futures::stream::SplitSink;
+use tokio::sync::mpsc;
+
+pub(super) async fn upgrade(req: Request<Body>) -> Result<WebSocketUpgrade, Failure> {
+    let (mut parts, _) = req.into_parts();
+    Ok(WebSocketUpgrade::from_request_parts(&mut parts, &())
+        .await
+        .map_err(|_| (StatusCode::FORBIDDEN, "Forbidden".into()))?
+        .protocols([wire::GZIP, wire::GZIP_FAST, wire::BINARY])
+        .max_message_size(128 * 1024)
+        .max_frame_size(128 * 1024))
+}
+
+pub(super) enum Input<'a> {
+    Native {
+        session: &'a Arc<Session>,
+        attachment: u64,
+    },
+    Herdr(&'a Arc<herdr_view::View>),
+    Metadata {
+        app: &'a App,
+        connection: &'a str,
+        owner: &'a str,
+        source: &'a str,
+        target: &'a herdr::Target,
+    },
+}
+impl Input<'_> {
+    fn invalid_text(&self) -> &'static str {
+        if matches!(self, Self::Native { .. }) {
+            "Invalid message"
+        } else {
+            "Invalid terminal message"
+        }
+    }
+    fn message(&self, message: ClientMessage) -> Result<(), &'static str> {
+        match self {
+            Self::Native {
+                session,
+                attachment,
+            } => {
+                session.receive(*attachment, message);
+                Ok(())
+            }
+            Self::Herdr(view) => view.receive(message).map_err(|_| self.invalid_text()),
+            Self::Metadata { .. } => Ok(()),
+        }
+    }
+    fn text(&self, text: &str) -> Result<(), &'static str> {
+        if let Self::Metadata {
+            app,
+            connection,
+            owner,
+            source,
+            target,
+        } = self
+        {
+            if text.len() <= 2048
+                && let Ok(message) = serde_json::from_str::<ViewerMessage>(text)
+            {
+                match message {
+                    ViewerMessage::NotificationPresence { device, focused } => {
+                        let _ =
+                            app.notifications
+                                .presence(connection, owner, &json!(device), focused);
+                    }
+                    ViewerMessage::NotificationAck { device, event } => {
+                        let _ = app.notifications.acknowledge(
+                            owner,
+                            &json!(device),
+                            source,
+                            target,
+                            &event,
+                        );
+                    }
+                }
+            }
+            return Ok(());
+        }
+        let message =
+            serde_json::from_str::<ClientMessage>(text).map_err(|_| self.invalid_text())?;
+        self.message(message)
+    }
+    fn audio(&self, bytes: Vec<u8>) {
+        match self {
+            Self::Native {
+                session,
+                attachment,
+            } => session.receive_binary(*attachment, bytes),
+            Self::Herdr(view) => view.audio(bytes),
+            Self::Metadata { .. } => {}
+        }
+    }
+    fn binary(&self, bytes: &[u8], mode: wire::Mode) -> Result<(), &'static str> {
+        if matches!(self, Self::Metadata { .. }) {
+            return Ok(());
+        }
+        if mode == wire::Mode::Json {
+            self.audio(bytes.to_vec());
+            return Ok(());
+        }
+        match wire::decode_as::<ClientMessage>(bytes).map_err(|_| "Invalid wire message")? {
+            wire::Incoming::Audio(audio) => {
+                self.audio(audio);
+                Ok(())
+            }
+            wire::Incoming::Message(message) => self.message(message),
+        }
+    }
+}
+
+pub(super) enum Output {
+    Native(mpsc::UnboundedReceiver<Transport>),
+    Herdr(mpsc::Receiver<crate::viewer_queue::Item>),
+}
+enum Outgoing {
+    Native(Transport),
+    Herdr(crate::viewer_queue::Item),
+}
+impl Outgoing {
+    fn transport(&self) -> &Transport {
+        match self {
+            Self::Native(message) => message,
+            Self::Herdr(item) => &item.message,
+        }
+    }
+}
+impl Output {
+    async fn receive(&mut self) -> Option<Outgoing> {
+        match self {
+            Self::Native(receive) => receive.recv().await.map(Outgoing::Native),
+            Self::Herdr(receive) => receive.recv().await.map(Outgoing::Herdr),
+        }
+    }
+}
+
+pub(super) struct Policy {
+    cancel: CancellationToken,
+    slow: CancellationToken,
+    heartbeat: bool,
+    send_timeout: Option<Duration>,
+}
+impl Policy {
+    pub fn native() -> Self {
+        Self {
+            cancel: CancellationToken::new(),
+            slow: CancellationToken::new(),
+            heartbeat: false,
+            send_timeout: None,
+        }
+    }
+    pub fn herdr(cancel: CancellationToken, slow: CancellationToken, heartbeat: bool) -> Self {
+        Self {
+            cancel,
+            slow,
+            heartbeat,
+            send_timeout: Some(Duration::from_secs(5)),
+        }
+    }
+}
+enum Event {
+    Slow,
+    Cancelled,
+    Heartbeat,
+    Output(Option<Outgoing>),
+    Input(Option<Result<Message, axum::Error>>),
+}
+type Sender = SplitSink<WebSocket, Message>;
+
+async fn send(sender: &mut Sender, message: Message, deadline: Option<Duration>) -> bool {
+    let work = sender.send(message);
+    if let Some(deadline) = deadline {
+        matches!(tokio::time::timeout(deadline, work).await, Ok(Ok(())))
+    } else {
+        work.await.is_ok()
+    }
+}
+async fn close(sender: &mut Sender, code: u16, reason: &str, deadline: Option<Duration>) {
+    send(
+        sender,
+        Message::Close(Some(CloseFrame {
+            code,
+            reason: reason.to_owned().into(),
+        })),
+        deadline,
+    )
+    .await;
+}
+fn encode(value: &Value, mode: wire::Mode) -> Message {
+    let encoded = wire::encode(value, mode);
+    if encoded.binary {
+        Message::Binary(encoded.bytes.into())
+    } else {
+        Message::Text(String::from_utf8(encoded.bytes).expect("wire UTF-8").into())
+    }
+}
+
+pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output, policy: Policy) {
+    let mode = wire::Mode::protocol(
+        socket
+            .protocol()
+            .and_then(|protocol| protocol.to_str().ok()),
+    );
+    let (mut sender, mut receive) = socket.split();
+    let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
+    heartbeat.tick().await;
+    let mut alive = true;
+    loop {
+        let event = tokio::select! {
+            biased;
+            _ = policy.slow.cancelled() => Event::Slow,
+            _ = policy.cancel.cancelled() => Event::Cancelled,
+            item = output.receive() => Event::Output(item),
+            _ = heartbeat.tick(), if policy.heartbeat => Event::Heartbeat,
+            message = receive.next() => Event::Input(message),
+        };
+        match event {
+            Event::Slow => {
+                close(
+                    &mut sender,
+                    1013,
+                    "Viewer is too slow; reconnect for a fresh screen.",
+                    Some(Duration::from_secs(1)),
+                )
+                .await;
+                break;
+            }
+            Event::Cancelled => {
+                close(&mut sender, 1000, "Connection closed", None).await;
+                break;
+            }
+            Event::Output(Some(item)) => match item.transport() {
+                Transport::Message(message) => {
+                    // Keep the queue reservation until the in-flight send completes.
+                    if !send(&mut sender, encode(message, mode), policy.send_timeout).await {
+                        break;
+                    }
+                }
+                Transport::Close(code, reason) => {
+                    close(&mut sender, *code, reason, None).await;
+                    break;
+                }
+            },
+            Event::Heartbeat => {
+                if !alive {
+                    break;
+                }
+                alive = false;
+                if !send(&mut sender, Message::Ping(Vec::new().into()), None).await {
+                    break;
+                }
+            }
+            Event::Input(Some(Ok(message))) => {
+                let result = match message {
+                    Message::Text(text) => input.text(&text),
+                    Message::Binary(bytes) => input.binary(&bytes, mode),
+                    Message::Ping(bytes) => {
+                        if !send(&mut sender, Message::Pong(bytes), None).await {
+                            break;
+                        }
+                        Ok(())
+                    }
+                    Message::Pong(_) => {
+                        alive = true;
+                        Ok(())
+                    }
+                    Message::Close(_) => break,
+                };
+                if let Err(reason) = result {
+                    close(&mut sender, 1008, reason, None).await;
+                    break;
+                }
+            }
+            Event::Output(None) | Event::Input(None | Some(Err(_))) => break,
+        }
+    }
+}

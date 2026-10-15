@@ -8,7 +8,7 @@ The publication job uploads every asset to a draft and publishes it only after c
 A failed build or upload never publishes an empty release or makes it Latest.
 Tags with a prerelease suffix publish prereleases without making them Latest, while the installer selects stable releases by default.
 
-Each archive includes the native Rust executable, frontend and engine Wasm, launch and setup scripts, licenses and release metadata.
+Each archive includes the native Rust executable, frontend assets, launch and setup scripts, licenses and release metadata.
 An official Node runtime and `ws` support installation and validation tools, while the installed service executes Rust directly.
 Linux archives additionally include a pinned Voxtype Mobile CPU daemon and its upstream installer.
 Linux builds use Ubuntu 24.04 because the pinned ONNX Runtime imports glibc C23 symbols missing from Ubuntu 22.04.
@@ -38,10 +38,10 @@ Use **Actions → Release → Run workflow** to build without creating or modify
 Select the workflow branch and optionally supply a branch, tag or commit in the `ref` field.
 Manual runs produce downloadable workflow artifacts and never execute the publication job.
 
-One Linux x64 checking job runs Rust formatting, native and Wasm Clippy, Rust and JavaScript tests, contracts, installer fixtures, saved-data compatibility and all browser and native Herdr harnesses.
+One Linux x64 checking job runs Rust formatting, native Clippy, Rust and JavaScript tests, contracts, installer fixtures, saved-data compatibility and all browser and native Herdr harnesses.
 The release workflow and local validation use the same `npm run verify:local` command.
 All full validation and packaging use the Node version pinned in `build/release-config.json`.
-Each platform builds its frontend and engine Wasm, then `release:package` compiles the optimized native executable once and creates the archive that both smoke checks exercise.
+Each platform builds its frontend, then `release:package` compiles the optimized native executable once and creates the archive that both smoke checks exercise.
 Formatting, lints and full browser validation run once on Linux rather than on every platform.
 The platform jobs do not transport intermediate builds or generate build manifests.
 Local performance checks remain available through the scripts and commit requirements described in [ci.md](ci.md).
@@ -63,7 +63,6 @@ CI builds its `parakeet` feature with CPU inference and includes the upstream `s
 Keep the daemon's model, Opus framing and capabilities protocol compatible with Termai's dictation client when updating that pin.
 The speech model is downloaded by the upstream installer only when the user opts into dictation setup.
 Termai and Voxtype use the current stable Rust toolchain and their respective Cargo lockfiles.
-Termai also requires the `wasm32-unknown-unknown` target for its shared browser engine.
 
 ## Local packaging
 

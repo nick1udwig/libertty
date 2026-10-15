@@ -10,6 +10,7 @@ use std::{
     sync::{Arc, LazyLock},
     time::Duration,
 };
+use termai_engine::utf16_len;
 use termai_engine::{path, validation::Environment};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
@@ -45,24 +46,33 @@ pub struct Address {
     pub username: String,
 }
 pub fn address(value: &Value) -> Result<Address, String> {
-    let host = value["host"].as_str().map(str::trim).unwrap_or("");
+    let port = value
+        .get("port")
+        .filter(|value| !value.is_null())
+        .map_or(Some(22.0), Value::as_f64)
+        .ok_or("SSH port must be between 1 and 65535.")?;
+    address_parts(
+        value["host"].as_str().unwrap_or(""),
+        port,
+        value["username"].as_str().unwrap_or(""),
+    )
+}
+pub fn address_parts(host: &str, port: f64, username: &str) -> Result<Address, String> {
+    let host = host.trim();
     if host.is_empty()
-        || host.encode_utf16().count() > 253
+        || utf16_len(host) > 253
         || !host
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b":._%-".contains(&c))
     {
         return Err("Enter a hostname or IP address.".into());
     }
-    let port = value
-        .get("port")
-        .filter(|v| !v.is_null())
-        .map_or(Some(22.0), Value::as_f64)
-        .filter(|n| n.fract() == 0.0 && (1.0..=65535.0).contains(n))
+    let port = Some(port)
+        .filter(|value| value.fract() == 0.0 && (1.0..=65535.0).contains(value))
         .ok_or("SSH port must be between 1 and 65535.")?;
-    let username = value["username"].as_str().map(str::trim).unwrap_or("");
+    let username = username.trim();
     if username.is_empty()
-        || username.encode_utf16().count() > 128
+        || utf16_len(username) > 128
         || username.chars().any(|c| c <= '\u{20}' || c == '\u{7f}')
     {
         return Err("Enter an SSH username.".into());

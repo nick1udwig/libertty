@@ -22,7 +22,14 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
     let cancel = CancellationToken::new();
     let view = View::open(
         target,
-        json!({"terminalId":"term_0","paneId":"w1:p0","cwd":"/fixture"}),
+        fixture
+            .target
+            .snapshot()
+            .await
+            .unwrap()
+            .terminal("term_0")
+            .unwrap()
+            .clone(),
         &frames,
         &history,
         None,
@@ -98,7 +105,14 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
     let cancel = CancellationToken::new();
     let view = View::open(
         target,
-        json!({"terminalId":"term_0","paneId":"w1:p0","cwd":"/fixture"}),
+        fixture
+            .target
+            .snapshot()
+            .await
+            .unwrap()
+            .terminal("term_0")
+            .unwrap()
+            .clone(),
         &frames,
         &history,
         Some((Size { cols: 40, rows: 30 }, Some(6))),

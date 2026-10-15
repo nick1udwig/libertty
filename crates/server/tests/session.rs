@@ -121,7 +121,6 @@ async fn light_catalog_does_not_poison_full_paths_and_nested_changes_refresh() {
     let session = Session::start(
         root.path().to_str().unwrap().into(),
         vec!["cd".into()],
-        "client".into(),
         true,
         HostServices::new(),
     )
@@ -151,7 +150,7 @@ async fn light_catalog_does_not_poison_full_paths_and_nested_changes_refresh() {
 }
 
 #[tokio::test]
-async fn compound_repairs_bind_saved_catalogs_to_the_live_session_context() {
+async fn native_suggestions_refresh_paths_and_honor_cancellation() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("Workspace")).unwrap();
     std::fs::write(
@@ -162,64 +161,25 @@ async fn compound_repairs_bind_saved_catalogs_to_the_live_session_context() {
     let session = Session::start(
         root.path().to_str().unwrap().into(),
         vec!["cd".into(), "python3".into()],
-        "client".into(),
         true,
         HostServices::new(),
     )
     .await
     .unwrap();
-    let context = session.context(None, false).await.unwrap();
-    let key = context["key"].as_str().unwrap();
-    let catalog = context["catalogKey"].as_str().unwrap();
     let cancel = tokio_util::sync::CancellationToken::new();
-    let candidates = session
-        .repair(key, catalog, "cd work space", &cancel)
-        .await
-        .unwrap();
-    assert_eq!(candidates[0]["command"], "cd Workspace");
+    // A light directory repair must not poison the next full script catalog.
+    let candidates = session.suggest("cd work space", &cancel).await.unwrap();
+    assert_eq!(candidates["candidates"][0]["command"], "cd Workspace");
     let python = session
-        .repair(
-            key,
-            catalog,
-            "Python three hello world dot py myarg food",
-            &cancel,
-        )
-        .await
-        .unwrap();
-    assert_eq!(python[0]["command"], "python3 hello_world.py --myarg food");
-    let coarse = session
         .suggest("Python three hello world dot py myarg food", &cancel)
         .await
         .unwrap();
     assert_eq!(
-        coarse["candidates"][0]["command"], "python3 hello_world.py --myarg food",
-        "{coarse}"
-    );
-    assert!(
-        session
-            .repair("stale", catalog, "cd work space", &cancel)
-            .await
-            .is_err()
-    );
-    assert!(
-        session
-            .repair(key, "unknown", "cd work space", &cancel)
-            .await
-            .is_err()
-    );
-    assert!(
-        session
-            .repair(key, catalog, &"🌍".repeat(1001), &cancel)
-            .await
-            .is_err()
+        python["candidates"][0]["command"],
+        "python3 hello_world.py --myarg food"
     );
     cancel.cancel();
-    assert!(
-        session
-            .repair(key, catalog, "cd work space", &cancel)
-            .await
-            .is_err()
-    );
+    assert!(session.suggest("cd work space", &cancel).await.is_err());
     session.dispose().await;
 }
 
@@ -265,15 +225,9 @@ async fn large_readline_and_private_utilities_child() {
     let Ok(root) = std::env::var("TERMAI_LARGE_HISTORY_ROOT") else {
         return;
     };
-    let session = Session::start(
-        root.clone(),
-        vec![],
-        "client".into(),
-        false,
-        HostServices::new(),
-    )
-    .await
-    .unwrap();
+    let session = Session::start(root.clone(), vec![], false, HostServices::new())
+        .await
+        .unwrap();
     let mut browser = Browser::attach(session.clone(), 0, None);
     browser.ready(0).await;
     browser.send(json!({"type":"input","data":"\x12termai-eternal-needle\x05"}));
@@ -364,7 +318,6 @@ async fn pty_contract_child() {
             "cat".into(),
             "printf".into(),
         ],
-        "server".into(),
         false,
         HostServices::new(),
     )

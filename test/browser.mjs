@@ -31,12 +31,10 @@ await writeFile(path.join(fixture, '.gitconfig'), '[alias]\n c = commit\n');
 await writeFile(path.join(fixture, 'eternal-history'), '#1234567890\ngit init\n');
 const port = Number(process.env.TEST_PORT || fixturePort3123);
 const origin = `http://127.0.0.1:${port}`;
-const engine = process.env.TEST_ENGINE || 'server';
-assert.ok(['server', 'client'].includes(engine));
 const mount = process.env.TEST_BASE_PATH || '';
 const base = origin + mount;
 const pairingToken = 'test-local-pairing-token-123456789';
-const server = spawn(process.env.TEST_EXECUTABLE || path.join(root, 'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_BASE_PATH: mount, TERMAI_ENGINE: engine, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: pairingToken, TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.env.TEST_EXECUTABLE || path.join(root, 'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_BASE_PATH: mount, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: pairingToken, TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 let browser;
 async function focusTerminal(page) { await page.locator('#terminal textarea').evaluate(el => el.focus()); }
@@ -45,6 +43,11 @@ async function ready(page, previous = -1) { await page.waitForFunction(previous 
 async function dictate(page, text, inputType = 'insertText') {
   await focusTerminal(page);
   await page.locator('#terminal textarea').evaluate((el, { inputType, text }) => el.dispatchEvent(new InputEvent('beforeinput', { inputType, data: text, bubbles: true, cancelable: true })), { inputType, text });
+}
+async function shellHistory(page) {
+  const file = path.join(fixture, 'history-inspection');
+  await command(page, ` builtin history -w '${file}'`);
+  return (await readFile(file, 'utf8')).split('\n').filter(line => line && !/^#\d+$/.test(line));
 }
 async function command(page, text) {
   const before = await shellPrompt(page); await focusTerminal(page);
@@ -62,7 +65,7 @@ try {
     CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'repair-result') window.__lastRepairResult = message; if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'context') window.__shellContext = message.context; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'repair-result') window.__lastRepairResult = message; if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
       send(data) { const message = window.__wireSent(data); (window.__sent ||= []).push(message); if (message.type === 'resize') window.__terminalSize = message; if (['repair', 'repair-cancel'].includes(message.type) && window.__repairDelay) setTimeout(() => { if (this.readyState === 1) super.send(data); }, window.__repairDelay); else super.send(data); }
     };
   });
@@ -75,23 +78,18 @@ try {
   await page.waitForFunction(() => document.querySelector('#login-error').textContent.includes('did not match'));
   await page.locator('#token').fill(pairingToken); await page.locator('#login-form button').click(); await ready(page);
   assert.equal(await page.locator('#token').inputValue(), '');
-  assert.equal(await page.evaluate(() => window.__engineMode), engine);
+  assert.equal(await page.evaluate(() => window.__engineMode), 'server');
   // Prompt caching must still notice shell definitions and newly installed executables.
   await command(page, 'alias freshalias=pwd; freshfunction() { :; }');
-  const contextAtPrompt = () => page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()));
-  let promptContext = await contextAtPrompt();
-  assert.ok(promptContext.commands.includes('freshalias'));
-  assert.ok(promptContext.functions.includes('freshfunction'));
+  const suggestAtPrompt = text => page.evaluate(async text => (await (await fetch(new URL('api/suggest', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })).json()).candidates, text);
+  assert.ok((await suggestAtPrompt('Fresh alias')).some(candidate => candidate.command === 'freshalias' && !candidate.literal));
   await command(page, 'unalias freshalias; unset -f freshfunction');
-  promptContext = await contextAtPrompt();
-  assert.ok(!promptContext.commands.includes('freshalias'));
-  assert.ok(!promptContext.functions.includes('freshfunction'));
+  assert.ok(!(await suggestAtPrompt('Fresh alias')).some(candidate => candidate.command === 'freshalias' && !candidate.literal));
   await writeFile(path.join(fixture, 'bin', 'freshbinary'), '#!/bin/sh\nprintf fresh\\n\n', { mode: 0o700 });
   await writeFile(path.join(fixture, 'new-context-file.txt'), 'new');
   await command(page, ':');
-  promptContext = await contextAtPrompt();
-  assert.ok(promptContext.commands.includes('freshbinary'));
-  assert.ok(promptContext.paths.includes('new-context-file.txt'));
+  assert.ok((await suggestAtPrompt('Fresh binary')).some(candidate => candidate.command === 'freshbinary' && !candidate.literal));
+  assert.ok((await suggestAtPrompt('cat new context file dot txt')).some(candidate => candidate.command === 'cat new-context-file.txt'));
   assert.ok(await page.evaluate(() => [...document.fonts].some(font => font.family === 'JetBrains Mono' && font.status === 'loaded')));
   const originalSize = await page.evaluate(() => window.__terminalSize);
   await page.locator('#menu-button').click();
@@ -119,9 +117,8 @@ try {
   await mkdir(path.join(root, '.test-artifacts'), { recursive: true });
   // A completion helper is a shell function, not a spoken git subcommand.
   await command(page, '_git_init() { printf bad > helper-was-run; }');
-  const catalog = await page.evaluate(async () => (await fetch(new URL('api/context', document.baseURI))).json());
-  assert.ok(catalog.functions.includes('_git_init'));
-  assert.ok(catalog.history.includes('git init'), 'Eternal history participates in context');
+  assert.ok((await suggestAtPrompt('Get in it.')).some(candidate => candidate.command === 'git init'), 'Eternal history participates in suggestions');
+  requests.length = 0;
   // Keep full mobile captures free of setup commands and interrupt markers.
   await command(page, 'stty -echoctl; clear');
   await dictate(page, 'Get in it.');
@@ -147,7 +144,7 @@ try {
   await page.screenshot({ path: path.join(root, '.test-artifacts/example-ls.png') });
   const firstPrompt = await shellPrompt(page);
   await page.keyboard.press('Enter'); await ready(page, firstPrompt);
-  assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'ls -l');
+  assert.equal((await shellHistory(page)).at(-1), 'ls -l');
   await page.locator('#menu-button').click();
   assert.equal(await page.locator('#tap-alternate-send').isChecked(), true);
   await page.locator('#tap-alternate-send').uncheck();
@@ -229,7 +226,7 @@ try {
   await page.keyboard.type(' edited');
   before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
   await delay(650);
-  assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo original edited');
+  assert.equal((await shellHistory(page)).at(-1), 'echo original edited');
   assert.equal(await page.locator('#alternatives-toggle').isVisible(), false);
   await page.evaluate(() => window.__repairDelay = 0);
   // Composition commits are inserted once even if the browser follows with beforeinput.
@@ -239,7 +236,7 @@ try {
   await page.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { data: 'echo composition', inputType: 'insertText', bubbles: true, cancelable: true })));
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'echo composition');
   before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
-  assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo composition');
+  assert.equal((await shellHistory(page)).at(-1), 'echo composition');
   // Android-style word composition streams each edit, and is not mistaken for dictation.
   // Bulk dictation may revise its partial transcript within a composition.
   for (const parts of [['echo partial', 'echo revised'], ['e', 'echo', 'echo gradual']]) {
@@ -255,7 +252,7 @@ try {
     await page.waitForFunction(text => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === text, parts.at(-1));
     assert.equal(await page.locator('#alternatives-toggle').isVisible(), true);
     before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
-    assert.equal((await contextAtPrompt()).history.at(-1), parts.at(-1));
+    assert.equal((await shellHistory(page)).at(-1), parts.at(-1));
   }
   // A history or completion operation requires the real Readline buffer before repair.
   await command(page, 'echo recovered');
@@ -294,7 +291,7 @@ try {
     el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 's', bubbles: true, cancelable: true }));
   });
   before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
-  assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo typed words');
+  assert.equal((await shellHistory(page)).at(-1), 'echo typed words');
   // The IME must have a preceding character to issue Backspace after PTY-only dictation.
   await dictate(page, 'echo dictatedXYZ');
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'echo dictatedXYZ');
@@ -314,7 +311,7 @@ try {
   });
   await page.keyboard.type('d');
   before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
-  assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo dictated');
+  assert.equal((await shellHistory(page)).at(-1), 'echo dictated');
   // Backspace cancels an in-flight repair instead of allowing the deleted text back in.
   await page.evaluate(() => window.__repairDelay = 400);
   await dictate(page, 'echo pendingX');
@@ -322,7 +319,7 @@ try {
   await page.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'deleteContentBackward', bubbles: true, cancelable: true })));
   await delay(500);
   before = await shellPrompt(page); await page.keyboard.press('Enter'); await ready(page, before);
-  assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo pending');
+  assert.equal((await shellHistory(page)).at(-1), 'echo pending');
   await page.evaluate(() => window.__repairDelay = 0);
   // Exact flag case can remain the top hit while offering its lowercase alternative.
   await dictate(page, 'ls -L');
@@ -368,8 +365,7 @@ try {
   }
   await dictate(page, 'Cd ~ fas get fas pebble agent');
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'cd ~/git/pebble-agent');
-  // After the first repair, fresh pushed context and verified directory snapshots
-  // reduce the next repair to one foreground fact batch in the real worker.
+  // A known input buffer uses one guarded terminal repair transaction.
   before = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, before);
   await page.evaluate(() => window.__sent = []);
   await dictate(page, 'Cd ~ fas get fas pebble agent');
@@ -404,7 +400,7 @@ try {
   assert.ok((await page.locator('#cwd').textContent()).endsWith('/subfolder'));
   before = await shellPrompt(page); await page.getByRole('button', { name: 'Ctrl R', exact: true }).click();
   await page.keyboard.type('remembered'); await page.keyboard.press('Enter'); await ready(page, before);
-  assert.equal(await page.evaluate(async () => (await (await fetch(new URL('api/context', document.baseURI))).json()).history.at(-1)), 'echo remembered-command');
+  assert.equal((await shellHistory(page)).at(-1), 'echo remembered-command');
   await dictate(page, 'ls dash all');
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'ls --all');
   await page.screenshot({ path: path.join(root, '.test-artifacts/mobile.png') });
@@ -459,7 +455,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS browser: inline loading/top-hit/literal, actual Readline editing, collapsed menu, stale-response cancellation, IME deduplication, shortcuts, Ctrl-R, mobile/keyboard layout, reconnect/offline');
 
-  assert.equal((await fetch(base + '/api/context')).status, 401);
+  assert.equal((await fetch(base + '/api/suggest', { method: 'POST' })).status, 401);
   assert.equal((await fetch(base + '/api/connect', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: 'https://evil.invalid' }, body: '{}' })).status, 403);
   const login = await fetch(base + '/api/connect', { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify({ token: pairingToken }) });
   const cookie = login.headers.get('set-cookie').split(';')[0];

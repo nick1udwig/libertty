@@ -1,10 +1,10 @@
 //! Observe terminal-content revisions independently of the first resized grid.
 use crate::herdr::Target;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-pub async fn revision(target: &Target, pane: &Value, cancel: &CancellationToken) -> Option<u64> {
+pub async fn revision(target: &Target, pane: &str, cancel: &CancellationToken) -> Option<u64> {
     let request = target.request(
         "pane.copy_motion",
         json!({"pane_id":pane,"motion":"line_end","cursor":{"row":0,"col":0}}),
@@ -17,7 +17,7 @@ pub fn redrawn(before: u64, current: u64) -> bool {
 }
 pub async fn wait(
     target: &Target,
-    pane: &Value,
+    pane: &str,
     before: Option<u64>,
     cancel: &CancellationToken,
 ) -> bool {

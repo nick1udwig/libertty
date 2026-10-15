@@ -1,5 +1,6 @@
 use crate::filesystem::{Reader, Writer};
 use crate::herdr::{Lines, Target};
+use crate::protocol::{HerdrFrame, ServerMessage};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -22,7 +23,7 @@ pub struct Size {
 }
 struct Viewer {
     id: u64,
-    send: mpsc::Sender<Value>,
+    send: mpsc::Sender<ServerMessage>,
     size: Option<Size>,
     order: u64,
     slow: tokio_util::sync::CancellationToken,
@@ -30,7 +31,7 @@ struct Viewer {
 enum Command {
     Add(
         u64,
-        mpsc::Sender<Value>,
+        mpsc::Sender<ServerMessage>,
         tokio_util::sync::CancellationToken,
         Option<Size>,
     ),
@@ -64,7 +65,7 @@ impl Hub {
         &self,
         target: Target,
         terminal: String,
-        send: mpsc::Sender<Value>,
+        send: mpsc::Sender<ServerMessage>,
     ) -> Result<Subscription, String> {
         self.subscribe_sized(target, terminal, send, None)
     }
@@ -72,7 +73,7 @@ impl Hub {
         &self,
         target: Target,
         terminal: String,
-        send: mpsc::Sender<Value>,
+        send: mpsc::Sender<ServerMessage>,
         size: Option<Size>,
     ) -> Result<Subscription, String> {
         if size.is_some_and(|size| {
@@ -263,7 +264,7 @@ impl Running {
         }
     }
 }
-fn broadcast(viewers: &mut Vec<Viewer>, message: Value) {
+fn broadcast(viewers: &mut Vec<Viewer>, message: ServerMessage) {
     viewers.retain(|viewer| match viewer.send.try_send(message.clone()) {
         Ok(()) => true,
         Err(mpsc::error::TrySendError::Full(_)) => {
@@ -273,11 +274,16 @@ fn broadcast(viewers: &mut Vec<Viewer>, message: Value) {
         Err(mpsc::error::TrySendError::Closed(_)) => false,
     });
 }
-fn reset(viewers: &mut Vec<Viewer>, frame: &mut Option<Value>) {
+fn reset(viewers: &mut Vec<Viewer>, frame: &mut Option<HerdrFrame>) {
     *frame = None;
     broadcast(
         viewers,
-        json!({"type":"herdr-frame","width":0,"height":0,"full":true,"bytes":""}),
+        ServerMessage::HerdrFrame(HerdrFrame {
+            width: 0,
+            height: 0,
+            full: true,
+            bytes: Arc::from(""),
+        }),
     );
 }
 fn desired(viewers: &[Viewer]) -> Option<Size> {
@@ -302,7 +308,7 @@ async fn run(
 ) {
     let mut viewers = Vec::<Viewer>::new();
     let mut running = None::<Running>;
-    let mut frame = None::<Value>;
+    let mut frame = None::<HerdrFrame>;
     let mut sequence = 0u64;
     let mut retry = tokio::time::Instant::now();
     let mut refresh = false;
@@ -320,9 +326,9 @@ async fn run(
                     Ok(Some(raw)) if raw["type"] != "terminal.closed"=>{
                         if raw["type"] == "terminal.frame" && raw["encoding"] == "ansi" {
                             if let (Some(width),Some(height),Some(bytes)) = (dimension(&raw["width"]), dimension(&raw["height"]),raw["bytes"].as_str()) {
-                                let message=json!({"type":"herdr-frame","width":width,"height":height,"full":raw["full"]==true,"bytes":bytes});
+                                let message = HerdrFrame { width, height, full: raw["full"] == true, bytes: Arc::from(bytes) };
                                 frame=if raw["full"]==true { Some(message.clone()) } else { None };
-                                broadcast(&mut viewers,message);
+                                broadcast(&mut viewers, ServerMessage::HerdrFrame(message));
                                 if !viewers.is_empty() { continue; }
                             } else {
                                 if let Some(stream)=running.take(){stream.close().await;}
@@ -334,7 +340,7 @@ async fn run(
                     _=>{
                         if let Some(stream)=running.take(){stream.close().await;}
                         reset(&mut viewers,&mut frame);
-                        if desired(&viewers).is_some(){broadcast(&mut viewers,json!({"type":"reading-error","message":"Cannot resize the Herdr terminal. Check that Herdr is available and no other terminal controller is attached."}));}
+                        if desired(&viewers).is_some(){broadcast(&mut viewers,ServerMessage::ReadingError { message: "Cannot resize the Herdr terminal. Check that Herdr is available and no other terminal controller is attached.".into() });}
                         retry=tokio::time::Instant::now()+Duration::from_secs(2);
                         continue;
                     }
@@ -345,7 +351,7 @@ async fn run(
                 match Running::open(&target,&terminal,desired(&viewers)).await {
                     Ok(stream)=>{running=Some(stream);refresh=false;},
                     Err(_)=>{
-                        if desired(&viewers).is_some(){broadcast(&mut viewers,json!({"type":"reading-error","message":"Cannot resize the Herdr terminal. Check that Herdr is available and no other terminal controller is attached."}));}
+                        if desired(&viewers).is_some(){broadcast(&mut viewers,ServerMessage::ReadingError { message: "Cannot resize the Herdr terminal. Check that Herdr is available and no other terminal controller is attached.".into() });}
                         retry=tokio::time::Instant::now()+Duration::from_secs(2);
                     }
                 }
@@ -360,16 +366,14 @@ async fn run(
                 // A new controller needs a complete baseline even when it joins
                 // an already-sized stream whose last message was a delta.
                 refresh |= size.is_some_and(|size| {
-                    frame.as_ref().is_none_or(|frame| {
-                        frame["width"] != size.cols || frame["height"] != size.rows
-                    })
+                    frame
+                        .as_ref()
+                        .is_none_or(|frame| frame.width != size.cols || frame.height != size.rows)
                 });
                 if let Some(frame) = &frame
-                    && size.is_none_or(|size| {
-                        frame["width"] == size.cols && frame["height"] == size.rows
-                    })
+                    && size.is_none_or(|size| frame.width == size.cols && frame.height == size.rows)
                 {
-                    let _ = send.try_send(frame.clone());
+                    let _ = send.try_send(ServerMessage::HerdrFrame(frame.clone()));
                 }
                 sequence += 1;
                 viewers.push(Viewer {
@@ -385,9 +389,9 @@ async fn run(
                 // Joining an incremental stream can retain the owner's geometry
                 // while still requiring a full baseline for this viewer.
                 refresh |= size.is_some_and(|size| {
-                    frame.as_ref().is_none_or(|frame| {
-                        frame["width"] != size.cols || frame["height"] != size.rows
-                    })
+                    frame
+                        .as_ref()
+                        .is_none_or(|frame| frame.width != size.cols || frame.height != size.rows)
                 });
                 if let Some(viewer) = viewers.iter_mut().find(|v| v.id == id)
                     && viewer.size != size
