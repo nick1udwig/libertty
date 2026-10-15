@@ -18,6 +18,8 @@ Native help, script and completion adapters retain probe-pool capacity and cance
 `src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
 Cancellation, attachment, prompt and revision guards protect concurrent edits.
 `crates/server/src/input_coordinator.rs` shares repair deadlines, cancellation and microphone callbacks across native terminals and Herdr.
+Session replay credit, history snapshots and captured connection requests live in separate state types under the session lock.
+Local and SSH PTYs expose the same process interface and event stream through `local_pty.rs` and `ssh_pty.rs`.
 The adapters retain attachment, shell and screen checks when applying text.
 Rust terminal replies use the `ServerMessage` enum and are checked against the shared wire schemas.
 HTTP requests and normalized Herdr snapshots use typed structures, while unknown saved notification-device fields are preserved.

@@ -25,6 +25,7 @@ pub mod host;
 pub mod http;
 pub mod input_controller;
 mod input_coordinator;
+mod local_pty;
 pub mod markers;
 pub mod notifications;
 pub mod pairing;

@@ -132,13 +132,6 @@ impl ServerMessage {
     pub fn value(&self) -> Value {
         serde_json::to_value(self).expect("server message")
     }
-    pub fn captured(kind: &str, id: String, command: String) -> Self {
-        if kind == "herdr" {
-            Self::HerdrCommand { id, command }
-        } else {
-            Self::SshCommand { id, command }
-        }
-    }
 }
 #[derive(Clone, Serialize)]
 pub struct RepairReply {

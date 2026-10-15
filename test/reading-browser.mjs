@@ -197,6 +197,7 @@ try {
   standalone.on('pageerror', error => errors.push(String(error)));
   await standalone.goto(base + '/terminal.html');
   await standalone.waitForFunction(() => document.querySelector('#shell-status')?.textContent === 'At prompt');
+  await standalone.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   await standalone.locator('#terminal textarea').focus();
   await standalone.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'look at note.txt', bubbles: true, cancelable: true })));
   await standalone.locator('.reading-choice').waitFor();
