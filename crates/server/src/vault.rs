@@ -15,6 +15,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
+use termai_engine::{truncate_utf16, utf16_len};
 use zeroize::Zeroizing;
 
 fn error(message: &str) -> io::Error {
@@ -84,7 +85,7 @@ pub struct InspectedKey {
 }
 pub fn inspect_private_key(raw: &str, passphrase: &str) -> io::Result<InspectedKey> {
     password(passphrase)?;
-    if raw.is_empty() || raw.encode_utf16().count() > 20000 {
+    if raw.is_empty() || utf16_len(raw) > 20000 {
         return Err(error("Invalid private key."));
     }
     if !raw
@@ -213,10 +214,10 @@ impl Vault {
         replace_id: Option<&str>,
     ) -> io::Result<KeyInfo> {
         password(passphrase)?;
-        if name.trim().is_empty() || name.encode_utf16().count() > 100 {
+        if name.trim().is_empty() || utf16_len(name) > 100 {
             return Err(error("Name the SSH key (up to 100 characters)."));
         }
-        if private_key.is_some_and(|raw| raw.encode_utf16().count() > 20000) {
+        if private_key.is_some_and(|raw| utf16_len(raw) > 20000) {
             return Err(error("Invalid private key."));
         }
         let generated = if private_key.is_none_or(str::is_empty) {
@@ -306,13 +307,7 @@ impl Vault {
             }
             let info = KeyInfo {
                 id: random_uuid(),
-                name: name
-                    .chars()
-                    .scan(0, |units, c| {
-                        *units += c.len_utf16();
-                        if *units <= 100 { Some(c) } else { None }
-                    })
-                    .collect(),
+                name: truncate_utf16(name, 100).to_owned(),
                 public_key: public_key.into(),
                 fingerprint: fingerprint.into(),
                 reference: Some(reference),
@@ -375,7 +370,7 @@ impl Vault {
         })
     }
     pub fn rename(&self, id: &str, name: &str) -> io::Result<()> {
-        if name.trim().is_empty() || name.encode_utf16().count() > 100 {
+        if name.trim().is_empty() || utf16_len(name) > 100 {
             return Err(error("Enter a key name."));
         }
         self.change(|data| {

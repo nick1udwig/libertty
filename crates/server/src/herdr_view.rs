@@ -7,6 +7,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
+use termai_engine::utf16_len;
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -355,7 +356,7 @@ impl View {
         guard: Option<(u64, &str)>,
         replacement: Option<Replacement>,
     ) -> Result<(), String> {
-        if text.encode_utf16().count() > 16000 {
+        if utf16_len(text) > 16000 {
             return Err("Terminal input exceeded its limit.".into());
         }
         let permit = self
@@ -429,7 +430,7 @@ impl View {
         guard: Option<(u64, &str)>,
         replacement: Option<&Replacement>,
     ) -> Result<(), String> {
-        if text.encode_utf16().count() > 16000 {
+        if utf16_len(text) > 16000 {
             return Err("Terminal input exceeded its limit.".into());
         }
         let work = async {
@@ -669,7 +670,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Input { data: text } => {
-                if text.encode_utf16().count() > 16000 {
+                if utf16_len(&text) > 16000 {
                     return Err("Invalid input".into());
                 }
                 {
@@ -681,7 +682,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Paste { text } => {
-                if text.is_empty() || text.encode_utf16().count() > 16000 || controls(&text) {
+                if text.is_empty() || utf16_len(&text) > 16000 || controls(&text) {
                     return Err("Invalid paste".into());
                 }
                 self.inner.lock().unwrap().revision += 1;
@@ -694,7 +695,7 @@ impl View {
                 prompt,
                 revision,
             } => {
-                if text.is_empty() || text.encode_utf16().count() > 2000 || controls(&text) {
+                if text.is_empty() || utf16_len(&text) > 2000 || controls(&text) {
                     return Err("Invalid replacement".into());
                 }
                 let replacement = {
@@ -727,10 +728,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Command { command, id, .. } => {
-                if command.trim().is_empty()
-                    || command.encode_utf16().count() > 16000
-                    || controls(&command)
-                {
+                if command.trim().is_empty() || utf16_len(&command) > 16000 || controls(&command) {
                     return Err("Invalid command".into());
                 }
                 let replacement = {
@@ -1049,9 +1047,9 @@ impl crate::input_coordinator::RecordingTarget for View {
             prompt,
             revision: new_revision,
             source: Some(DictationSource::Dictation),
-            repairing: Some(shell && text.encode_utf16().count() <= 2000),
+            repairing: Some(shell && utf16_len(&text) <= 2000),
         });
-        if shell && text.encode_utf16().count() <= 2000 {
+        if shell && utf16_len(&text) <= 2000 {
             let intent = crate::alternatives::Intent::detect(&text, &phrases);
             self.start_repair(
                 crate::storage::random_hex(16),

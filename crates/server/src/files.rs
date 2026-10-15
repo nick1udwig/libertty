@@ -9,6 +9,7 @@ use std::{
     path::Path,
     time::{Duration, Instant},
 };
+use termai_engine::utf16_len;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const MAX_UPLOAD: u64 = 1024 * 1024 * 1024;
@@ -63,7 +64,7 @@ impl From<std::io::Error> for Error {
 }
 pub type Result<T> = std::result::Result<T, Error>;
 pub fn file_path(cwd: &str, home: &str, input: &str) -> Result<String> {
-    if input.is_empty() || input.encode_utf16().count() > 4096 || input.contains('\0') {
+    if input.is_empty() || utf16_len(input) > 4096 || input.contains('\0') {
         return Err(Error::new("Enter a file path.", 400));
     }
     let expanded = if input == "~" {

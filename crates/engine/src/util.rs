@@ -144,9 +144,23 @@ macro_rules! replace {
     };
 }
 
+/// Count JavaScript UTF-16 code units rather than bytes or Unicode scalars.
+#[inline]
 pub fn utf16_len(text: &str) -> usize {
     text.encode_utf16().count()
 }
+/// Return the longest scalar-aligned prefix within a JavaScript UTF-16 length limit.
+pub fn truncate_utf16(text: &str, limit: usize) -> &str {
+    let mut units = 0;
+    for (index, character) in text.char_indices() {
+        units += character.len_utf16();
+        if units > limit {
+            return &text[..index];
+        }
+    }
+    text
+}
+
 pub fn quoted_words(input: &str) -> Vec<&str> {
     let mut words = Vec::new();
     let mut at = 0;
@@ -216,5 +230,28 @@ mod regex_tests {
         assert!(first.is_match("écaté"));
         assert!(!first.is_match("scatter"));
         assert!(crate::test!(r"^[\x09-\x0d \u{feff}]$", "\u{feff}"));
+    }
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::{truncate_utf16, utf16_len};
+    #[test]
+    fn utf16_limits_preserve_scalars_and_count_combining_characters_separately() {
+        let text = "a😀e\u{301}";
+        assert_eq!(utf16_len(text), 5);
+        for (limit, expected) in [
+            (0, ""),
+            (1, "a"),
+            (2, "a"),
+            (3, "a😀"),
+            (4, "a😀e"),
+            (5, text),
+            (usize::MAX, text),
+        ] {
+            assert_eq!(truncate_utf16(text, limit), expected);
+        }
+        assert_eq!(truncate_utf16("😀x", 1), "");
+        assert_eq!(truncate_utf16("", 0), "");
     }
 }

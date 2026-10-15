@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, LazyLock},
     time::Duration,
 };
+use termai_engine::utf16_len;
 use termai_engine::{repair::shell_quote, validation::Environment};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite},
@@ -42,7 +43,7 @@ pub fn session(value: Option<&Value>) -> Result<String, String> {
 pub fn name(value: &Value) -> Result<String, String> {
     let value = value.as_str().ok_or("Enter a name of 1–100 characters.")?;
     if value.trim().is_empty()
-        || value.encode_utf16().count() > 100
+        || utf16_len(value) > 100
         || value.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
     {
         return Err("Enter a name of 1–100 characters.".into());
@@ -489,9 +490,7 @@ impl Target {
                 }
                 let space = space.ok_or("Choose an existing space.")?;
                 if cwd.as_ref().is_some_and(|s| {
-                    !s.starts_with('/')
-                        || s.encode_utf16().count() > 4096
-                        || crate::protocol::controls(s)
+                    !s.starts_with('/') || utf16_len(s) > 4096 || crate::protocol::controls(s)
                 }) {
                     return Err("Enter an absolute working directory.".into());
                 }

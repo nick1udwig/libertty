@@ -17,6 +17,7 @@ use std::{
     },
     time::{Duration, Instant},
 };
+use termai_engine::utf16_len;
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 use web_push::{
@@ -54,7 +55,7 @@ fn decode(value: &Value) -> Option<Vec<u8>> {
 pub fn subscription(value: &Value) -> Result<Value, String> {
     let endpoint = value["endpoint"]
         .as_str()
-        .filter(|s| s.encode_utf16().count() <= 4096)
+        .filter(|s| utf16_len(s) <= 4096)
         .ok_or("Invalid push subscription.")?;
     let url = url::Url::parse(endpoint).map_err(|e| e.to_string())?;
     let host = url.host_str().unwrap_or("");
@@ -523,7 +524,7 @@ impl Notifications {
         let device = Self::device(&mut state, owner, id)?;
         if !event["terminalId"]
             .as_str()
-            .is_some_and(|s| s.encode_utf16().count() <= 256)
+            .is_some_and(|s| utf16_len(s) <= 256)
             || !["done", "request"].iter().any(|s| event["kind"] == *s)
             || !event["sequence"]
                 .as_f64()

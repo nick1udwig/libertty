@@ -4,6 +4,7 @@ use crate::{
 };
 use serde::Serialize;
 use std::collections::VecDeque;
+use termai_engine::{truncate_utf16, utf16_len};
 use tokio::io::AsyncReadExt;
 pub const MAX_READING_BYTES: usize = 20 * 1024 * 1024;
 pub fn mime(file: &str, data: &[u8]) -> &'static str {
@@ -65,7 +66,7 @@ pub struct File {
 }
 pub async fn read(cwd: &str, home: &str, input: &str) -> Result<File> {
     if input.is_empty()
-        || input.encode_utf16().count() > 4096
+        || utf16_len(input) > 4096
         || input.chars().any(|c| c < '\x20' || c == '\x7f')
     {
         return Err(Error::new("Enter a file path.", 400));
@@ -165,14 +166,7 @@ impl Captures {
             .chars()
             .map(|c| if c < '\x20' || c == '\x7f' { ' ' } else { c })
             .collect::<String>();
-        let name = stripped
-            .trim()
-            .chars()
-            .scan(0, |n, c| {
-                *n += c.len_utf16();
-                if *n <= 180 { Some(c) } else { None }
-            })
-            .collect::<String>();
+        let name = truncate_utf16(stripped.trim(), 180).to_owned();
         let capture = Capture {
             id: storage::random_hex(16),
             name: if name.is_empty() {

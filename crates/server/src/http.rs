@@ -1,3 +1,4 @@
+use termai_engine::utf16_len;
 mod routes;
 mod socket;
 use crate::{
@@ -720,7 +721,7 @@ async fn typed_body<T: serde::de::DeserializeOwned>(
         bytes.extend_from_slice(&chunk);
     }
     let content = String::from_utf8_lossy(&bytes);
-    if content.encode_utf16().count() > limit {
+    if utf16_len(&content) > limit {
         return Err(fail("Request too large"));
     }
     let content = if content.is_empty() { "{}" } else { &content };

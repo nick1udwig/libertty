@@ -51,6 +51,10 @@ fn parsed_tokens(input: &str) -> SharedList<Token> {
         })
         .collect()
 }
+/// Quote one literal shell argument, including tildes and shell substitutions.
+pub fn shell_quote_literal(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
 pub fn shell_quote(value: &str) -> String {
     if let Some(rest) = value.strip_prefix("~/") {
         return format!("~/{}", shell_quote(rest));
@@ -58,7 +62,7 @@ pub fn shell_quote(value: &str) -> String {
     if test!(r###"^[a-zA-Z0-9_@%+=:,./~-]+$"###, value) {
         value.into()
     } else {
-        format!("'{}'", value.replace('\'', "'\\''"))
+        shell_quote_literal(value)
     }
 }
 pub fn command_names(input: &str, catalog: &Catalog) -> Vec<String> {
@@ -483,7 +487,7 @@ pub(crate) fn directory_scores<'a>(
         if spelling
             && *value == 0.0
             && folded.len() >= 3
-            && folded.len() == name.lower.encode_utf16().count()
+            && folded.len() == utf16_len(&name.lower)
             && folded
                 .iter()
                 .copied()
@@ -1570,4 +1574,17 @@ fn repair_one(
         unique.push(literal);
     }
     unique
+}
+
+#[cfg(test)]
+mod quoting_tests {
+    use super::{shell_quote, shell_quote_literal};
+    #[test]
+    fn literal_arguments_remain_literal_while_command_paths_keep_home_expansion() {
+        assert_eq!(shell_quote_literal(""), "''");
+        assert_eq!(shell_quote_literal("a'b"), "'a'\\''b'");
+        assert_eq!(shell_quote_literal("~/$(whoami)"), "'~/$(whoami)'");
+        assert_eq!(shell_quote("~/a b"), "~/'a b'");
+        assert_eq!(shell_quote("plain"), "plain");
+    }
 }

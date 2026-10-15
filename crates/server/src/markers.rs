@@ -4,6 +4,7 @@ use base64::{
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig, general_purpose::STANDARD},
 };
 use serde::Serialize;
+use termai_engine::utf16_len;
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -43,9 +44,6 @@ pub enum Event {
         file: String,
         name: String,
     },
-}
-fn length(value: &str) -> usize {
-    value.encode_utf16().count()
 }
 /// Node's base64 decoder accepts wrapping, URL-safe letters and missing padding.
 fn decode(value: &str) -> String {
@@ -104,7 +102,7 @@ impl Markers {
             output.push_str(&self.pending[..index]);
             self.pending = self.pending[index..].into();
             let Some(end) = self.pending.find('\x07') else {
-                if length(&self.pending) > 32768 {
+                if utf16_len(&self.pending) > 32768 {
                     output.push_str(&self.pending);
                     self.pending.clear();
                 }
@@ -128,7 +126,7 @@ fn parse(record: &[&str]) -> Option<Event> {
     let kind = *record.first()?;
     if ["transfer-upload", "transfer-download"].contains(&kind) && record.len() == 2 {
         let path = decode(record[1]);
-        if path.starts_with('/') && length(&path) <= 4096 && !path.contains('\0') {
+        if path.starts_with('/') && utf16_len(&path) <= 4096 && !path.contains('\0') {
             return Some(if kind == "transfer-upload" {
                 Event::TransferUpload { path }
             } else {
@@ -154,7 +152,7 @@ fn parse(record: &[&str]) -> Option<Event> {
         }
     } else if kind == "reading-file" && record.len() == 2 {
         let path = decode(record[1]);
-        if path.starts_with('/') && length(&path) <= 4096 && !control(&path) {
+        if path.starts_with('/') && utf16_len(&path) <= 4096 && !control(&path) {
             return Some(Event::ReadingFile { path });
         }
     } else if kind == "reading-capture" && record.len() == 4 && capture_name(record[1], "read.") {
@@ -166,7 +164,7 @@ fn parse(record: &[&str]) -> Option<Event> {
             && let Ok(exit_code) = code.parse::<u8>()
         {
             let name = decode(record[2]);
-            if length(&name) <= 4000 {
+            if utf16_len(&name) <= 4000 {
                 return Some(Event::ReadingCapture {
                     file: record[1].into(),
                     name,
@@ -176,7 +174,7 @@ fn parse(record: &[&str]) -> Option<Event> {
         }
     } else if ["ssh", "herdr"].contains(&kind) && record.len() == 2 {
         let command = decode(record[1]);
-        if length(&command) <= 4000 && !control(&command) {
+        if utf16_len(&command) <= 4000 && !control(&command) {
             return Some(if kind == "herdr" {
                 Event::Herdr { command }
             } else {
@@ -186,10 +184,10 @@ fn parse(record: &[&str]) -> Option<Event> {
     } else if kind == "input-line" && record.len() == 3 {
         let text = decode(record[2]);
         let prefix = decode(record[1]);
-        if length(&text) <= 16000 && text.starts_with(&prefix) && !control(&text) {
+        if utf16_len(&text) <= 16000 && text.starts_with(&prefix) && !control(&text) {
             return Some(Event::InputLine {
                 text,
-                cursor: length(&prefix),
+                cursor: utf16_len(&prefix),
             });
         }
     } else if kind == "busy" {

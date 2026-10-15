@@ -2,6 +2,7 @@
 use crate::alternatives::Intent;
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use serde_json::Value;
+use termai_engine::utf16_len;
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -191,7 +192,7 @@ fn bounded<'de, D: Deserializer<'de>, const N: usize, const CLEAN: bool>(
     d: D,
 ) -> Result<String, D::Error> {
     let value = String::deserialize(d)?;
-    if value.encode_utf16().count() > N || (CLEAN && controls(&value)) {
+    if utf16_len(&value) > N || (CLEAN && controls(&value)) {
         return Err(D::Error::custom(
             "Text exceeds its limit or contains control characters.",
         ));

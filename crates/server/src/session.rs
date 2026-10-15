@@ -1,3 +1,4 @@
+use termai_engine::utf16_len;
 mod handoffs;
 #[path = "session/history.rs"]
 mod history_cache;
@@ -707,7 +708,7 @@ impl Session {
             || inner.state.prompt != prompt
             || inner.state.input_revision != revision
             || text.is_empty()
-            || text.encode_utf16().count() > 16000
+            || utf16_len(text) > 16000
             || text
                 .chars()
                 .any(|c| c < '\x20' || ('\x7f'..='\u{9f}').contains(&c))
@@ -896,10 +897,10 @@ impl Session {
             ClientMessage::Replace {
                 text, id, revision, ..
             } => {
-                let accepted = id.encode_utf16().count() <= 100
+                let accepted = utf16_len(&id) <= 100
                     && same
                     && revision == inner.state.input_revision
-                    && text.encode_utf16().count() <= 4000
+                    && utf16_len(&text) <= 4000
                     && !control(&text);
                 if accepted {
                     inner.state.input_revision += 1;
@@ -926,7 +927,7 @@ impl Session {
                     }
                     let accepted = same
                         && !command.is_empty()
-                        && command.encode_utf16().count() <= 4000
+                        && utf16_len(&command) <= 4000
                         && !control(&command);
                     let result = ServerMessage::Result { id: id.clone(), accepted, message: (!accepted).then(|| "The shell is not at the same prompt. Review the command and try again.".into()) };
                     inner.remember_command(&id, result.clone());
@@ -1078,7 +1079,7 @@ impl Session {
             || inner.state.prompt != prompt
             || inner.state.input_revision != revision
             || text.is_empty()
-            || text.encode_utf16().count() > 16000
+            || utf16_len(text) > 16000
             || text
                 .chars()
                 .any(|c| c < '\x20' || ('\x7f'..='\u{9f}').contains(&c))
@@ -1097,7 +1098,7 @@ impl Session {
             text: (text).to_string(),
             replace: false,
             source: Some(DictationSource::Dictation),
-            repairing: Some(target == "shell" && text.encode_utf16().count() <= 2000),
+            repairing: Some(target == "shell" && utf16_len(text) <= 2000),
             prompt,
             revision: inner.state.input_revision,
         });
@@ -1431,7 +1432,7 @@ impl crate::input_coordinator::RecordingTarget for Session {
         if !session.paste_dictation(&text, prompt, revision, &guard.target, attachment, serial) {
             return Err(Self::CHANGED.into());
         }
-        if guard.target == "shell" && text.encode_utf16().count() <= 2000 {
+        if guard.target == "shell" && utf16_len(&text) <= 2000 {
             tokio::spawn(async move {
                 let original = if empty {
                     Some(text)

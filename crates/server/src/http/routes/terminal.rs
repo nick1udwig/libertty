@@ -1,4 +1,5 @@
 use super::*;
+use termai_engine::truncate_utf16;
 
 pub(super) async fn healthz(
     app: &Arc<App>,
@@ -127,17 +128,7 @@ pub(super) async fn api_sessions_post(
     let name = if input.name.as_deref().unwrap_or("").trim().is_empty() {
         "Terminal".into()
     } else {
-        input
-            .name
-            .as_deref()
-            .unwrap_or("")
-            .trim()
-            .chars()
-            .scan(0, |n, c| {
-                *n += c.len_utf16();
-                if *n <= 100 { Some(c) } else { None }
-            })
-            .collect::<String>()
+        truncate_utf16(input.name.as_deref().unwrap_or("").trim(), 100).to_owned()
     };
     let session = if let Some(ssh) = &input.ssh {
         match app

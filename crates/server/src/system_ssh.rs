@@ -10,6 +10,7 @@ use std::{
     sync::{Arc, LazyLock},
     time::Duration,
 };
+use termai_engine::utf16_len;
 use termai_engine::{path, validation::Environment};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
@@ -59,7 +60,7 @@ pub fn address(value: &Value) -> Result<Address, String> {
 pub fn address_parts(host: &str, port: f64, username: &str) -> Result<Address, String> {
     let host = host.trim();
     if host.is_empty()
-        || host.encode_utf16().count() > 253
+        || utf16_len(host) > 253
         || !host
             .bytes()
             .all(|c| c.is_ascii_alphanumeric() || b":._%-".contains(&c))
@@ -71,7 +72,7 @@ pub fn address_parts(host: &str, port: f64, username: &str) -> Result<Address, S
         .ok_or("SSH port must be between 1 and 65535.")?;
     let username = username.trim();
     if username.is_empty()
-        || username.encode_utf16().count() > 128
+        || utf16_len(username) > 128
         || username.chars().any(|c| c <= '\u{20}' || c == '\u{7f}')
     {
         return Err("Enter an SSH username.".into());

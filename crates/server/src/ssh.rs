@@ -22,6 +22,7 @@ use std::{
     },
     time::Duration,
 };
+use termai_engine::utf16_len;
 use termai_engine::{path, repair::shell_quote, validation::Environment};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
@@ -714,7 +715,7 @@ impl SSHHost {
             reading::{File, MAX_READING_BYTES, mime},
         };
         if input.is_empty()
-            || input.encode_utf16().count() > 4096
+            || utf16_len(input) > 4096
             || input.chars().any(|c| c < '\x20' || c == '\x7f')
         {
             return Err(Error::new("Enter a file path.", 400));

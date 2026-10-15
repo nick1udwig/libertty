@@ -1,4 +1,5 @@
 //! A bounded shell structure that preserves opaque expressions instead of evaluating them.
+use crate::utf16_len;
 use crate::{
     command_policy::{flags_for, option_arity},
     types::CommandMetadata,
@@ -29,7 +30,7 @@ pub struct CommandList<'a> {
 }
 
 pub fn command_list(input: &str) -> Option<CommandList<'_>> {
-    if input.encode_utf16().count() > 2000 || input.contains(['\n', '\r']) {
+    if utf16_len(input) > 2000 || input.contains(['\n', '\r']) {
         return None;
     }
     let chars: Vec<_> = input.char_indices().collect();

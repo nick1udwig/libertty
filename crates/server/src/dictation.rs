@@ -10,6 +10,8 @@ use std::{
     },
     time::Duration,
 };
+use termai_engine::repair::shell_quote_literal;
+use termai_engine::utf16_len;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
     connect_async_with_config,
@@ -106,7 +108,7 @@ async fn configuration(env: &BTreeMap<String, String>) -> Result<(url::Url, Stri
         .await
         .map_err(|e| e.to_string())?;
     let token = raw.trim();
-    if token.encode_utf16().count() < 32 || token.contains(['\r', '\n']) {
+    if utf16_len(token) < 32 || token.contains(['\r', '\n']) {
         return Err("Invalid Voxtype token.".into());
     }
     let url = url::Url::parse(
@@ -223,9 +225,6 @@ pub async fn detect(env: &BTreeMap<String, String>) -> Value {
         json!({"installed":true,"available":false,"reason":"Voxtype is installed but its dictation API is unavailable or needs updating."})
     }
 }
-fn quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
 pub async fn install_command(env: &BTreeMap<String, String>) -> Result<String, String> {
     let local = env
         .get("TERMAI_VOXTYPE_SOURCE")
@@ -239,7 +238,7 @@ pub async fn install_command(env: &BTreeMap<String, String>) -> Result<String, S
         });
     let script = format!("{local}/scripts/install");
     if tokio::fs::metadata(&script).await.is_ok() {
-        return Ok(format!("bash {}", quote(&script)));
+        return Ok(format!("bash {}", shell_quote_literal(&script)));
     }
     let address=env.get("TERMAI_VOXTYPE_INSTALL_URL").filter(|v|!v.is_empty()).ok_or("Set TERMAI_VOXTYPE_INSTALL_URL to the published voxtype-mobile install script, or TERMAI_VOXTYPE_SOURCE to its checkout.")?;
     let url = url::Url::parse(address).map_err(|e| e.to_string())?;
@@ -265,8 +264,8 @@ pub async fn install_command(env: &BTreeMap<String, String>) -> Result<String, S
         .ok_or("Set TERMAI_VOXTYPE_REPO to the repository used by the downloaded installer.")?;
     Ok(format!(
         "(termai_voxtype_installer=$(mktemp) && trap 'rm -f \"$termai_voxtype_installer\"' EXIT && curl -fsSL {} -o \"$termai_voxtype_installer\" && VOXTYPE_MOBILE_REPO={} bash \"$termai_voxtype_installer\")",
-        quote(url.as_str()),
-        quote(&repository)
+        shell_quote_literal(url.as_str()),
+        shell_quote_literal(&repository)
     ))
 }
 enum Control {
@@ -432,7 +431,7 @@ async fn run(
                         ready=true;deadline=tokio::time::Instant::now()+Duration::from_secs(480);
                         status("ready",None);
                     } else if event["type"]=="final" {
-                        let text=event["text"].as_str().filter(|s|s.encode_utf16().count()<=16000).filter(|_|finishing).ok_or("Invalid Voxtype result.")?;
+                        let text=event["text"].as_str().filter(|s|utf16_len(s)<=16000).filter(|_|finishing).ok_or("Invalid Voxtype result.")?;
                         let text=breaks.replace_all(text," ").into_owned();
                         if text.chars().any(|c|c<'\x20'||('\x7f'..='\u{9f}').contains(&c)){return Err("Voxtype returned terminal control characters.".into())}
                         result(text).await?;

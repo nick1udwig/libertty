@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use termai_engine::utf16_len;
 use termai_engine::{
     shell_structure::{Separator, command_list},
     types::Candidate,
@@ -97,8 +98,8 @@ pub async fn prepare<'a>(
         Intent::Shell => "",
         Intent::ReadingFile { phrase, .. } | Intent::ReadingPipeline { phrase, .. } => phrase,
     };
-    if text.encode_utf16().count() > 2000
-        || query.encode_utf16().count() > 2000
+    if utf16_len(text) > 2000
+        || utf16_len(&query) > 2000
         || text.chars().chain(query.chars()).any(char::is_control)
         || phrase.len() > 50
         || phrase.chars().any(char::is_control)
