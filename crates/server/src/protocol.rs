@@ -45,6 +45,7 @@ pub struct HerdrFrame {
     rename_all_fields = "camelCase"
 )]
 pub enum ServerMessage {
+    Pong,
     RepairResult(RepairReply),
     InputLine {
         id: String,
@@ -171,6 +172,7 @@ impl RepairReply {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ViewerMessage {
+    Ping,
     NotificationPresence { device: String, focused: bool },
     NotificationAck { device: String, event: Value },
 }
@@ -278,6 +280,7 @@ pub fn dictation_target(value: &Value) -> Option<&str> {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ClientMessage {
+    Ping,
     Repair(Repair),
     RepairCancel {
         #[serde(deserialize_with = "id")]

@@ -41,6 +41,7 @@ export class HerdrView {
   private transport!: ReconnectingSocket;
   private get ws() { return this.transport?.socket; }
   private offeredWire?: string[];
+  private supportsHeartbeat = false;
   private recovering?: Promise<void>;
   private recoveryRetry?: ReturnType<typeof setTimeout>;
   private disposed = false;
@@ -141,13 +142,15 @@ export class HerdrView {
     this.transport = new ReconnectingSocket({
       available: () => !this.disposed && !this.recovering && !document.hidden && navigator.onLine,
       protocols: () => wireProtocols(this.offeredWire),
+      heartbeat: () => this.supportsHeartbeat,
       prepare: async signal => {
-        const { ticket, wire } = await this.host.api<{ ticket: string; wire?: string[] }>('api/herdr/ticket', {}, signal);
-        signal.throwIfAborted(); this.offeredWire = wire;
+        const { ticket, wire, heartbeat } = await this.host.api<{ ticket: string; wire?: string[]; heartbeat?: boolean }>('api/herdr/ticket', {}, signal);
+        signal.throwIfAborted(); this.offeredWire = wire; this.supportsHeartbeat = heartbeat === true;
         const url = this.endpoint('herdr/ws');
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
         return url;
       },
+      stalled: seconds => { this.status.textContent = `Connection stalled · last contact ${seconds}s ago`; },
       open: () => { this.quietSnapshot = true; this.updatePresence(); },
       message: event => {
         try { this.receive(typeof event.data === 'string' ? JSON.parse(event.data) : event.data); }
@@ -160,6 +163,7 @@ export class HerdrView {
       },
       error: error => { this.connectionError(error); return true; },
     });
+    this.element.addEventListener('pointerdown', () => this.transport.activity(), { passive: true });
     this.render(); void this.connect();
   }
   setVisible(visible: boolean) {

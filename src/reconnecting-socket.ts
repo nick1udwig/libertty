@@ -3,10 +3,12 @@ interface ReconnectingSocketOptions {
   prepare(signal: AbortSignal, token?: string): Promise<URL>;
   available(): boolean;
   protocols?(): string[];
+  heartbeat?(): boolean;
   open(): void;
   message(event: MessageEvent): void;
   close(event?: CloseEvent): boolean;
   error(error: unknown, token?: string): boolean;
+  stalled?(seconds: number): void;
 }
 
 /** Own one connection attempt, including authorization and the initial state. */
@@ -17,6 +19,11 @@ export class ReconnectingSocket {
   private retry?: ReturnType<typeof setTimeout>;
   private delay = 1000;
   private stopped = false;
+  private retained?: WebSocket;
+  private heartbeat?: ReturnType<typeof setTimeout>;
+  private lastContact = 0;
+  private pingAt?: number;
+  private stalled = false;
   private options: ReconnectingSocketOptions;
 
   constructor(options: ReconnectingSocketOptions) { this.options = options; }
@@ -36,16 +43,44 @@ export class ReconnectingSocket {
   suspend() {
     clearTimeout(this.retry);
     this.release();
+    this.retained?.close(); this.retained = undefined;
+    clearTimeout(this.heartbeat);
+    this.stalled = false;
   }
+
+  /** User activity bypasses retry backoff without competing with a handshake. */
+  activity() {
+    if (!this.attempt && (this.stalled || this.socket?.readyState !== WebSocket.OPEN)) void this.resume(this.stalled);
+  }
+
+  get healthy() { return !this.stalled && this.socket?.readyState === WebSocket.OPEN; }
 
   ready() {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
     clearTimeout(this.deadline);
     this.attempt = undefined;
     this.delay = 1000;
+    this.lastContact = Date.now(); this.pingAt = undefined; this.stalled = false;
+    clearTimeout(this.heartbeat);
+    if (this.options.heartbeat?.() !== false) this.heartbeat = setTimeout(() => this.checkHeartbeat(), 2000);
   }
 
-  private release(event?: CloseEvent) {
+  private checkHeartbeat() {
+    if (this.stopped) return;
+    if (this.pingAt !== undefined && Date.now() - this.lastContact >= 4000) {
+      if (!this.stalled) {
+        this.stalled = true;
+        void this.begin(undefined, true);
+      }
+      this.options.stalled?.(Math.floor((Date.now() - this.lastContact) / 1000));
+    } else if (this.socket?.readyState === WebSocket.OPEN && this.pingAt === undefined && Date.now() - this.lastContact >= 2000) {
+      this.pingAt = Date.now();
+      this.socket.send(JSON.stringify({ type: 'ping' }));
+    }
+    this.heartbeat = setTimeout(() => this.checkHeartbeat(), 1000);
+  }
+
+  private release(event?: CloseEvent, retain = false) {
     const socket = this.socket;
     this.socket = undefined;
     const attempt = this.attempt;
@@ -53,13 +88,20 @@ export class ReconnectingSocket {
     clearTimeout(this.deadline);
     attempt?.abort();
     // Detach before closing: a delayed close must not affect its replacement.
-    socket?.close();
+    if (retain && socket?.readyState === WebSocket.OPEN) {
+      this.retained?.close(); this.retained = socket;
+    } else socket?.close();
     if (socket && !this.options.close(event)) this.stopped = true;
   }
 
   private schedule() {
     clearTimeout(this.retry);
-    if (this.stopped || !this.options.available()) return;
+    if (this.stopped) {
+      this.retained?.close(); this.retained = undefined;
+      clearTimeout(this.heartbeat);
+      return;
+    }
+    if (!this.options.available()) return;
     this.retry = setTimeout(() => void this.begin(), this.delay);
     this.delay = Math.min(10000, this.delay * 1.5);
   }
@@ -68,7 +110,7 @@ export class ReconnectingSocket {
     if (!this.options.available()) return;
     if (!replace && (this.attempt || this.socket?.readyState === WebSocket.OPEN)) return;
     clearTimeout(this.retry);
-    this.release();
+    this.release(undefined, replace);
     if (this.stopped) return;
     const attempt = new AbortController();
     this.attempt = attempt;
@@ -87,13 +129,23 @@ export class ReconnectingSocket {
       socket.binaryType = 'arraybuffer';
       let decoded = Promise.resolve();
       this.socket = socket;
-      socket.onopen = () => { if (this.socket === socket) this.options.open(); };
+      socket.onopen = () => {
+        if (this.socket !== socket) return;
+        this.retained?.close(); this.retained = undefined;
+        this.options.open();
+      };
       socket.onmessage = event => {
         if (this.socket !== socket) return;
-        if (!socket.protocol?.startsWith('termai.')) { this.options.message(event); return; }
+        this.lastContact = Date.now(); this.pingAt = undefined;
+        const deliver = (value: unknown) => {
+          if (this.socket !== socket) return;
+          if (value === '{"type":"pong"}' || typeof value === 'object' && value !== null && 'type' in value && value.type === 'pong') return;
+          this.options.message(new MessageEvent('message', { data: value }));
+        };
+        if (!socket.protocol?.startsWith('termai.')) { deliver(event.data); return; }
         decoded = decoded.then(async () => {
           const value = await decodeWire(event.data);
-          if (this.socket === socket) this.options.message(new MessageEvent('message', { data: value }));
+          deliver(value);
         }).catch(error => { if (this.socket === socket) { this.options.error(error, token); socket.close(4002, 'Invalid transport message'); } });
       };
       socket.onclose = event => {

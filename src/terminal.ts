@@ -30,6 +30,7 @@ let herdrLayoutPending = false, herdrLayoutMatched = false, herdrLayoutFrame = 0
 let herdrBarrier = false, herdrBarrierReady = true, herdrParkable = false, herdrParked = false, herdrPreserve = false;
 let herdrPresentation = '';
 let offeredWire: string[] | undefined;
+let supportsHeartbeat = false;
 let accessToken: string | undefined = backendAccess(baseURL.href);
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
 function herdrEndpoint(name: string) {
@@ -44,6 +45,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const transport = new ReconnectingSocket({
   available: () => !document.hidden && (!herdrTerminal || tabVisible) && navigator.onLine,
   protocols: () => wireProtocols(offeredWire),
+  heartbeat: () => supportsHeartbeat,
+  stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
   prepare: prepareConnection, open: socketOpened, message: socketMessage, close: socketClosed, error: connectionError,
 });
 let state: ShellState = { cwd: '', inputRevision: 0, promptRevision: 0, ready: false, prompt: 0, exited: false };
@@ -79,7 +82,7 @@ function toast(message: string) {
 }
 function connection(label: string, online = false) {
   $('connection-label').textContent = label;
-  $('reconnect-banner').textContent = label === 'Session ended' ? 'This terminal has ended. Open its saved host to reconnect.' : 'Reconnecting to your terminal…';
+  $('reconnect-banner').textContent = label === 'Session ended' ? 'This terminal has ended; open its saved host to reconnect.' : label.startsWith('Connection stalled') ? label : 'Reconnecting to your terminal…';
   $('reconnect-banner').hidden = online || label === 'Connecting' || label === 'Locked';
   updateRun();
 }
@@ -210,6 +213,7 @@ mobileViewport.addEventListener('change', sizeTerminal);
 function viewport() { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height || window.innerHeight}px`); }
 window.visualViewport?.addEventListener('resize', viewport); window.addEventListener('resize', viewport); viewport();
 function rawInput(data: string) {
+  transport.activity();
   if (presentation.pending) {
     if (['\x1b[I', '\x1b[O'].includes(data)) return;
     if (!herdrTerminal && transport.socket?.readyState === WebSocket.OPEN && streamId && !capturedConnection && !state.exited) {
@@ -344,7 +348,7 @@ const gestures = new TerminalGestures(term, {
       send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
     },
   },
-  tap: (x, y) => { if (!presentation.pending && !queue.length && !capturedConnection) inline.moveCursor(x, y); }, copy: copyTerminalText,
+  tap: (x, y) => { transport.activity(); if (!presentation.pending && !queue.length && !capturedConnection) inline.moveCursor(x, y); }, copy: copyTerminalText,
 });
 
 async function socketURL(signal: AbortSignal) {
@@ -357,17 +361,17 @@ async function socketURL(signal: AbortSignal) {
     herdrPreserve = false; herdrMobileRendered = false;
     herdrLayoutPending = geometry.mobile;
     terminalViewport.classList.toggle('awaiting-herdr-layout', herdrLayoutPending && !herdrParked);
-    const result = await requestJSON<{ redrawBarrier?: boolean; parkViews?: boolean; ticket: string; wire?: string[] }>(herdrEndpoint('api/herdr/ticket'), geometry, { token: () => accessToken, signal });
+    const result = await requestJSON<{ redrawBarrier?: boolean; parkViews?: boolean; ticket: string; heartbeat?: boolean; wire?: string[] }>(herdrEndpoint('api/herdr/ticket'), geometry, { token: () => accessToken, signal });
     herdrBarrier = result.redrawBarrier === true; herdrBarrierReady = !herdrBarrier; herdrParkable = result.parkViews === true;
-    socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire;
+    socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
   socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:'; socketURL.searchParams.set('after', String(after));
   if (streamId) socketURL.searchParams.set('stream', streamId);
   return socketURL;
 }
 async function prepareConnection(signal: AbortSignal, token?: string) {
-  const result = await api<{ state?: ShellState; accessToken: string; wire?: string[] }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
-  signal.throwIfAborted(); offeredWire = result.wire;
+  const result = await api<{ state?: ShellState; accessToken: string; heartbeat?: boolean; wire?: string[] }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
+  signal.throwIfAborted(); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
   if (result.state) state = result.state; accessToken = result.accessToken; notify('terminal-authorized', { accessToken });
   rememberBackendAccess(baseURL.href, accessToken);
   $<HTMLInputElement>('token').value = '';
@@ -555,6 +559,7 @@ function connectionError(error: any, token?: string) {
   return true;
 }
 const connect = (token?: string) => transport.connect(token);
+document.addEventListener('pointerdown', () => transport.activity(), { passive: true });
 $('login-form').onsubmit = e => { e.preventDefault(); void connect($<HTMLInputElement>('token').value); };
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {

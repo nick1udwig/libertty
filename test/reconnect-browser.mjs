@@ -33,6 +33,9 @@ try {
         super(...args); window.__sockets.push(this);
         this.addEventListener('message', async event => { if ((await window.__wireMessage(event.data, this)).type === 'state') window.__states++; });
       }
+      set onmessage(handler) {
+        this.addEventListener('message', event => { if (this !== window.__blackhole) handler(event); });
+      }
       set onclose(handler) {
         this.addEventListener('close', event => {
           if (window.__holdCloses) window.__lateCloses.push(() => handler(event)); else handler(event);
@@ -60,6 +63,21 @@ try {
     document.dispatchEvent(new Event('visibilitychange'));
   });
   const online = async () => page.evaluate(() => window.dispatchEvent(new Event('online')));
+
+  async function silentStall() {
+    const states = await stateCount();
+    const held = await stallNext(page.url().includes('herdrTerminal') ? '/api/herdr/ticket' : '/api/connect');
+    await page.evaluate(() => { window.__blackhole = window.__sockets.at(-1); });
+    await page.waitForFunction(() => document.querySelector('#connection-label').textContent.startsWith('Connection stalled'), undefined, { polling: 50, timeout: 8000 });
+    await held.entered;
+    assert.equal(await page.evaluate(() => window.__blackhole.readyState), 1, 'keep the old connection while preparing its replacement');
+    await held.done();
+    await connected(states);
+    await page.waitForFunction(() => window.__blackhole.readyState === 3);
+    assert.equal(await page.evaluate(() => window.__blackhole.readyState), 3, 'the replacement releases its predecessor');
+    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+  }
+  await silentStall();
 
   // Recover before a closing socket delivers its close event to the app.
   let states = await stateCount();
@@ -137,6 +155,7 @@ try {
 
   // Herdr also bounds/cancels the ticket request after authorization succeeds.
   await page.goto(base + 'terminal.html?herdrTerminal=term_0'); await connected(0);
+  await silentStall();
   stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
   await online(); await stalled.entered;
   await page.locator('.terminal-loading-bar').waitFor({ state: 'visible' });

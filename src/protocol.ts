@@ -17,6 +17,7 @@ export function dictationTarget(state: ShellState): DictationTarget | undefined 
   if (state.inputTarget === 'program') return 'program';
 }
 export type ServerMessage =
+  | { type: 'pong' }
   | ({ type: 'repair-result'; id: string; source?: 'dictation' } & RepairResult)
   | { type: 'input-line'; id: string; prompt: number; revision: number; text?: string; cursor?: number }
   | { type: 'transfer'; request: TransferRequest }
@@ -37,6 +38,7 @@ export type ServerMessage =
   | { type: 'edit-result'; id: string; accepted: boolean; revision: number }
   | { type: 'result'; id: string; accepted: boolean; message?: string };
 export type ClientMessage =
+  | { type: 'ping' }
   | { type: 'repair'; id: string; text: string; prompt: number; revision: number; intent?: RepairIntent }
   | { type: 'repair-cancel'; id: string }
   | { type: 'input-line'; id: string; prompt: number; revision: number }

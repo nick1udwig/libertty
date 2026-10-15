@@ -43,6 +43,10 @@ New clients offer only advertised protocols and fall back to legacy JSON with ol
 Without browser decompression support, raw binary remains available.
 Input, acknowledgements and geometry use compact binary fields, terminal output retains its sequence, and Herdr frames carry their original ANSI bytes directly.
 Decoding remains ordered across asynchronous decompression and discards results from replaced sockets.
+Connect and ticket replies advertise application heartbeat support independently of the encoding.
+After two idle seconds, browsers ping the terminal or metadata socket and report a stall after four seconds without incoming traffic.
+A replacement handshake keeps the previous socket alive and the last painted screen visible until takeover, and user activity bypasses reconnect backoff.
+Older servers without the heartbeat capability retain their existing reconnect behavior.
 Audio retains its existing Opus bytes inside a distinct four-byte envelope and is never compressed.
 Each compressed message uses gzip level 1 with an independent dictionary and must save at least one eighth of the original representation.
 Constrained links compress messages from 2 KiB, while ordinary links compress only messages from 128 KiB.

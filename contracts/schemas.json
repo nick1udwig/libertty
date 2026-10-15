@@ -711,6 +711,19 @@
             "accepted"
           ],
           "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pong",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
         }
       ]
     },
@@ -1161,6 +1174,19 @@
           "required": [
             "type",
             "seq"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ping",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "additionalProperties": true
         }
@@ -7671,6 +7697,19 @@
           "required": [
             "type",
             "seq"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ping",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "additionalProperties": true
         }

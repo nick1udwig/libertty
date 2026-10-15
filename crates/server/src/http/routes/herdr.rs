@@ -284,6 +284,6 @@ pub(super) async fn api_herdr_ticket(
         },
     );
     ok(
-        json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
+        json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"heartbeat":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
     )
 }

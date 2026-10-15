@@ -6,6 +6,7 @@ use termai_server::protocol::{
 fn server_samples() -> Vec<ServerMessage> {
     let id = || "fixture".to_owned();
     vec![
+        ServerMessage::Pong,
         ServerMessage::RepairResult(RepairReply::new(id(), "echo words".into(), 1, 2, true)),
         ServerMessage::InputLine {
             id: id(),

@@ -37,7 +37,7 @@ pub(super) async fn api_connect(
     let owner = owner.unwrap();
     let sid = session_id_text(input.session.as_deref())?;
     let result = if input.no_session {
-        json!({"accessToken":owner,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
+        json!({"accessToken":owner,"heartbeat":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
     } else {
         if sid != "default"
             && !app
@@ -51,7 +51,7 @@ pub(super) async fn api_connect(
                 "This terminal has ended. Open its saved host to reconnect.".into(),
             ));
         }
-        json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state(),"accessToken":owner,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
+        json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state(),"accessToken":owner,"heartbeat":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
     };
     let secure = if req
         .headers()
@@ -186,7 +186,7 @@ pub(super) async fn api_ticket(
             until: Instant::now() + Duration::from_secs(15),
         },
     );
-    ok(json!({"ticket":ticket,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}))
+    ok(json!({"ticket":ticket,"heartbeat":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}))
 }
 
 pub(super) async fn api_dictation_install(

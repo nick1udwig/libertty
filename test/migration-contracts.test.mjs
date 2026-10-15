@@ -114,6 +114,7 @@ test('asynchronous native engine messages obey their contracts', () => {
 test('the Rust client parser accepts every declared client message and rejects malformed field types', () => {
   const id = '11111111-1111-4111-8111-111111111111';
   const samples = [
+    { type: 'ping' },
     { type: 'repair', id, text: 'echo 🌍', prompt: 1, revision: 2 },
     { type: 'repair-cancel', id }, { type: 'input-line', id, prompt: 1, revision: 2 },
     { type: 'dictation', id, action: 'start', target: 'program', prompt: 1, revision: 2 },

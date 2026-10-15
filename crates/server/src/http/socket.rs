@@ -35,20 +35,26 @@ impl Input<'_> {
             "Invalid terminal message"
         }
     }
-    fn message(&self, message: ClientMessage) -> Result<(), &'static str> {
+    fn message(&self, message: ClientMessage) -> Result<bool, &'static str> {
+        if matches!(message, ClientMessage::Ping) {
+            return Ok(true);
+        }
         match self {
             Self::Native {
                 session,
                 attachment,
             } => {
                 session.receive(*attachment, message);
-                Ok(())
+                Ok(false)
             }
-            Self::Herdr(view) => view.receive(message).map_err(|_| self.invalid_text()),
-            Self::Metadata { .. } => Ok(()),
+            Self::Herdr(view) => view
+                .receive(message)
+                .map(|_| false)
+                .map_err(|_| self.invalid_text()),
+            Self::Metadata { .. } => Ok(false),
         }
     }
-    fn text(&self, text: &str) -> Result<(), &'static str> {
+    fn text(&self, text: &str) -> Result<bool, &'static str> {
         if let Self::Metadata {
             app,
             connection,
@@ -61,6 +67,7 @@ impl Input<'_> {
                 && let Ok(message) = serde_json::from_str::<ViewerMessage>(text)
             {
                 match message {
+                    ViewerMessage::Ping => return Ok(true),
                     ViewerMessage::NotificationPresence { device, focused } => {
                         let _ =
                             app.notifications
@@ -77,7 +84,7 @@ impl Input<'_> {
                     }
                 }
             }
-            return Ok(());
+            return Ok(false);
         }
         let message =
             serde_json::from_str::<ClientMessage>(text).map_err(|_| self.invalid_text())?;
@@ -93,18 +100,18 @@ impl Input<'_> {
             Self::Metadata { .. } => {}
         }
     }
-    fn binary(&self, bytes: &[u8], mode: wire::Mode) -> Result<(), &'static str> {
+    fn binary(&self, bytes: &[u8], mode: wire::Mode) -> Result<bool, &'static str> {
         if matches!(self, Self::Metadata { .. }) {
-            return Ok(());
+            return Ok(false);
         }
         if mode == wire::Mode::Json {
             self.audio(bytes.to_vec());
-            return Ok(());
+            return Ok(false);
         }
         match wire::decode_as::<ClientMessage>(bytes).map_err(|_| "Invalid wire message")? {
             wire::Incoming::Audio(audio) => {
                 self.audio(audio);
-                Ok(())
+                Ok(false)
             }
             wire::Incoming::Message(message) => self.message(message),
         }
@@ -260,14 +267,24 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                         if !send(&mut sender, Message::Pong(bytes), None).await {
                             break;
                         }
-                        Ok(())
+                        Ok(false)
                     }
                     Message::Pong(_) => {
                         alive = true;
-                        Ok(())
+                        Ok(false)
                     }
                     Message::Close(_) => break,
                 };
+                if matches!(result, Ok(true))
+                    && !send(
+                        &mut sender,
+                        encode(&json!({"type":"pong"}), mode),
+                        policy.send_timeout,
+                    )
+                    .await
+                {
+                    break;
+                }
                 if let Err(reason) = result {
                     close(&mut sender, 1008, reason, None).await;
                     break;
