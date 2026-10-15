@@ -3653,7 +3653,7 @@ dependencies = [
 
 [[package]]
 name = "termai-engine"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "futures",
  "icu_collator",
@@ -3664,7 +3664,7 @@ dependencies = [
 
 [[package]]
 name = "termai-server"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "aes-gcm 0.10.3",
  "axum",
