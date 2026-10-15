@@ -1,7 +1,31 @@
+import type { HerdrSpace } from './herdr-protocol.ts';
+
 export interface SpaceLayout { order: string[]; groups: string[][] }
 export type SpaceDrop = 'before' | 'after' | 'group';
+export interface SpaceRepo { id: string; name: string; git: boolean; root?: HerdrSpace; spaces: HerdrSpace[] }
 
-export function spaceTerminal(space: import('./herdr-protocol.ts').HerdrSpace, remembered?: string): string {
+/** Worktree checkouts join their repository's root space; Herdr reports a repository only once it has a worktree, so other spaces stand alone. */
+export function spaceRepos(spaces: HerdrSpace[]): SpaceRepo[] {
+  const repos = new Map<string, SpaceRepo>();
+  for (const space of spaces) {
+    const id = space.repoKey ? 'repo:' + space.repoKey : 'space:' + space.id;
+    const repo = repos.get(id) || { id, name: space.repoKey && space.repoName || space.name, git: !!space.repoKey, spaces: [] };
+    repo.spaces.push(space); repos.set(id, repo);
+  }
+  for (const repo of repos.values()) {
+    // New and open worktree actions must start from a checkout that is not itself a linked worktree.
+    repo.root = repo.git ? repo.spaces.find(space => !space.linkedWorktree) : repo.spaces[0];
+    if (repo.root) repo.spaces = [repo.root, ...repo.spaces.filter(space => space !== repo.root)];
+  }
+  return [...repos.values()];
+}
+
+/** A repository opens the space last used there, then its root checkout. */
+export function repoSpace(repo: SpaceRepo, remembered?: string): HerdrSpace {
+  return repo.spaces.find(space => space.id === remembered) || repo.spaces[0];
+}
+
+export function spaceTerminal(space: HerdrSpace, remembered?: string): string {
   return (remembered && space.terminalIds.includes(remembered) ? remembered : space.selectedTerminalId) || space.terminalIds[0] || '';
 }
 

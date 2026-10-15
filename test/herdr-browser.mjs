@@ -601,11 +601,15 @@ try {
   const spaceTab = id => page.locator('.herdr-agent-strip:visible .herdr-agent-tab[data-terminal="space:' + id + '"]');
   await spaceTab('w2').waitFor(); await swipeStrip('Spaces'); await spaceTab('w2').click(); terminal = await agentFrame();
   await until(async () => (await text()).includes('Scratch shell'), 'ordinary terminal opened from a space');
+  // Tapping the selected space opens its tree; a pane pill switches terminals and + agent creates one there.
   await spaceTab('w1').click(); await spaceTab('w1').click();
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'docs · Termai' }).click();
+  const tree = page.locator('.herdr-tree:visible');
+  await tree.locator('.herdr-pane[data-terminal=term_2] .herdr-pane-focus').click();
   assert.equal(await page.locator('.herdr-terminal').getAttribute('data-terminal'), 'term_2');
+  assert.equal(await tree.count(), 0, 'Choosing a pane closes the tree');
   await spaceTab('w1').click();
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Create agent', exact: true }).click();
+  await tree.getByRole('button', { name: 'Create an agent in Termai', exact: true }).click();
+  assert.equal(await page.getByLabel('Space', { exact: true }).inputValue(), 'w1', 'The tree preselects its space for a new agent');
   await page.getByLabel('Agent name', { exact: true }).fill('Mobile review');
   await page.getByLabel('Agent type', { exact: true }).selectOption('codex'); await page.getByLabel('Space', { exact: true }).selectOption('w2');
   await page.getByRole('dialog').getByRole('button', { name: 'Create agent', exact: true }).click();
@@ -634,7 +638,8 @@ try {
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   await page.locator('#herdr-strip').selectOption('spaces'); await page.locator('#nav-terminals').click();
   await spaceTab('w2').click(); terminal = await agentFrame();
-  await hold(spaceTab('w2')); await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close', exact: true }).click();
+  await hold(spaceTab('w2')); await page.locator('.herdr-tree:visible').getByRole('button', { name: 'Close Scratch', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Close Scratch?' }).getByRole('button', { name: 'Close space', exact: true }).click();
   await until(async () => await spaceTab('w2').count() === 0, 'space removed after server close');
   assert.ok(!fixture.snapshot.workspaces.some(w => w.workspace_id === 'w2')); assert.ok(!fixture.snapshot.panes.some(p => p.workspace_id === 'w2'));
   assert.deepEqual(fixture.actions.filter(a => a.method === 'workspace.close').at(-1).params, { workspace_id: 'w2', close_group: false });

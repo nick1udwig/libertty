@@ -98,33 +98,42 @@ Hold menus open upward so their actions remain visible above the controls.
 **+** creates a new space with a shell in the selected terminal’s working directory, without a popover or form.
 Creating from Agents switches the view to Spaces so the new space is visible.
 Spaces include ordinary terminals.
-Tap a selected space again to choose one of its terminals or create an agent within it.
+Once a repository has a worktree, Herdr reports its repository and the strip shows its checkouts as one chip.
+A grouped chip shows the repository name and checkout count, and while selected also names its current checkout.
+Other spaces, including repositories without worktrees, keep their own chips.
+Selecting a chip reopens the checkout and pane last used in it.
 Agent creation lets you choose a name, agent type and directory; the type must be installed on that host.
 
 Swipe left or right to scroll the strip in either Spaces or Agents mode.
-Hold a space for Rename, New worktree, Open worktree, Split and Close.
-Worktree actions use the held space’s repository, including when another space is selected, and start from the repository’s parent space just as on desktop.
+Tap the selected chip again, or hold any chip, to open its tree, which grows out of the chip above the strip.
+The tree shows the root checkout with its worktrees nested beneath it, and each checkout's panes as pills.
+Tap a checkout or pane to open it, or hold its name to rename it in place.
+Enter or the check button saves a rename, and Escape cancels it.
+**+ split** splits that checkout's remembered pane, falling back to its desktop-selected pane, and **+ agent** creates an agent in it.
+**×** on a pane closes it at once and keeps the tree open, while **×** on a checkout asks before closing its space.
+**New worktree** and **Open worktree…** start from the root checkout just as on desktop, and are unavailable while only worktrees are open.
 New worktree creates a branch from `HEAD` in Herdr’s configured worktree directory, while Open worktree lists existing usable checkouts.
-Split offers Right and Down and targets the held space’s remembered terminal, falling back to its desktop-selected terminal.
-The refreshed terminal dropdown immediately includes the new pane, and both desktop and mobile see the same worktrees and splits.
+Split offers Right and Down, and the tree immediately includes the new pane; desktop and mobile see the same worktrees and splits.
+Tap outside the tree, press Escape or swipe it down by its grab bar to dismiss it.
 The dialogs show progress and errors, prevent repeated submissions, and preserve selection on cancellation or failure.
-Linked worktree spaces offer Delete worktree checkout, which removes the checkout folder and closes its Herdr workspace while preserving the Git branch.
+Closing a linked worktree's space also offers Delete checkout, which removes the checkout folder and closes its Herdr workspace while preserving the Git branch.
 If deletion reports that `--force` is required, the dialog shows a Force delete button that discards modified and untracked files in that checkout.
 Local and SSH connections route these actions through their selected Herdr server and session, with update guidance if its API is unavailable.
 Split checks that the Termai backend supports the action before submitting it, so an older running backend reports the version mismatch.
 After rebuilding the interface and backend, restart the Termai service to activate the backend changes.
 Use `npm run build:release` when the service runs `target/release/termai`, so both the optimized backend and the interface are rebuilt together.
-Hold, then drag onto the left or right edge of another space to reorder; drop on its middle to stack the spaces.
+Hold, then drag onto the left or right edge of another chip to reorder; drop on its middle to stack the chips.
+A repository chip moves all of its checkouts together.
 The count button expands or collapses a stack.
 Expand it and drag a member to an edge to remove it.
 Stacks keep their spaces and terminals separate.
 Reordering uses Herdr’s native workspace order; arbitrary stacks are saved in the web app because Herdr’s API does not expose them.
 Cancelling a drag changes neither membership nor order.
 In Agents mode, holding then moving reorders agent tabs, while an immediate swipe scrolls the strip.
-Keyboard users can use Shift+F10 for actions, arrows to select and Alt+arrows to reorder.
+Keyboard users can use Shift+F10 to open a tree or rename within it, arrows to select and Alt+arrows to reorder.
 Spaces aggregate agent status; renaming a space updates Herdr’s shared workspace label.
 
-Agent order, space stacks, selected terminal and viewed-completion acknowledgements are saved in browser local storage per backend, source machine and Herdr session.
+Agent order, space stacks, each repository's last checkout, selected terminal and viewed-completion acknowledgements are saved in browser local storage per backend, source machine and Herdr session.
 Closing an agent tab closes its Herdr pane on the server and ends its process.
 Closing a space closes that server workspace and its terminals.
 Rejected closes keep the tab visible and show Herdr’s error.

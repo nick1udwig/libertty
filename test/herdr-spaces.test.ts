@@ -1,6 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spaceLayout, dropSpace, spaceTerminal, worktreePath } from '../src/herdr-spaces.ts';
+import { spaceLayout, dropSpace, spaceTerminal, worktreePath, spaceRepos, repoSpace } from '../src/herdr-spaces.ts';
+
+test('worktrees group under their repository root while other spaces stand alone', () => {
+  const space = (id: string, extra = {}) => ({ id, name: id, terminalIds: [id + ':pane'], ...extra });
+  const repo = { repoKey: '/repo/.git', repoName: 'repo' };
+  const repos = spaceRepos([space('review', { ...repo, linkedWorktree: true }), space('notes'), space('main', { ...repo, linkedWorktree: false }), space('fix', { ...repo, linkedWorktree: true })]);
+  assert.deepEqual(repos.map(group => [group.id, group.name, group.git, group.root?.id, group.spaces.map(space => space.id)]), [
+    ['repo:/repo/.git', 'repo', true, 'main', ['main', 'review', 'fix']],
+    ['space:notes', 'notes', false, 'notes', ['notes']],
+  ], 'The root checkout leads its worktrees, and groups keep the position of their first space');
+  const orphaned = spaceRepos([space('review', { ...repo, linkedWorktree: true })])[0];
+  assert.equal(orphaned.root, undefined, 'Worktrees still group when their root checkout is not open');
+  assert.equal(repoSpace(repos[0], 'fix').id, 'fix');
+  assert.equal(repoSpace(repos[0], 'closed').id, 'main', 'A closed remembered space falls back to the root');
+  assert.equal(repoSpace(orphaned).id, 'review');
+});
 
 test('held-space actions use its remembered pane, then desktop selection, then first pane', () => {
   const space = { id: 'held', name: 'Held', terminalIds: ['original', 'split'], selectedTerminalId: 'original' };

@@ -59,3 +59,43 @@
 @media(prefers-reduced-motion:reduce){.herdr-tabs-toggle svg{transition:none}}
 .herdr-delete-worktree .actions{flex-wrap:wrap}
 .herdr-tab .tab-icon{color:var(--muted)}.herdr-tab[aria-selected=true] .tab-icon{color:var(--accent)}
+.herdr-space-label{display:flex;flex-direction:column;align-items:flex-start;min-width:0;line-height:1.15}
+.herdr-repo-name{font:10px var(--font-ui);color:var(--muted)}
+.herdr-space-label .herdr-agent-name{max-width:150px;overflow:hidden;text-overflow:ellipsis}
+.herdr-repo-count{font:11px var(--font-ui);color:var(--text-2)}
+/* The open chip loses its top edge and joins the tree through the bridge, so both read as one panel. */
+.herdr-agent-tab.herdr-tree-anchor{background:var(--overlay);border-color:var(--accent-line);border-top-color:transparent;border-radius:0 0 var(--r-md) var(--r-md);color:var(--text)}
+.herdr-tree-bridge{position:fixed;z-index:16;pointer-events:none;box-sizing:border-box;background:var(--overlay);border:1px solid var(--accent-line);border-block:0}
+.herdr-tab-menu.herdr-tree{max-width:calc(100% - 16px);max-height:70%;box-sizing:border-box;border-color:var(--accent-line);padding:0 8px 8px}
+.herdr-screen-dim::after{content:"";position:absolute;inset:0;z-index:5;background:var(--scrim);pointer-events:none}
+.herdr-tree-grabber{display:grid;place-items:center;height:20px;touch-action:none}
+.herdr-tree-grabber::before{content:"";width:40px;height:5px;border-radius:3px;background:var(--faint)}
+.herdr-tree button{display:flex;align-items:center;gap:7px;width:auto;min-height:0;padding:0;border-radius:var(--r-sm);text-align:left;font:13px var(--font-mono);color:var(--text-2)}
+.herdr-tree button:disabled{opacity:.5}
+.herdr-tree svg{flex:none;color:var(--muted)}
+.herdr-tree-head{display:flex;align-items:center;gap:4px;min-height:40px}
+.herdr-tree .herdr-tree-title{flex:1;min-width:0;height:38px;padding:0 6px}
+span.herdr-tree-title{display:flex;align-items:center;gap:7px;font:600 13px var(--font-mono);color:var(--text)}
+.herdr-tree-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.herdr-tree-repo{flex:none;color:var(--muted);font-size:12px}
+.herdr-tree-root>.herdr-tree-head .herdr-tree-name{font-weight:600;color:var(--text)}
+.herdr-tree .herdr-tree-current .herdr-tree-name,.herdr-tree .herdr-tree-current svg{color:var(--accent)}
+.herdr-tree .herdr-tree-close{justify-content:center;width:40px;height:38px;color:var(--danger)}
+.herdr-tree .herdr-tree-close svg,.herdr-tree .herdr-pane-close svg,.herdr-tree .herdr-tree-save svg{color:inherit}
+.herdr-tree-kids{margin-left:11px;padding-left:10px;border-left:1px solid var(--line-strong)}
+.herdr-tree-panes{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 8px 28px}
+.herdr-pane{display:flex;height:36px;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:8px;background:var(--bg);overflow:hidden}
+.herdr-pane:has([aria-current=true]){border-color:var(--accent);background:var(--accent-soft)}
+.herdr-tree .herdr-pane-focus{gap:6px;padding:0 6px 0 10px;border-radius:0;font-size:12px}
+.herdr-tree .herdr-pane-focus[aria-current=true]{color:var(--text)}
+.herdr-pane-name{max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.herdr-tree .herdr-pane-close{justify-content:center;width:32px;border-left:1px solid var(--line-strong);border-radius:0;color:var(--danger)}
+.herdr-tree .herdr-pane-add{height:36px;padding:0 10px;border:1px dashed var(--line-strong);border-radius:8px;color:var(--muted);font-size:12px}
+.herdr-tree-actions{display:flex;gap:6px;margin-top:4px;padding-top:8px;border-top:1px solid var(--line)}
+.herdr-tree .herdr-tree-actions button{flex:1;justify-content:center;height:42px;border:1px solid var(--line-strong);border-radius:var(--r-md);font:13px var(--font-ui)}
+.herdr-tree-rename{display:flex;align-items:center;gap:4px}
+.herdr-tree .herdr-tree-rename input{flex:1;min-width:0;height:34px;margin:0;padding:0 8px;border:1px solid var(--accent);border-radius:var(--r-sm);background:var(--bg);color:var(--text);font:13px var(--font-mono)}
+.herdr-pane.herdr-tree-rename{border-color:var(--accent)}
+.herdr-tree .herdr-pane.herdr-tree-rename input{width:150px;height:100%;border:0;border-radius:0}
+.herdr-tree .herdr-tree-save{justify-content:center;width:40px;height:34px;color:var(--accent)}
+.herdr-close-space .actions{flex-wrap:wrap}

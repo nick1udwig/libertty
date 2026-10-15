@@ -51,7 +51,12 @@ try {
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(base); await page.locator('#backend-token').fill(token); await page.locator('#backend-login-form button[type=submit]').click();
   page.setDefaultTimeout(15000);
-  const tab = id => page.locator('.herdr-agent-strip:visible .herdr-agent-tab[data-terminal="space:' + id + '"]');
+  // Herdr reports a repository once it has a worktree, and from then on its checkouts share one chip.
+  assert.equal((await herdrSnapshot(target)).spaces.find(space => space.id === alpha).repoKey, undefined, 'A repository without worktrees keeps its own space chip');
+  let alphaRepo = 'space:' + alpha;
+  const inAlpha = new Set([alpha]);
+  const chip = id => inAlpha.has(id) ? alphaRepo : 'space:' + id;
+  const tab = id => page.locator('.herdr-agent-strip:visible .herdr-agent-tab[data-terminal="' + chip(id) + '"]');
   await tab(alpha).waitFor(); await tab(beta).waitFor();
   assert.equal(await page.locator('#add-tab').count(), 0, 'The duplicate terminal plus is removed');
   const toggle = page.locator('.herdr-agent-strip:visible .herdr-tabs-toggle');
@@ -104,7 +109,7 @@ try {
   await page.screenshot({ path: '/tmp/termai-herdr-tabs-collapsed.png' });
   const drawerHeight = () => page.locator('#terminal-tabs-drawer').evaluate(el => el.getBoundingClientRect().height);
   const selectedBeforeSwipe = await page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal');
-  const swipeTab = tab(selectedBeforeSwipe === 'space:' + beta ? alpha : beta);
+  const swipeTab = tab(selectedBeforeSwipe === chip(beta) ? alpha : beta);
   const tabsBeforeSwipe = await page.locator('#tabs [role=tab]').count();
   const partialSwipe = async (expanded, cancel) => {
     const rect = await swipeBounds(swipeTab), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
@@ -162,10 +167,10 @@ try {
   assert.equal(await page.locator('#workspace-navigation').isVisible(), true, 'Swiping the back button does not leave Herdr');
   await swipeTab.press('Enter');
   await wait(async () => await page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal') !== selectedBeforeSwipe, 'keyboard activation still selects a space after swiping');
-  await tab(selectedBeforeSwipe.slice(6)).click();
+  await page.locator('.herdr-agent-strip:visible .herdr-agent-tab[data-terminal="' + selectedBeforeSwipe + '"]').click();
   await page.evaluate(() => document.fonts.ready);
   const order = async () => (await herdrSnapshot(target)).spaces.map(space => space.id);
-  const stripOrder = () => page.locator('.herdr-agent-strip:visible .herdr-agent-tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.terminal.slice(6)));
+  const stripOrder = () => page.locator('.herdr-agent-strip:visible .herdr-agent-tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.terminal));
   const bounds = async id => {
     let rect;
     await wait(async () => {
@@ -183,11 +188,11 @@ try {
   };
   const drag = async (source, target, position, cancel = false) => {
     const { from, to } = await page.evaluate(([source, target]) => {
-      const bounds = id => { const rect = document.querySelector('.herdr-agent-tab[data-terminal="space:' + CSS.escape(id) + '"]').getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; };
+      const bounds = id => { const rect = document.querySelector('.herdr-agent-tab[data-terminal="' + CSS.escape(id) + '"]').getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; };
       return { from: bounds(source), to: bounds(target) };
-    }, [source, target]);
+    }, [chip(source), chip(target)]);
     await touch('touchStart', from.x + from.width / 2, from.y + from.height / 2);
-    assert.equal(await page.evaluate(() => window.__touchSource), 'space:' + source, 'The native touch starts on the intended space');
+    assert.equal(await page.evaluate(() => window.__touchSource), chip(source), 'The native touch starts on the intended space');
     await delay(500); await touch('touchMove', to.x + to.width * position, to.y + to.height / 2);
     const preview = page.locator('.herdr-drop-indicator:visible');
     const mode = position < .25 ? 'before' : position > .75 ? 'after' : 'group';
@@ -209,11 +214,11 @@ try {
   assert.equal(await page.locator('.herdr-terminal').getAttribute('data-terminal'), newSpace.selectedTerminalId);
   await drag(alpha, created, .9);
   await wait(async () => JSON.stringify(await order()) === JSON.stringify([beta, created, alpha]), 'edge drop reorders the native spaces');
-  await wait(async () => JSON.stringify(await stripOrder()) === JSON.stringify([beta, created, alpha]), 'strip receives the native order');
+  await wait(async () => JSON.stringify(await stripOrder()) === JSON.stringify([beta, created, alpha].map(chip)), 'strip receives the native order');
   assert.equal(await page.locator('.herdr-space-stack').count(), 0);
   await drag(alpha, beta, .5);
   await page.locator('.herdr-space-stack').waitFor();
-  assert.deepEqual(await page.locator('.herdr-space-stack .herdr-agent-tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.terminal)), ['space:' + beta, 'space:' + alpha]);
+  assert.deepEqual(await page.locator('.herdr-space-stack .herdr-agent-tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.terminal)), [chip(beta), chip(alpha)]);
   await page.screenshot({ path: '/tmp/termai-herdr-spaces.png' });
   await page.getByRole('button', { name: 'Collapse space stack', exact: true }).click(); assert.equal(await tab(alpha).isVisible(), false);
   await page.reload(); await tab(beta).waitFor(); assert.equal(await tab(alpha).isVisible(), false, 'Stack and collapsed state survive reload');
@@ -223,38 +228,63 @@ try {
   await drag(alpha, created, .1); await wait(async () => (await page.locator('.herdr-space-stack').count()) === 0, 'edge drop extracts a space from its stack');
   await tab(beta).click();
   await wait(async () => await tab(beta).getAttribute('aria-selected') === 'true', 'selected Beta space');
+  const tree = page.locator('.herdr-tree:visible'), bridge = page.locator('.herdr-tree-bridge:visible');
+  // Snapshots re-render the strip and tree, so a measurement can briefly find a replaced element.
+  const box = async locator => { let rect; await wait(async () => !!(rect = await locator.boundingBox()), 'element bounds'); return rect; };
+  const press = async (locator, duration = 500) => { const rect = await box(locator); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(duration); await touch('touchEnd'); };
   const rect = await bounds(beta); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2);
-  assert.equal(await page.evaluate(() => window.__touchSource), 'space:' + beta); await delay(500); await touch('touchEnd');
-  await page.locator('.herdr-tab-menu:visible').waitFor();
-  const popupBounds = await page.locator('.herdr-tab-menu:visible').boundingBox();
-  assert.ok(popupBounds.y + popupBounds.height < rect.y, 'The bottom space hold menu opens upward');
-  assert.deepEqual(await page.locator('.herdr-tab-menu:visible [role=menuitem]').allTextContents(), ['Rename', 'New worktree', 'Open worktree', 'Split', 'Close']);
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Rename', exact: true }).click();
-  await page.getByLabel('Space name', { exact: true }).fill('Review'); await page.getByRole('dialog').getByRole('button', { name: 'Save', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.__touchSource), chip(beta)); await delay(500); await touch('touchEnd');
+  await tree.waitFor();
+  const treeBounds = await box(tree), chipBounds = await box(tab(beta)), bridgeBounds = await box(bridge);
+  assert.ok(treeBounds.y + treeBounds.height < chipBounds.y, 'The space tree opens upward above its chip');
+  assert.ok(Math.abs(bridgeBounds.x - chipBounds.x) < 1 && Math.abs(bridgeBounds.width - chipBounds.width) < 1 && bridgeBounds.y <= treeBounds.y + treeBounds.height && bridgeBounds.y + bridgeBounds.height >= chipBounds.y, 'The bridge joins the tree to its chip');
+  assert.equal(await tab(beta).evaluate(el => el.classList.contains('herdr-tree-anchor')), true);
+  await page.screenshot({ path: root + '.test-artifacts/herdr-space-tree-beta.png' });
+  // Holding a name renames it in place, and the tree stays open afterwards.
+  await press(tree.getByRole('button', { name: 'Open Beta, the current space. Hold to rename.', exact: true }));
+  const spaceName = tree.getByLabel('Space name', { exact: true }); await spaceName.fill('Review'); await spaceName.press('Enter');
   await wait(async () => (await herdrSnapshot(target)).spaces.find(space => space.id === beta)?.name === 'Review', 'shared space rename');
-  await tab(beta).click();
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Create agent', exact: true }).waitFor();
+  await tree.getByRole('button', { name: 'Open Review, the current space. Hold to rename.', exact: true }).waitFor();
+  const betaPane = (await herdrSnapshot(target)).spaces.find(space => space.id === beta).terminalIds[0];
+  await press(tree.locator('.herdr-pane[data-terminal="' + betaPane + '"] .herdr-pane-focus'));
+  const paneName = tree.getByLabel('Pane name', { exact: true }); await paneName.fill('Review shell'); await paneName.press('Escape');
+  assert.equal(await tree.count(), 1, 'Escape cancels a rename without closing the tree');
+  await press(tree.locator('.herdr-pane[data-terminal="' + betaPane + '"] .herdr-pane-focus'));
+  await paneName.fill('Review shell'); await tree.getByRole('button', { name: 'Save name', exact: true }).click();
+  await wait(async () => (await herdrSnapshot(target)).terminals.find(terminal => terminal.terminalId === betaPane)?.name === 'Review shell', 'shared pane rename');
+  await page.keyboard.press('Escape'); await tab(beta).click(); await tree.waitFor();
   const hold = async id => {
     if (await page.locator('.herdr-tab-menu:visible').count()) await page.keyboard.press('Escape');
-    const rect = await bounds(id); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd'); await page.locator('.herdr-tab-menu:visible').waitFor();
+    const rect = await bounds(id); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd'); await tree.waitFor();
   };
-  const menuAction = name => page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name, exact: true }).click();
+  const treeAction = name => tree.getByRole('button', { name, exact: true }).click();
   const selected = () => page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal');
   const dismissMenu = async (x, y) => {
     await touch('touchStart', x, y); await touch('touchEnd');
-    assert.equal(await page.locator('.herdr-tab-menu:visible').count(), 0, 'Tapping outside closes the space menu');
+    assert.equal(await page.locator('.herdr-tab-menu:visible').count(), 0, 'Tapping outside closes the space tree');
     assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Dismissal restores access to the screen');
+    assert.equal(await bridge.count(), 0, 'Dismissal removes the bridge');
   };
   const terminalBounds = await page.locator('.herdr-terminal:visible').boundingBox();
   await dismissMenu(terminalBounds.x + terminalBounds.width / 2, terminalBounds.y + 20);
   for (const target of [() => bounds(alpha), () => bounds(beta), () => toggle.boundingBox()]) {
     await hold(beta);
     const rect = await target(); await dismissMenu(rect.x + rect.width / 2, rect.y + rect.height / 2);
-    assert.equal(await selected(), 'space:' + beta, 'The dismissing tap does not activate another control');
+    assert.equal(await selected(), chip(beta), 'The dismissing tap does not activate another control');
   }
   await hold(beta); await page.keyboard.press('Escape');
   assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Escape also removes the dismissal layer');
-  await hold(alpha); await menuAction('New worktree'); await page.getByLabel('Branch', { exact: true }).waitFor();
+  const swipeTree = async distance => {
+    const grab = await box(tree.locator('.herdr-tree-grabber')), x = grab.x + grab.width / 2, y = grab.y + grab.height / 2;
+    await touch('touchStart', x, y);
+    for (const fraction of [.25, .5, 1]) await touch('touchMove', x, y + distance * fraction);
+    await touch('touchEnd');
+  };
+  await hold(beta); await swipeTree(30);
+  assert.equal(await tree.count(), 1, 'A short swipe returns the tree');
+  await swipeTree(120); await wait(async () => await tree.count() === 0, 'swiping down dismisses the tree');
+  assert.equal(await selected(), chip(beta), 'Swiping the tree away keeps the selection');
+  await hold(alpha); await treeAction('New worktree'); await page.getByLabel('Branch', { exact: true }).waitFor();
   const branch = page.getByRole('combobox', { name: 'Branch', exact: true }), branchList = page.getByRole('listbox', { name: 'Existing branches', exact: true });
   await branchList.getByRole('option', { name: 'review/existing', exact: true }).waitFor();
   assert.equal(await branchList.getByRole('option', { name: 'main Already checked out', exact: true }).isDisabled(), true);
@@ -267,19 +297,19 @@ try {
   assert.equal(await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).isDisabled(), true, 'A checked-out branch cannot create a second checkout');
   await branch.fill('review/'); await page.screenshot({ path: root + '.test-artifacts/herdr-worktree-branch-suggestions.png' });
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
-  assert.equal(await selected(), 'space:' + beta, 'Cancelling on an inactive held space preserves selection');
-  await hold(beta); await menuAction('New worktree'); await page.locator('.herdr-space-action .form-error').filter({ hasText: /Git|repo/i }).waitFor();
+  assert.equal(await selected(), chip(beta), 'Cancelling on an inactive held space preserves selection');
+  await hold(beta); await treeAction('New worktree'); await page.locator('.herdr-space-action .form-error').filter({ hasText: /Git|repo/i }).waitFor();
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
-  assert.equal(await selected(), 'space:' + beta, 'Discovery failure preserves selection');
+  assert.equal(await selected(), chip(beta), 'Discovery failure preserves selection');
   const alphaBefore = (await herdrSnapshot(target)).spaces.find(space => space.id === alpha);
   await page.route('**/api/herdr/options*', route => route.fulfill({ json: { kinds: ['codex'] } }));
-  await hold(alpha); await menuAction('Split');
+  await hold(alpha); await treeAction('Split a pane in Alpha');
   await page.locator('.herdr-space-action .form-error').filter({ hasText: 'Restart it with the current build' }).waitFor();
   assert.equal(await page.getByRole('dialog').getByRole('button', { name: 'Split', exact: true }).isDisabled(), true, 'A stale backend cannot receive an unsupported split action');
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
-  assert.equal(await selected(), 'space:' + beta, 'A version mismatch preserves selection');
+  assert.equal(await selected(), chip(beta), 'A version mismatch preserves selection');
   await page.unroute('**/api/herdr/options*');
-  await hold(alpha); await menuAction('Split');
+  await hold(alpha); await treeAction('Split a pane in Alpha');
   let splitRequests = 0;
   await page.route('**/api/herdr/action*', async route => {
     if (route.request().postDataJSON()?.action !== 'split') return route.continue();
@@ -287,7 +317,7 @@ try {
   });
   await page.getByRole('dialog').getByRole('button', { name: 'Split', exact: true }).click();
   await page.locator('.herdr-space-action .form-error').filter({ hasText: 'Split refused' }).waitFor();
-  assert.equal(await selected(), 'space:' + beta, 'Split errors preserve the active space');
+  assert.equal(await selected(), chip(beta), 'Split errors preserve the active space');
   await page.unroute('**/api/herdr/action*');
   await page.route('**/api/herdr/action*', async route => {
     if (route.request().postDataJSON()?.action !== 'split') return route.continue();
@@ -300,34 +330,55 @@ try {
   await page.unroute('**/api/herdr/action*');
   const alphaSplit = (await herdrSnapshot(target)).spaces.find(space => space.id === alpha);
   assert.equal(alphaSplit.terminalIds.length, alphaBefore.terminalIds.length + 1, 'A real split is created in the held space');
-  assert.equal(await selected(), 'space:' + beta, 'Splitting an inactive held space preserves selection');
-  await tab(alpha).click(); await tab(alpha).click();
+  assert.equal(await selected(), chip(beta), 'Splitting an inactive held space preserves selection');
+  await tab(alpha).click(); await tab(alpha).click(); await tree.waitFor();
   const newPane = alphaSplit.terminalIds.find(id => !alphaBefore.terminalIds.includes(id));
-  const newTerminal = (await herdrSnapshot(target)).terminals.find(t => t.terminalId === newPane);
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: newTerminal.name + ' · ' + newTerminal.workspace, exact: true }).last().click();
-  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === newPane || await page.locator('.herdr-terminal:visible').getAttribute('src').then(src => src?.includes(encodeURIComponent(newPane))), 'new split is accessible in dropdown');
-  await tab(beta).click(); await hold(alpha); await menuAction('New worktree');
+  await tree.locator('.herdr-pane[data-terminal="' + newPane + '"] .herdr-pane-focus').click();
+  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === newPane, 'new split is accessible in the tree');
+  await tab(beta).click(); await hold(alpha); await treeAction('New worktree');
   await page.getByLabel('Branch', { exact: true }).fill('mobile-review');
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
   const worktreeSpace = (await herdrSnapshot(target)).spaces.find(space => !before.includes(space.id) && space.id !== created);
   assert.ok(worktreeSpace, 'Worktree creation adds a shared native space');
+  assert.ok(worktreeSpace.repoKey?.endsWith('/alpha/.git'), 'The worktree reports its repository');
+  await wait(async () => (await herdrSnapshot(target)).spaces.find(space => space.id === alpha).repoKey === worktreeSpace.repoKey, 'root checkout joins its repository');
+  alphaRepo = 'repo:' + worktreeSpace.repoKey; inAlpha.add(worktreeSpace.id);
   assert.match(execFileSync('git', ['-C', dir + '/alpha', 'worktree', 'list', '--porcelain'], { encoding: 'utf8' }), /refs\/heads\/mobile-review/);
-  await hold(worktreeSpace.id);
-  assert.deepEqual(await page.locator('.herdr-tab-menu:visible [role=menuitem]').allTextContents(), ['Rename', 'Split', 'Close', 'Delete worktree checkout']);
-  await menuAction('Split');
+  // The worktree joins the repository chip, which names its current checkout.
+  await wait(async () => await selected() === alphaRepo, 'new worktree selected in its repository chip');
+  assert.equal(await page.locator('.herdr-agent-strip:visible .herdr-agent-tab[data-terminal^="space:' + worktreeSpace.id + '"]').count(), 0, 'The worktree has no chip of its own');
+  assert.equal(await tab(alpha).locator('.herdr-repo-name').textContent(), 'alpha · 2');
+  assert.equal(await tab(alpha).locator('.herdr-agent-name').textContent(), worktreeSpace.name);
+  await tab(alpha).click(); await tree.waitFor();
+  assert.deepEqual(await tree.locator('.herdr-tree-node').evaluateAll(nodes => nodes.map(node => [node.dataset.space, node.parentElement.classList.contains('herdr-tree-kids')])), [[alpha, false], [worktreeSpace.id, true]], 'The tree nests the worktree under its root checkout');
+  await page.screenshot({ path: root + '.test-artifacts/herdr-space-tree.png' });
+  await treeAction('Split a pane in ' + worktreeSpace.name);
   await page.getByRole('dialog').getByRole('button', { name: 'Split', exact: true }).click();
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
   const worktreeSplit = (await herdrSnapshot(target)).spaces.find(space => space.id === worktreeSpace.id);
-  assert.equal(worktreeSplit.terminalIds.length, worktreeSpace.terminalIds.length + 1, 'A real split is created in the held worktree space');
-  assert.equal(await selected(), 'space:' + worktreeSpace.id, 'Splitting preserves the active worktree space');
+  assert.equal(worktreeSplit.terminalIds.length, worktreeSpace.terminalIds.length + 1, 'A real split is created in the worktree space');
+  assert.equal(await selected(), alphaRepo, 'Splitting preserves the active repository');
   const worktreePane = worktreeSplit.terminalIds.find(id => !worktreeSpace.terminalIds.includes(id));
-  const worktreeTerminal = (await herdrSnapshot(target)).terminals.find(terminal => terminal.terminalId === worktreePane);
-  await tab(worktreeSpace.id).click();
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: worktreeTerminal.name + ' · ' + worktreeTerminal.workspace, exact: true }).last().click();
-  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === worktreePane, 'worktree split is accessible in dropdown');
-  await hold(worktreeSpace.id);
-  await menuAction('Delete worktree checkout');
+  await tab(alpha).click(); await tree.locator('.herdr-pane[data-terminal="' + worktreePane + '"] .herdr-pane-focus').click();
+  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === worktreePane, 'worktree split is accessible in the tree');
+  // Closing a pane keeps the tree open and the selection in the same space.
+  await tab(alpha).click(); await tree.locator('.herdr-pane[data-terminal="' + worktreePane + '"] .herdr-pane-close').click();
+  await wait(async () => !(await herdrSnapshot(target)).spaces.find(space => space.id === worktreeSpace.id).terminalIds.includes(worktreePane), 'pane closed on the server');
+  await wait(async () => await tree.locator('.herdr-pane[data-terminal="' + worktreePane + '"]').count() === 0, 'closed pane leaves the tree');
+  assert.equal(await tree.count(), 1, 'Closing a pane keeps the tree open');
+  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === worktreeSpace.terminalIds[0], 'selection stays in the worktree space');
+  const closeFromTree = async space => {
+    if (!await tree.count()) await hold(space.id);
+    await tree.locator('.herdr-tree-node[data-space="' + space.id + '"] > .herdr-tree-head .herdr-tree-close').click();
+    return page.getByRole('dialog', { name: 'Close ' + space.name + '?' });
+  };
+  const closing = await closeFromTree(worktreeSpace);
+  assert.match(await closing.textContent(), /The checkout stays on disk/);
+  await closing.getByRole('button', { name: 'Cancel', exact: true }).click();
+  assert.ok((await order()).includes(worktreeSpace.id), 'Cancelling the close dialog keeps the worktree space');
+  const deleteFromTree = async space => (await closeFromTree(space)).getByRole('button', { name: 'Delete checkout…', exact: true }).click();
+  await deleteFromTree(worktreeSpace);
   const deletion = page.getByRole('dialog', { name: 'Delete worktree checkout?' });
   const checkout = worktreeSpace.checkoutPath;
   assert.ok(checkout && checkout !== dir + '/alpha');
@@ -340,7 +391,7 @@ try {
   assert.ok((await order()).includes(worktreeSpace.id), 'Cancel preserves the checkout and workspace');
   await writeFile(checkout + '/uncommitted.txt', 'Keep this change');
   await writeFile(checkout + '/tracked.txt', 'Modified content');
-  await hold(worktreeSpace.id); await menuAction('Delete worktree checkout');
+  await deleteFromTree(worktreeSpace);
   const denyDelete = async route => {
     if (route.request().postDataJSON()?.action !== 'delete-worktree') return route.continue();
     return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Permission denied while deleting checkout.' }) });
@@ -364,7 +415,7 @@ try {
   }
   await deletion.getByRole('button', { name: 'Cancel', exact: true }).click();
   await access(checkout + '/uncommitted.txt');
-  await hold(worktreeSpace.id); await menuAction('Delete worktree checkout');
+  await deleteFromTree(worktreeSpace);
   assert.equal(await forceDelete.isVisible(), false, 'Reopening the dialog requires a fresh force-required refusal');
   await deletion.getByRole('button', { name: 'Delete worktree checkout', exact: true }).click();
   await forceDelete.waitFor({ state: 'visible' });
@@ -386,31 +437,34 @@ try {
   execFileSync('git', ['-C', dir + '/alpha', 'show-ref', '--verify', 'refs/heads/mobile-review']);
   await tab(beta).click();
   await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === (await herdrSnapshot(target)).spaces.find(space => space.id === beta).selectedTerminalId, 'Beta terminal presented after checkout deletion');
-  await hold(alpha); await menuAction('New worktree'); await branch.fill('review/ex');
+  const added = async previous => { let space; await wait(async () => { space = (await herdrSnapshot(target)).spaces.find(space => !previous.includes(space.id)); return !!space; }, 'new worktree space'); inAlpha.add(space.id); return space; };
+  let previous = await order();
+  await hold(alpha); await treeAction('New worktree'); await branch.fill('review/ex');
   await branchList.getByRole('option', { name: 'review/existing', exact: true }).click();
   assert.equal(await branch.inputValue(), 'review/existing');
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
-  const existingBranchSpaceId = (await selected()).slice(6);
-  const existingBranchSpace = (await herdrSnapshot(target)).spaces.find(space => space.id === existingBranchSpaceId);
+  const existingBranchSpace = await added(previous);
   assert.equal(execFileSync('git', ['-C', existingBranchSpace.checkoutPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), existingBranchCommit, 'Selecting a suggestion checks out the existing branch commit rather than recreating it from HEAD');
-  await hold(existingBranchSpace.id); await menuAction('Delete worktree checkout');
+  await deleteFromTree(existingBranchSpace);
   await page.getByRole('dialog', { name: 'Delete worktree checkout?' }).getByRole('button', { name: 'Delete worktree checkout', exact: true }).click();
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
-  await hold(alpha); await menuAction('Open worktree');
+  previous = await order();
+  await hold(alpha); await treeAction('Open worktree…');
   await page.getByLabel('Worktree', { exact: true }).selectOption(dir + '/existing-review');
   await page.getByRole('dialog').getByRole('button', { name: 'Open', exact: true }).click();
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
-  const openedSpaceId = (await selected()).slice(6);
-  assert.equal((await herdrSnapshot(target)).spaces.find(space => space.id === openedSpaceId)?.cwd, dir + '/existing-review');
+  const openedSpace = await added(previous);
+  assert.equal((await herdrSnapshot(target)).spaces.find(space => space.id === openedSpace.id)?.cwd, dir + '/existing-review');
   await tab(created).click(); await wait(async () => await tab(created).getAttribute('aria-selected') === 'true', 'selected created space');
   const closingTerminal = (await herdrSnapshot(target)).terminals.find(terminal => terminal.workspaceId === created)?.terminalId;
   await wait(async () => await page.locator('.herdr-terminal:visible').count() === 1 && await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === closingTerminal, 'created pane rendered before holding its tab');
-  const close = await bounds(created); await touch('touchStart', close.x + close.width / 2, close.y + close.height / 2); await delay(500); await touch('touchEnd');
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close', exact: true }).click();
+  const createdSpace = (await herdrSnapshot(target)).spaces.find(space => space.id === created);
+  await (await closeFromTree(createdSpace)).getByRole('button', { name: 'Close space', exact: true }).click();
   await wait(async () => !(await order()).includes(created), 'close removes the native space');
   const navigationSpaces = [];
-  for (let i = 0; i < 6; i++) navigationSpaces.push((await herdrRequest(target, 'workspace.create', { cwd: dir + '/alpha', label: 'Navigation ' + i, focus: false })).workspace.workspace_id);
+  // Spaces outside Git keep separate chips, so these overflow the strip.
+  for (let i = 0; i < 6; i++) navigationSpaces.push((await herdrRequest(target, 'workspace.create', { cwd: dir + '/beta project', label: 'Navigation ' + i, focus: false })).workspace.workspace_id);
   await wait(async () => await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').count() >= 8, 'overflowing Herdr strip');
   const scrolled = await page.locator('.herdr-agent-strip:visible').evaluate(strip => {
     strip.scrollLeft = strip.scrollWidth;
@@ -423,7 +477,7 @@ try {
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces'); await page.locator('#herdr-strip').selectOption('agents'); await page.reload(); await page.getByRole('button', { name: 'Show terminal tabs', exact: true }).click(); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'agents', 'Explicit agent mode survives reload');
   assert.deepEqual(errors, []);
-  console.log('PASS: Herdr and terminal-strip swipes reveal/hide tabs without accidental clicks or intermediate terminal resizes; real Herdr space actions create/open Git worktrees and pane splits, preserve selection on cancellation/errors, reject duplicate submissions, refresh the dropdown, and preserve rename/close/reorder/stacks.');
+  console.log('PASS: Herdr and terminal-strip swipes reveal/hide tabs without accidental clicks or intermediate terminal resizes; real Herdr worktrees group under their repository chip, whose attached tree renames, splits, closes, creates and opens checkouts and panes while preserving selection, rejecting duplicate submissions and keeping reorder/stacks.');
 } catch (error) {
   await browser?.contexts()[0]?.pages()[0]?.screenshot({ path: '/tmp/termai-herdr-spaces-failure.png' }).catch(() => {}); throw error;
 } finally {

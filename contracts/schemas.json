@@ -1484,6 +1484,12 @@
         },
         "checkoutPath": {
           "type": "string"
+        },
+        "repoKey": {
+          "type": "string"
+        },
+        "repoName": {
+          "type": "string"
         }
       },
       "required": [
