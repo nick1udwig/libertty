@@ -33,6 +33,11 @@ See the [pairing security review](pairing-security.md) for tested boundaries and
 The interface uses bundled JetBrains Mono.
 Open the **Settings** tab to change the terminal font size from 6–24 pt (default 10 pt).
 Changes apply immediately and are saved in this browser.
+**Settings → Theme** offers Forest (default), Paper, Ink and Auto.
+Paper is a light, high-contrast theme and Ink is a true-black one, and both stay readable on grayscale e-paper style screens and under amber backlights.
+Auto follows the system appearance with Paper for light and Ink for dark.
+Programs such as Claude Code and Codex in Herdr panes paint for a dark terminal, so Paper flips the lightness of every color outside its own palette and their dark input boxes, diffs and code blocks render as light shades.
+Open terminals reload into the same session to apply a new theme, because the terminal palette is fixed when a terminal starts.
 
 ## Tailscale
 

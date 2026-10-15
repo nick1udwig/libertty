@@ -12,7 +12,7 @@ export interface FileClient {
   upload(path: string, file: File, signal: AbortSignal): Promise<void>;
 }
 const folder = '<svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M3 5h10l3 3h13a2 2 0 0 1 2 2v17a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg>';
-const documentIcon = '<svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M7 2h12l7 7v20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"/><path d="M19 2v8h7" fill="none" stroke="#0b0f0d" stroke-width="2"/></svg>';
+const documentIcon = '<svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M7 2h12l7 7v20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"/><path d="M19 2v8h7" fill="none" style="stroke:var(--bg)" stroke-width="2"/></svg>';
 export function fileSize(size: number) { if (size < 1024) return size + ' bytes'; const unit = Math.min(3, Math.floor(Math.log(size) / Math.log(1024))); return (size / 1024 ** unit).toFixed(1) + ' ' + ['bytes', 'KB', 'MB', 'GB'][unit]; }
 function permissions(entry: FileEntry) { return (entry.symlink ? 'l' : entry.directory ? 'd' : '-') + Array.from({ length: 9 }, (_, n) => entry.mode & (1 << (8 - n)) ? 'rwx'[n % 3] : '-').join(''); }
 export function fileBrowser(client: FileClient, initial = '.', changed: (path: string) => void = () => {}) {

@@ -124,6 +124,13 @@ try {
   await page.locator('#font-size').fill('14'); await frame.waitForFunction(() => document.querySelector('#font-size').value === '14');
   await page.locator('#auto-alternatives').uncheck(); await frame.waitForFunction(() => !document.querySelector('#auto-alternatives').checked);
   await page.locator('#auto-alternatives').check(); await page.locator('#tap-alternate-send').uncheck(); await frame.waitForFunction(() => !document.querySelector('#tap-alternate-send').checked); await page.locator('#tap-alternate-send').check();
+  // A theme change restyles the workspace at once and reloads the terminal into the same session with the matching palette.
+  const themeOf = target => target.evaluate(() => [document.documentElement.dataset.theme ?? 'forest', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), document.querySelector('meta[name=theme-color]').content]);
+  const switchTheme = async name => { await frame.evaluate(() => { window.__previousTheme = true; }); await page.locator('#theme').selectOption(name); await frame.waitForFunction(() => !window.__previousTheme && window.__shellState?.ready); };
+  assert.equal(await page.locator('#theme').inputValue(), 'forest'); assert.deepEqual(await themeOf(page), ['forest', '#0b0f0d', '#0b0f0d']);
+  await switchTheme('paper'); assert.deepEqual(await themeOf(page), ['paper', '#fbfaf6', '#fbfaf6']); assert.deepEqual(await themeOf(frame), ['paper', '#fbfaf6', '#fbfaf6']);
+  await switchTheme('ink'); assert.deepEqual(await themeOf(frame), ['ink', '#000', '#000000']);
+  await switchTheme('forest'); assert.deepEqual(await themeOf(page), ['forest', '#0b0f0d', '#0b0f0d']); assert.deepEqual(await themeOf(frame), ['forest', '#0b0f0d', '#0b0f0d']);
   await page.locator('#customize-shortcuts').click(); assert.equal(await page.locator('dialog[open]').count(), 0);
   await page.locator('#add-shortcut').click();
   const shortcut = page.locator('.shortcut-row').last(); await shortcut.locator('.shortcut-label').fill('Help'); await shortcut.locator('select').selectOption('keys'); await shortcut.locator('.binding').fill('Ctrl+H');

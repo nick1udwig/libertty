@@ -10,6 +10,8 @@ import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './bac
 import { Queue } from './queue.ts';
 import { dictationTarget } from './protocol.ts';
 import { UnsentInput, type InputContext } from './unsent-input.ts';
+import { applyTheme, terminalThemes, watchSystemTheme } from './theme.ts';
+import { adaptDarkAppColors } from './terminal-colors.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { TerminalFocus } from './terminal-focus.ts';
@@ -120,6 +122,10 @@ function send(message: ClientMessage): boolean {
   if (transport.socket?.readyState !== WebSocket.OPEN) return false;
   transport.socket.send(encodeWire(message, transport.socket.protocol)); return true;
 }
+// Ghostty fixes its ANSI palette when the terminal is created, so a theme change reloads this document and replays the session.
+const terminalTheme = applyTheme();
+function applyTerminalTheme() { if (applyTheme() !== terminalTheme) location.reload(); }
+watchSystemTheme(applyTerminalTheme);
 const fontSizeInput = $<HTMLInputElement>('font-size');
 try {
   const saved = JSON.parse(localStorage.getItem('termai.fontSizePt') || 'null');
@@ -131,8 +137,9 @@ const fontFamily = getComputedStyle(document.documentElement).fontFamily;
 const [ghostty] = await Promise.all([Ghostty.load(), document.fonts.load(`14px ${fontFamily}`).catch(() => {})]);
 const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 / 3, fontFamily,
   scrollback: 5000, cursorBlink: true, smoothScrollDuration: 0,
-  theme: { background: '#0b0f0d', foreground: '#dfe7e1', cursor: '#a8f0a0', selectionBackground: '#2e4732', green: '#a8f0a0', cyan: '#8fd3e0', blue: '#93b4d8', yellow: '#e8c27a', red: '#f09a9a' } });
+  theme: terminalThemes[terminalTheme] });
 term.open($('terminal'));
+if (terminalTheme === 'paper') adaptDarkAppColors(term.renderer as unknown as Parameters<typeof adaptDarkAppColors>[0], terminalThemes.paper);
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
 const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
@@ -361,6 +368,7 @@ $('customize-shortcuts').onclick = () => { $<HTMLDialogElement>('options-dialog'
 renderShortcuts();
 function applySettings() {
   try {
+    applyTerminalTheme();
     const font = JSON.parse(localStorage.getItem('termai.fontSizePt') || '10');
     if (typeof font === 'number') { fontSizeInput.value = String(font); fontSizeInput.dispatchEvent(new Event('input')); }
     for (const [id, value] of [['auto-alternatives', localStorage.getItem('termai.autoAlternatives') !== 'false' && localStorage.getItem('termai.justRun') !== 'true'], ['tap-alternate-send', localStorage.getItem('termai.tapAlternateSend') !== 'false']] as const) {
@@ -372,7 +380,7 @@ function applySettings() {
     sizeTerminal();
   } catch { /* Keep valid settings if stored data is unavailable or malformed. */ }
 }
-window.addEventListener('storage', event => { if (event.key === null || ['termai.herdrLayout', 'termai.fontSizePt', 'termai.autoAlternatives', 'termai.tapAlternateSend', 'termai.shortcuts', 'termai.readingPhrases', 'termai.justRun'].includes(event.key)) applySettings(); });
+window.addEventListener('storage', event => { if (event.key === null || ['termai.herdrLayout', 'termai.fontSizePt', 'termai.autoAlternatives', 'termai.tapAlternateSend', 'termai.shortcuts', 'termai.readingPhrases', 'termai.justRun', 'termai.theme'].includes(event.key)) applySettings(); });
 function copyTerminalText(text: string) {
   // Clipboard access needs a focused document. Focus the frame itself without
   // enabling its textarea or opening the software keyboard after a gesture.

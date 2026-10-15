@@ -11,6 +11,7 @@ import {
 import { PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
 import { defaultReadingPhrases, readingPhrases } from './reading-request.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
+import { applyTheme, readTheme, watchSystemTheme } from './theme.ts';
 import { defaults, validateShortcuts } from './shortcuts.ts';
 import type { WorkspaceServices, WorkspaceState } from './workspace-storage.ts';
 export function currentShortcuts() {
@@ -83,6 +84,7 @@ export function createWorkspaceSettings(options: Options) {
   function renderSettings() {
     herdrNotifications.render($('herdr-notifications'), workspace.backends, notice);
     renderPluginSettings();
+    select('theme').value = readTheme();
     select('herdr-layout').value =
       saved<string>('herdrLayout', 'reflow') === 'full-width' ? 'full-width' : 'reflow';
     select('herdr-strip').value =
@@ -204,6 +206,15 @@ export function createWorkspaceSettings(options: Options) {
       }
     })();
   };
+  select('theme').onchange = () => {
+    preferencesChanged('theme', select('theme').value);
+    applyTheme();
+  };
+  applyTheme();
+  watchSystemTheme(() => applyTheme());
+  window.addEventListener('storage', (event) => {
+    if (event.key === null || event.key === 'termai.theme') applyTheme();
+  });
   select('herdr-strip').onchange = () =>
     preferencesChanged('herdrStrip', select('herdr-strip').value);
   select('herdr-layout').onchange = () =>

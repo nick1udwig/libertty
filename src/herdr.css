@@ -17,8 +17,9 @@
 .herdr-status-dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--faint);flex:none}
 [data-status=idle] .herdr-status-dot{border-color:var(--herdr-idle)}
 [data-status=done] .herdr-status-dot{background:var(--herdr-done);border-color:var(--herdr-done)}
-[data-status=working] .herdr-status-dot{background:var(--herdr-working);border-color:var(--herdr-working)}
-[data-status=blocked] .herdr-status-dot{background:var(--herdr-blocked);border-color:var(--herdr-blocked)}
+/* Shapes keep the statuses distinct on grayscale screens: idle is a ring, done a dot, working a half-filled ring and blocked a square. */
+[data-status=working] .herdr-status-dot{background:linear-gradient(90deg,var(--herdr-working) 50%,transparent 50%);border-color:var(--herdr-working)}
+[data-status=blocked] .herdr-status-dot{width:9px;height:9px;border-radius:1px;background:var(--herdr-blocked);border-color:var(--herdr-blocked)}
 .herdr-agent-add,.herdr-tabs-toggle{display:grid;place-items:center;flex:none;min-height:34px;min-width:34px;padding:0;border-radius:var(--r-md);background:none;border:1px solid var(--line-strong);color:var(--text-2);font-size:20px}
 .herdr-agent-add:hover,.herdr-tabs-toggle:hover{background:var(--hover);color:var(--text)}
 .herdr-agent-add:active,.herdr-tabs-toggle:active{background:var(--press)}
