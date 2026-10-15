@@ -425,14 +425,13 @@ export class InlineSuggestions {
       if (request) this.openRead(request.operand);
       return;
     }
-    if (this.tapToSend) { this.host.execute(text); this.term.focus(); return; }
+    if (this.tapToSend) { this.host.execute(text); return; }
     const request = ++this.generation; this.controller?.abort(); this.loading = false;
     this.collapse();
     this.line.reset(text);
     if (await this.host.replace(text) && request === this.generation) {
       this.selected = text; this.line.reset(text); this.open = false; this.render();
     }
-    this.term.focus();
   }
   private openRead(operand: string) { this.host.execute('look at ' + operand); }
   private render() {

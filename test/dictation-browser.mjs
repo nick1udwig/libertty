@@ -256,8 +256,12 @@ try {
   assert.equal(await page.evaluate(() => window.__sent.some(message => ['repair', 'replace'].includes(message.type))), false, 'Backend dictation must repair and apply without a browser relay');
   assert.ok(await page.evaluate(() => window.__messages.some(message => message.type === 'repair-result' && message.source === 'dictation' && message.accepted)));
   await page.screenshot({ path: '/tmp/termai-voxtype-web-alternatives.png' });
-  await page.locator('.alternative-choice').filter({ hasText: 'git init' }).click();
+  const terminalInput = page.locator('#terminal textarea');
+  const keyboardOpen = () => terminalInput.evaluate(element => element === document.activeElement && !element.readOnly);
+  assert.equal(await keyboardOpen(), false, 'Microphone alternatives leave the keyboard closed');
+  await page.locator('.alternative-choice').filter({ hasText: 'git init' }).tap();
   await page.waitForFunction(() => window.__out.includes('Initialized empty Git repository'));
+  assert.equal(await keyboardOpen(), false, 'Sending an alternate must leave the keyboard closed');
   assert.equal(await access(path.join(fixture, '.git')).then(() => true, () => false), true);
   const beforePermission = voice.currentId;
   await page.evaluate(() => { window.__holdPermission = true; window.__messages = []; });
@@ -454,6 +458,20 @@ try {
   await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'git init');
   assert.equal(repairRequests.length, 0, 'Native dictation uses one repair transaction on the terminal connection');
   assert.ok(await page.evaluate(() => window.__sent.some(message => message.type === 'repair')));
+  await page.locator('#menu-button').click(); await page.locator('#tap-alternate-send').uncheck();
+  await page.getByRole('button', { name: 'Close session options' }).click();
+  for (const focused of [false, true]) {
+    for (const [selector, text] of [['.literal-choice', 'Get in it.'], ['.alternative-choice:not(.literal-choice)', 'git init']]) {
+      await page.locator('#alternatives-toggle').tap();
+      if (focused) await page.evaluate(() => window.__testTerminal.focus()); else await terminalInput.evaluate(element => element.blur());
+      assert.equal(await keyboardOpen(), focused, 'Set the keyboard state before choosing an alternate');
+      const before = await page.evaluate(() => window.__messages.length);
+      await page.locator(selector).tap();
+      await page.waitForFunction(before => window.__messages.slice(before).some(message => message.type === 'edit-result' && message.accepted), before);
+      assert.equal(await page.evaluate(() => window.__sent.filter(message => message.type === 'replace').at(-1).text), text);
+      assert.equal(await keyboardOpen(), focused, 'Inserting an alternate preserves the current keyboard state');
+    }
+  }
   const outer = await page.context().newPage(); outer.setDefaultTimeout(15000); await outer.goto(base);
   if (await outer.locator('#backend-login').isVisible()) { await outer.locator('#backend-token').fill('feature-test-pairing-token-123456789'); await outer.locator('#backend-login-form button[type=submit]').click(); }
   await outer.locator('#terminal-stack > iframe').waitFor();
