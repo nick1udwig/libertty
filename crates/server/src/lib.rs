@@ -14,6 +14,7 @@ pub mod help;
 pub mod herdr;
 pub mod herdr_action;
 pub mod herdr_history;
+pub mod herdr_metadata;
 pub mod herdr_redraw;
 mod herdr_snapshot;
 pub mod herdr_state;

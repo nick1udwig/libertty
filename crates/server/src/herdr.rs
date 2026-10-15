@@ -9,7 +9,7 @@ use std::{
 };
 use termai_engine::{repair::shell_quote, validation::Environment};
 use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite},
     net::UnixStream,
 };
 use tokio_util::sync::CancellationToken;
@@ -92,6 +92,7 @@ pub struct Target {
     pub env: Environment,
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
     pub repairs: RepairSessions,
+    pub shared: crate::herdr_metadata::Shared,
 }
 #[derive(Clone, Default)]
 pub struct RepairSessions(Arc<tokio::sync::Mutex<HashMap<String, RepairContext>>>);
@@ -144,6 +145,15 @@ pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
 pub type Connection = Box<dyn Stream>;
 impl Target {
+    pub(crate) async fn validate_terminal(&self, terminal: &Terminal) -> Result<(), String> {
+        let response = self
+            .request("pane.get", json!({"pane_id":terminal.pane_id}))
+            .await?;
+        if response["pane"]["terminal_id"] != terminal.terminal_id {
+            return Err("This agent ended or moved. Reopen its tab. No input was sent.".into());
+        }
+        Ok(())
+    }
     pub async fn shell_input(&self, pane: &str) -> Result<Option<ShellInput>, String> {
         let response = self
             .request("pane.process_info", json!({"pane_id":pane}))
@@ -186,6 +196,7 @@ impl Target {
         let pane = snapshot
             .terminal(terminal)
             .ok_or("This terminal has ended.")?;
+        self.validate_terminal(pane).await?;
         let shell = self
             .shell_input(&pane.pane_id)
             .await?
@@ -238,6 +249,7 @@ impl Target {
             env: std::env::vars().collect(),
             remote: None,
             repairs: Default::default(),
+            shared: Default::default(),
         })
     }
     pub fn path(&self) -> Result<String, String> {
@@ -259,46 +271,17 @@ impl Target {
             .map_err(|_| "Cannot connect to Herdr. Start its server on this machine first.".into())
     }
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
-        let work = async {
-            let mut stream = self.open().await?;
-            let id = storage::random_hex(16);
-            stream
-                .write_all(
-                    format!("{}\n", json!({"id":id,"method":method,"params":params})).as_bytes(),
-                )
-                .await
-                .map_err(|_| {
-                    "Cannot connect to Herdr. Start its server on this backend first.".to_owned()
-                })?;
-            let mut input = BufReader::new(stream);
-            loop {
-                let reply = read_line(&mut input)
-                    .await?
-                    .ok_or("Herdr disconnected before responding.")?;
-                if reply["id"] != id {
-                    continue;
-                }
-                if truthy(&reply["error"]) {
-                    return Err(reply["error"]["message"]
-                        .as_str()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or("Herdr rejected the action.")
-                        .into());
-                }
-                return Ok(reply.get("result").cloned().unwrap_or(Value::Null));
-            }
-        };
-        let timeout = if method.starts_with("worktree.") {
-            60
-        } else {
-            5
-        };
-        tokio::time::timeout(Duration::from_secs(timeout), work)
+        self.shared
+            .resource(self)?
+            .request(self, method, params)
             .await
-            .map_err(|_| "Herdr did not respond.".to_owned())?
     }
     pub async fn snapshot(&self) -> Result<Snapshot, String> {
-        normalize(&self.request("session.snapshot", json!({})).await?)
+        self.shared
+            .resource(self)?
+            .snapshot(self)
+            .await
+            .map(|snapshot| (*snapshot).clone())
     }
     pub async fn options(&self) -> Result<Value, String> {
         static KIND: LazyLock<Regex> =
@@ -327,7 +310,21 @@ impl Target {
         let input: Action = input
             .try_into()
             .map_err(|error| format!("Invalid Herdr action: {error}"))?;
-        let snapshot = self.snapshot().await?;
+        // Directory choices and checkout confirmations must reflect current metadata.
+        let resource = self.shared.resource(self)?;
+        let snapshot = if matches!(
+            &input,
+            Action::DeleteWorktree { .. }
+                | Action::ListWorktrees { .. }
+                | Action::NewWorktree { .. }
+                | Action::OpenWorktree { .. }
+                | Action::CreateSpace { .. }
+                | Action::Create { .. }
+        ) {
+            resource.refresh_snapshot(self).await?
+        } else {
+            resource.snapshot(self).await?
+        };
         let spaces = &snapshot.spaces;
         let terminals = &snapshot.terminals;
         let space = input
@@ -426,6 +423,7 @@ impl Target {
                             && t.workspace_id.as_deref() == Some(space.id.as_str())
                     })
                     .ok_or("Choose a running terminal in this space.")?;
+                self.validate_terminal(terminal).await?;
                 let created = self.space_request("pane.split", json!({"workspace_id":space.id,"target_pane_id":terminal.pane_id,"direction":direction,"focus":false})).await?;
                 Ok(json!({"workspaceId":space.id,"terminalId":created["pane"]["terminal_id"]}))
             }
@@ -547,6 +545,7 @@ impl Target {
                     .iter()
                     .find(|t| t.terminal_id == *id)
                     .ok_or("This agent has ended.")?;
+                self.validate_terminal(agent).await?;
                 match action {
                     Action::Rename { name: label, .. } => {
                         self.request(
@@ -724,6 +723,7 @@ impl Target {
             env,
             remote: Some(remote.clone()),
             repairs: Default::default(),
+            shared: Default::default(),
         })
     }
     pub async fn preview(&self, agent: &Terminal) -> String {
@@ -777,7 +777,7 @@ impl Lines {
 fn array<'a>(object: &'a Value, field: &str) -> &'a [Value] {
     object[field].as_array().map(Vec::as_slice).unwrap_or(&[])
 }
-fn truthy(value: &Value) -> bool {
+pub(crate) fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(v) => *v,
@@ -853,98 +853,32 @@ pub async fn metadata(
     send: tokio::sync::mpsc::Sender<Metadata>,
     cancel: CancellationToken,
 ) {
-    let mut previous = None;
-    loop {
-        if cancel.is_cancelled() {
-            break;
+    let resource = match target.shared.resource(&target) {
+        Ok(resource) => resource,
+        Err(message) => {
+            let _ = send.send(Metadata::Error { message }).await;
+            return;
         }
-        let work = async {
-            let snapshot = Arc::new(target.snapshot().await?);
-            if previous.as_ref() != Some(&snapshot) {
-                send.send(Metadata::Snapshot {
-                    snapshot: snapshot.clone(),
-                })
-                .await
-                .map_err(|_| "Viewer closed".to_owned())?;
-                previous = Some(snapshot.clone());
+    };
+    let mut subscription = resource.subscribe(target);
+    loop {
+        let update = subscription.receive.borrow_and_update().clone();
+        if let Some(update) = update {
+            tokio::select! {
+                biased;
+                _ = cancel.cancelled() => break,
+                result = send.send(update) => if result.is_err() { break; }
             }
-            let stream = target.open().await?;
-            let mut stream = BufReader::new(stream);
-            let mut subscriptions: Vec<Value> = [
-                "pane.agent_detected",
-                "pane.updated",
-                "pane.created",
-                "pane.closed",
-                "pane.moved",
-                "tab.created",
-                "tab.closed",
-                "tab.renamed",
-                "workspace.created",
-                "workspace.closed",
-                "workspace.renamed",
-                "workspace.moved",
-                "workspace.reordered",
-            ]
-            .iter()
-            .map(|kind| json!({"type":kind}))
-            .collect();
-            subscriptions.extend(
-                snapshot
-                    .agents
-                    .iter()
-                    .map(|a| json!({"type":"pane.agent_status_changed","pane_id":a.pane_id})),
-            );
-            stream.get_mut().write_all(format!("{}\n",json!({"id":"events","method":"events.subscribe","params":{"subscriptions":subscriptions}})).as_bytes()).await.map_err(|e| e.to_string())?;
-            let mut pane_key = pane_key(&snapshot);
-            let mut lines = Lines::default();
-            loop {
-                let reply = tokio::select! { _=cancel.cancelled()=>return Ok(()), reply=lines.read(&mut stream)=>reply?, _=tokio::time::sleep(Duration::from_secs(10))=>Some(json!({})) };
-                let reply = reply.ok_or("Herdr disconnected before responding.")?;
-                if truthy(&reply["error"]) {
-                    return Err(reply["error"]["message"]
-                        .as_str()
-                        .unwrap_or("Herdr rejected status subscriptions.")
-                        .into());
-                }
-                let delay = tokio::time::sleep(Duration::from_millis(40));
-                tokio::pin!(delay);
-                loop {
-                    let reply = tokio::select! { biased; _=cancel.cancelled()=>return Ok(()), _=&mut delay=>break, reply=lines.read(&mut stream)=>reply? };
-                    let reply = reply.ok_or("Herdr disconnected before responding.")?;
-                    if truthy(&reply["error"]) {
-                        return Err(reply["error"]["message"]
-                            .as_str()
-                            .unwrap_or("Herdr rejected status subscriptions.")
-                            .into());
-                    }
-                }
-                let snapshot = Arc::new(target.snapshot().await?);
-                let changed = pane_key != self::pane_key(&snapshot);
-                pane_key = self::pane_key(&snapshot);
-                if previous.as_ref() != Some(&snapshot) {
-                    send.send(Metadata::Snapshot {
-                        snapshot: snapshot.clone(),
-                    })
-                    .await
-                    .map_err(|_| "Viewer closed".to_owned())?;
-                    previous = Some(snapshot);
-                }
-                if changed {
-                    break;
-                }
-            }
-            Ok::<_, String>(())
-        };
-        let result = tokio::select! { biased; _=cancel.cancelled()=>break, result=work=>result };
-        if let Err(message) = result {
-            if send.send(Metadata::Error { message }).await.is_err() {
-                break;
-            }
-            tokio::select! { biased; _=cancel.cancelled()=>break, _=tokio::time::sleep(Duration::from_secs(2))=>{} }
+        }
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => break,
+            result = subscription.receive.changed() => if result.is_err() { break; }
         }
     }
 }
-fn pane_key(snapshot: &Snapshot) -> Vec<String> {
+
+pub(crate) fn pane_key(snapshot: &Snapshot) -> Vec<String> {
     let mut result: Vec<_> = snapshot
         .agents
         .iter()

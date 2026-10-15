@@ -21,6 +21,11 @@ Cancellation, attachment, prompt and revision guards protect concurrent edits.
 The adapters retain attachment, shell and screen checks when applying text.
 Rust terminal replies use the `ServerMessage` enum and are checked against the shared wire schemas.
 HTTP requests and normalized Herdr snapshots use typed structures, while unknown saved notification-device fields are preserved.
+Herdr metadata viewers and notification watches share one subscription per socket and SSH transport, with cached snapshots available to routes while listeners are active.
+Herdr v0.9.3 closes ordinary RPC connections after one response, so connection reduction comes from sharing subscriptions and reusing cached snapshots.
+Mutations invalidate cached metadata, and failed actions are never replayed.
+Terminal input and terminal-specific mutations validate the live pane identity before applying text or changing a terminal.
+Actions choosing a current directory or confirming a checkout refresh metadata before using those values.
 Backend microphone dictation repairs its transcript locally and publishes alternatives.
 Herdr additionally checks ownership, foreground shell identity and the last dictated span before replacement.
 

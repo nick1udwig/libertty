@@ -436,11 +436,8 @@ impl View {
             if self.cancel.is_cancelled() {
                 return Err("The agent view changed. No input was sent.".into());
             }
-            let snapshot = self.target.snapshot().await?;
-            let current = snapshot.terminal(&self.agent.terminal_id);
-            if current.is_none_or(|terminal| terminal.pane_id != self.agent.pane_id)
-                || self.cancel.is_cancelled()
-            {
+            self.target.validate_terminal(&self.agent).await?;
+            if self.cancel.is_cancelled() {
                 return Err("This agent ended or moved. Reopen its tab. No input was sent.".into());
             }
             if let Some((revision, id)) = guard {

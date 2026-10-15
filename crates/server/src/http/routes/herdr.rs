@@ -96,6 +96,7 @@ pub(super) async fn api_herdr_captured(
         socket_path: Some(socket_path.clone()),
         env,
         repairs: Default::default(),
+        shared: Default::default(),
     };
     target.ensure(&source.state().cwd).await.map_err(fail)?;
     if !app
