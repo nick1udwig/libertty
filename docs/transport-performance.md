@@ -222,3 +222,12 @@ Each viewer compares against its own last delivered text, so a coalesced shared 
 Missing bases request one fresh baseline, and short unrelated replacements use a full message.
 Matching live native screens retain the latest history text and defer its terminal parser until fallback, reflow or growing scrollback requires it.
 Legacy clients continue to receive complete history messages.
+
+## Predicted prompt echo
+
+A faint text overlay predicts printable ASCII appended to a known Bash input line before its remote echo arrives.
+The authoritative terminal buffer, selection, acknowledgements and submitted input retain their existing behavior.
+Incoming output confirms matching prefixes and removes the overlay without writing the predicted text into the terminal again.
+Unknown editing, controls, Unicode input, line wrapping, geometry changes, disconnected sessions and foreground programs suppress prediction.
+A new known prompt enables prediction again, and unconfirmed overlays expire after four seconds.
+The browser harness delays input packets to verify prediction appears before the server receives them and disappears when authoritative output arrives.

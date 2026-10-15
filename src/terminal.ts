@@ -12,6 +12,7 @@ import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { TerminalFocus } from './terminal-focus.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
+import { TerminalEcho } from './predicted-echo.ts';
 import { TerminalHistory } from './terminal-history.ts';
 import { TerminalProjection } from './terminal-projection.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
@@ -104,6 +105,7 @@ async function api<T>(url: string, data?: unknown, signal?: AbortSignal): Promis
   return requestJSON<T>(endpoint(url), data, { token: () => accessToken, signal });
 }
 function send(message: ClientMessage): boolean {
+  if (['paste', 'replace', 'command', 'dictation-paste', 'input-line', 'repair'].includes(message.type)) echo.cancel();
   if ((message.type === 'dictation' && message.action === 'start') || message.type === 'dictation-paste') {
     try { message.readingPhrases = readingPhrases(JSON.parse(localStorage.getItem('termai.readingPhrases') || 'null')); } catch { message.readingPhrases = ['look at']; }
   }
@@ -128,6 +130,7 @@ const fit = new FitAddon(); term.loadAddon(fit);
 const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
 const projection = herdrTerminal ? new TerminalProjection(term, ghostty) : undefined;
 const terminalViewport = $('terminal-viewport');
+const echo = new TerminalEcho(term, $('terminal'));
 const presentation = new TerminalPresentation(terminalViewport, () => {
   updateRun();
   const pending = pendingPaintInput; pendingPaintInput = undefined;
@@ -158,7 +161,7 @@ function drain() {
   }
   if (chunks.length) {
     preserveScrollback(term, () => term.write(chunks.join(''))); after = last;
-    send({ type: 'ack', seq: after });
+    send({ type: 'ack', seq: after }); echo.output();
   }
   inline.refresh();
   if (queue.length) scheduleDrain();
@@ -228,8 +231,9 @@ function rawInput(data: string) {
   if (herdrTerminal && !herdrReady) { toast('Connecting to the agent. Input was not sent.'); return; }
   if (capturedConnection) { toast('Finish opening the connection first.'); return; }
   if (ctrl) { if (/^[a-zA-Z]$/.test(data)) data = String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64); setCtrl(false); }
-  if (!inline.raw(data)) return;
-  if (send({ type: 'input', data })) { state.inputRevision++; term.scrollToBottom(); }
+  const predict = inline.predictionReady && !queue.length && !herdrLayoutPending;
+  if (!inline.raw(data)) { echo.cancel(); return; }
+  if (send({ type: 'input', data })) { term.scrollToBottom(); echo.input(data, state, predict); state.inputRevision++; }
   else toast('Disconnected. Input was not sent.');
 }
 function replaceLine(text: string): Promise<boolean> {
@@ -438,12 +442,12 @@ function socketMessage(event: MessageEvent) {
       if (projection?.frame(message) && !herdrLayoutPending) scheduleHerdrRendered();
       revealHerdrLayout();
       if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
-    } finally { if (message.seq !== undefined) send({ type: 'ack', seq: message.seq }); }
+    } finally { echo.output(); if (message.seq !== undefined) send({ type: 'ack', seq: message.seq }); }
   }
   if (message.type === 'screen' || message.type === 'screen-delta') {
     const text = history.receive(message);
     if (text === undefined || herdrLayoutPending || herdrParked) return;
-    projection?.update(text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return;
+    projection?.update(text); echo.output(); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return;
   }
   if (message.type === 'input-line') {
     const intact = message.prompt === state.prompt && message.revision === state.inputRevision && state.ready;
@@ -524,7 +528,7 @@ function socketMessage(event: MessageEvent) {
     state = message.state; notify('terminal-state', { state }); $('cwd').textContent = state.cwd; $('cwd').title = state.cwd;
     dictation.prompt();
     updateRun();
-    inline.onState(state);
+    inline.onState(state); echo.state(state);
     revealReplay();
   } else if (message.type === 'edit-result') {
     edits.get(message.id)?.(message.accepted); edits.delete(message.id);
@@ -537,6 +541,7 @@ function socketMessage(event: MessageEvent) {
 
 }
 function socketClosed(event?: CloseEvent) {
+  echo.reset();
   if (pendingPaintInput) { pendingPaintInput = undefined; toast('Connection changed. Queued input was not sent.'); }
   presentation.freeze(); replayState = false;
   herdrReady = false;
@@ -572,6 +577,7 @@ document.addEventListener('pointerdown', () => transport.activity(), { passive: 
 $('login-form').onsubmit = e => { e.preventDefault(); void connect($<HTMLInputElement>('token').value); };
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
+    echo.cancel();
     presentation.freeze();
     // Dictation may keep the transport alive through lock; geometry still
     // belongs to the desktop while this pane is no longer visible.

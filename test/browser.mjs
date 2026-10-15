@@ -66,7 +66,7 @@ try {
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'repair-result') window.__lastRepairResult = message; if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
-      send(data) { const message = window.__wireSent(data); (window.__sent ||= []).push(message); if (message.type === 'resize') window.__terminalSize = message; if (['repair', 'repair-cancel'].includes(message.type) && window.__repairDelay) setTimeout(() => { if (this.readyState === 1) super.send(data); }, window.__repairDelay); else super.send(data); }
+      send(data) { const message = window.__wireSent(data); (window.__sent ||= []).push(message); if (message.type === 'resize') window.__terminalSize = message; if (message.type === 'input' && window.__echoDelay) setTimeout(() => { if (this.readyState === 1) super.send(data); }, window.__echoDelay); else if (['repair', 'repair-cancel'].includes(message.type) && window.__repairDelay) setTimeout(() => { if (this.readyState === 1) super.send(data); }, window.__repairDelay); else super.send(data); }
     };
   });
   const workers = []; page.on('worker', worker => workers.push(worker));
@@ -79,6 +79,19 @@ try {
   await page.locator('#token').fill(pairingToken); await page.locator('#login-form button').click(); await ready(page);
   assert.equal(await page.locator('#token').inputValue(), '');
   assert.equal(await page.evaluate(() => window.__engineMode), 'server');
+  await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+  await delay(100); await focusTerminal(page);
+  await page.evaluate(() => { window.__echoDelay = 1200; window.__terminalOutput = ''; });
+  await page.keyboard.type('echo');
+  await page.waitForFunction(() => !document.querySelector('.predicted-echo').hidden && document.querySelector('.predicted-echo').textContent === 'echo', undefined, { timeout: 500 });
+  assert.equal(await page.evaluate(() => window.__terminalOutput), '', 'Predicted text appears before the delayed keys reach the server');
+  assert.equal(await page.locator('.predicted-echo>span').first().evaluate(el => getComputedStyle(el).opacity), '0.45');
+  await mkdir(path.join(root, '.test-artifacts'), { recursive: true });
+  await page.screenshot({ path: path.join(root, '.test-artifacts/predicted-echo.png') });
+  await page.waitForFunction(() => window.__terminalOutput.includes('echo'));
+  await page.locator('.predicted-echo').waitFor({ state: 'hidden', timeout: 500 });
+  await page.evaluate(() => { window.__echoDelay = 0; });
+  const echoPrompt = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, echoPrompt);
   // Prompt caching must still notice shell definitions and newly installed executables.
   await command(page, 'alias freshalias=pwd; freshfunction() { :; }');
   const suggestAtPrompt = text => page.evaluate(async text => (await (await fetch(new URL('api/suggest', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })).json()).candidates, text);

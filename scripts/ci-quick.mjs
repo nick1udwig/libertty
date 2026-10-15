@@ -47,6 +47,7 @@ const tests = [
   'plugins.test.ts',
   'push-worker.test.ts',
   'publish-release.test.mjs',
+  'predicted-echo.test.ts',
   'queue.test.ts',
   'reconnecting-socket.test.ts',
   'service-worker.test.ts',

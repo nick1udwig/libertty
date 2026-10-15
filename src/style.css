@@ -61,3 +61,10 @@ dialog{font-family:var(--font-ui);color:var(--text);background:var(--overlay);bo
 .terminal-loading-bar::after{content:'';position:absolute;inset:0;background:var(--accent);transform:translateX(-100%);animation:terminal-progress 1.4s ease-in-out infinite}
 @keyframes terminal-progress{to{transform:translateX(100%)}}
 @media(prefers-reduced-motion:reduce){.terminal-loading-bar::after{animation:none;transform:none;opacity:.7}}
+
+.predicted-echo{position:absolute;white-space:pre;pointer-events:none;user-select:none;background:#0b0f0d;color:#dfe7e1;z-index:1}
+
+.predicted-echo:not([hidden]){display:grid;grid-auto-flow:column}
+
+.predicted-echo>span{opacity:.45}
+.predicted-echo::after{content:"";position:absolute;left:100%;height:100%;width:1px;background:#a8f0a0;opacity:.45}
