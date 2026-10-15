@@ -597,6 +597,15 @@ try {
   await until(async () => await spaceTab('w2').count() === 0, 'space removed after server close');
   assert.ok(!fixture.snapshot.workspaces.some(w => w.workspace_id === 'w2')); assert.ok(!fixture.snapshot.panes.some(p => p.workspace_id === 'w2'));
   assert.deepEqual(fixture.actions.filter(a => a.method === 'workspace.close').at(-1).params, { workspace_id: 'w2', close_group: false });
+  fixture.addSpace('desktop-closed', 'Desktop close'); fixture.addTerminal('desktop-closed', 'Desktop shell', false);
+  await spaceTab('desktop-closed').click(); terminal = await agentFrame();
+  const closureNotices = await page.evaluate(() => window.__notices.length);
+  fixture.pauseEvents(); fixture.closeSpace('desktop-closed');
+  await until(async () => await spaceTab('desktop-closed').count() === 0, 'external close reconciles the space list before its metadata event');
+  terminal = await agentFrame();
+  assert.equal(await spaceTab('w1').getAttribute('aria-selected'), 'true', 'External close selects a surviving space');
+  assert.deepEqual(await page.evaluate(index => window.__notices.slice(index), closureNotices), [], 'Closing a pane must not show an error');
+  fixture.pauseEvents(false);
   await page.reload(); await spaceTab('w1').waitFor(); assert.equal(await spaceTab('w2').count(), 0, 'Closed space stays closed after reload');
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   // The primary backend's label is installation-specific; choose its single control.
@@ -623,6 +632,13 @@ try {
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click(); await page.locator('#herdr-notifications button').first().click();
   await until(async () => !(await page.evaluate(() => localStorage.getItem('termai.notifications.primary'))));
   assert.ok(notificationRequests.some(request => request.url.endsWith('/unsubscribe')));
+  await page.locator('#nav-terminals').click(); terminal = await agentFrame();
+  const lastClosureNotices = await page.evaluate(() => window.__notices.length);
+  fixture.pauseEvents(); fixture.closeSpace('w1');
+  await until(async () => await spaceTab('w1').count() === 0 && await page.locator('.herdr-empty:visible').count() === 1, 'closing the last space shows the empty state');
+  assert.equal(await page.locator('.herdr-view:visible iframe').count(), 0, 'The last closed terminal is removed');
+  assert.deepEqual(await page.evaluate(index => window.__notices.slice(index), lastClosureNotices), [], 'Closing the last space must not show an error');
+  fixture.pauseEvents(false);
   assert.deepEqual(errors, []); console.log('Herdr browser checks passed: automatic discovery, shared direct input/shortcuts/touch scroll/copy, live-output selection and wrapped/labeled link taps, native mobile sizing/release, desktop reflow/full-width layouts and panning, PWA enable/disable/scoped workers/focus/click routing, session labels, hold menus, ordering, persistence, server pane/space close, sounds and scoped tickets.');
 } catch (error) { await page?.screenshot({ path: '/tmp/termai-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all(page.frames().map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('.selection-notice')?.textContent, pending: document.querySelector('#terminal-viewport')?.className, parentVisible: frameElement && getComputedStyle(frameElement).visibility, layout: window.__herdrMessages?.filter(m => m.type === 'herdr-layout'), rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: JSON.stringify(window.__herdrMessages?.filter(m => m.type === 'herdr-frame').map(m => ({width:m.width,height:m.height,full:m.full}))), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('termai.hosts'), tabs: localStorage.getItem('termai.tabs') })).catch(() => ({}))); throw error; }
 finally { clearInterval(liveOutput); await browser?.close(); backend.kill('SIGTERM'); await exited; sshd?.kill('SIGTERM'); for (const socket of daemon.clients) socket.terminate(); await new Promise(resolve => daemon.close(resolve)); await fixture.close(); }

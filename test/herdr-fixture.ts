@@ -8,6 +8,7 @@ export async function herdrFixture() {
   const sockets = new Set<Socket>(), subscribers = new Set<Socket>();
   const actions: any[] = [];
   let closeError = '';
+  let eventsPaused = false;
   let createdSpaces = 0;
   let frameSequence = 0;
   let foregroundGroup = 2;
@@ -26,7 +27,13 @@ export async function herdrFixture() {
   const controllers = new Map<string, { socket: Socket; size: { width: number; height: number } }>();
   const cursors = new Map<string, { x: number; y: number; visible?: boolean }>();
   const send = (socket: Socket, value: unknown) => { if (!socket.destroyed) socket.write(JSON.stringify(value) + '\n'); };
-  const event = () => { for (const socket of subscribers) send(socket, { type: 'event', event: { type: 'pane.agent_status_changed' } }); };
+  const event = () => { if (!eventsPaused) for (const socket of subscribers) send(socket, { type: 'event', event: { type: 'pane.agent_status_changed' } }); };
+  const closeSpace = (workspaceId: string) => {
+    for (const pane of snapshot.panes.filter(pane => pane.workspace_id === workspaceId)) controllers.get(pane.terminal_id)?.socket.end();
+    remove(snapshot.agents, agent => agent.workspace_id === workspaceId); remove(snapshot.panes, pane => pane.workspace_id === workspaceId);
+    remove(snapshot.tabs, tab => tab.workspace_id === workspaceId); remove(snapshot.workspaces, workspace => workspace.workspace_id === workspaceId);
+    event();
+  };
   const updateFrame = async (paneId: string, cursor?: { x: number; y: number; visible?: boolean }) => {
     const pane = snapshot.panes.find(p => p.pane_id === paneId);
     if (!pane) return;
@@ -107,11 +114,10 @@ export async function herdrFixture() {
         else if (request.method === 'workspace.close') {
           actions.push(request);
           if (closeError) { send(socket, { id: request.id, error: { message: closeError } }); continue; }
-          remove(snapshot.agents, a => a.workspace_id === p.workspace_id); remove(snapshot.panes, pane => pane.workspace_id === p.workspace_id);
-          remove(snapshot.tabs, tab => tab.workspace_id === p.workspace_id); remove(snapshot.workspaces, workspace => workspace.workspace_id === p.workspace_id);
-          reply({ type: 'ok' }); event();
+          closeSpace(p.workspace_id); reply({ type: 'ok' });
         }
         else if (request.method === 'session.snapshot') reply({ type: 'session_snapshot', snapshot });
+        else if (['pane.get', 'pane.read', 'pane.process_info'].includes(request.method) && !agent) send(socket, { id: request.id, error: { message: 'Pane not found' } });
         else if (request.method === 'pane.get' && agent) { actions.push(request); reply({ pane: agent }); }
         else if (request.method === 'events.subscribe') {
           if (p.subscriptions.some((s: any) => s.type === 'pane.agent_status_changed' && !s.pane_id)) send(socket, { id: request.id, error: { message: 'pane_id required' } });
@@ -145,6 +151,8 @@ export async function herdrFixture() {
     rename(index: number, label: string) { snapshot.panes[index].label = label; event(); },
     setScreen(index: number, text: string, cursor?: { x: number; y: number; visible?: boolean }, size?: { width: number; height: number }) { const pane = snapshot.panes[index]; if (size) dimensions.set(pane.pane_id, size); cursors.delete(pane.pane_id); screens.set(pane.pane_id, text); void updateFrame(pane.pane_id, cursor); },
     addTerminal,
+    closeSpace,
+    pauseEvents(paused = true) { eventsPaused = paused; if (!paused) event(); },
     setProcessGroup(group: number) { foregroundGroup = group; },
     rejectClose(message = '') { closeError = message; },
     addSpace(id: string, name: string) { snapshot.workspaces.push({ workspace_id: id, label: name, active_tab_id: '' }); event(); },

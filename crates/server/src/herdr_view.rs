@@ -247,6 +247,10 @@ impl View {
                     } else {
                         view.send(ServerMessage::HerdrFrame(frame));
                     }
+                } else if let ServerMessage::ReadingError { message } = frame {
+                    if view.report_error(&message).await {
+                        break;
+                    }
                 } else {
                     view.send(frame);
                 }
@@ -285,13 +289,12 @@ impl View {
                                 }
                             }
                             Err(message) => {
-                                view.send(ServerMessage::ReadingError {
-                                    message: (message.as_ref()).to_string(),
-                                });
-                                view.send.send(Transport::Close(
-                                    1011,
-                                    "Herdr terminal unavailable".into(),
-                                ));
+                                if !view.report_error(&message).await {
+                                    view.send.send(Transport::Close(
+                                        1011,
+                                        "Herdr terminal unavailable".into(),
+                                    ));
+                                }
                                 break;
                             }
                         }
@@ -304,6 +307,32 @@ impl View {
             view.confirm_layout(size, revision, view.begin_layout());
         }
         Ok(view)
+    }
+    async fn report_error(&self, message: &str) -> bool {
+        // A pane can close before its metadata event reaches the viewer.
+        let current = tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => return true,
+            snapshot = async {
+                self.target.shared.resource(&self.target)?
+                    .refresh_snapshot(&self.target).await
+            } => snapshot,
+        };
+        let ended = current.is_ok_and(|snapshot| {
+            !snapshot.terminals.iter().any(|terminal| {
+                terminal.terminal_id == self.agent.terminal_id
+                    && terminal.pane_id == self.agent.pane_id
+            })
+        });
+        if ended {
+            self.send
+                .send(Transport::Close(1000, "Herdr terminal ended".into()));
+        } else {
+            self.send(ServerMessage::ReadingError {
+                message: message.into(),
+            });
+        }
+        ended
     }
     pub fn set_recording_scope(&self, scope: String) {
         *self.recording_scope.lock().unwrap() = scope;

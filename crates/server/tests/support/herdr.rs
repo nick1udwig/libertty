@@ -22,6 +22,7 @@ pub struct Fixture {
     pub screen: Arc<Mutex<String>>,
     pub content_revision: Arc<AtomicU64>,
     pub close_error: Arc<Mutex<String>>,
+    pub read_error: Arc<Mutex<String>>,
     pub split_error: Arc<Mutex<String>>,
     events: tokio::sync::broadcast::Sender<()>,
     cancel: CancellationToken,
@@ -43,6 +44,7 @@ impl Fixture {
         let screen = Arc::new(Mutex::new("Live Herdr terminal".into()));
         let content_revision = Arc::new(AtomicU64::new(6));
         let close_error = Arc::new(Mutex::new(String::new()));
+        let read_error = Arc::new(Mutex::new(String::new()));
         let split_error = Arc::new(Mutex::new(String::new()));
         let (events, _) = tokio::sync::broadcast::channel(64);
         let cancel = CancellationToken::new();
@@ -64,6 +66,7 @@ impl Fixture {
             screen: screen.clone(),
             content_revision: content_revision.clone(),
             close_error: close_error.clone(),
+            read_error: read_error.clone(),
             split_error: split_error.clone(),
             events: events.clone(),
             cancel: cancel.clone(),
@@ -80,6 +83,7 @@ impl Fixture {
                 let events = events.clone();
                 let cancel = cancel.clone();
                 let close_error = close_error.clone();
+                let read_error = read_error.clone();
                 let split_error = split_error.clone();
                 tokio::spawn(async move {
                     let mut stream = BufReader::new(stream);
@@ -119,6 +123,10 @@ impl Fixture {
                             }
                             "pane.read" => {
                                 actions.lock().unwrap().push(request.clone());
+                                let message = read_error.lock().unwrap().clone();
+                                if !message.is_empty() {
+                                    error = Some(message);
+                                }
                                 json!({"read":{"text":screen.lock().unwrap().clone()}})
                             }
                             "pane.get" => {

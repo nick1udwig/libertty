@@ -603,6 +603,7 @@ function socketClosed(event?: CloseEvent) {
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) { pendingCommand = undefined; toast('Connection lost before acknowledgement. Check the terminal before running again.'); }
   if (event?.code === 4001) { unsentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason); return false; }
+  if (herdrTerminal && event?.code === 1000 && event.reason === 'Herdr terminal ended') { inline.disconnect(); connection('Session ended'); notify('terminal-ended'); return false; }
   if (embedded && state.exited) return false; // The workspace is replacing this finished shell.
   connection('Reconnecting');
   return true;

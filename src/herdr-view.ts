@@ -133,6 +133,7 @@ export class HerdrView {
         this.rendered = true; this.setLoading(false); viewed(); this.host.ready?.();
       }
       if (active && event.data.type === 'terminal-notice') this.host.notice(event.data.message);
+      if (event.data.type === 'terminal-ended') void this.refreshSnapshot().catch(error => { if (error.status !== 404) this.connectionError(error); });
       if (event.data.type === 'terminal-locked') entry.locked = true;
       if (active && event.data.type === 'terminal-locked') void this.host.authenticate().then(() => entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin)).catch(error => this.host.notice(error.message));
     };
@@ -677,9 +678,13 @@ export class HerdrView {
       await this.host.api('api/herdr/action', item.space
         ? { action: 'close-space', workspaceId: item.space.id }
         : { action: 'close', terminalId: item.terminalId });
-      if (!this.disposed) this.receive({ type: 'snapshot', snapshot: await this.host.api('api/herdr/snapshot') });
+      await this.refreshSnapshot();
     } catch (error: any) { if (!this.disposed) this.host.notice(error.message); }
     finally { this.closing.delete(item.terminalId); }
+  }
+  private async refreshSnapshot() {
+    const snapshot = await this.host.api<import('./herdr-protocol.ts').HerdrSnapshot>('api/herdr/snapshot');
+    if (!this.disposed) this.receive({ type: 'snapshot', snapshot });
   }
   private openAgents(anchor: HTMLElement, spaceId?: string) {
     this.menu.replaceChildren();

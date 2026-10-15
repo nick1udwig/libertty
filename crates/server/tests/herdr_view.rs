@@ -11,6 +11,151 @@ use tokio_util::sync::CancellationToken;
 #[path = "support/herdr.rs"]
 mod support;
 
+#[tokio::test]
+async fn a_closed_terminal_controller_ends_quietly_before_history_detects_the_close() {
+    let fixture = support::Fixture::new().await;
+    let mut target = fixture.target.clone();
+    target.binary = "/bin/false".into();
+    let terminal = target
+        .snapshot()
+        .await
+        .unwrap()
+        .terminal("term_0")
+        .unwrap()
+        .clone();
+    {
+        let mut snapshot = fixture.snapshot.lock().unwrap();
+        snapshot["workspaces"] = json!([]);
+        snapshot["panes"] = json!([]);
+        snapshot["agents"] = json!([]);
+    }
+    let (send, mut receive, _) = viewer_queue::channel();
+    let cancel = CancellationToken::new();
+    let view = View::open(
+        target,
+        terminal,
+        &Hub::default(),
+        &herdr_history::Hub::default(),
+        Some((Size { cols: 40, rows: 30 }, None)),
+        send,
+        cancel.clone(),
+    )
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match receive.recv().await.unwrap().message {
+                Transport::Message(value) => assert_ne!(value["type"], "reading-error"),
+                Transport::Close(code, reason) => {
+                    assert_eq!(code, 1000);
+                    assert_eq!(reason, "Herdr terminal ended");
+                    break;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
+    cancel.cancel();
+    drop(view);
+}
+
+#[tokio::test]
+async fn history_errors_reconcile_closed_moved_and_replaced_panes_before_reporting_failures() {
+    for state in ["closed", "moved", "replaced", "live"] {
+        let fixture = support::Fixture::new().await;
+        let mut target = fixture.target.clone();
+        target.binary = "/bin/false".into();
+        let (metadata, mut snapshots) = tokio::sync::mpsc::channel(16);
+        let cancel = CancellationToken::new();
+        let task = tokio::spawn(termai_server::herdr::metadata(
+            target.clone(),
+            metadata,
+            cancel.clone(),
+        ));
+        snapshots.recv().await.unwrap();
+        let terminal = target
+            .snapshot()
+            .await
+            .unwrap()
+            .terminal("term_0")
+            .unwrap()
+            .clone();
+        let (send, mut receive, _) = viewer_queue::channel();
+        let view = View::open(
+            target,
+            terminal,
+            &Hub::default(),
+            &herdr_history::Hub::default(),
+            None,
+            send,
+            cancel.clone(),
+        )
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let item = receive.recv().await.unwrap();
+                if let Transport::Message(value) = item.message
+                    && value["type"] == "screen"
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        {
+            let mut snapshot = fixture.snapshot.lock().unwrap();
+            match state {
+                "closed" => {
+                    snapshot["workspaces"] = json!([]);
+                    snapshot["panes"] = json!([]);
+                    snapshot["agents"] = json!([]);
+                }
+                "moved" => {
+                    snapshot["panes"][0]["pane_id"] = json!("w1:p1");
+                    snapshot["agents"][0]["pane_id"] = json!("w1:p1");
+                }
+                "replaced" => {
+                    snapshot["panes"][0]["terminal_id"] = json!("term_new");
+                    snapshot["agents"][0]["terminal_id"] = json!("term_new");
+                }
+                _ => {}
+            }
+        }
+        // Withhold metadata events so the history failure must refresh a cached snapshot.
+        let cached = fixture.target.snapshot().await.unwrap();
+        assert_eq!(cached.terminals[0].terminal_id, "term_0");
+        assert_eq!(cached.terminals[0].pane_id, "w1:p0");
+        *fixture.read_error.lock().unwrap() = "Pane not found".into();
+        let mut errors = Vec::new();
+        let code = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match receive.recv().await.unwrap().message {
+                    Transport::Message(value) if value["type"] == "reading-error" => {
+                        errors.push(value)
+                    }
+                    Transport::Close(code, _) => break code,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        if state == "live" {
+            assert_eq!(code, 1011);
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0]["message"], "Pane not found");
+        } else {
+            assert_eq!(code, 1000, "{state}");
+            assert!(errors.is_empty(), "{state}: {errors:?}");
+        }
+        cancel.cancel();
+        drop(view);
+        task.await.unwrap();
+    }
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
     let fixture = support::Fixture::new().await;
