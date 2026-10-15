@@ -32,93 +32,152 @@ fn parse_query(uri: &Uri) -> Result<HashMap<String, String>, Failure> {
         .into_owned()
         .collect())
 }
-/// Resolve paired ownership once; modes add a scoped file session, shell, or Herdr target.
-struct RequestContext<const MODE: u8> {
+/// Paired ownership and validated query scope, without opening a session.
+struct OwnerContext {
     owner: String,
     query: HashMap<String, String>,
     sid: String,
     key: String,
-    session: Option<Arc<Session>>,
-    target: Option<herdr::Target>,
+}
+struct FileContext {
+    owner: String,
+    query: HashMap<String, String>,
+    sid: String,
+    session: Arc<Session>,
+}
+struct ShellContext {
+    owner: String,
+    query: HashMap<String, String>,
+    sid: String,
+    key: String,
+    session: Arc<Session>,
+}
+struct HerdrContext {
+    owner: String,
+    query: HashMap<String, String>,
+    target: herdr::Target,
     source: String,
     session_name: String,
 }
-impl<const MODE: u8> FromRequestParts<Arc<App>> for RequestContext<MODE> {
+impl FromRequestParts<Arc<App>> for OwnerContext {
     type Rejection = ApiError;
-    async fn from_request_parts(
-        parts: &mut Parts,
-        app: &Arc<App>,
-    ) -> Result<Self, Self::Rejection> {
-        let work = async {
-            let owner = app.owner(&parts.headers).ok_or((
+    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
+        let owner = app.owner(&parts.headers).ok_or_else(|| {
+            ApiError((
                 StatusCode::UNAUTHORIZED,
                 "Connect to your shell first.".into(),
-            ))?;
-            let query = parse_query(&parts.uri)?;
-            let sid = session_id(query.get("session").map(|s| json!(s)).as_ref())?;
-            let key = format!("{owner}/{sid}");
-            let session = if MODE == 1 || MODE == 2 {
-                if sid != "default" && !app.sessions.lock().await.contains_key(&key) {
-                    return Err((StatusCode::NOT_FOUND, "Terminal not found.".into()));
-                }
-                let session = app.get_session(&owner, &sid, "Terminal", false).await?;
-                if MODE == 2 && session.files_only {
-                    return Err(fail("Open a terminal tab for shell actions."));
-                }
-                Some(session)
-            } else {
-                None
-            };
-            let session_name = if MODE == 3 {
-                herdr::session(query.get("herdrSession").map(|s| json!(s)).as_ref())
-                    .map_err(fail)?
-            } else {
-                String::new()
-            };
-            let (source, target) = if MODE == 3 {
-                let source = query
-                    .get("herdrSource")
-                    .filter(|s| !s.is_empty())
-                    .map(String::as_str)
-                    .unwrap_or("");
-                let target = if source.is_empty() {
-                    let key = format!("{owner}//{session_name}");
-                    let mut targets = app.herdr_targets.lock().unwrap();
-                    if let Some(target) = targets.get(&key) {
-                        target.clone()
-                    } else {
-                        let target = herdr::Target::local(&session_name).map_err(fail)?;
-                        targets.insert(key, target.clone());
-                        target
-                    }
-                } else {
-                    let source = session_id(Some(&json!(source)))?;
-                    if !app
-                        .sessions
-                        .lock()
-                        .await
-                        .contains_key(&format!("{owner}/{source}"))
-                    {
-                        return Err((StatusCode::NOT_FOUND,"This Herdr connection has ended. Reconnect from the host menu, or run herdr again in its source terminal.".into()));
-                    }
-                    app.herdr_targets.lock().unwrap().get(&format!("{owner}/{source}/{session_name}")).cloned().ok_or((StatusCode::NOT_FOUND,"This Herdr connection has ended. Reconnect from the host menu, or run herdr again in its source terminal.".into()))?
-                };
-                (source.to_owned(), Some(target))
-            } else {
-                (String::new(), None)
-            };
-            Ok(Self {
-                owner,
-                query,
-                sid,
-                key,
-                session,
-                target,
-                source,
-                session_name,
-            })
+            ))
+        })?;
+        let query = parse_query(&parts.uri).map_err(ApiError)?;
+        let sid = session_id_text(query.get("session").map(String::as_str)).map_err(ApiError)?;
+        let key = format!("{owner}/{sid}");
+        Ok(Self {
+            owner,
+            query,
+            sid,
+            key,
+        })
+    }
+}
+impl FromRequestParts<Arc<App>> for FileContext {
+    type Rejection = ApiError;
+    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
+        let OwnerContext {
+            owner,
+            query,
+            sid,
+            key,
+        } = OwnerContext::from_request_parts(parts, app).await?;
+        if sid != "default" && !app.sessions.lock().await.contains_key(&key) {
+            return Err(ApiError((
+                StatusCode::NOT_FOUND,
+                "Terminal not found.".into(),
+            )));
+        }
+        let session = app
+            .get_session(&owner, &sid, "Terminal", false)
+            .await
+            .map_err(ApiError)?;
+        Ok(Self {
+            owner,
+            query,
+            sid,
+            session,
+        })
+    }
+}
+impl FromRequestParts<Arc<App>> for ShellContext {
+    type Rejection = ApiError;
+    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
+        let FileContext {
+            owner,
+            query,
+            sid,
+            session,
+        } = FileContext::from_request_parts(parts, app).await?;
+        if session.files_only {
+            return Err(ApiError(fail("Open a terminal tab for shell actions.")));
+        }
+        let key = format!("{owner}/{sid}");
+        Ok(Self {
+            owner,
+            query,
+            sid,
+            key,
+            session,
+        })
+    }
+}
+impl FromRequestParts<Arc<App>> for HerdrContext {
+    type Rejection = ApiError;
+    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
+        let OwnerContext { owner, query, .. } =
+            OwnerContext::from_request_parts(parts, app).await?;
+        let session_name = herdr::session(query.get("herdrSession").map(|s| json!(s)).as_ref())
+            .map_err(|error| ApiError(fail(error)))?;
+        let source = query
+            .get("herdrSource")
+            .filter(|source| !source.is_empty())
+            .cloned()
+            .unwrap_or_default();
+        let disconnected = || {
+            ApiError((StatusCode::NOT_FOUND, "This Herdr connection has ended. Reconnect from the host menu, or run herdr again in its source terminal.".into()))
         };
-        work.await.map_err(ApiError)
+        let target = if source.is_empty() {
+            let key = format!("{owner}//{session_name}");
+            let mut targets = app.herdr_targets.lock().unwrap();
+            if let Some(target) = targets.get(&key) {
+                target.clone()
+            } else {
+                let target =
+                    herdr::Target::local(&session_name).map_err(|error| ApiError(fail(error)))?;
+                targets.insert(key, target.clone());
+                target
+            }
+        } else {
+            let source = session_id_text(Some(&source)).map_err(ApiError)?;
+            if !app
+                .sessions
+                .lock()
+                .await
+                .contains_key(&format!("{owner}/{source}"))
+            {
+                return Err(disconnected());
+            }
+            app.herdr_targets
+                .lock()
+                .unwrap()
+                .get(&format!("{owner}/{source}/{session_name}"))
+                .cloned()
+                .ok_or_else(disconnected)?
+        };
+        Ok(Self {
+            owner,
+            query,
+            target,
+            source,
+            session_name,
+        })
     }
 }
 async fn socket(State(app): State<Arc<App>>, req: Request<Body>) -> Response<Body> {
@@ -145,217 +204,54 @@ macro_rules! endpoint {
         }
     };
 }
+macro_rules! routes {
+    ($($path:literal => $method:ident($handler:path $(, $context:ty)?) $(, $next:ident($next_handler:path $(, $next_context:ty)?))*;)*) => {
+        Router::new()$(.route($path, axum::routing::$method(endpoint!($handler $(, $context)?))$(.$next(endpoint!($next_handler $(, $next_context)?)))*))*
+    };
+}
 pub(super) fn router() -> Router<Arc<App>> {
-    Router::new()
-        .route(
-            "/healthz",
-            axum::routing::get(endpoint!(terminal_routes::healthz)),
-        )
-        .route(
-            "/api/files/download",
-            axum::routing::get(endpoint!(files_routes::api_files_download_download)).post(
-                endpoint!(files_routes::api_files_download, RequestContext<1>),
-            ),
-        )
-        .route(
-            "/api/connect",
-            axum::routing::post(endpoint!(terminal_routes::api_connect)),
-        )
-        .route(
-            "/api/notifications/key",
-            axum::routing::get(endpoint!(
-                terminal_routes::api_notifications_key,
-                RequestContext<0>
-            )),
-        )
-        .route(
-            "/api/ssh/probe",
-            axum::routing::post(endpoint!(ssh_routes::api_ssh_probe, RequestContext<0>)),
-        )
-        .route(
-            "/api/dictation",
-            axum::routing::get(endpoint!(terminal_routes::api_dictation, RequestContext<0>)),
-        )
-        .route(
-            "/api/ping",
-            axum::routing::get(endpoint!(terminal_routes::api_ping, RequestContext<0>)),
-        )
-        .route(
-            "/api/keychain",
-            axum::routing::get(endpoint!(keychain_routes::api_keychain, RequestContext<0>))
-                .post(endpoint!(keychain_routes::api_keychain, RequestContext<0>)),
-        )
-        .route(
-            "/api/sessions",
-            axum::routing::get(endpoint!(
-                terminal_routes::api_sessions_get,
-                RequestContext<0>
-            ))
-            .post(endpoint!(
-                terminal_routes::api_sessions_post,
-                RequestContext<0>
-            )),
-        )
-        .route(
-            "/api/sessions/close",
-            axum::routing::post(endpoint!(
-                terminal_routes::api_sessions_close,
-                RequestContext<0>
-            )),
-        )
-        .route(
-            "/api/ticket",
-            axum::routing::post(endpoint!(terminal_routes::api_ticket, RequestContext<0>)),
-        )
-        .route(
-            "/api/plugins/read",
-            axum::routing::get(endpoint!(files_routes::api_plugins_read, RequestContext<1>)),
-        )
-        .route(
-            "/api/files/list",
-            axum::routing::get(endpoint!(files_routes::api_files_list, RequestContext<1>)),
-        )
-        .route(
-            "/api/files/mkdir",
-            axum::routing::post(endpoint!(files_routes::api_files_mkdir, RequestContext<1>)),
-        )
-        .route(
-            "/api/files/action",
-            axum::routing::post(endpoint!(files_routes::api_files_action, RequestContext<1>)),
-        )
-        .route(
-            "/api/images/upload",
-            axum::routing::post(endpoint!(
-                files_routes::api_images_upload,
-                RequestContext<1>
-            )),
-        )
-        .route(
-            "/api/files/upload",
-            axum::routing::post(endpoint!(files_routes::api_files_upload, RequestContext<1>)),
-        )
-        .route(
-            "/api/files/transfer",
-            axum::routing::post(endpoint!(
-                files_routes::api_files_transfer,
-                RequestContext<1>
-            )),
-        )
-        .route(
-            "/api/dictation/install",
-            axum::routing::post(endpoint!(
-                terminal_routes::api_dictation_install,
-                RequestContext<2>
-            )),
-        )
-        .route(
-            "/api/reading/capture",
-            axum::routing::get(endpoint!(
-                terminal_routes::api_reading_capture,
-                RequestContext<2>
-            ))
-            .delete(endpoint!(
-                terminal_routes::api_reading_capture,
-                RequestContext<2>
-            )),
-        )
-        .route(
-            "/api/reading/file",
-            axum::routing::get(endpoint!(
-                terminal_routes::api_reading_file,
-                RequestContext<2>
-            )),
-        )
-        .route(
-            "/api/ssh/captured",
-            axum::routing::post(endpoint!(ssh_routes::api_ssh_captured, RequestContext<2>)),
-        )
-        .route(
-            "/api/suggest",
-            axum::routing::post(endpoint!(terminal_routes::api_suggest, RequestContext<2>)),
-        )
-        .route(
-            "/api/new",
-            axum::routing::post(endpoint!(terminal_routes::api_new, RequestContext<2>)),
-        )
-        .route(
-            "/api/herdr/connect",
-            axum::routing::post(endpoint!(
-                herdr_routes::api_herdr_connect,
-                RequestContext<0>
-            )),
-        )
-        .route(
-            "/api/herdr/captured",
-            axum::routing::post(endpoint!(
-                herdr_routes::api_herdr_captured,
-                RequestContext<0>
-            )),
-        )
-        .route(
-            "/api/herdr/notifications",
-            axum::routing::post(endpoint!(
-                herdr_routes::api_herdr_notifications,
-                RequestContext<3>
-            )),
-        )
-        .route(
-            "/api/herdr/snapshot",
-            axum::routing::get(endpoint!(
-                herdr_routes::api_herdr_snapshot,
-                RequestContext<3>
-            )),
-        )
-        .route(
-            "/api/herdr/images/upload",
-            axum::routing::post(endpoint!(
-                herdr_routes::api_herdr_images_upload,
-                RequestContext<3>
-            )),
-        )
-        .route(
-            "/api/herdr/options",
-            axum::routing::get(endpoint!(
-                herdr_routes::api_herdr_options,
-                RequestContext<3>
-            )),
-        )
-        .route(
-            "/api/herdr/suggest",
-            axum::routing::post(endpoint!(
-                herdr_routes::api_herdr_suggest,
-                RequestContext<3>
-            )),
-        )
-        .route(
-            "/api/herdr/action",
-            axum::routing::post(endpoint!(herdr_routes::api_herdr_action, RequestContext<3>)),
-        )
-        .route(
-            "/api/herdr/ticket",
-            axum::routing::post(endpoint!(herdr_routes::api_herdr_ticket, RequestContext<3>)),
-        )
-        .route(
-            "/api/notifications/subscribe",
-            axum::routing::post(endpoint!(
-                notifications_routes::api_notifications_subscribe,
-                RequestContext<0>
-            )),
-        )
-        .route(
-            "/api/notifications/unsubscribe",
-            axum::routing::post(endpoint!(
-                notifications_routes::api_notifications_unsubscribe,
-                RequestContext<0>
-            )),
-        )
-        .route(
-            "/api/notifications/unwatch",
-            axum::routing::post(endpoint!(
-                notifications_routes::api_notifications_unwatch,
-                RequestContext<0>
-            )),
-        )
-        .route("/ws", axum::routing::any(socket))
-        .route("/herdr/ws", axum::routing::any(herdr_socket))
+    routes! {
+        "/healthz" => get(terminal_routes::healthz);
+        "/api/files/download" => get(files_routes::api_files_download_download),
+            post(files_routes::api_files_download, FileContext);
+        "/api/connect" => post(terminal_routes::api_connect);
+        "/api/notifications/key" => get(terminal_routes::api_notifications_key, OwnerContext);
+        "/api/ssh/probe" => post(ssh_routes::api_ssh_probe, OwnerContext);
+        "/api/dictation" => get(terminal_routes::api_dictation, OwnerContext);
+        "/api/ping" => get(terminal_routes::api_ping, OwnerContext);
+        "/api/keychain" => get(keychain_routes::api_keychain, OwnerContext),
+            post(keychain_routes::api_keychain, OwnerContext);
+        "/api/sessions" => get(terminal_routes::api_sessions_get, OwnerContext),
+            post(terminal_routes::api_sessions_post, OwnerContext);
+        "/api/sessions/close" => post(terminal_routes::api_sessions_close, OwnerContext);
+        "/api/ticket" => post(terminal_routes::api_ticket, OwnerContext);
+        "/api/plugins/read" => get(files_routes::api_plugins_read, FileContext);
+        "/api/files/list" => get(files_routes::api_files_list, FileContext);
+        "/api/files/mkdir" => post(files_routes::api_files_mkdir, FileContext);
+        "/api/files/action" => post(files_routes::api_files_action, FileContext);
+        "/api/images/upload" => post(files_routes::api_images_upload, FileContext);
+        "/api/files/upload" => post(files_routes::api_files_upload, FileContext);
+        "/api/files/transfer" => post(files_routes::api_files_transfer, FileContext);
+        "/api/dictation/install" => post(terminal_routes::api_dictation_install, ShellContext);
+        "/api/reading/capture" => get(terminal_routes::api_reading_capture, ShellContext),
+            delete(terminal_routes::api_reading_capture, ShellContext);
+        "/api/reading/file" => get(terminal_routes::api_reading_file, ShellContext);
+        "/api/ssh/captured" => post(ssh_routes::api_ssh_captured, ShellContext);
+        "/api/suggest" => post(terminal_routes::api_suggest, ShellContext);
+        "/api/new" => post(terminal_routes::api_new, ShellContext);
+        "/api/herdr/connect" => post(herdr_routes::api_herdr_connect, OwnerContext);
+        "/api/herdr/captured" => post(herdr_routes::api_herdr_captured, OwnerContext);
+        "/api/herdr/notifications" => post(herdr_routes::api_herdr_notifications, HerdrContext);
+        "/api/herdr/snapshot" => get(herdr_routes::api_herdr_snapshot, HerdrContext);
+        "/api/herdr/images/upload" => post(herdr_routes::api_herdr_images_upload, HerdrContext);
+        "/api/herdr/options" => get(herdr_routes::api_herdr_options, HerdrContext);
+        "/api/herdr/suggest" => post(herdr_routes::api_herdr_suggest, HerdrContext);
+        "/api/herdr/action" => post(herdr_routes::api_herdr_action, HerdrContext);
+        "/api/herdr/ticket" => post(herdr_routes::api_herdr_ticket, HerdrContext);
+        "/api/notifications/subscribe" => post(notifications_routes::api_notifications_subscribe, OwnerContext);
+        "/api/notifications/unsubscribe" => post(notifications_routes::api_notifications_unsubscribe, OwnerContext);
+        "/api/notifications/unwatch" => post(notifications_routes::api_notifications_unwatch, OwnerContext);
+    }
+    .route("/ws", axum::routing::any(socket))
+    .route("/herdr/ws", axum::routing::any(herdr_socket))
 }

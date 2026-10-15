@@ -2,9 +2,11 @@ use serde_json::{Value, json};
 #[path = "support/herdr.rs"]
 mod herdr_support;
 use std::{
+    collections::HashSet,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     process::{Child, Command, Stdio},
+    sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
 
@@ -29,11 +31,17 @@ impl Backend {
     }
     fn start_with_base(engine: &str, base: &str) -> Self {
         let root = tempfile::tempdir().unwrap();
-        let port = TcpListener::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+        static PORTS: LazyLock<Mutex<HashSet<u16>>> = LazyLock::new(Default::default);
+        let port = loop {
+            let port = TcpListener::bind("127.0.0.1:0")
+                .unwrap()
+                .local_addr()
+                .unwrap()
+                .port();
+            if PORTS.lock().unwrap().insert(port) {
+                break port;
+            }
+        };
         std::fs::create_dir(root.path().join("dist")).unwrap();
         std::fs::create_dir(root.path().join("dist/assets")).unwrap();
         std::fs::write(
@@ -43,6 +51,7 @@ impl Backend {
         .unwrap();
         std::fs::write(root.path().join("dist/assets/test.wasm"), b"\0asm").unwrap();
         std::fs::write(root.path().join("dist/assets/test.wasm.br"), b"compressed").unwrap();
+        let stderr = std::fs::File::create(root.path().join("stderr.log")).unwrap();
         let child = Command::new(env!("CARGO_BIN_EXE_termai"))
             .env("HOST", "127.0.0.1")
             .env("PORT", port.to_string())
@@ -58,16 +67,28 @@ impl Backend {
             .env("TERMAI_ALLOWED_HOSTS", "127.0.0.1,localhost")
             .env("TERMAI_ALLOWED_ORIGINS", "")
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr))
             .spawn()
             .unwrap();
-        let backend = Self { child, root, port };
+        let mut backend = Self { child, root, port };
         let deadline = Instant::now() + Duration::from_secs(10);
-        while TcpStream::connect(("127.0.0.1", port)).is_err() {
+        loop {
+            if let Some(status) = backend.child.try_wait().unwrap() {
+                panic!(
+                    "Rust HTTP backend exited with {status}: {}",
+                    backend.stderr()
+                );
+            }
+            if TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
             assert!(Instant::now() < deadline, "Rust HTTP startup timeout");
             std::thread::sleep(Duration::from_millis(10));
         }
         backend
+    }
+    fn stderr(&self) -> String {
+        std::fs::read_to_string(self.root.path().join("stderr.log")).unwrap_or_default()
     }
     fn request(
         &self,
@@ -107,7 +128,16 @@ impl Backend {
         stream.write_all(bytes).unwrap();
         let mut data = vec![];
         stream.read_to_end(&mut data).unwrap();
-        let split = data.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        let split = data
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .unwrap_or_else(|| {
+                panic!(
+                    "No HTTP response to {method} {path} on port {}: {}",
+                    self.port,
+                    self.stderr()
+                )
+            });
         let headers = String::from_utf8(data[..split].to_vec()).unwrap();
         let status = headers.split_whitespace().nth(1).unwrap().parse().unwrap();
         Response {

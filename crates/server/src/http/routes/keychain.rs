@@ -3,7 +3,7 @@ use crate::protocol::KeychainAction;
 
 pub(super) async fn api_keychain(
     app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let input = if *req.method() == Method::GET {

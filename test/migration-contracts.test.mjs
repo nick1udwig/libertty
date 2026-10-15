@@ -25,7 +25,10 @@ test('Rust shell utilities and pairing assets match their declared byte checksum
 test('all migration schemas compile and every API route has a resolvable request, response and error contract', async () => {
   for (const name of Object.keys(schemas.$defs)) validate(name);
   const source = await readFile(new URL('../crates/server/src/http/routes.rs', import.meta.url), 'utf8');
-  const endpoints = [...source.matchAll(/\.route\(\s*"(\/[^"]+)"/g)].map(match => match[1]);
+  const table = [...source.matchAll(/"(\/[^"]+)"\s*=>\s*([^;]+);/g)];
+  const endpoints = [...table.map(match => match[1]), ...[...source.matchAll(/\.route\(\s*"(\/[^"]+)"/g)].map(match => match[1])];
+  const registered = table.flatMap(([, path, handlers]) => [...handlers.matchAll(/\b(get|post|delete)\(/g)].map(match => match[1].toUpperCase() + ' ' + path));
+  assert.deepEqual(registered.sort(), http.routes.map(route => route.method + ' ' + route.path).sort(), 'Every declared HTTP method and path is registered exactly once');
   assert.ok(endpoints.length >= 35, 'The Axum route table must be covered');
   for (const path of new Set(endpoints)) assert.ok([...http.routes,...http.sockets].some(route => route.path === path), 'Missing HTTP contract: ' + path);
   const seen = new Set();

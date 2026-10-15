@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn api_ssh_probe(
     app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let _permit = app.ssh_probes.try_acquire().map_err(|_| {
@@ -19,12 +19,12 @@ pub(super) async fn api_ssh_probe(
 
 pub(super) async fn api_ssh_captured(
     app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let key = ctx.key;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
     let input: crate::protocol::requests::Capture = typed_body(&mut req, 16384).await?;
     let id = input.id.as_str();

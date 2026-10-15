@@ -76,7 +76,7 @@ pub(super) async fn api_connect(
 
 pub(super) async fn api_notifications_key(
     app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     ok(json!({"publicKey":app.notifications.public_key}))
@@ -84,7 +84,7 @@ pub(super) async fn api_notifications_key(
 
 pub(super) async fn api_dictation(
     _app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     return ok(dictation::detect(&std::env::vars().collect()).await);
@@ -92,7 +92,7 @@ pub(super) async fn api_dictation(
 
 pub(super) async fn api_ping(
     _app: &Arc<App>,
-    _ctx: RequestContext<0>,
+    _ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     ok(json!({"ok":true}))
@@ -100,7 +100,7 @@ pub(super) async fn api_ping(
 
 pub(super) async fn api_sessions_get(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -110,7 +110,7 @@ pub(super) async fn api_sessions_get(
 
 pub(super) async fn api_sessions_post(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -155,7 +155,7 @@ pub(super) async fn api_sessions_post(
 
 pub(super) async fn api_sessions_close(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -166,7 +166,7 @@ pub(super) async fn api_sessions_close(
 
 pub(super) async fn api_ticket(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -200,10 +200,10 @@ pub(super) async fn api_ticket(
 
 pub(super) async fn api_dictation_install(
     _app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let input: crate::protocol::InputStamp = typed_body(&mut req, 16384).await?;
     let command = dictation::install_command(&std::env::vars().collect())
         .await
@@ -218,11 +218,11 @@ pub(super) async fn api_dictation_install(
 
 pub(super) async fn api_reading_capture(
     _app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let get = *req.method() == Method::GET;
     let id = query.get("id").map(String::as_str).unwrap_or("");
     if *req.method() == Method::DELETE {
@@ -242,11 +242,11 @@ pub(super) async fn api_reading_capture(
 
 pub(super) async fn api_reading_file(
     _app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let cwd = session.state().cwd;
     let path = query
         .get("path")
@@ -257,10 +257,10 @@ pub(super) async fn api_reading_file(
 
 pub(super) async fn api_suggest(
     _app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     let input: crate::protocol::SuggestRequest = typed_body(&mut req, 16384).await?;
     let text = input.text.as_str();
     return ok(bounded(async |cancel| session.suggest(text, cancel).await).await?);
@@ -268,12 +268,12 @@ pub(super) async fn api_suggest(
 
 pub(super) async fn api_new(
     app: &Arc<App>,
-    ctx: RequestContext<2>,
+    ctx: ShellContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sid = ctx.sid;
-    let session = ctx.session.unwrap();
+    let session = ctx.session;
     if session.remote.is_some() {
         return Err(fail(
             "Open the saved SSH host again to start another shell.",

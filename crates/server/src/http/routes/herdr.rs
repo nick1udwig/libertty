@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn api_herdr_connect(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner.as_str();
@@ -46,7 +46,7 @@ pub(super) async fn api_herdr_connect(
 
 pub(super) async fn api_herdr_captured(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner.as_str();
@@ -129,11 +129,11 @@ pub(super) async fn api_herdr_captured(
 
 pub(super) async fn api_herdr_notifications(
     app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner.as_str();
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let source = ctx.source.as_str();
     let input: crate::protocol::requests::Watch = typed_body(&mut req, 16384).await?;
     app.notifications
@@ -150,20 +150,20 @@ pub(super) async fn api_herdr_notifications(
 
 pub(super) async fn api_herdr_snapshot(
     _app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     return ok(json!(target.snapshot().await.map_err(fail)?));
 }
 
 pub(super) async fn api_herdr_images_upload(
     _app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = &ctx.query;
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
     if target
         .snapshot()
@@ -189,20 +189,20 @@ pub(super) async fn api_herdr_images_upload(
 
 pub(super) async fn api_herdr_options(
     _app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     return ok(target.options().await.map_err(fail)?);
 }
 
 pub(super) async fn api_herdr_suggest(
     app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = &ctx.query;
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let input: crate::protocol::SuggestRequest = typed_body(&mut req, 16384).await?;
     let text = input.text.as_str();
     let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
@@ -216,23 +216,23 @@ pub(super) async fn api_herdr_suggest(
 
 pub(super) async fn api_herdr_action(
     _app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let input: crate::herdr_action::Action = typed_body(&mut req, 65536).await?;
     return ok(target.action(input).await.map_err(fail)?);
 }
 
 pub(super) async fn api_herdr_ticket(
     app: &Arc<App>,
-    ctx: RequestContext<3>,
+    ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner.as_str();
     let query = &ctx.query;
     let session_name = ctx.session_name;
-    let target = ctx.target.unwrap();
+    let target = ctx.target;
     let source = ctx.source.as_str();
     let terminal = query.get("terminalId").cloned().unwrap_or_default();
     // Existing ticket callers may omit a JSON body entirely.

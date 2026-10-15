@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) async fn api_notifications_subscribe(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -12,7 +12,7 @@ pub(super) async fn api_notifications_subscribe(
 
 pub(super) async fn api_notifications_unsubscribe(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
@@ -25,7 +25,7 @@ pub(super) async fn api_notifications_unsubscribe(
 
 pub(super) async fn api_notifications_unwatch(
     app: &Arc<App>,
-    ctx: RequestContext<0>,
+    ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
