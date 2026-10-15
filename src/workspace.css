@@ -74,6 +74,7 @@ dialog .primary[type=submit]{width:100%;margin-top:8px}dialog .actions .primary{
 .plugin-entry{border:1px solid var(--line);background:var(--surface);border-radius:var(--r-lg);padding:14px;margin:12px 0}.plugin-entry strong{display:block}.plugin-entry .actions{flex-wrap:wrap}.plugin-entry .toggle{margin:10px 0!important}.plugin-entry p{overflow-wrap:anywhere}
 #workspace-shortcuts{flex:none;background:var(--surface);padding:4px 8px}
 #workspace-navigation{flex:none;min-width:0;background:var(--surface)}
+#workspace-navigation.herdr-navigation,#workspace-navigation.herdr-navigation #tabs,#workspace-navigation.herdr-navigation .herdr-agent-strip{touch-action:none}
 #terminal-tabs-drawer{display:grid;grid-template-rows:1fr;transition:grid-template-rows .2s ease}
 #terminal-tabs-drawer.collapsed{grid-template-rows:0fr}
 .terminal-tabs-clip{min-height:0;overflow:hidden}

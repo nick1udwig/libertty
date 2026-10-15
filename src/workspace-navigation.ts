@@ -9,7 +9,7 @@ import { validCapture } from './persistence.ts';
 import { PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
 import { readingMessage } from './reading-view.ts';
 import { validateShortcuts, type Shortcut } from './shortcuts.ts';
-import { tabGestures } from './tab-gestures.ts';
+import { tabGestures, tabStripSwipes } from './tab-gestures.ts';
 import { readingTab } from './tabs.ts';
 import { currentShortcuts } from './workspace-settings.ts';
 import type { WorkspaceServices, WorkspaceState } from './workspace-storage.ts';
@@ -343,6 +343,7 @@ export function createWorkspaceNavigation(options: Options) {
     }
     const herdr = herdrViews.get(workspace.active),
       expanded = !herdr || terminalTabsExpanded;
+    $('workspace-navigation').classList.toggle('herdr-navigation', !!herdr);
     const drawer = $('terminal-tabs-drawer');
     drawer.classList.toggle('collapsed', !expanded);
     drawer.inert = !expanded;
@@ -852,6 +853,14 @@ export function createWorkspaceNavigation(options: Options) {
         .map((animation) => animation.finished),
     ).then(() => release?.());
   }
+  tabStripSwipes(
+    $('workspace-navigation'),
+    () => page === 'terminal' && herdrViews.get(workspace.active),
+    (expanded) => {
+      const tab = workspace.tabs.find((tab) => tab.id === workspace.active);
+      if (tab && expanded !== terminalTabsExpanded) toggleTerminalTabs(tab);
+    },
+  );
   function attention(tab: TerminalTab, count: number) {
     herdrAttention.set(tab.id, count);
     const badge = $('tabs').querySelector<HTMLElement>(

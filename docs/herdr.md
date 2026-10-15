@@ -24,6 +24,9 @@ After a backend restart, close the ended tab and connect again from its host men
 
 ## Terminal interface and mobile sizing
 
+Swipe up on the Herdr strip to reveal terminal tabs, or swipe down on either navigation strip to hide them.
+The arrow button provides the same controls, while horizontal swipes scroll tabs and holding opens tab actions.
+
 At a Herdr shell prompt, `look at FILE`, `look at COMMAND` and `COMMAND | look at` open Reading Mode in a top-level workspace tab.
 Typed requests and dictated alternatives use the selected pane's working directory and the Herdr host's existing connection.
 Reading commands run once in a separate Bash context using the connection environment rather than the pane's interactive variables or functions.

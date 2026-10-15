@@ -54,6 +54,14 @@ try {
   await tab(alpha).waitFor(); await tab(beta).waitFor();
   assert.equal(await page.locator('#add-tab').count(), 0, 'The duplicate terminal plus is removed');
   const toggle = page.locator('.herdr-agent-strip:visible .herdr-tabs-toggle');
+  const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
+  const swipeNavigation = async (locator, dx, dy, cancel = false) => {
+    const rect = await locator.boundingBox(), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+    await touch('touchStart', x, y);
+    await touch('touchMove', x + dx / 3, y + dy / 3);
+    await touch('touchMove', x + dx, y + dy);
+    await touch(cancel ? 'touchCancel' : 'touchEnd');
+  };
   await page.locator('.herdr-terminal').waitFor({ state: 'visible' });
   const sampleDrawer = async () => page.evaluate(() => {
     window.__drawerPaints = [];
@@ -86,6 +94,39 @@ try {
   await wait(async () => await page.locator('#terminal-tabs-drawer').evaluate(el => el.getBoundingClientRect().height) === 0, 'terminal row tucked behind Herdr');
   await assertDrawer();
   await page.screenshot({ path: '/tmp/termai-herdr-tabs-collapsed.png' });
+  const drawerHeight = () => page.locator('#terminal-tabs-drawer').evaluate(el => el.getBoundingClientRect().height);
+  const selectedBeforeSwipe = await page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal');
+  const swipeTab = tab(selectedBeforeSwipe === 'space:' + beta ? alpha : beta);
+  const tabsBeforeSwipe = await page.locator('#tabs [role=tab]').count();
+  await swipeNavigation(swipeTab, 0, 60); await delay(250);
+  assert.equal(await drawerHeight(), 0, 'Downward swipes keep hidden tabs hidden');
+  await swipeNavigation(swipeTab, 0, -18); await delay(250);
+  assert.equal(await drawerHeight(), 0, 'Small vertical movements do not open the drawer');
+  await swipeNavigation(swipeTab, 0, -70, true); await delay(250);
+  assert.equal(await drawerHeight(), 0, 'Cancelled swipes do not open the drawer');
+  await sampleDrawer(); await swipeNavigation(swipeTab, 0, -70);
+  await wait(async () => await drawerHeight() === 44, 'upward Herdr swipe reveals terminal tabs');
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'true'); await assertDrawer();
+  assert.equal(await page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal'), selectedBeforeSwipe, 'Swiping an unselected space does not select it');
+  assert.equal(await page.locator('.herdr-tab-menu:visible').count(), 0, 'Swiping opens no hold menu');
+  await swipeNavigation(swipeTab, 0, -70); await delay(250);
+  assert.equal(await drawerHeight(), 44, 'Upward swipes keep revealed tabs visible');
+  await sampleDrawer(); await swipeNavigation(swipeTab, 0, 60);
+  await wait(async () => await drawerHeight() === 0, 'downward Herdr swipe hides terminal tabs');
+  assert.equal(await toggle.getAttribute('aria-expanded'), 'false'); await assertDrawer();
+  await swipeNavigation(toggle, 0, -70);
+  await wait(async () => await drawerHeight() === 44, 'swiping the arrow reveals tabs without also clicking it');
+  await swipeNavigation(page.locator('#tabs .tab-close').first(), 0, 60);
+  await wait(async () => await drawerHeight() === 0, 'downward terminal-tab swipe hides terminal tabs');
+  assert.equal(await page.locator('#tabs [role=tab]').count(), tabsBeforeSwipe, 'Swiping a close button does not close a terminal tab');
+  await swipeNavigation(toggle, 0, -70);
+  await wait(async () => await drawerHeight() === 44, 'reveal terminal header for another swipe');
+  await swipeNavigation(page.locator('#terminal-back'), 0, 60);
+  await wait(async () => await drawerHeight() === 0, 'downward header swipe hides terminal tabs');
+  assert.equal(await page.locator('#workspace-navigation').isVisible(), true, 'Swiping the back button does not leave Herdr');
+  await swipeTab.press('Enter');
+  await wait(async () => await page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal') !== selectedBeforeSwipe, 'keyboard activation still selects a space after swiping');
+  await tab(selectedBeforeSwipe.slice(6)).click();
   await page.evaluate(() => document.fonts.ready);
   const order = async () => (await herdrSnapshot(target)).spaces.map(space => space.id);
   const stripOrder = () => page.locator('.herdr-agent-strip:visible .herdr-agent-tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.terminal.slice(6)));
@@ -104,7 +145,6 @@ try {
     }, 'space bounds after subscription refresh');
     return rect;
   };
-  const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
   const drag = async (source, target, position, cancel = false) => {
     const { from, to } = await page.evaluate(([source, target]) => {
       const bounds = id => { const rect = document.querySelector('.herdr-agent-tab[data-terminal="space:' + CSS.escape(id) + '"]').getBoundingClientRect(); return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }; };
@@ -347,7 +387,7 @@ try {
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces'); await page.locator('#herdr-strip').selectOption('agents'); await page.reload(); await page.getByRole('button', { name: 'Show terminal tabs', exact: true }).click(); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'agents', 'Explicit agent mode survives reload');
   assert.deepEqual(errors, []);
-  console.log('PASS: real Herdr space actions create/open Git worktrees and pane splits in the held space, preserve selection on cancellation/errors, reject duplicate submissions, refresh the dropdown, and preserve rename/close/reorder/stacks.');
+  console.log('PASS: Herdr and terminal-strip swipes reveal/hide tabs without accidental clicks or intermediate terminal resizes; real Herdr space actions create/open Git worktrees and pane splits, preserve selection on cancellation/errors, reject duplicate submissions, refresh the dropdown, and preserve rename/close/reorder/stacks.');
 } catch (error) {
   await browser?.contexts()[0]?.pages()[0]?.screenshot({ path: '/tmp/termai-herdr-spaces-failure.png' }).catch(() => {}); throw error;
 } finally {
