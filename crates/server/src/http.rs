@@ -1,4 +1,5 @@
 mod routes;
+mod socket;
 use crate::{
     assets, dictation, files, herdr, herdr_terminal_stream, herdr_view,
     host::HostServices,
@@ -857,15 +858,9 @@ async fn herdr_websocket(
         .clone()
         .try_acquire_owned()
         .map_err(|_| denied())?;
-    let (mut parts, _) = req.into_parts();
-    let upgrade = WebSocketUpgrade::from_request_parts(&mut parts, &())
-        .await
-        .map_err(|_| denied())?;
+    let upgrade = socket::upgrade(req).await?;
     let app = app.clone();
     Ok(upgrade
-        .protocols([wire::GZIP, wire::GZIP_FAST, wire::BINARY])
-        .max_message_size(128 * 1024)
-        .max_frame_size(128 * 1024)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
             let id = storage::random_hex(16);
@@ -903,12 +898,7 @@ async fn herdr_socket_session(
         let Some(source) = source else { return };
         Some(source)
     };
-    let mode = wire::Mode::protocol(
-        socket
-            .protocol()
-            .and_then(|protocol| protocol.to_str().ok()),
-    );
-    let (send, mut output, slow) = crate::viewer_queue::channel();
+    let (send, output, slow) = crate::viewer_queue::channel();
     let notification_target = ticket.target.clone();
     let view = if ticket.terminal.is_empty() {
         let (metadata, mut receive) = tokio::sync::mpsc::channel(16);
@@ -918,7 +908,11 @@ async fn herdr_socket_session(
         let send = send.clone();
         tokio::spawn(async move {
             loop {
-                let message = tokio::select! {biased;_=lifetime.cancelled()=>break,message=receive.recv()=>message};
+                let message = tokio::select! {
+                    biased;
+                    _ = lifetime.cancelled() => break,
+                    message = receive.recv() => message,
+                };
                 let Some(message) = message else { break };
                 if !send.send(Transport::Message(message.value())) {
                     break;
@@ -927,7 +921,11 @@ async fn herdr_socket_session(
         });
         None
     } else {
-        let snapshot = tokio::select! {biased;_=cancel.cancelled()=>return,snapshot=ticket.target.snapshot()=>snapshot};
+        let snapshot = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return,
+            snapshot = ticket.target.snapshot() => snapshot,
+        };
         let agent = snapshot
             .ok()
             .and_then(|snapshot| snapshot.terminal(&ticket.terminal).cloned());
@@ -959,46 +957,24 @@ async fn herdr_socket_session(
             Err(_) => return,
         }
     };
-    let (mut send, mut receive) = socket.split();
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
-    heartbeat.tick().await;
-    let mut alive = true;
-    loop {
-        tokio::select! {
-            biased;
-            _=slow.cancelled()=>{let _=tokio::time::timeout(Duration::from_secs(1),send.send(Message::Close(Some(CloseFrame{code:1013,reason:"Viewer is too slow; reconnect for a fresh screen.".into()})))).await;break;},
-            _=cancel.cancelled()=>{let _=send.send(Message::Close(Some(CloseFrame{code:1000,reason:"Connection closed".into()}))).await;break;},
-            item=output.recv()=>match item {
-                Some(item)=>match &item.message {
-                    Transport::Message(message)=>{if !matches!(tokio::time::timeout(Duration::from_secs(5),send.send(wire_message(message, mode))).await,Ok(Ok(()))){break;}},
-                    Transport::Close(code,reason)=>{let _=send.send(Message::Close(Some(CloseFrame{code:*code,reason:reason.clone().into()}))).await;break;},
-                },
-                None=>break,
-            },
-            _=heartbeat.tick(),if view.is_some()=>{
-                if !alive{break;}alive=false;if send.send(Message::Ping(Vec::new().into())).await.is_err(){break;}
-            },
-            message=receive.next()=>match message{
-                Some(Ok(Message::Text(bytes)))=>if let Some(view)=&view{
-                    if serde_json::from_str::<crate::protocol::ClientMessage>(&bytes).map_err(|_|"Invalid terminal message".to_owned()).and_then(|message|view.receive(message)).is_err(){
-                        let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid terminal message".into()}))).await;break;
-                    }
-                } else if bytes.len()<=2048 && let Ok(message)=serde_json::from_str::<crate::protocol::ViewerMessage>(&bytes) {
-                    match message {
-                        crate::protocol::ViewerMessage::NotificationPresence { device, focused } => { let _=app.notifications.presence(id,&ticket.owner,&json!(device),focused); }
-                        crate::protocol::ViewerMessage::NotificationAck { device, event } => { let _=app.notifications.acknowledge(&ticket.owner,&json!(device),&ticket.source,&notification_target,&event); }
-                    }
-                },
-                Some(Ok(Message::Binary(bytes)))=>if let Some(view)=&view{
-                    if mode==wire::Mode::Json { view.audio(bytes.to_vec()); }
-                    else { match wire::decode_as::<crate::protocol::ClientMessage>(&bytes) { Ok(wire::Incoming::Audio(audio)) => view.audio(audio), Ok(wire::Incoming::Message(message)) => { if view.receive(message).is_err() { break; } }, Err(_) => { let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid wire message".into()}))).await; break; } } }
-                },
-                Some(Ok(Message::Ping(bytes)))=>if send.send(Message::Pong(bytes)).await.is_err(){break;},
-                Some(Ok(Message::Pong(_)))=>alive=true,
-                _=>break,
-            }
+    let input = if let Some(view) = &view {
+        socket::Input::Herdr(view)
+    } else {
+        socket::Input::Metadata {
+            app,
+            connection: id,
+            owner: &ticket.owner,
+            source: &ticket.source,
+            target: &notification_target,
         }
-    }
+    };
+    socket::pump(
+        socket,
+        input,
+        socket::Output::Herdr(output),
+        socket::Policy::herdr(cancel.clone(), slow, view.is_some()),
+    )
+    .await;
     cancel.cancel();
     drop(view);
 }
@@ -1043,28 +1019,14 @@ async fn websocket(
     if !safe_integer(after) {
         return Err(denied());
     }
-    let (mut parts, _) = req.into_parts();
-    let upgrade = WebSocketUpgrade::from_request_parts(&mut parts, &())
-        .await
-        .map_err(|_| denied())?;
+    let upgrade = socket::upgrade(req).await?;
     if let Some(ticket) = query.get("ticket") {
         app.tickets.lock().unwrap().remove(ticket);
     }
     let stream = query.get("stream").cloned();
     Ok(upgrade
-        .protocols([wire::GZIP, wire::GZIP_FAST, wire::BINARY])
-        .max_message_size(128 * 1024)
-        .max_frame_size(128 * 1024)
         .on_upgrade(move |socket| socket_session(socket, session, after as u64, stream))
         .into_response())
-}
-fn wire_message(value: &Value, mode: wire::Mode) -> Message {
-    let encoded = wire::encode(value, mode);
-    if encoded.binary {
-        Message::Binary(encoded.bytes.into())
-    } else {
-        Message::Text(String::from_utf8(encoded.bytes).expect("wire UTF-8").into())
-    }
 }
 async fn socket_session(
     socket: WebSocket,
@@ -1072,33 +1034,17 @@ async fn socket_session(
     after: u64,
     stream: Option<String>,
 ) {
-    let mode = wire::Mode::protocol(
-        socket
-            .protocol()
-            .and_then(|protocol| protocol.to_str().ok()),
-    );
-    let (id, mut output) = session.attach(after, stream.as_deref());
-    let (mut send, mut receive) = socket.split();
-    loop {
-        tokio::select! {
-            biased;
-            event=output.recv()=>match event {
-                Some(Transport::Message(value))=>if send.send(wire_message(&value, mode)).await.is_err(){break},
-                Some(Transport::Close(code,reason))=>{let _=send.send(Message::Close(Some(CloseFrame{code,reason:reason.into()}))).await;break},
-                None=>break,
-            },
-            event=receive.next()=>match event {
-                Some(Ok(Message::Text(value)))=>match serde_json::from_str::<crate::protocol::ClientMessage>(&value) { Ok(message)=>session.receive(id,message),Err(_)=>{let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid message".into()}))).await;break} },
-                Some(Ok(Message::Ping(bytes)))=>if send.send(Message::Pong(bytes)).await.is_err(){break},
-                Some(Ok(Message::Binary(bytes)))=>{
-                    if mode==wire::Mode::Json { session.receive_binary(id,bytes.to_vec()); }
-                    else { match wire::decode_as::<crate::protocol::ClientMessage>(&bytes) { Ok(wire::Incoming::Audio(audio))=>session.receive_binary(id,audio), Ok(wire::Incoming::Message(message))=>session.receive(id,message), Err(_)=>{let _=send.send(Message::Close(Some(CloseFrame{code:1008,reason:"Invalid wire message".into()}))).await;break;} } }
-                },
-                Some(Ok(Message::Pong(_)))=>{},
-                _=>break,
-            }
-        }
-    }
+    let (id, output) = session.attach(after, stream.as_deref());
+    socket::pump(
+        socket,
+        socket::Input::Native {
+            session: &session,
+            attachment: id,
+        },
+        socket::Output::Native(output),
+        socket::Policy::native(),
+    )
+    .await;
     session.detach(id);
 }
 pub async fn run() -> Result<(), String> {

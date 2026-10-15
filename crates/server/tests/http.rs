@@ -1,4 +1,6 @@
 use serde_json::{Value, json};
+#[path = "support/herdr.rs"]
+mod herdr_support;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -48,6 +50,7 @@ impl Backend {
             .env("TERMAI_BASE_PATH", base)
             .env("TERMAI_CWD", root.path())
             .env("HOME", root.path())
+            .env("HERDR_SOCKET_PATH", root.path().join("herdr.sock"))
             .env("TERMAI_NO_RC", "1")
             .env("TERMAI_DIST_DIR", root.path().join("dist"))
             .env("TERMAI_DATA_DIR", root.path().join("data"))
@@ -141,6 +144,130 @@ impl Drop for Backend {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let fixture = herdr_support::Fixture::new().await;
+    let backend = Backend::start("server");
+    std::os::unix::fs::symlink(
+        fixture.target.path().unwrap(),
+        backend.root.path().join("herdr.sock"),
+    )
+    .unwrap();
+    let origin = format!("http://127.0.0.1:{}", backend.port);
+    let paired = backend.request(
+        "POST",
+        "/api/connect",
+        &[("Origin", &origin), ("Content-Type", "application/json")],
+        br#"{"token":"test-local-pairing-token-123456789"}"#,
+    );
+    assert_eq!(paired.status, 200);
+    let bearer = format!("Bearer {}", paired.json()["accessToken"].as_str().unwrap());
+    for herdr in [false, true] {
+        for protocol in [
+            None,
+            Some(termai_server::wire::BINARY),
+            Some(termai_server::wire::GZIP),
+            Some(termai_server::wire::GZIP_FAST),
+        ] {
+            let (ticket_path, socket_path, query) = if herdr {
+                (
+                    "/api/herdr/ticket?terminalId=term_0",
+                    "/herdr/ws",
+                    "&terminalId=term_0",
+                )
+            } else {
+                ("/api/ticket", "/ws", "")
+            };
+            let ticket = backend.request(
+                "POST",
+                ticket_path,
+                &[
+                    ("Origin", &origin),
+                    ("Authorization", &bearer),
+                    ("Content-Type", "application/json"),
+                ],
+                b"{}",
+            );
+            assert_eq!(ticket.status, 200);
+            let url = format!(
+                "ws://127.0.0.1:{}/terminal{socket_path}?ticket={}{}",
+                backend.port,
+                ticket.json()["ticket"].as_str().unwrap(),
+                query
+            );
+            let mut request = url.into_client_request().unwrap();
+            request
+                .headers_mut()
+                .insert("origin", origin.parse().unwrap());
+            if let Some(protocol) = protocol {
+                request
+                    .headers_mut()
+                    .insert("sec-websocket-protocol", protocol.parse().unwrap());
+            }
+            let (mut socket, response) = tokio_tungstenite::connect_async(request).await.unwrap();
+            assert_eq!(
+                response
+                    .headers()
+                    .get("sec-websocket-protocol")
+                    .map(|value| value.to_str().unwrap()),
+                protocol
+            );
+            // Idle audio is accepted in legacy/raw and negotiated compact modes.
+            let audio = if protocol.is_some() {
+                vec![b'T', b'M', 1, 6, 0, 255]
+            } else {
+                vec![0, 255]
+            };
+            socket.send(Message::Binary(audio.into())).await.unwrap();
+            let ping = vec![0, 255, 42];
+            socket
+                .send(Message::Ping(ping.clone().into()))
+                .await
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    match socket.next().await.unwrap().unwrap() {
+                        Message::Pong(bytes) => {
+                            assert_eq!(&bytes[..], &ping);
+                            break;
+                        }
+                        Message::Close(frame) => panic!("socket closed before pong: {frame:?}"),
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            let malformed = if protocol == Some(termai_server::wire::BINARY) {
+                Message::Binary(vec![b'T', b'M', 2, 3].into())
+            } else {
+                Message::Text("{invalid".into())
+            };
+            socket.send(malformed).await.unwrap();
+            let frame = tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Message::Close(frame) = socket.next().await.unwrap().unwrap() {
+                        break frame.unwrap();
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(u16::from(frame.code), 1008);
+            let reason = if protocol == Some(termai_server::wire::BINARY) {
+                "Invalid wire message"
+            } else if herdr {
+                "Invalid terminal message"
+            } else {
+                "Invalid message"
+            };
+            assert_eq!(frame.reason, reason);
+        }
     }
 }
 

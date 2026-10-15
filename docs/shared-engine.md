@@ -21,6 +21,8 @@ Cancellation, attachment, prompt and revision guards protect concurrent edits.
 The adapters retain attachment, shell and screen checks when applying text.
 Rust terminal replies use the `ServerMessage` enum and are checked against the shared wire schemas.
 HTTP requests and normalized Herdr snapshots use typed structures, while unknown saved notification-device fields are preserved.
+Native terminal and Herdr WebSockets share one pump for wire decoding, audio, ping/pong and close frames.
+Herdr viewers retain their bounded output reservations, cancellation and heartbeat policies.
 Herdr metadata viewers and notification watches share one subscription per socket and SSH transport, with cached snapshots available to routes while listeners are active.
 Herdr v0.9.3 closes ordinary RPC connections after one response, so connection reduction comes from sharing subscriptions and reusing cached snapshots.
 Mutations invalidate cached metadata, and failed actions are never replayed.
