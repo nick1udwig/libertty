@@ -5,18 +5,26 @@ interface TabGestures {
 }
 /** Swiping scrolls the strip; holding opens actions and allows reordering. */
 export function tabGestures(element: HTMLElement, actions: TabGestures) {
-  let press: { id: number; x: number; y: number; scroll: number; held: boolean; dragged: boolean; moved: boolean } | undefined;
+  let press: { id: number; x: number; y: number; scroll: number; touch: boolean; held: boolean; dragged: boolean; moved: boolean } | undefined;
   let timer: ReturnType<typeof setTimeout>, suppress = false;
+  const preventHeldScroll = (event: TouchEvent) => { if (press?.held && event.cancelable) event.preventDefault(); };
   const finish = () => {
+    element.removeEventListener('touchmove', preventHeldScroll);
     clearTimeout(timer); if (press) suppress = press.held || press.moved;
     element.classList.remove('dragging'); press = undefined; actions.finish?.();
   };
   element.addEventListener('pointerdown', event => {
     const button = (event.target as HTMLElement).closest('button');
     if (event.button !== 0 || button && button !== element) return;
-    suppress = false; press = { id: event.pointerId, x: event.clientX, y: event.clientY, scroll: actions.scroll?.scrollLeft || 0, held: false, dragged: false, moved: false };
+    suppress = false; press = { id: event.pointerId, x: event.clientX, y: event.clientY, scroll: actions.scroll?.scrollLeft || 0, touch: event.pointerType === 'touch', held: false, dragged: false, moved: false };
     element.setPointerCapture(event.pointerId);
-    timer = setTimeout(() => { if (press && !press.moved) { press.held = true; suppress = true; actions.hold(); } }, 450);
+    timer = setTimeout(() => {
+      if (!press || press.moved) return;
+      press.held = true; suppress = true;
+      // Only a held tab needs to block native scrolling for reordering.
+      if (press.touch) element.addEventListener('touchmove', preventHeldScroll, { passive: false });
+      actions.hold();
+    }, 450);
   });
   element.addEventListener('pointermove', event => {
     if (!press || event.pointerId !== press.id) return;
@@ -33,7 +41,7 @@ export function tabGestures(element: HTMLElement, actions: TabGestures) {
       return;
     }
     press.moved = true; clearTimeout(timer);
-    if (actions.scroll && Math.abs(dx) >= Math.abs(dy)) { event.preventDefault(); actions.scroll.scrollLeft = press.scroll - dx; }
+    if (!press.touch && actions.scroll && Math.abs(dx) >= Math.abs(dy)) { event.preventDefault(); actions.scroll.scrollLeft = press.scroll - dx; }
   });
   element.addEventListener('pointerup', event => { if (press?.id !== event.pointerId) return; if (press.dragged) actions.drop?.(event.clientX); finish(); });
   element.addEventListener('pointercancel', finish);
