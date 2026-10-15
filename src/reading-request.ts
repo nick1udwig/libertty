@@ -3,6 +3,12 @@ import { simpleWords } from './shell-words.ts';
 import { expandSymbols } from './speech-symbols.ts';
 
 export const defaultReadingPhrases = ['look at'];
+export type ReadingOpen = { path: string } | { capture: string; name: string; exitCode: number };
+export function readingOpen(value: any): value is ReadingOpen {
+  if (!value || typeof value !== 'object') return false;
+  if ('path' in value) return typeof value.path === 'string' && !!value.path && value.path.length <= 4096 && !/[\x00-\x1f\x7f]/.test(value.path);
+  return typeof value.capture === 'string' && /^[a-f0-9]{32}$/.test(value.capture) && typeof value.name === 'string' && value.name.length <= 180 && Number.isInteger(value.exitCode) && value.exitCode >= 0 && value.exitCode <= 255;
+}
 
 export function readingPhrases(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > 12) return [...defaultReadingPhrases];

@@ -177,6 +177,8 @@ pub struct App {
     downloads: Mutex<HashMap<String, Download>>,
     herdr_tickets: Mutex<HashMap<String, HerdrTicket>>,
     herdr_targets: Mutex<HashMap<String, herdr::Target>>,
+    herdr_readings: Mutex<HashMap<String, crate::reading::Captures>>,
+    herdr_reading_capacity: tokio::sync::Semaphore,
     herdr_connections: Mutex<HashMap<String, (String, CancellationToken)>>,
     herdr_capacity: Arc<tokio::sync::Semaphore>,
     ssh_probes: tokio::sync::Semaphore,
@@ -280,6 +282,8 @@ impl App {
             downloads: Mutex::new(HashMap::new()),
             herdr_tickets: Mutex::new(HashMap::new()),
             herdr_targets: Mutex::new(HashMap::new()),
+            herdr_readings: Mutex::new(HashMap::new()),
+            herdr_reading_capacity: tokio::sync::Semaphore::new(2),
             herdr_connections: Mutex::new(HashMap::new()),
             herdr_capacity: Arc::new(tokio::sync::Semaphore::new(64)),
             ssh_probes: tokio::sync::Semaphore::new(4),
@@ -437,6 +441,10 @@ impl App {
                 }
             });
         self.herdr_targets
+            .lock()
+            .unwrap()
+            .retain(|key, _| !key.starts_with(&format!("{prefix}/")));
+        self.herdr_readings
             .lock()
             .unwrap()
             .retain(|key, _| !key.starts_with(&format!("{prefix}/")));

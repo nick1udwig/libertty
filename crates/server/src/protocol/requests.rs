@@ -39,6 +39,14 @@ pub struct HerdrConnect {
     pub source: Option<String>,
     pub session: Option<String>,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HerdrReading {
+    pub terminal_id: String,
+    pub command: String,
+    pub context: String,
+    pub cwd: String,
+}
 #[derive(Default, Deserialize)]
 pub struct HerdrTicket {
     #[serde(default, rename = "historyDelta")]

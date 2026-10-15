@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use termai_server::herdr::{Target, read_line};
 use tokio::{
@@ -23,6 +23,7 @@ pub struct Fixture {
     pub content_revision: Arc<AtomicU64>,
     pub close_error: Arc<Mutex<String>>,
     pub read_error: Arc<Mutex<String>>,
+    pub reading_shell: Arc<AtomicBool>,
     pub split_error: Arc<Mutex<String>>,
     events: tokio::sync::broadcast::Sender<()>,
     cancel: CancellationToken,
@@ -45,6 +46,7 @@ impl Fixture {
         let content_revision = Arc::new(AtomicU64::new(6));
         let close_error = Arc::new(Mutex::new(String::new()));
         let read_error = Arc::new(Mutex::new(String::new()));
+        let reading_shell = Arc::new(AtomicBool::new(false));
         let split_error = Arc::new(Mutex::new(String::new()));
         let (events, _) = tokio::sync::broadcast::channel(64);
         let cancel = CancellationToken::new();
@@ -67,6 +69,7 @@ impl Fixture {
             content_revision: content_revision.clone(),
             close_error: close_error.clone(),
             read_error: read_error.clone(),
+            reading_shell: reading_shell.clone(),
             split_error: split_error.clone(),
             events: events.clone(),
             cancel: cancel.clone(),
@@ -84,6 +87,7 @@ impl Fixture {
                 let cancel = cancel.clone();
                 let close_error = close_error.clone();
                 let read_error = read_error.clone();
+                let reading_shell = reading_shell.clone();
                 let split_error = split_error.clone();
                 tokio::spawn(async move {
                     let mut stream = BufReader::new(stream);
@@ -120,6 +124,9 @@ impl Fixture {
                             }
                             "pane.copy_motion" => {
                                 json!({"content_revision":content_revision.load(Ordering::Relaxed),"cursor":{"row":0,"col":0}})
+                            }
+                            "pane.process_info" if reading_shell.load(Ordering::Relaxed) => {
+                                json!({"process_info":{"shell_pid":1,"foreground_process_group_id":1,"foreground_processes":[{"pid":1,"name":"bash","cwd":snapshot.lock().unwrap()["panes"][0]["cwd"]}]}})
                             }
                             "pane.read" => {
                                 actions.lock().unwrap().push(request.clone());

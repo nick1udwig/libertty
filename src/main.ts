@@ -155,6 +155,7 @@ for (const plugin of builtinPlugins({
   notice,
   terminalURL,
   openReading,
+  openReadingCapture,
   frame(tab, frame) {
     if (frame) frames.set(tab.id, frame);
     else frames.delete(tab.id);
@@ -453,8 +454,20 @@ async function consumePendingReading() {
     )
       return;
     const { backend, source } = await pendingSource(request.backendUrl, request.session);
-    if (captured) openReadingCapture(source, request.capture, request.name, request.exitCode);
-    else openReading(source, request.path);
+    const readingSource =
+      typeof request.herdrTerminal === 'string' &&
+      request.herdrTerminal.length <= 512 &&
+      (!request.herdrSource || validSession(request.herdrSource))
+        ? {
+            ...source,
+            readHerdrTerminal: request.herdrTerminal,
+            herdrSession: herdrSession(request.herdrSession),
+            herdrSource: request.herdrSource || undefined,
+          }
+        : source;
+    if (captured)
+      openReadingCapture(readingSource, request.capture, request.name, request.exitCode);
+    else openReading(readingSource, request.path);
   } catch (error: any) {
     notice(error?.message || 'Reading Mode could not open this file.');
   }

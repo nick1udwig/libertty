@@ -289,3 +289,103 @@ pub(super) async fn api_herdr_ticket(
         json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"heartbeat":true,"inputContexts":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
     )
 }
+
+pub(super) async fn api_herdr_reading(
+    app: &Arc<App>,
+    ctx: HerdrContext,
+    mut req: Request<Body>,
+) -> Result<Response<Body>, Failure> {
+    let input: crate::protocol::requests::HerdrReading = typed_body(&mut req, 32768).await?;
+    let _permit = app
+        .herdr_reading_capacity
+        .try_acquire()
+        .map_err(|_| fail("Too many reading commands are running."))?;
+    let cancel = CancelOnDrop(CancellationToken::new());
+    let opened = tokio::time::timeout(
+        Duration::from_secs(30),
+        crate::herdr_reading::open(
+            &ctx.target,
+            &input.terminal_id,
+            &input.command,
+            &input.context,
+            &input.cwd,
+            &cancel.0,
+        ),
+    )
+    .await
+    .map_err(|_| fail("Reading command timed out."))?
+    .map_err(fail)?;
+    match opened {
+        crate::herdr_reading::Opened::File(path) => ok(json!({"path":path})),
+        crate::herdr_reading::Opened::Capture {
+            name,
+            data,
+            exit_code,
+        } => {
+            let key = format!("{}/{}/{}", ctx.owner, ctx.source, ctx.session_name);
+            let mut readings = app.herdr_readings.lock().unwrap();
+            if readings.len() >= 32
+                && !readings.contains_key(&key)
+                && let Some(old) = readings.keys().next().cloned()
+            {
+                readings.remove(&old);
+            }
+            let capture = readings
+                .entry(key)
+                .or_default()
+                .add(&name, data, exit_code)
+                .map_err(file_failure)?;
+            ok(json!({"capture":capture.id,"name":capture.name,"exitCode":capture.exit_code}))
+        }
+    }
+}
+
+pub(super) async fn api_herdr_reading_file(
+    _app: &Arc<App>,
+    ctx: HerdrContext,
+    _req: Request<Body>,
+) -> Result<Response<Body>, Failure> {
+    let path = ctx
+        .query
+        .get("path")
+        .filter(|path| path.starts_with('/'))
+        .ok_or_else(|| fail("Use an absolute file path."))?;
+    let cancel = CancelOnDrop(CancellationToken::new());
+    let file = if let Some(remote) = &ctx.target.remote {
+        remote.read_for_viewing("/", path, &cancel.0).await
+    } else {
+        crate::reading::read(
+            "/",
+            ctx.target.env.get("HOME").map(String::as_str).unwrap_or(""),
+            path,
+        )
+        .await
+    }
+    .map_err(file_failure)?;
+    Ok(binary_response(file.mime, file.data))
+}
+
+pub(super) async fn api_herdr_reading_capture(
+    app: &Arc<App>,
+    ctx: HerdrContext,
+    req: Request<Body>,
+) -> Result<Response<Body>, Failure> {
+    let key = format!("{}/{}/{}", ctx.owner, ctx.source, ctx.session_name);
+    let id = ctx.query.get("id").map(String::as_str).unwrap_or("");
+    let mut readings = app.herdr_readings.lock().unwrap();
+    if req.method() == Method::DELETE {
+        if let Some(readings) = readings.get_mut(&key) {
+            readings.remove(id);
+        }
+        return ok(json!({"ok":true}));
+    }
+    let capture = readings
+        .get_mut(&key)
+        .and_then(|readings| readings.get(id))
+        .ok_or((
+            StatusCode::NOT_FOUND,
+            "This captured output has expired. Run the command again to create a new snapshot."
+                .into(),
+        ))?;
+    Ok(binary_response(capture.mime, capture.data))
+}

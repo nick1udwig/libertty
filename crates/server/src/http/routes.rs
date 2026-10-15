@@ -246,6 +246,10 @@ pub(super) fn router() -> Router<Arc<App>> {
         "/api/herdr/images/upload" => post(herdr_routes::api_herdr_images_upload, HerdrContext);
         "/api/herdr/options" => get(herdr_routes::api_herdr_options, HerdrContext);
         "/api/herdr/suggest" => post(herdr_routes::api_herdr_suggest, HerdrContext);
+        "/api/herdr/reading" => post(herdr_routes::api_herdr_reading, HerdrContext);
+        "/api/herdr/reading/file" => get(herdr_routes::api_herdr_reading_file, HerdrContext);
+        "/api/herdr/reading/capture" => get(herdr_routes::api_herdr_reading_capture, HerdrContext),
+            delete(herdr_routes::api_herdr_reading_capture, HerdrContext);
         "/api/herdr/action" => post(herdr_routes::api_herdr_action, HerdrContext);
         "/api/herdr/ticket" => post(herdr_routes::api_herdr_ticket, HerdrContext);
         "/api/notifications/subscribe" => post(notifications_routes::api_notifications_subscribe, OwnerContext);

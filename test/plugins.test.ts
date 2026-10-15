@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { builtinIds, PluginRegistry, migratePluginTab, migrateReadingTab, type TabPlugin } from '../src/plugins.ts';
 import { parsePluginPackage, pluginRequest, pluginState } from '../src/plugin-package.ts';
+import { readingTab } from '../src/tabs.ts';
+import { readingOpen } from '../src/reading-request.ts';
 
 const host = { id: 'local', name: 'This machine', kind: 'http' as const, backendId: 'primary' };
 const tab = { id: 'tab', name: 'Test', session: 'default', backendId: 'primary' };
@@ -34,6 +36,22 @@ test('legacy reading tabs pin the reading plugin and borrow their source session
   const capture = migrateReadingTab({ ...tab, path: 'git diff', sourceTabId: 'terminal-tab', capture: 'a'.repeat(32), exitCode: 2 });
   assert.equal(capture.readCapture, 'a'.repeat(32)); assert.equal(capture.readExitCode, 2);
   assert.equal(capture.readPath, 'git diff'); assert.equal(capture.pluginVersion, '1'); assert.equal(capture.ownsSession, false);
+});
+test('Herdr readers and linked files retain the pane connection and return to their source tab', () => {
+  const source = { ...tab, pluginId: 'herdr', herdrSession: 'work', herdrSource: 'source-id', readHerdrTerminal: 'term_0' };
+  const file = readingTab(source, { name: 'Notes', readPath: '/work/README.md' });
+  const linked = readingTab(file, { name: 'Linked', readPath: '/work/linked.md' });
+  for (const reader of [file, linked]) {
+    assert.equal(reader.parentTabId, source.id);
+    assert.equal(reader.herdrSession, 'work'); assert.equal(reader.herdrSource, 'source-id');
+    assert.equal(reader.readHerdrTerminal, 'term_0'); assert.equal(reader.ownsSession, false);
+  }
+});
+test('nested reader handoffs reject malformed file paths and capture descriptors', () => {
+  const capture = { capture: 'a'.repeat(32), name: 'Command output', exitCode: 7 };
+  assert.equal(readingOpen({ path: '/work/note.txt' }), true);
+  assert.equal(readingOpen(capture), true);
+  for (const value of [null, {}, { path: '' }, { path: '/work/\nfile' }, { ...capture, exitCode: 256 }, { ...capture, path: null }, { ...capture, capture: '../file' }]) assert.equal(readingOpen(value), false);
 });
 test('the independently packaged sample uses the supported manifest and view', async () => {
   const pkg = parsePluginPackage(JSON.parse(await readFile(new URL('../examples/plugins/example.log-viewer.termai-plugin.json', import.meta.url), 'utf8')));

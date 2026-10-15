@@ -18,13 +18,22 @@ export function readingPlugin(s: ReadingServices): TabPlugin {
     async mount(tab) { return mountReading(tab, s); },
     async close(tab) {
       if (tab.readCapture) {
-        const backend = s.backend(tab), url = new URL('api/reading/capture', backend.url);
+        const backend = s.backend(tab), url = readingURL(tab, backend, true);
         url.searchParams.set('id', tab.readCapture); url.searchParams.set('session', tab.session);
         void request(url, { method: 'DELETE', token: () => s.token(backend), recoverAuth: () => s.authenticate(backend, true) }).catch(() => {});
       }
       return true;
     },
   };
+}
+
+function readingURL(tab: TerminalTab, backend: BackendProfile, capture = false) {
+  const url = new URL((tab.readHerdrTerminal ? 'api/herdr/reading/' : 'api/reading/') + (capture ? 'capture' : 'file'), backend.url);
+  if (tab.readHerdrTerminal) {
+    url.searchParams.set('herdrSession', tab.herdrSession || '');
+    if (tab.herdrSource) url.searchParams.set('herdrSource', tab.herdrSource);
+  }
+  return url;
 }
 
 function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
@@ -42,7 +51,7 @@ function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
     current?.dispose(); current = view; view.element.hidden = !visible; element.replaceChildren(view.element);
   };
   const readFile = async (path: string, capture?: string) => {
-    const url = new URL(capture ? 'api/reading/capture' : 'api/reading/file', backend.url);
+    const url = readingURL(tab, backend, !!capture);
     url.searchParams.set(capture ? 'id' : 'path', capture || path); url.searchParams.set('session', tab.session);
     const response = await request(url, { signal: controller.signal, token: () => s.token(backend), recoverAuth: () => s.authenticate(backend, true) });
     if (!response.ok) { const result = await response.json(); throw new Error(result.error || 'Could not open file.'); }

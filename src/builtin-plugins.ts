@@ -13,6 +13,7 @@ export interface BuiltinServices extends ReadingServices {
   api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string, recoverAuth?: boolean, signal?: AbortSignal): Promise<T>;
   connect(host: HostProfile, pluginId: string): Promise<void>;
   closeSession(tab: TerminalTab): Promise<void>;
+  openReadingCapture(tab: TerminalTab, capture: string, name: string, exitCode?: number): void;
   reconnectHerdr(tab: TerminalTab): Promise<void>;
   store(): void;
   notice(message: string): void;
@@ -64,6 +65,11 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         const session = herdrSession(tab.herdrSession), source = tab.herdrSource, sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
         const connection = backend.url + '#' + (source ? sourceHost || tab.hostId || source : '') + '#' + session;
         const view = new HerdrView({ url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'termai.herdr.' + connection,
+          reading: (terminalId, request) => {
+            const source = { ...tab, readHerdrTerminal: terminalId };
+            if ('path' in request) s.openReading(source, request.path);
+            else s.openReadingCapture(source, request.capture, request.name, request.exitCode);
+          },
           notificationDevice: () => s.notificationDevice(tab.backendId), toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
           api: async <T>(name: string, data?: unknown, signal?: AbortSignal) => {
             try { return await s.api<T>(backend, name + '?' + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }

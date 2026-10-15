@@ -8087,6 +8087,75 @@
         "complete"
       ],
       "additionalProperties": true
+    },
+    "HerdrReadingRequest": {
+      "type": "object",
+      "properties": {
+        "terminalId": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "command": {
+          "type": "string",
+          "maxLength": 16000
+        },
+        "context": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "cwd": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "terminalId",
+        "command",
+        "context",
+        "cwd"
+      ],
+      "additionalProperties": true
+    },
+    "HerdrReadingReply": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "capture": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            },
+            "name": {
+              "type": "string",
+              "maxLength": 180
+            },
+            "exitCode": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "capture",
+            "name",
+            "exitCode"
+          ],
+          "additionalProperties": true
+        }
+      ]
     }
   }
 }

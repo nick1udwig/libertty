@@ -22,7 +22,7 @@ run('scripts/install-test-herdr.mjs');
 env.HERDR_BINARY = path.join(root, '.test-artifacts/bin/herdr');
 env.PATH = path.dirname(env.HERDR_BINARY) + path.delimiter + process.env.PATH;
 for (const file of [
-  'herdr-dictation-browser.mjs', 'herdr-spaces-browser.mjs', 'herdr-resize-native.mjs',
+  'herdr-dictation-browser.mjs', 'herdr-reading-browser.mjs', 'herdr-spaces-browser.mjs', 'herdr-resize-native.mjs',
   'herdr-space-flash-native.mjs', 'herdr-app-scroll-native.mjs',
 ]) run('test/' + file);
 run('test/herdr-app-scroll-native.mjs', { TEST_WIRE: 'gzip', TEST_LINK: 'lossy' });

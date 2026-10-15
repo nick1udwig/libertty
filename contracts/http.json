@@ -1106,6 +1106,135 @@
         403,
         404
       ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/herdr/reading",
+      "authentication": "paired-client",
+      "origin": "required",
+      "request": {
+        "$ref": "#/$defs/HerdrReadingRequest"
+      },
+      "response": {
+        "$ref": "#/$defs/HerdrReadingReply"
+      },
+      "requestEncoding": "application/json",
+      "responseEncoding": "application/json",
+      "bodyLimitUTF16": 32768,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404
+      ],
+      "timeoutMs": 30000
+    },
+    {
+      "method": "GET",
+      "path": "/api/herdr/reading/file",
+      "authentication": "paired-client",
+      "origin": "optional",
+      "request": null,
+      "response": null,
+      "requestEncoding": "none",
+      "responseEncoding": "binary-mime",
+      "bodyLimitUTF16": 0,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404
+      ],
+      "query": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": true
+      },
+      "responseLimitBytes": 20971520
+    },
+    {
+      "method": "GET",
+      "path": "/api/herdr/reading/capture",
+      "authentication": "paired-client",
+      "origin": "optional",
+      "request": null,
+      "response": null,
+      "requestEncoding": "none",
+      "responseEncoding": "binary-mime",
+      "bodyLimitUTF16": 0,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404
+      ],
+      "query": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": true
+      },
+      "responseLimitBytes": 20971520
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/herdr/reading/capture",
+      "authentication": "paired-client",
+      "origin": "required",
+      "request": null,
+      "response": {
+        "$ref": "#/$defs/Ok"
+      },
+      "requestEncoding": "none",
+      "responseEncoding": "application/json",
+      "bodyLimitUTF16": 0,
+      "error": {
+        "$ref": "#/$defs/Error"
+      },
+      "statuses": [
+        200,
+        400,
+        401,
+        403,
+        404
+      ],
+      "query": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": true
+      }
     }
   ],
   "sockets": [

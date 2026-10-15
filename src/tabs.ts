@@ -3,6 +3,7 @@ import { BUILTIN_VERSION, tabPluginId } from './plugins.ts';
 export function readingTab(source: TerminalTab, detail: Pick<TerminalTab, 'name' | 'readPath' | 'readCapture' | 'readExitCode'>): TerminalTab {
   return { id: crypto.randomUUID(), pluginId: 'reading', pluginVersion: BUILTIN_VERSION, ownsSession: false,
     backendId: source.backendId, session: source.session,
+    ...(source.readHerdrTerminal ? { readHerdrTerminal: source.readHerdrTerminal, herdrSession: source.herdrSession, herdrSource: source.herdrSource } : {}),
     parentTabId: tabPluginId(source) === 'reading' ? source.parentTabId : source.id,
     lastUsed: Date.now(), ...detail };
 }

@@ -24,6 +24,12 @@ After a backend restart, close the ended tab and connect again from its host men
 
 ## Terminal interface and mobile sizing
 
+At a Herdr shell prompt, `look at FILE`, `look at COMMAND` and `COMMAND | look at` open Reading Mode in a top-level workspace tab.
+Typed requests and dictated alternatives use the selected pane's working directory and the Herdr host's existing connection.
+Reading commands run once in a separate Bash context using the connection environment rather than the pane's interactive variables or functions.
+Commands have a 30-second limit and use the reader's existing 20 MB output limit.
+Readers preserve their connection across reloads and relative file links, and closing a reader returns to its Herdr tab.
+
 Every selected agent opens the same terminal.html / terminal.ts pane as a normal terminal.
 Input, dictation, configurable shortcuts, IME focus, touch scrolling, selection handles, automatic copy, terminal links and the history scrollbar all use the existing implementations.
 There is no separate message composer.

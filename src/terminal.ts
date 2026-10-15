@@ -25,7 +25,7 @@ import { SuggestionClient } from './suggestion-client.ts';
 import { InlineSuggestions } from './inline-suggestions.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { defaults, keySequence, validateShortcuts, type Shortcut } from './shortcuts.ts';
-import { readingPhrases } from './reading-request.ts';
+import { readingPhrases, readingRequest, readingPipeline, type ReadingOpen } from './reading-request.ts';
 const params = new URLSearchParams(location.search);
 const embedded = params.get('embedded') === '1' && parent !== window;
 const baseURL = new URL(params.get('backend') || document.baseURI);
@@ -320,7 +320,7 @@ const dictation = new DictationControl({ api, send, state: () => state, context:
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
   const workspace = new URL('.', document.baseURI);
-  sessionStorage.setItem('termai.pendingReading:' + workspace.pathname, JSON.stringify({ ...request, session, backendUrl: baseURL.href }));
+  sessionStorage.setItem('termai.pendingReading:' + workspace.pathname, JSON.stringify({ ...request, session, backendUrl: baseURL.href, ...(herdrTerminal ? { herdrTerminal, herdrSession: params.get('herdrSession') || '', herdrSource: params.get('herdrSource') || '' } : {}) }));
   location.assign(workspace.href);
 }
 term.onData(rawInput);
@@ -645,6 +645,22 @@ window.addEventListener('offline', () => transport.suspend());
 function execute(command: string) {
   if (presentation.pending || capturedConnection || !state.ready && !herdrReady || state.exited || pendingCommand || transport.socket?.readyState !== WebSocket.OPEN) { toast('Wait for terminal input before running a command.'); return; }
   if (!command.trim() || /[\x00-\x1f\x7f]/.test(command)) { toast('Use one command line at a time.'); return; }
+  if (herdrTerminal && state.ready && (readingRequest(command, ['look at']) || readingPipeline(command, ['look at']))) {
+    const context = state.inputContext;
+    inline.disconnect();
+    // Clear the submitted line before the reader runs so later typing is preserved.
+    send({ type: 'input', data: '\x07\x05\x15' }); state.inputRevision++;
+    const controller = new AbortController(), socket = transport.socket;
+    socket.addEventListener('close', () => controller.abort(), { once: true, signal: controller.signal });
+    pendingCommand = { id: crypto.randomUUID() }; updateRun();
+    void requestJSON<ReadingOpen>(herdrEndpoint('api/herdr/reading'), { terminalId: herdrTerminal, command, context, cwd: state.cwd }, { token: () => accessToken, signal: controller.signal, timeout: 35000 }).then(request => {
+      if (transport.socket !== socket || socket.readyState !== WebSocket.OPEN) return;
+      showReading(request);
+    }).catch(error => { if (!controller.signal.aborted) toast(error.message); }).finally(() => {
+      controller.abort(); pendingCommand = undefined; updateRun();
+    });
+    return;
+  }
   inline.disconnect();
   const id = crypto.randomUUID(); pendingCommand = { id };
   if (!send({ type: 'command', command, prompt: state.prompt, id })) { pendingCommand = undefined; toast('Disconnected. The command was not sent.'); }

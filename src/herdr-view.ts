@@ -1,4 +1,5 @@
 import { node } from './dom.ts';
+import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import { wireProtocols } from './wire.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSpace, type HerdrWorktrees } from './herdr-protocol.ts';
@@ -14,6 +15,7 @@ interface Host {
   api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
   notice(message: string): void;
+  reading(terminalId: string, request: ReadingOpen): void;
   reconnect?(): Promise<void>;
   ready?(): void;
   toggleTerminalTabs?(): void;
@@ -133,6 +135,7 @@ export class HerdrView {
         this.rendered = true; this.setLoading(false); viewed(); this.host.ready?.();
       }
       if (active && event.data.type === 'terminal-notice') this.host.notice(event.data.message);
+      if (event.data.type === 'reading-open' && readingOpen(event.data)) this.host.reading(entry.frame.dataset.terminal!, event.data);
       if (event.data.type === 'terminal-ended') void this.refreshSnapshot().catch(error => { if (error.status !== 404) this.connectionError(error); });
       if (event.data.type === 'terminal-locked') entry.locked = true;
       if (active && event.data.type === 'terminal-locked') void this.host.authenticate().then(() => entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin)).catch(error => this.host.notice(error.message));
