@@ -12,6 +12,7 @@ import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { TerminalFocus } from './terminal-focus.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
+import { TerminalHistory } from './terminal-history.ts';
 import { TerminalProjection } from './terminal-projection.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
 import { DictationControl } from './dictation.ts';
@@ -124,6 +125,7 @@ const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 /
 term.open($('terminal'));
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
+const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
 const projection = herdrTerminal ? new TerminalProjection(term, ghostty) : undefined;
 const terminalViewport = $('terminal-viewport');
 const presentation = new TerminalPresentation(terminalViewport, () => {
@@ -356,7 +358,7 @@ async function socketURL(signal: AbortSignal) {
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
   if (herdrTerminal) {
     sizeTerminal();
-    const geometry = { frameAck: true, cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && !document.hidden };
+    const geometry = { historyDelta: true, frameAck: true, cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && !document.hidden };
     cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutMatched = false;
     herdrPreserve = false; herdrMobileRendered = false;
     herdrLayoutPending = geometry.mobile;
@@ -379,6 +381,7 @@ async function prepareConnection(signal: AbortSignal, token?: string) {
   return socketURL(signal);
 }
 function socketOpened() {
+  history.reset();
   replayState = false;
   if (herdrTerminal) { herdrReady = false; state.inputRevision = 0; state.inputTarget = undefined; connection('Connecting'); }
   else { connection('Connected', true); notify('terminal-ready'); dictation.connected(true); }
@@ -437,7 +440,11 @@ function socketMessage(event: MessageEvent) {
       if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
     } finally { if (message.seq !== undefined) send({ type: 'ack', seq: message.seq }); }
   }
-  if (message.type === 'screen') { if (herdrLayoutPending || herdrParked) return; projection?.update(message.text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return; }
+  if (message.type === 'screen' || message.type === 'screen-delta') {
+    const text = history.receive(message);
+    if (text === undefined || herdrLayoutPending || herdrParked) return;
+    projection?.update(text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return;
+  }
   if (message.type === 'input-line') {
     const intact = message.prompt === state.prompt && message.revision === state.inputRevision && state.ready;
     inputLines.get(message.id)?.(intact && typeof message.text === 'string' && typeof message.cursor === 'number' ? { text: message.text, cursor: message.cursor } : undefined);

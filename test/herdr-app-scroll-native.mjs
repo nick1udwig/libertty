@@ -55,7 +55,7 @@ try {
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
   await context.addInitScript(() => {
-    window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0;
+    window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0; window.__historyDeltas = 0;
     window.WebSocket = class extends WebSocket {
       send(data) {
         if (window.__holdAcks && window.__wireSent(data).type === 'ack') {
@@ -69,7 +69,7 @@ try {
         super.onmessage = async event => {
           const message = await window.__wireMessage(event.data, this);
           if (message.type === 'herdr-frame') { window.__frames++; if (!message.full) window.__deltas++; }
-          if (message.type === 'screen') { window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }
+          if (message.type === 'screen') { if (message.delta) window.__historyDeltas++; window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }
           handler.call(this, event);
         };
       }
@@ -91,7 +91,7 @@ try {
   assert.ok((await herdrSnapshot(target)).terminals.some(item => item.terminalId === terminal.terminalId));
   const pane = await herdrRequest(target, 'pane.get', { pane_id: terminal.paneId }); assert.equal(pane.pane.scroll.max_offset_from_bottom, 0);
   assert.equal(await page.evaluate(() => window.__terminal.buffer.active.length), await page.evaluate(() => window.__terminal.rows));
-  await page.waitForFunction(() => window.__screens > 1 && window.__lastScreen.text.includes('TICK:'));
+  await page.waitForFunction(() => window.__screens > 1 && window.__historyDeltas > 0 && window.__lastScreen.text.includes('TICK:'));
   // Prove text uses native deltas, not the 150 ms snapshot loop: withhold all
   // history messages while sampling the displayed animation on browser paints.
   const animation = await page.evaluate(async () => {

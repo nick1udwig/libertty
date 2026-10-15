@@ -30,7 +30,8 @@ export type ServerMessage =
   | { type: 'herdr-command'; id: string; command: string }
   | { type: 'ssh-released'; id: string }
   | { type: 'output'; seq: number; data: string }
-  | { type: 'screen'; text: string }
+  | { type: 'screen'; text: string; version?: number }
+  | { type: 'screen-delta'; base: number; version: number; drop: number; from: number; tail: number; text: string }
   | { type: 'herdr-layout'; cols: number; rows: number; ready: boolean }
   | { type: 'herdr-frame'; seq?: number; width: number; height: number; full: boolean; bytes: string }
   | { type: 'state'; state: ShellState }

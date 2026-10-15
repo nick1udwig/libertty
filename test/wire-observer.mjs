@@ -6,11 +6,19 @@ export async function installWireObserver(context) {
   const source = stripTypeScriptTypes(await readFile(new URL('../src/wire.ts', import.meta.url), 'utf8')).replace(/^export /gm, '');
   if (process.env.TEST_WIRE === 'gzip') await context.addInitScript(() => Object.defineProperty(navigator, 'connection', { configurable: true, value: { effectiveType: '3g', downlink: 1 } }));
   await context.addInitScript({ content: '(() => {' + source + String.raw`
-    const pending = new WeakMap();
+    const pending = new WeakMap(), histories = new WeakMap();
     window.__wireMessage = (data, owner) => {
       const previous = owner ? pending.get(owner) || Promise.resolve() : Promise.resolve();
       const next = previous.then(async () => {
-        const value = await decodeWire(data);
+        let value = await decodeWire(data);
+        if (owner && value.type === 'screen') histories.set(owner, value);
+        else if (owner && value.type === 'screen-delta') {
+          const previous = histories.get(owner);
+          if (previous?.version === value.base) {
+            value = { ...value, type: 'screen', text: previous.text.slice(value.drop, value.drop + value.from) + value.text + (value.tail ? previous.text.slice(-value.tail) : ''), delta: true };
+            histories.set(owner, value);
+          }
+        }
         if (value.type === 'herdr-frame' && typeof value.bytes !== 'string') {
           let text = ''; for (let i=0;i<value.bytes.length;i+=8192) text += String.fromCharCode(...value.bytes.subarray(i,i+8192));
           value.bytes=btoa(text);

@@ -1,4 +1,5 @@
 mod frames;
+mod history;
 use crate::protocol::{DictationSource, DictationState, ServerMessage};
 use crate::{
     herdr::Target,
@@ -68,6 +69,7 @@ pub struct View {
     baseline: Mutex<Option<Size>>,
     frame_ready: tokio::sync::Notify,
     frames: Mutex<Option<frames::Frames>>,
+    history_delta: Mutex<Option<history::History>>,
     cancel: CancellationToken,
     services: crate::host::HostServices,
 }
@@ -119,6 +121,7 @@ impl View {
             baseline: Mutex::new(None),
             frame_ready: tokio::sync::Notify::new(),
             frames: Mutex::new(None),
+            history_delta: Mutex::new(None),
             cancel,
         });
         if let Some(size) = initial_size {
@@ -249,7 +252,18 @@ impl View {
                     if let Some(message) = message {
                         let Some(view) = weak.upgrade() else { break };
                         match message {
-                            Ok(message) => view.send(message.as_ref().clone()),
+                            Ok(message) => {
+                                if let ServerMessage::Screen { text, .. } = message.as_ref() {
+                                    let mut delivery = view.history_delta.lock().unwrap();
+                                    if let Some(delivery) = delivery.as_mut() {
+                                        if let Some(message) = delivery.next(text.clone()) {
+                                            view.send(message);
+                                        }
+                                    } else {
+                                        view.send(message.as_ref().clone());
+                                    }
+                                }
+                            }
                             Err(message) => {
                                 view.send(ServerMessage::ReadingError {
                                     message: (message.as_ref()).to_string(),
@@ -270,6 +284,9 @@ impl View {
             view.confirm_layout(size, revision, view.begin_layout());
         }
         Ok(view)
+    }
+    pub fn enable_history_delta(&self) {
+        *self.history_delta.lock().unwrap() = Some(history::History::default());
     }
     pub fn enable_frame_ack(&self) {
         *self.frames.lock().unwrap() = Some(frames::Frames::default());
@@ -620,6 +637,9 @@ impl View {
                 Ok(())
             }
             ClientMessage::HerdrFrameRequest => {
+                if let Some(delivery) = self.history_delta.lock().unwrap().as_mut() {
+                    delivery.reset();
+                }
                 self.terminal.refresh();
                 // Subscribe briefly to refresh the shared active resource.
                 if let Ok(history) = self

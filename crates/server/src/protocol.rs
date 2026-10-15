@@ -101,6 +101,16 @@ pub enum ServerMessage {
     },
     Screen {
         text: std::sync::Arc<str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        version: Option<u64>,
+    },
+    ScreenDelta {
+        base: u64,
+        version: u64,
+        drop: usize,
+        from: usize,
+        tail: usize,
+        text: std::sync::Arc<str>,
     },
     HerdrLayout {
         cols: u16,

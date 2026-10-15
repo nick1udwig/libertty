@@ -60,7 +60,16 @@ fn server_samples() -> Vec<ServerMessage> {
             seq: 1,
             data: "世界\r\n".into(),
         },
+        ServerMessage::ScreenDelta {
+            base: 1,
+            version: 2,
+            drop: 0,
+            from: 1,
+            tail: 0,
+            text: "changed".into(),
+        },
         ServerMessage::Screen {
+            version: Some(1),
             text: "history".into(),
         },
         ServerMessage::HerdrLayout {

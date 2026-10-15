@@ -147,6 +147,7 @@ struct Ticket {
     until: Instant,
 }
 struct HerdrTicket {
+    history_delta: bool,
     frame_ack: bool,
     size: Option<herdr_terminal_stream::Size>,
     owner: String,
@@ -956,6 +957,9 @@ async fn herdr_socket_session(
             cancel.clone(),
         ) {
             Ok(view) => {
+                if ticket.history_delta {
+                    view.enable_history_delta();
+                }
                 if ticket.frame_ack {
                     view.enable_frame_ack();
                 }

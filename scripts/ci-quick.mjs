@@ -52,6 +52,7 @@ const tests = [
   'service-worker.test.ts',
   'shell-words.test.ts',
   'shortcuts.test.ts',
+  'terminal-history.test.ts',
   'terminal-projection.test.ts',
   'touch-cursor.test.ts',
   'vault.test.ts',

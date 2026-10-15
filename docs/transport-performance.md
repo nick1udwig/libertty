@@ -207,3 +207,18 @@ The mobile paint certificate resets on reconnects and desktop layouts, so an ini
 Run `npm run test:herdr-loading` to exercise cold loading panels, pane and top-level handoffs, stale acknowledgements, viewport changes, cancellation, live composited canvas updates and input delivery through keyboard opening and dismissal.
 The native flash test samples visibility from the parent window, so it includes the old displayed pane and the incoming pane across iframe visibility transitions.
 The real-Herdr test also captures composited browser pixels independently of the terminal-buffer assertions.
+
+## Herdr history delivery
+
+`node scripts/measure-herdr-history.mjs` samples a live working agent without saving its terminal contents.
+A 67-poll sample on October 14, 2026 changed on 47 polls and produced 846,030 bytes of complete history messages, ranging from 17,839 to 18,292 bytes each.
+Gzip level 1 would reduce that sample to 139,544 bytes, but each message falls below the ordinary 128 KiB threshold.
+A common-prefix estimate used 131,917 bytes before delta metadata, which justified implementing per-view edits.
+The sample report is saved in `.test-artifacts/herdr-history-measurement.json`.
+
+Viewers opt into history deltas through their ticket request and receive a versioned full baseline first.
+Subsequent edits preserve a UTF-16 prefix and suffix and can discard leading complete lines as the 1,000-line window rolls forward.
+Each viewer compares against its own last delivered text, so a coalesced shared poll or a newly joined viewer cannot inherit another viewer's delta base.
+Missing bases request one fresh baseline, and short unrelated replacements use a full message.
+Matching live native screens retain the latest history text and defer its terminal parser until fallback, reflow or growing scrollback requires it.
+Legacy clients continue to receive complete history messages.

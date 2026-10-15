@@ -274,6 +274,7 @@ pub(super) async fn api_herdr_ticket(
     tickets.insert(
         ticket.clone(),
         HerdrTicket {
+            history_delta: input.history_delta,
             frame_ack: input.frame_ack,
             size,
             owner: owner.into(),
