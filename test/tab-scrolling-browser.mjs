@@ -19,7 +19,7 @@ try {
         tab.addEventListener('pointercancel', () => result.cancelled++);
       }
     }
-    tabStripSwipes(document.querySelector('#workspace-navigation'), () => 'herdr', () => result.vertical++);
+    tabStripSwipes(document.querySelector('#workspace-navigation'), () => 'herdr', { move: () => {}, end: up => { if (up !== undefined) result.vertical++; } });
   ` });
   const cdp = await context.newCDPSession(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });

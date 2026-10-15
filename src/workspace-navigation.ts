@@ -59,13 +59,22 @@ export function createWorkspaceNavigation(options: Options) {
   } = options;
   let navigationTab = '',
     terminalTabsExpanded = false;
+  let drawerDrag:
+    | { view: HerdrView; height: number; expanded: boolean; release: () => void }
+    | undefined;
   let page: 'terminal' | 'hosts' | 'vault' | 'keychain' | 'backends' | 'known' | 'settings' =
     'terminal';
   const mounting = new Map<string, Promise<void>>(),
     mountGeneration = new Map<string, number>();
   const terminalShortcuts = new WeakMap<
     Window,
-    { shortcuts: Shortcut[]; ctrl: boolean; available: boolean; imageAvailable: boolean }
+    {
+      shortcuts: Shortcut[];
+      ctrl: boolean;
+      available: boolean;
+      imageAvailable: boolean;
+      returnAvailable: boolean;
+    }
   >();
   let shortcutPresentation = '';
   let shortcutWindow: Window | null | undefined;
@@ -337,6 +346,8 @@ export function createWorkspaceNavigation(options: Options) {
     renderWorkspaceShortcuts();
   }
   function updateWorkspaceNavigation() {
+    if (drawerDrag && (page !== 'terminal' || drawerDrag.view !== herdrViews.get(workspace.active)))
+      cancelDrawerSwipe();
     if (navigationTab !== workspace.active) {
       if (!herdrViews.has(navigationTab)) terminalTabsExpanded = false;
       navigationTab = workspace.active;
@@ -364,6 +375,7 @@ export function createWorkspaceNavigation(options: Options) {
     else notice('Select the original terminal and attach the image again.');
   });
   document.body.append(images);
+  $('workspace-enter').addEventListener('pointerdown', (event) => event.preventDefault());
   function renderWorkspaceShortcuts() {
     const frame = shortcutFrame(),
       source = frame?.contentWindow,
@@ -381,11 +393,18 @@ export function createWorkspaceNavigation(options: Options) {
       ctrl: ready && state?.ctrl,
       available: state?.available,
       imageAvailable: state?.imageAvailable,
+      returnAvailable: state?.returnAvailable,
       ready,
     });
     if (source === shortcutWindow && presentation === shortcutPresentation) return;
     shortcutWindow = source;
     shortcutPresentation = presentation || '';
+    const enter = $<HTMLButtonElement>('workspace-enter');
+    enter.disabled = !ready || !state?.returnAvailable;
+    enter.onclick = () => {
+      if (!ready || !state?.returnAvailable || shortcutFrame()?.contentWindow !== source) return;
+      source!.postMessage({ type: 'terminal-return' }, location.origin);
+    };
     const buttons = $('workspace-shortcut-buttons'),
       scroll = buttons.scrollLeft;
     buttons.replaceChildren();
@@ -722,6 +741,7 @@ export function createWorkspaceNavigation(options: Options) {
             ctrl: event.data.ctrl === true,
             available: event.data.available === true,
             imageAvailable: event.data.imageAvailable === true,
+            returnAvailable: event.data.returnAvailable === true,
           });
           renderWorkspaceShortcuts();
         } catch {
@@ -843,6 +863,7 @@ export function createWorkspaceNavigation(options: Options) {
   document.addEventListener('visibilitychange', updateViewVisibility);
   function toggleTerminalTabs(tab: TerminalTab) {
     if (tab.id !== workspace.active) return;
+    cancelDrawerSwipe();
     const release = herdrViews.get(tab.id)?.holdTerminalSize();
     terminalTabsExpanded = !terminalTabsExpanded;
     updateWorkspaceNavigation();
@@ -853,13 +874,42 @@ export function createWorkspaceNavigation(options: Options) {
         .map((animation) => animation.finished),
     ).then(() => release?.());
   }
-  tabStripSwipes(
+  function moveTerminalTabs(dy: number) {
+    const view = herdrViews.get(workspace.active);
+    if (!view || page !== 'terminal') return;
+    const drawer = $('terminal-tabs-drawer');
+    if (!drawerDrag) {
+      drawerDrag = {
+        view,
+        height: drawer.getBoundingClientRect().height,
+        expanded: terminalTabsExpanded,
+        release: view.holdTerminalSize(),
+      };
+      drawer.classList.add('dragging');
+    }
+    drawer.style.height =
+      Math.max(0, Math.min($('terminal-header').offsetHeight, drawerDrag.height - dy)) + 'px';
+  }
+  function endTerminalTabs(expanded?: boolean) {
+    const drag = drawerDrag;
+    if (!drag) return;
+    drawerDrag = undefined;
+    const drawer = $('terminal-tabs-drawer');
+    // Commit the last dragged height before transitioning to the settled state.
+    drawer.getBoundingClientRect();
+    drawer.classList.remove('dragging');
+    drawer.style.removeProperty('height');
+    if (page === 'terminal' && drag.view === herdrViews.get(workspace.active))
+      terminalTabsExpanded = expanded ?? drag.expanded;
+    updateWorkspaceNavigation();
+    void Promise.allSettled(drawer.getAnimations().map((animation) => animation.finished)).then(
+      drag.release,
+    );
+  }
+  const cancelDrawerSwipe = tabStripSwipes(
     $('workspace-navigation'),
     () => page === 'terminal' && herdrViews.get(workspace.active),
-    (expanded) => {
-      const tab = workspace.tabs.find((tab) => tab.id === workspace.active);
-      if (tab && expanded !== terminalTabsExpanded) toggleTerminalTabs(tab);
-    },
+    { move: moveTerminalTabs, end: endTerminalTabs },
   );
   function attention(tab: TerminalTab, count: number) {
     herdrAttention.set(tab.id, count);

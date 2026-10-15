@@ -75,12 +75,11 @@ dialog .primary[type=submit]{width:100%;margin-top:8px}dialog .actions .primary{
 #workspace-shortcuts{flex:none;background:var(--surface);padding:4px 8px}
 #workspace-navigation{flex:none;min-width:0;background:var(--surface)}
 #workspace-navigation.herdr-navigation,#workspace-navigation.herdr-navigation #tabs,#workspace-navigation.herdr-navigation .herdr-agent-strip{touch-action:pan-x}
-#terminal-tabs-drawer{display:grid;grid-template-rows:1fr;transition:grid-template-rows .2s ease}
-#terminal-tabs-drawer.collapsed{grid-template-rows:0fr}
-.terminal-tabs-clip{min-height:0;overflow:hidden}
-#terminal-tabs-drawer .terminal-header{transform:translateY(0);opacity:1;transition:transform .2s ease,opacity .2s ease}
-#terminal-tabs-drawer.collapsed .terminal-header{transform:translateY(44px);opacity:0}
-@media(prefers-reduced-motion:reduce){#terminal-tabs-drawer,#terminal-tabs-drawer .terminal-header{transition:none}}
+#terminal-tabs-drawer{height:44px;overflow:hidden;transition:height .2s ease}
+#terminal-tabs-drawer.collapsed{height:0}
+#terminal-tabs-drawer.dragging{transition:none}
+.terminal-tabs-clip{height:100%;overflow:hidden}
+@media(prefers-reduced-motion:reduce){#terminal-tabs-drawer{transition:none}}
 .host-terminal-arrow,.vault-card .chevron{display:grid;place-items:center}.host-terminal-arrow svg{width:16px;height:16px}.vault-card .chevron{margin-left:auto}.vault-card .chevron svg{width:18px;height:18px}
 .card-edit svg{width:18px;height:18px}.tab-close svg{width:16px;height:16px}
 .bottom-nav button span svg{width:20px;height:20px}

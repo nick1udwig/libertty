@@ -48,7 +48,13 @@
 /* Shortcut keys look identical in the terminal dock and the workspace bar. */
 .key-bar{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;min-width:0}
 .key-bar::-webkit-scrollbar{display:none}
-.key-bar button{flex:0 0 auto;min-width:44px;min-height:36px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--raised);color:var(--text-2);font:12px var(--font-mono);padding:0 11px;white-space:nowrap}
+.key-controls{display:flex;gap:6px}
+.key-controls[hidden]{display:none}
+.key-controls>.key-bar{flex:1}
+.key-bar button,.terminal-enter{flex:0 0 auto;min-width:44px;min-height:36px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--raised);color:var(--text-2);font:12px var(--font-mono);padding:0 11px;white-space:nowrap}
+.terminal-enter{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft);touch-action:manipulation}
+.terminal-enter:active{background:var(--press)}
+.terminal-enter:disabled{opacity:.45}
 .key-bar button:hover{background:var(--hover);color:var(--text)}
 .key-bar button:active{background:var(--press)}
 .key-bar button[aria-pressed=true]{border-color:var(--accent-line);box-shadow:inset 0 0 0 var(--selected-ring) var(--accent-line);background:var(--accent-soft);color:var(--accent)}

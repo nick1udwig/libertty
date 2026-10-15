@@ -89,6 +89,8 @@ export function createWorkspaceSettings(options: Options) {
       saved<string>('herdrLayout', 'reflow') === 'full-width' ? 'full-width' : 'reflow';
     select('herdr-strip').value =
       saved<string>('herdrStrip', 'spaces') === 'agents' ? 'agents' : 'spaces';
+    select('herdr-strip-order').value =
+      saved<string>('herdrStripOrder', 'manual') === 'lanes' ? 'lanes' : 'manual';
     input('show-downloads').checked = saved('showDownloads', true);
     input('font-size').value = String(saved('fontSizePt', 10));
     if (!input('font-size').checkValidity()) input('font-size').value = '10';
@@ -217,6 +219,8 @@ export function createWorkspaceSettings(options: Options) {
   });
   select('herdr-strip').onchange = () =>
     preferencesChanged('herdrStrip', select('herdr-strip').value);
+  select('herdr-strip-order').onchange = () =>
+    preferencesChanged('herdrStripOrder', select('herdr-strip-order').value);
   select('herdr-layout').onchange = () =>
     preferencesChanged('herdrLayout', select('herdr-layout').value);
   input('show-downloads').onchange = () =>
