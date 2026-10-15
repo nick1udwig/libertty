@@ -1,32 +1,13 @@
-import { launchBrowser, freePort, delay } from './support/browser.mjs';
-import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { launchBrowser, delay } from './support/browser.mjs';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import os from 'node:os';
-import path from 'node:path';
 import assert from 'node:assert/strict';
-import ssh2 from 'ssh2';
-import { sshdPath, sshFixturePath } from './support/sshd.mjs';
+import { filesFixture } from './support/files-fixture.mjs';
 
-const fixturePort3181 = await freePort();
-const fixturePort3182 = await freePort();
-const fixturePort3183 = await freePort();
-const root = path.resolve(import.meta.dirname, '..'), fixture = await mkdtemp('/tmp/termai-files-');
-const origin = 'http://127.0.0.1:' + fixturePort3181, base = origin + '/t/', second = 'http://127.0.0.1:' + fixturePort3182 + '/t/', sshPort = fixturePort3183;
-const processes = []; let logs = '', browser;
-function start(cmd, args, env = {}) { const p = spawn(cmd, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(p); p.stdout.on('data', b => logs += b); p.stderr.on('data', b => logs += b); return p; }
-const request = (target, route, owner, data) => fetch(target + route, { method: data === undefined ? 'GET' : 'POST', headers: { Origin: origin, ...(owner ? { Authorization: 'Bearer ' + owner } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-const bytes = Buffer.from([0, 255, 1, 2, 3, 10, 13, 90]);
+const system = await filesFixture();
+const { fixture, origin, base, second, sshPort, bytes, key, owner, other, request } = system;
+let browser;
 try {
-  for (const dir of ['local/docs', 'remote/docs', 'secondary/docs']) await mkdir(fixture + '/' + dir, { recursive: true });
-  for (const dir of ['local', 'remote', 'secondary']) { await writeFile(`${fixture}/${dir}/docs/über file.bin`, bytes); await writeFile(`${fixture}/${dir}/.hidden`, 'hidden'); await symlink('docs', `${fixture}/${dir}/linked`); }
-  const hostKey = ssh2.utils.generateKeyPairSync('ed25519'), key = ssh2.utils.generateKeyPairSync('ed25519');
-  await writeFile(fixture + '/host', hostKey.private, { mode: 0o600 }); await writeFile(fixture + '/authorized', key.public);
-  await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote PATH=${sshFixturePath()}\nSubsystem sftp internal-sftp\n`);
-  start(sshdPath(), ['-D', '-e', '-f', fixture + '/sshd_config']);
-  for (const [port, dir] of [[fixturePort3181, 'local'], [fixturePort3182, 'secondary']]) start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: 'files-feature-test-123456789', TERMAI_CWD: fixture + '/' + dir, TERMAI_DATA_DIR: fixture + '/data-' + dir, TERMAI_NO_RC: '1', HOME: fixture + '/' + dir });
-  for (let n = 0; n < 200; n++) { try { if ((await fetch(base)).ok && (await fetch(second)).ok) break; } catch {} await delay(50); }
-  const owner = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
-  const other = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
   const local = await (await request(base, 'api/sessions', owner, { name: 'Local files', files: true })).json();
   assert.equal((await request(base, 'api/files/list?session=' + local.id, other)).status, 404);
   assert.equal((await request(base, 'api/files/list?session=' + local.id)).status, 401);
@@ -213,5 +194,5 @@ try {
   assert.equal(await readFile(await (await crossDownload).path(), 'utf8'), 'cross origin');
   assert.deepEqual(errors, []);
   console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, one-use links, no shell in Files tabs, mobile menu and restored directory');
-} catch (e) { console.error(logs); throw e; }
-finally { await browser?.close(); for (const p of processes) p.kill('SIGTERM'); await delay(200); await rm(fixture, { recursive: true, force: true }); }
+} catch (e) { console.error(system.logs); throw e; }
+finally { await browser?.close(); await system.close(); }

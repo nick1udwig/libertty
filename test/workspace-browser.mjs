@@ -1,4 +1,4 @@
-import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
+import { launchBrowser, freePort, delay, until, waitForBackend } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access } from 'node:fs/promises';
@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import ssh2 from 'ssh2';
-import { sshdPath, sshFixturePath } from './support/sshd.mjs';
+import { sshdPath, sshdConfig } from './support/sshd.mjs';
 import { WebSocket } from 'ws';
 
 const fixturePort3153 = await freePort();
@@ -36,12 +36,12 @@ try {
   await writeFile(fixture + '/remote/hello_world.py', "import argparse\np=argparse.ArgumentParser()\np.add_argument('--myarg')\n");
   await writeFile(fixture + '/remote/SKILL.md', '# Skill\n');
   const hostKey = ssh2.utils.generateKeyPairSync('ed25519'); await writeFile(fixture + '/host', hostKey.private, { mode: 0o600 }); await writeFile(fixture + '/authorized', '');
-  await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote PATH=${sshFixturePath()}\nSubsystem sftp internal-sftp\n`);
+  await sshdConfig(fixture, sshPort);
   start(sshdPath(), ['-D', '-e', '-f', fixture + '/sshd_config']);
   const backendSpecs = [[fixturePort3153, 'primary', ''], [fixturePort3154, 'secondary', 'test-backend-token-123456789']];
   const startBackend = ([port, name, token]) => start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '', TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: token, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, HOME: fixture, TERMAI_DATA_DIR: fixture + '/' + name, TERMAI_HISTORY_FILE: fixture + '/no-history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/no-history' });
   const backends = backendSpecs.map(startBackend);
-  await until(async () => { try { return (await fetch(origin)).ok && (await fetch(secondary)).ok; } catch { return false; } });
+  await Promise.all([waitForBackend(origin, backends[0]), waitForBackend(secondary, backends[1])]);
   const primaryPairingToken = (await readFile(fixture + '/primary/pairing-token', 'utf8')).trim();
   const request = (base, api, token, data, from = origin) => fetch(base + '/api/' + api, { method: data === undefined ? 'GET' : 'POST', headers: { Origin: from, ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   assert.equal((await request(secondary, 'keychain')).status, 401);

@@ -1,34 +1,14 @@
-import { launchBrowser, freePort, delay } from './support/browser.mjs';
+import { launchBrowser } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import { mkdtemp, mkdir, writeFile, readFile, rm, symlink } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
-import path from 'node:path';
 import assert from 'node:assert/strict';
-import ssh2 from 'ssh2';
-import { sshdPath, sshFixturePath } from './support/sshd.mjs';
+import { filesFixture } from './support/files-fixture.mjs';
 
-const fixturePort3184 = await freePort();
-const fixturePort3185 = await freePort();
-const fixturePort3186 = await freePort();
-const root = path.resolve(import.meta.dirname, '..'), fixture = await mkdtemp('/tmp/termai-files-');
-const origin = 'http://127.0.0.1:' + fixturePort3184, base = origin + '/t/', second = 'http://127.0.0.1:' + fixturePort3185 + '/t/', sshPort = fixturePort3186;
-const processes = []; let logs = '', browser;
-function start(cmd, args, env = {}) { const p = spawn(cmd, args, { cwd: root, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(p); p.stdout.on('data', b => logs += b); p.stderr.on('data', b => logs += b); return p; }
-const request = (target, route, owner, data) => fetch(target + route, { method: data === undefined ? 'GET' : 'POST', headers: { Origin: origin, ...(owner ? { Authorization: 'Bearer ' + owner } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-const bytes = Buffer.from([0, 255, 1, 2, 3, 10, 13, 90]);
+const system = await filesFixture({ sourceFile: true, locale: true });
+const { fixture, origin, base, sshPort, bytes, key, owner, other, request } = system;
+let browser;
 try {
-  for (const dir of ['local/docs', 'remote/docs', 'secondary/docs']) await mkdir(fixture + '/' + dir, { recursive: true });
-  for (const dir of ['local', 'remote', 'secondary']) { await writeFile(`${fixture}/${dir}/docs/über file.bin`, bytes); await writeFile(`${fixture}/${dir}/.hidden`, 'hidden'); await writeFile(`${fixture}/${dir}/hello_world.py`, 'source file'); await symlink('docs', `${fixture}/${dir}/linked`); }
-  const hostKey = ssh2.utils.generateKeyPairSync('ed25519'), key = ssh2.utils.generateKeyPairSync('ed25519');
-  await writeFile(fixture + '/host', hostKey.private, { mode: 0o600 }); await writeFile(fixture + '/authorized', key.public);
-  await writeFile(fixture + '/sshd_config', `Port ${sshPort}\nListenAddress 127.0.0.1\nHostKey ${fixture}/host\nPidFile ${fixture}/pid\nAuthorizedKeysFile ${fixture}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${os.userInfo().username}\nSetEnv HOME=${fixture}/remote PATH=${sshFixturePath()} LANG=${process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8'}\nSubsystem sftp internal-sftp\n`);
-  start(sshdPath(), ['-D', '-e', '-f', fixture + '/sshd_config']);
-  for (const [port, dir] of [[fixturePort3184, 'local'], [fixturePort3185, 'secondary']]) start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: 'files-feature-test-123456789', TERMAI_CWD: fixture + '/' + dir, TERMAI_DATA_DIR: fixture + '/data-' + dir, TERMAI_NO_RC: '1', HOME: fixture + '/' + dir });
-  for (let n = 0; n < 200; n++) { try { if ((await fetch(base)).ok && (await fetch(second)).ok) break; } catch {} await delay(50); }
-  const owner = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
-  const other = (await (await request(base, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
   const local = await (await request(base, 'api/sessions', owner, { name: 'Local terminal' })).json();
   assert.equal((await request(base, 'api/files/list?session=' + local.id, other)).status, 404);
   assert.equal((await request(base, 'api/files/list?session=' + local.id)).status, 401);
@@ -124,12 +104,5 @@ try {
   }
   assert.deepEqual(errors, []);
   console.log('PASS transfer utilities: local and real SSH upload picker, invocation cwd despite cd, Unicode file downloads, binary pipe downloads, named/default output, empty output');
-} catch (e) { console.error(logs); if (browser) console.error(await browser.contexts()[0].pages()[0].evaluate(() => ({ state: window.__state, transfer: window.__transfer, output: window.__output, modal: document.querySelector('.transfer-dialog')?.outerHTML, downloads: document.querySelector('.download-dialog')?.outerHTML }))); throw e; }
-finally {
-  await browser?.close();
-  await Promise.all(processes.map(async process => {
-    if (process.exitCode !== null || process.signalCode !== null) return;
-    const exited = once(process, 'exit'); process.kill('SIGTERM'); await exited;
-  }));
-  await rm(fixture, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-}
+} catch (e) { console.error(system.logs); if (browser) console.error(await browser.contexts()[0].pages()[0].evaluate(() => ({ state: window.__state, transfer: window.__transfer, output: window.__output, modal: document.querySelector('.transfer-dialog')?.outerHTML, downloads: document.querySelector('.download-dialog')?.outerHTML }))); throw e; }
+finally { await browser?.close(); await system.close(); }
