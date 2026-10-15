@@ -261,3 +261,10 @@ Consecutive queued output chunks share messages of up to 64 KiB within the exist
 Each message carries the final constituent sequence, and its acknowledgement releases the batch's total byte credit.
 Replay history retains the original chunks so reconnecting at an earlier cursor still returns exactly the missing bytes.
 Live output is sent immediately without a batching timer, and an existing oversized chunk remains whole.
+
+## Adaptive outgoing compression
+
+Negotiated gzip-fast connections temporarily use the 2 KiB bulk threshold when output is queued, a socket write takes at least 50 ms, or terminal frame acknowledgements take at least 100 ms.
+The server retains that profile for ten seconds after pressure clears, then returns to the 128 KiB fast-link threshold.
+This adapts to changing links and browsers without connection-speed reporting while retaining the negotiated wire format and the existing minimum compression saving.
+JSON and binary-only clients keep their negotiated encodings.
