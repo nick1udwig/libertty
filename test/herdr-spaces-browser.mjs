@@ -39,6 +39,7 @@ try {
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.addInitScript(() => {
+    localStorage.setItem('termai.voxtype:' + location.origin + '/', 'dismissed');
     if (!localStorage.getItem('termai.tabs')) {
       const id = crypto.randomUUID();
       localStorage.setItem('termai.hosts', JSON.stringify([{ id: 'herdr-native', name: 'Herdr', kind: 'herdr', backendId: 'primary' }]));
@@ -55,11 +56,18 @@ try {
   assert.equal(await page.locator('#add-tab').count(), 0, 'The duplicate terminal plus is removed');
   const toggle = page.locator('.herdr-agent-strip:visible .herdr-tabs-toggle');
   const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
+  const swipeBounds = async locator => {
+    let rect;
+    await wait(async () => { rect = await locator.boundingBox(); return !!rect; }, 'visible swipe target after snapshot refresh');
+    return rect;
+  };
   const swipeNavigation = async (locator, dx, dy, cancel = false) => {
-    const rect = await locator.boundingBox(), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+    const rect = await swipeBounds(locator), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
     await touch('touchStart', x, y);
-    await touch('touchMove', x + dx / 3, y + dy / 3);
-    await touch('touchMove', x + dx, y + dy);
+    for (const fraction of [.2, .4, .6, 1]) {
+      await touch('touchMove', x + dx * fraction, y + dy * fraction);
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+    }
     await touch(cancel ? 'touchCancel' : 'touchEnd');
   };
   await page.locator('.herdr-terminal').waitFor({ state: 'visible' });
@@ -98,6 +106,33 @@ try {
   const selectedBeforeSwipe = await page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal');
   const swipeTab = tab(selectedBeforeSwipe === 'space:' + beta ? alpha : beta);
   const tabsBeforeSwipe = await page.locator('#tabs [role=tab]').count();
+  const partialSwipe = async (expanded, cancel) => {
+    const rect = await swipeBounds(swipeTab), x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+    const geometry = () => page.evaluate(() => {
+      const box = selector => document.querySelector(selector).getBoundingClientRect();
+      const drawer = box('#terminal-tabs-drawer'), header = box('#terminal-header'), strip = box('.herdr-agent-strip:not([hidden])');
+      return { height: drawer.height, drawerTop: drawer.top, headerTop: header.top, stripTop: strip.top, terminal: box('.herdr-terminal').height };
+    });
+    const before = await geometry(), direction = expanded ? 1 : -1;
+    await touch('touchStart', x, y);
+    for (const distance of [12, 24, 16]) {
+      await touch('touchMove', x, y + distance * direction);
+      const expected = expanded ? 44 - distance : distance;
+      await wait(async () => Math.abs((await geometry()).height - expected) < 1, 'drawer follows the finger before release');
+      const current = await geometry();
+      assert.equal(current.stripTop, before.stripTop, 'Herdr stays stationary while the terminal strip slides behind it');
+      assert.equal(current.headerTop, current.drawerTop, 'The terminal row emerges directly from the clipping edge without a second translation');
+      assert.equal(current.terminal, before.terminal, 'Dragging never resizes the live terminal');
+    }
+    if (!expanded) await page.screenshot({ path: '/tmp/termai-herdr-tabs-dragging.png' });
+    await touch(cancel ? 'touchCancel' : 'touchEnd');
+    await wait(async () => await drawerHeight() === (expanded ? 44 : 0), 'short or cancelled drag restores its starting state');
+    await wait(async () => await page.locator('.herdr-navigation-resizing').count() === 0, 'drag releases its terminal geometry hold');
+  };
+  await partialSwipe(false, false);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await partialSwipe(false, false);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   await swipeNavigation(swipeTab, 0, 60); await delay(250);
   assert.equal(await drawerHeight(), 0, 'Downward swipes keep hidden tabs hidden');
   await swipeNavigation(swipeTab, 0, -18); await delay(250);
@@ -107,6 +142,7 @@ try {
   await sampleDrawer(); await swipeNavigation(swipeTab, 0, -70);
   await wait(async () => await drawerHeight() === 44, 'upward Herdr swipe reveals terminal tabs');
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true'); await assertDrawer();
+  await partialSwipe(true, true);
   assert.equal(await page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal'), selectedBeforeSwipe, 'Swiping an unselected space does not select it');
   assert.equal(await page.locator('.herdr-tab-menu:visible').count(), 0, 'Swiping opens no hold menu');
   await swipeNavigation(swipeTab, 0, -70); await delay(250);

@@ -25,6 +25,8 @@ After a backend restart, close the ended tab and connect again from its host men
 ## Terminal interface and mobile sizing
 
 Swipe up on the Herdr strip to reveal terminal tabs, or swipe down on either navigation strip to hide them.
+The terminal tabs follow your finger out from behind the Herdr strip and slide back behind it as you swipe down.
+Releasing settles the strip open or closed, while short or cancelled swipes return to their starting state.
 The arrow button provides the same controls, while horizontal swipes scroll tabs and holding opens tab actions.
 
 At a Herdr shell prompt, `look at FILE`, `look at COMMAND` and `COMMAND | look at` open Reading Mode in a top-level workspace tab.

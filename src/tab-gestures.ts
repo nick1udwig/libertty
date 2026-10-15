@@ -45,11 +45,15 @@ export function tabGestures(element: HTMLElement, actions: TabGestures) {
 }
 
 /** Vertical swipes on either navigation strip share the terminal drawer controls. */
-export function tabStripSwipes(element: HTMLElement, context: () => unknown, swipe: (up: boolean) => void) {
+export function tabStripSwipes(element: HTMLElement, context: () => unknown, actions: { move(dy: number): void; end(up?: boolean): void }) {
   let press: { id: number; x: number; y: number; started: number; context: unknown; axis?: 'vertical' | 'other' } | undefined;
   let suppressClick = false;
+  const cancel = () => {
+    const current = press; press = undefined;
+    if (current?.axis === 'vertical') { suppressClick = true; actions.end(); }
+  };
   element.addEventListener('pointerdown', event => {
-    suppressClick = false; press = undefined;
+    cancel(); suppressClick = false;
     if (!event.isPrimary) return;
     const current = context();
     if (event.pointerType === 'mouse' || event.button !== 0 || !current) return;
@@ -57,11 +61,12 @@ export function tabStripSwipes(element: HTMLElement, context: () => unknown, swi
   }, true);
   element.addEventListener('pointermove', event => {
     if (!press || press.id !== event.pointerId) return;
+    if (context() !== press.context) { cancel(); return; }
     const dx = event.clientX - press.x, dy = event.clientY - press.y;
     if (!press.axis && Math.hypot(dx, dy) >= 8) {
       press.axis = performance.now() - press.started < 450 && Math.abs(dy) > Math.abs(dx) * 1.25 ? 'vertical' : 'other';
     }
-    if (press.axis === 'vertical') event.preventDefault();
+    if (press.axis === 'vertical') { event.preventDefault(); suppressClick = true; actions.move(dy); }
   }, true);
   element.addEventListener('pointerup', event => {
     if (!press || press.id !== event.pointerId) return;
@@ -69,12 +74,17 @@ export function tabStripSwipes(element: HTMLElement, context: () => unknown, swi
     if (current.axis !== 'vertical') return;
     event.preventDefault(); suppressClick = true;
     const dx = event.clientX - current.x, dy = event.clientY - current.y;
-    if (Math.abs(dy) >= 28 && Math.abs(dy) > Math.abs(dx) * 1.25) {
-      queueMicrotask(() => { if (context() === current.context) swipe(dy < 0); });
-    }
+    const up = Math.abs(dy) >= 28 && Math.abs(dy) > Math.abs(dx) * 1.25 ? dy < 0 : undefined;
+    queueMicrotask(() => actions.end(context() === current.context ? up : undefined));
   }, true);
-  element.addEventListener('pointercancel', () => { press = undefined; }, true);
+  element.addEventListener('pointercancel', cancel, true);
+  element.addEventListener('lostpointercapture', event => { if (press?.id === event.pointerId) cancel(); }, true);
+  window.addEventListener('blur', cancel);
+  window.addEventListener('resize', cancel);
+  window.visualViewport?.addEventListener('resize', cancel);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
   element.addEventListener('click', event => {
     if (suppressClick && event.detail) { event.preventDefault(); event.stopPropagation(); suppressClick = false; }
   }, true);
+  return cancel;
 }
