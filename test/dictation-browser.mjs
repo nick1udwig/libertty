@@ -1,4 +1,4 @@
-import { launchBrowser, freePort } from './support/browser.mjs';
+import { launchBrowser, freePort, until } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, mkdir, rm, access, readFile } from 'node:fs/promises';
@@ -7,7 +7,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
-import { parseOpusFrame } from '../src/voxtype-audio.ts';
+import { resumableVoxtype } from './support/voxtype-daemon.mjs';
 import { getPacketInfo } from 'libopus-wasm';
 const fixturePort3176 = await freePort();
 const root = path.resolve(import.meta.dirname, '..');
@@ -47,25 +47,10 @@ async function waitForAudioAfter(previous) {
   }
   throw new Error('Audio transport did not deliver another frame within five seconds');
 }
-daemon.on('connection', (socket, request) => {
-  assert.equal(request.headers.authorization, 'Bearer ' + 'secret'.repeat(8));
-  assert.equal(request.headers.origin, undefined);
-  if (request.url === '/v1/capabilities') { if (!capabilities) { socket.close(); return; } socket.send(JSON.stringify({ type: 'capabilities', protocol: 2, dictation: true, sample_rate: 16000, channels: 1, format: 'opus', framing: 'sequence_opus_v1', audio_encodings: ['opus_v1'], results: ['partial', 'final'] })); return; }
-  assert.equal(request.headers['x-voxtype-protocol'], '2');
-  recordingSocket = socket;
-  assert.equal(request.headers['x-voxtype-audio'], 'opus_v1');
-  assert.match(String(request.headers['x-voxtype-session']), /^[a-f0-9]{32}$/);
-  socket.send(JSON.stringify({ type: 'ready', protocol: 2, sample_rate: 16000, channels: 1, format: 'opus', audio_encoding: 'opus_v1', framing: 'sequence_opus_v1', max_seconds: 300, max_encoded_bytes: 2097152, resume: true, accepted_frames: 0, finished: false }));
-  let sequence = 0, final = false; const packets = [];
-  socket.on('message', async (bytes, binary) => {
-    if (binary) { const frame = parseOpusFrame(bytes); assert.equal(frame.sequence, sequence++); final = frame.final; packets.push(...frame.packets); audioBytes += bytes.length; }
-    else if (JSON.parse(bytes.toString()).type === 'finish') {
-      assert.equal(final, true);
-      for (const packet of packets) { const info = await getPacketInfo(packet, { sampleRate: 16000 }); assert.equal(info.channels, 1); assert.equal(info.durationMs, 20); }
-      socket.send(JSON.stringify({ type: 'partial', text: 'never forward this preview' }));
-      setTimeout(() => { if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'final', text: 'Get in it.' })); }, 600);
-    }
-  });
+const voice = resumableVoxtype(daemon, {
+  token: 'secret'.repeat(8), available: () => capabilities,
+  onAudio: bytes => audioBytes += bytes, onRecording: socket => recordingSocket = socket,
+  checkPacket: async packet => { const info = await getPacketInfo(packet, { sampleRate: 16000 }); assert.equal(info.channels, 1); assert.equal(info.durationMs, 20); },
 });
 const port = Number(process.env.TEST_PORT || fixturePort3176), base = `http://127.0.0.1:${port}`;
 const server = spawn(path.join(root,'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: 'feature-test-pairing-token-123456789', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_VOXTYPE_SOURCE: path.join(fixture, 'source'), TERMAI_VOXTYPE_TOKEN_FILE: path.join(fixture, 'token'), TERMAI_VOXTYPE_URL: `ws://127.0.0.1:${daemon.address().port}/v1/dictate` }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -94,6 +79,7 @@ try {
     const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getUserMedia = async constraints => {
       if (window.__denyMicrophone) throw new DOMException('Microphone denied', 'NotAllowedError');
+      if (window.__holdPermission) { window.__permissionWaiting = true; await new Promise(resolve => window.__releasePermission = resolve); window.__permissionWaiting = false; }
       window.__captureConstraints = constraints; const stream = await capture(constraints); window.__captureStream = stream;
       if (window.__suspendDuringPermission) { window.__suspendDuringPermission = false; await window.__captureContext.suspend(); }
       return stream;
@@ -192,6 +178,17 @@ try {
   await page.mouse.down();
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await waitForAudioAfter(0);
+  const resumedId = voice.currentId, resumedBefore = voice.resumptions;
+  const bytesBeforeDrop = audioBytes;
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
+  await page.waitForTimeout(1400);
+  assert.equal(await page.evaluate(() => window.__captureStream.getAudioTracks()[0].readyState), 'live', 'A dropped terminal connection keeps recording');
+  assert.equal(await mic.getAttribute('aria-pressed'), 'true');
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: true }); window.dispatchEvent(new Event('online')); });
+  for (let i = 0; voice.resumptions === resumedBefore && i < 100; i++) await page.waitForTimeout(30);
+  assert.ok(voice.resumptions > resumedBefore, 'The daemon resumes its retained logical recording');
+  assert.equal(voice.currentId, resumedId);
+  await waitForAudioAfter(bytesBeforeDrop);
   assert.equal(await page.evaluate(() => window.__captureContext.state), 'running', 'Startup resumes audio after a permission/device interruption');
   assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Recording holds a screen wake lock');
   assert.deepEqual(await mic.boundingBox(), micPosition, 'Expanding controls must keep the button under the finger');
@@ -262,6 +259,18 @@ try {
   await page.locator('.alternative-choice').filter({ hasText: 'git init' }).click();
   await page.waitForFunction(() => window.__out.includes('Initialized empty Git repository'));
   assert.equal(await access(path.join(fixture, '.git')).then(() => true, () => false), true);
+  const beforePermission = voice.currentId;
+  await page.evaluate(() => { window.__holdPermission = true; window.__messages = []; });
+  await mic.press('Enter'); await page.waitForFunction(() => window.__permissionWaiting);
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
+  await page.waitForTimeout(100);
+  await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: true }); window.dispatchEvent(new Event('online')); });
+  await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected');
+  await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+  assert.equal(voice.currentId, beforePermission, 'Reconnect waits for microphone startup before admitting a recording');
+  await page.evaluate(() => { window.__holdPermission = false; window.__releasePermission(); });
+  await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+  await page.getByLabel('Cancel dictation', { exact: true }).click();
   // Dragging a provisional press cancels it; the controls expand on the other side near the left edge.
   const dragFrom = await mic.boundingBox();
   await page.mouse.move(dragFrom.x + 24, dragFrom.y + 24); await page.mouse.down();
@@ -327,7 +336,9 @@ try {
         await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
       } else if (interruption === 'disconnect') {
         recordingSocket.close();
-        await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+        await page.getByText('Tap to retry', { exact: true }).waitFor();
+        assert.equal(await mic.getAttribute('aria-pressed'), 'true', 'A daemon transport error retains encoded speech');
+        await page.getByLabel('Cancel dictation', { exact: true }).click();
       } else await page.getByLabel('Cancel dictation', { exact: true }).click();
     }
     await page.waitForFunction(() => window.__wakeLocks.every(lock => lock.released));
@@ -340,6 +351,7 @@ try {
   await page.locator('#termai-dictation').click();
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'error' && m.message.includes('terminal changed')));
   assert.equal(await page.evaluate(() => window.__messages.some(m => m.type === 'pasted')), false);
+  await page.getByText('Tap to retry', { exact: true }).waitFor(); await page.getByLabel('Cancel dictation', { exact: true }).click();
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+u');
   const repairRequests = [];
   page.on('request', request => { if (/\/api\/(suggest|facts)(?:\?|$)/.test(request.url())) repairRequests.push(request.url()); });
@@ -391,7 +403,32 @@ try {
       await mic.click(); await quitProgram();
       await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'error' && m.message.includes('terminal changed')));
       assert.equal(await page.evaluate(() => window.__messages.some(m => m.type === 'pasted')), false);
+      await page.getByText('Tap to retry', { exact: true }).waitFor(); await page.getByLabel('Cancel dictation', { exact: true }).click();
     } else await quitProgram();
+  }
+  for (const dropout of ['upload', 'final']) {
+    await rm(path.join(fixture, 'program-input'), { force: true });
+    await startProgram('node program.mjs plain', () => window.__out.includes('PROGRAM_READY'));
+    await mic.press('Enter');
+    await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+    await page.waitForTimeout(250);
+    const id = voice.currentId, previousFinishes = voice.finishes;
+    if (dropout === 'upload') await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
+    await mic.click();
+    if (dropout === 'final') {
+      await until(() => voice.finishes > previousFinishes, 'daemon finish acceptance');
+      await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
+    }
+    await page.waitForTimeout(1100);
+    const bytes = voice.audioBytes;
+    assert.equal(await mic.getAttribute('aria-pressed'), 'true', 'Finishing offline retains the recording');
+    await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: true }); window.dispatchEvent(new Event('online')); });
+    await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'done'));
+    await until(async () => (await readFile(path.join(fixture, 'program-input'), 'utf8').catch(() => '')) === 'Get in it.', 'one resumed transcript');
+    assert.equal(voice.currentId, id);
+    assert.equal(await page.evaluate(() => window.__messages.filter(m => m.type === 'pasted').length), 1);
+    if (dropout === 'final') assert.equal(voice.audioBytes, bytes, 'A cached final needs no audio replay');
+    await quitProgram();
   }
   if (process.env.TEST_CODEX) {
     for (const flags of ['', '--no-alt-screen']) {
@@ -438,7 +475,7 @@ try {
   await outer.waitForFunction(() => window.__wakeLocks.every(lock => lock.released));
   await outer.close();
   assert.deepEqual(errors, []);
-  console.log('PASS: daemon discovery, microphone Opus, simulated lock transport, wake lock lifecycle, paused/ended capture, shell alternatives, literal program dictation, paste modes, stale transcripts' + (process.env.TEST_CODEX ? ', Codex CLI with and without alternate screen' : ''));
+  console.log('PASS: daemon discovery, microphone Opus, offline capture/checkpoint resume/cached finals, simulated lock transport, wake lock lifecycle, paused/ended capture, shell alternatives, literal program dictation, paste modes, stale transcripts' + (process.env.TEST_CODEX ? ', Codex CLI with and without alternate screen' : ''));
 } catch (error) { console.error(logs); if (browser) console.error(await browser.contexts()[0]?.pages()[0]?.evaluate(() => ({ messages: window.__messages, out: window.__out, paint: window.__paint?.slice(-40) }))); throw error; }
 finally {
   await browser?.close();

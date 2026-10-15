@@ -147,7 +147,7 @@ pub fn compatible(value: &Value) -> bool {
 async fn connect(
     url: &url::Url,
     token: &str,
-    recording: bool,
+    recording: Option<&str>,
     timeout: Duration,
 ) -> Result<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
@@ -163,18 +163,18 @@ async fn connect(
             .parse()
             .map_err(|_| "Invalid Voxtype token.")?,
     );
-    if recording {
+    if let Some(session) = recording {
         for (name, value) in [("X-Voxtype-Protocol", "2"), ("X-Voxtype-Audio", "opus_v1")] {
             request.headers_mut().insert(name, value.parse().unwrap());
         }
         request.headers_mut().insert(
             "X-Voxtype-Session",
-            storage::random_hex(16).parse().unwrap(),
+            session.parse().map_err(|_| "Invalid recording session.")?,
         );
     }
     let config = WebSocketConfig::default()
-        .max_message_size(Some(if recording { 65536 } else { 16384 }))
-        .max_frame_size(Some(if recording { 65536 } else { 16384 }));
+        .max_message_size(Some(if recording.is_some() { 65536 } else { 16384 }))
+        .max_frame_size(Some(if recording.is_some() { 65536 } else { 16384 }));
     tokio::time::timeout(
         timeout,
         connect_async_with_config(request, Some(config), false),
@@ -204,7 +204,7 @@ pub async fn detect(env: &BTreeMap<String, String>) -> Value {
         .unwrap_or_else(|| url.path().to_owned());
     url.set_path(&pathname);
     let available = tokio::time::timeout(Duration::from_secs(2), async {
-        let mut socket = connect(&url, &token, false, Duration::from_millis(1500))
+        let mut socket = connect(&url, &token, None, Duration::from_millis(1500))
             .await
             .ok()?;
         let event = socket.next().await?;
@@ -272,11 +272,24 @@ enum Control {
     Audio(Vec<u8>),
     Finish,
 }
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Checkpoint {
+    pub accepted_frames: u64,
+    pub finished: bool,
+}
+pub type ReadyCallback = Arc<dyn Fn(Checkpoint) + Send + Sync>;
+struct Resume {
+    session: String,
+    ready: Option<ReadyCallback>,
+    detached: Arc<AtomicBool>,
+}
 pub struct Recording {
     control: mpsc::Sender<Control>,
     cancel: CancellationToken,
     failure: Arc<Mutex<Option<String>>>,
     done: Arc<AtomicBool>,
+    detached: Arc<AtomicBool>,
 }
 pub type ResultCallback = Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>;
 pub type AsyncResultCallback =
@@ -291,6 +304,7 @@ impl Recording {
             cancel: CancellationToken::new(),
             failure: Arc::new(Mutex::new(None)),
             done: Arc::new(AtomicBool::new(false)),
+            detached: Arc::new(AtomicBool::new(false)),
         }
     }
     pub fn start(
@@ -312,18 +326,43 @@ impl Recording {
         result: AsyncResultCallback,
         status: StatusCallback,
     ) -> Self {
+        Self::start_config(env, result, status, storage::random_hex(16), None)
+    }
+    pub fn start_resumable(
+        env: BTreeMap<String, String>,
+        session: String,
+        result: AsyncResultCallback,
+        status: StatusCallback,
+        ready: ReadyCallback,
+    ) -> Self {
+        Self::start_config(env, result, status, session, Some(ready))
+    }
+    fn start_config(
+        env: BTreeMap<String, String>,
+        result: AsyncResultCallback,
+        status: StatusCallback,
+        session: String,
+        ready: Option<ReadyCallback>,
+    ) -> Self {
         let (control, receive) = mpsc::channel(32);
         let cancel = CancellationToken::new();
         let failure = Arc::new(Mutex::new(None));
         let done = Arc::new(AtomicBool::new(false));
+        let detached = Arc::new(AtomicBool::new(false));
+        let resume = Resume {
+            session,
+            ready,
+            detached: detached.clone(),
+        };
         let recording = Self {
             control,
             cancel: cancel.clone(),
             failure: failure.clone(),
             done: done.clone(),
+            detached,
         };
         tokio::spawn(async move {
-            let outcome = run(env, receive, &cancel, &failure, &result, &status).await;
+            let outcome = run(env, receive, &cancel, &failure, &result, &status, &resume).await;
             done.store(true, Ordering::SeqCst);
             if let Err(error) = outcome {
                 status("error", Some(error));
@@ -347,6 +386,10 @@ impl Recording {
                 "Recording exceeded the audio limit or connection capacity. Please try again.",
             )
         }
+    }
+    pub fn suspend(&self) {
+        self.detached.store(true, Ordering::SeqCst);
+        self.cancel.cancel();
     }
     pub fn cancel(&self) {
         self.cancel.cancel();
@@ -385,14 +428,16 @@ async fn run(
     failure: &Mutex<Option<String>>,
     result: &AsyncResultCallback,
     status: &StatusCallback,
+    resume: &Resume,
 ) -> Result<(), String> {
     let mut deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let socket = tokio::select! { biased;_=cancel.cancelled()=>return failure.lock().unwrap().clone().map_or(Ok(()),Err),socket=tokio::time::timeout_at(deadline,async {let (url,token)=configuration(&env).await.map_err(|_|"Voxtype is unavailable.")?;connect(&url,&token,true,Duration::from_secs(3)).await})=>socket.map_err(|_|"Dictation timed out.")?};
+    let socket = tokio::select! { biased;_=cancel.cancelled()=>return failure.lock().unwrap().clone().map_or(Ok(()),Err),socket=tokio::time::timeout_at(deadline,async {let (url,token)=configuration(&env).await.map_err(|_|"Voxtype is unavailable.")?;connect(&url,&token,Some(&resume.session),Duration::from_secs(3)).await})=>socket.map_err(|_|"Dictation timed out.")?};
     let mut socket = socket?;
     let mut ready = false;
     let mut finishing = false;
     let mut audio_final = false;
     let mut frames = 0;
+    let mut accepted_frames = 0;
     let mut bytes = 0;
     let mut max_bytes = MAX_OPUS_BYTES;
     let mut max_samples = MAX_AUDIO_SAMPLES;
@@ -412,7 +457,7 @@ async fn run(
                     },
                     Some(Control::Finish)=>{
                         if !ready||finishing{continue}
-                        if !audio_final{return Err("Recording ended without complete Opus audio.".into())}
+                        if !audio_final && (accepted_frames == 0 || frames != accepted_frames) {return Err("Recording ended without complete Opus audio.".into())}
                         finishing=true;
                         socket.send(Message::Text(json!({"type":"finish"}).to_string().into())).await.map_err(|_|"Could not connect to Voxtype.")?;
                     },
@@ -425,11 +470,15 @@ async fn run(
                     if matches!(message,Message::Pong(_)){continue}
                     let event: Value=serde_json::from_slice(&message.into_data()).map_err(|_|"Invalid Voxtype response.")?;
                     if event["type"]=="ready"&&!ready {
-                        if event["protocol"].as_f64()!=Some(2.0)||event["sample_rate"].as_f64()!=Some(16000.0)||event["channels"].as_f64()!=Some(1.0)||event["format"]!="opus"||event["audio_encoding"]!="opus_v1"||event["framing"]!="sequence_opus_v1"||event["accepted_frames"].as_f64()!=Some(0.0)||event["finished"]!=false||event["resume"]!=true{return Err("Unsupported Voxtype audio format. Update Termai and Voxtype together.".into())}
+                        if event["protocol"].as_f64()!=Some(2.0)||event["sample_rate"].as_f64()!=Some(16000.0)||event["channels"].as_f64()!=Some(1.0)||event["format"]!="opus"||event["audio_encoding"]!="opus_v1"||event["framing"]!="sequence_opus_v1"||event["resume"]!=true{return Err("Unsupported Voxtype audio format. Update Termai and Voxtype together.".into())}
+                        let accepted = crate::protocol::unsigned(&event["accepted_frames"]).filter(|frames| *frames <= MAX_OPUS_FRAMES).ok_or("Invalid Voxtype audio checkpoint.")?;
+                        let finished = event["finished"].as_bool().ok_or("Invalid Voxtype audio checkpoint.")?;
+                        if resume.ready.is_none() && (accepted != 0 || finished) { return Err("Unsupported Voxtype audio format. Update Termai and Voxtype together.".into()); }
+                        frames = accepted; accepted_frames = accepted; finishing = finished; audio_final = finished;
                         max_samples=(event["max_seconds"].as_f64().filter(|n|*n!=0.0).unwrap_or(300.0).clamp(1.0,300.0)*16000.0) as u32;
                         max_bytes=event["max_encoded_bytes"].as_f64().filter(|n|*n!=0.0).unwrap_or(MAX_OPUS_BYTES as f64).clamp(17.0,MAX_OPUS_BYTES as f64) as usize;
                         ready=true;deadline=tokio::time::Instant::now()+Duration::from_secs(480);
-                        status("ready",None);
+                        if let Some(callback) = &resume.ready { callback(Checkpoint { accepted_frames: accepted, finished }); } else { status("ready",None); }
                     } else if event["type"]=="final" {
                         let text=event["text"].as_str().filter(|s|utf16_len(s)<=16000).filter(|_|finishing).ok_or("Invalid Voxtype result.")?;
                         let text=breaks.replace_all(text," ").into_owned();
@@ -443,6 +492,10 @@ async fn run(
         }
     };
     let outcome = tokio::select! {biased;_=cancel.cancelled()=>failure.lock().unwrap().clone().map_or(Ok(false),Err),result=work=>result};
+    if resume.detached.load(Ordering::SeqCst) {
+        let _ = tokio::time::timeout(Duration::from_secs(2), socket.close(None)).await;
+        return outcome.map(|_| ());
+    }
     close(
         &mut socket,
         if matches!(outcome, Ok(true)) {

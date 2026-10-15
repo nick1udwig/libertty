@@ -33,6 +33,7 @@ console.log(`Verified syntax for ${modules} modules, ${data} JSON files and ${Ob
 // the required check install dependencies, build Rust or start a browser.
 const tests = [
   'api.test.ts',
+  'dictation-audio.test.ts',
   'dictation-alternatives.test.ts',
   'dictation-layout.test.ts',
   'dictation-wake-lock.test.ts',
@@ -56,6 +57,7 @@ const tests = [
   'terminal-history.test.ts',
   'terminal-projection.test.ts',
   'touch-cursor.test.ts',
+  'unsent-input.test.ts',
   'vault.test.ts',
   'wire.test.ts',
 ];

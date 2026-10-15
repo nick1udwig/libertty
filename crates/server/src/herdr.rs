@@ -156,35 +156,45 @@ impl Target {
         Ok(())
     }
     pub async fn shell_input(&self, pane: &str) -> Result<Option<ShellInput>, String> {
+        self.input_state(pane).await.map(|(shell, _)| shell)
+    }
+    pub async fn input_state(&self, pane: &str) -> Result<(Option<ShellInput>, String), String> {
         let response = self
             .request("pane.process_info", json!({"pane_id":pane}))
             .await?;
         let info = &response["process_info"];
-        let Some(pid) = info["shell_pid"].as_u64().filter(|pid| *pid > 0) else {
-            return Ok(None);
-        };
-        if info["foreground_process_group_id"].as_u64() != Some(pid) {
-            return Ok(None);
-        }
-        let process = info["foreground_processes"]
-            .as_array()
-            .and_then(|items| items.iter().find(|item| item["pid"] == pid));
-        let Some(process) = process else {
-            return Ok(None);
-        };
-        if !matches!(
-            process["name"].as_str(),
-            Some("bash" | "zsh" | "fish" | "sh" | "dash" | "ksh")
-        ) {
-            return Ok(None);
-        }
-        let Some(cwd) = process["cwd"].as_str().filter(|cwd| cwd.starts_with('/')) else {
-            return Ok(None);
-        };
-        Ok(Some(ShellInput {
-            pid,
-            cwd: cwd.into(),
-        }))
+        let context = info["shell_pid"]
+            .as_u64()
+            .filter(|pid| *pid > 0)
+            .zip(
+                info["foreground_process_group_id"]
+                    .as_u64()
+                    .filter(|pid| *pid > 0),
+            )
+            .map(|(shell, group)| format!("{shell}:{group}"))
+            .unwrap_or_default();
+        let shell = (|| {
+            let pid = info["shell_pid"].as_u64().filter(|pid| *pid > 0)?;
+            if info["foreground_process_group_id"].as_u64() != Some(pid) {
+                return None;
+            }
+            let process = info["foreground_processes"]
+                .as_array()
+                .and_then(|items| items.iter().find(|item| item["pid"] == pid));
+            let process = process?;
+            if !matches!(
+                process["name"].as_str(),
+                Some("bash" | "zsh" | "fish" | "sh" | "dash" | "ksh")
+            ) {
+                return None;
+            }
+            let cwd = process["cwd"].as_str().filter(|cwd| cwd.starts_with('/'))?;
+            Some(ShellInput {
+                pid,
+                cwd: cwd.into(),
+            })
+        })();
+        Ok((shell, context))
     }
     pub async fn suggest(
         &self,

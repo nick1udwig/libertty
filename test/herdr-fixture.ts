@@ -10,6 +10,7 @@ export async function herdrFixture() {
   let closeError = '';
   let createdSpaces = 0;
   let frameSequence = 0;
+  let foregroundGroup = 2;
   const remove = <T>(items: T[], matches: (item: T) => boolean) => { for (let i = items.length - 1; i >= 0; i--) if (matches(items[i])) items.splice(i, 1); };
   const snapshot = { version: 'test', protocol: 22,
     workspaces: [{ workspace_id: 'w1', label: 'Termai', active_tab_id: 't1' }] as any[],
@@ -116,6 +117,7 @@ export async function herdrFixture() {
           if (p.subscriptions.some((s: any) => s.type === 'pane.agent_status_changed' && !s.pane_id)) send(socket, { id: request.id, error: { message: 'pane_id required' } });
           else { subscribers.add(socket); reply({ type: 'subscribed' }); }
         }
+        else if (request.method === 'pane.process_info' && agent) reply({ process_info: { shell_pid: 1, foreground_process_group_id: foregroundGroup, foreground_processes: [{ pid: foregroundGroup, name: 'agent', cwd: '/workspace' }] } });
         else if (request.method === 'pane.read' && agent) { actions.push(request); if (p.source !== 'recent_unwrapped') send(socket, { id: request.id, error: { message: 'Invalid read source' } }); else reply({ type: 'pane_read', read: { text: screens.get(agent.pane_id), revision: agent.revision, truncated: false } }); }
         else if (['pane.send_text', 'pane.send_input'].includes(request.method) && agent) { actions.push(request); screens.set(agent.pane_id, screens.get(agent.pane_id) + p.text); void updateFrame(agent.pane_id); reply({ type: 'ok' }); }
         else if (request.method === 'pane.rename' && agent) { actions.push(request); snapshot.panes.find(pane => pane.pane_id === agent.pane_id)!.label = p.label; reply({ type: 'pane_info' }); event(); }
@@ -143,6 +145,7 @@ export async function herdrFixture() {
     rename(index: number, label: string) { snapshot.panes[index].label = label; event(); },
     setScreen(index: number, text: string, cursor?: { x: number; y: number; visible?: boolean }, size?: { width: number; height: number }) { const pane = snapshot.panes[index]; if (size) dimensions.set(pane.pane_id, size); cursors.delete(pane.pane_id); screens.set(pane.pane_id, text); void updateFrame(pane.pane_id, cursor); },
     addTerminal,
+    setProcessGroup(group: number) { foregroundGroup = group; },
     rejectClose(message = '') { closeError = message; },
     addSpace(id: string, name: string) { snapshot.workspaces.push({ workspace_id: id, label: name, active_tab_id: '' }); event(); },
     update(index: number, status: string) {

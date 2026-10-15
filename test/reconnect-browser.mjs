@@ -79,6 +79,39 @@ try {
   }
   await silentStall();
 
+  async function queuedTyping(text, changeContext) {
+    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+    await page.locator('#terminal textarea').focus();
+    await page.evaluate(() => {
+      window.__sent = [];
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+      window.dispatchEvent(new Event('offline'));
+    });
+    await page.keyboard.type(text);
+    const inputs = () => page.evaluate(() => window.__sent.filter(message => message.type === 'input' && !['\x1b[I', '\x1b[O'].includes(message.data)).map(message => message.data).join(''));
+    assert.equal(await inputs(), '', 'Disconnected keys have never been sent');
+    await changeContext?.();
+    const states = await stateCount();
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+      window.dispatchEvent(new Event('online'));
+    });
+    await connected(states); await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+    if (changeContext) {
+      await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('changed prompt'));
+      assert.equal(await inputs(), '', 'Changed prompts or processes cannot receive queued keys');
+    } else {
+      await page.waitForFunction(text => window.__sent.filter(message => message.type === 'input').map(message => message.data).join('').includes(text), text);
+      assert.equal(await inputs(), text, 'Queued keys are sent exactly once after replay paints');
+    }
+  }
+  await queuedTyping('queued-native-once');
+  await page.keyboard.press('Control+c'); await delay(100);
+  await queuedTyping('never-send-to-new-shell', () => page.evaluate(async () => {
+    const reply = await fetch(new URL('api/new', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!reply.ok) throw new Error('Could not replace the test shell');
+  }));
+
   // Recover before a closing socket delivers its close event to the app.
   let states = await stateCount();
   await page.evaluate(() => {
@@ -92,6 +125,7 @@ try {
 
   // An online event must replace an existing OPEN socket, without replaying input.
   states = await stateCount();
+  await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo reconnect-once');
   const inputs = await page.evaluate(() => window.__sent.filter(message => message.type === 'input').length);
   await online(); await connected(states);
@@ -155,6 +189,8 @@ try {
 
   // Herdr also bounds/cancels the ticket request after authorization succeeds.
   await page.goto(base + 'terminal.html?herdrTerminal=term_0'); await connected(0);
+  await queuedTyping('queued-herdr-once');
+  await queuedTyping('never-send-to-new-process', async () => { fixture.setProcessGroup(3); });
   await silentStall();
   stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
   await online(); await stalled.entered;
@@ -167,7 +203,7 @@ try {
   await online(); await stalled.entered; await connected(states, 22000);
   assert.equal(stalled.aborted(), true, 'the connection deadline aborts Herdr ticket acquisition'); await stalled.done();
   assert.deepEqual(errors, []);
-  console.log('PASS reconnect browser: closing sockets, stale OPEN sockets, no input replay, canceled authorization/tickets, and deadline recovery for shell and Herdr');
+  console.log('PASS reconnect browser: closing sockets, stale OPEN sockets, queued unsent keys, changed-context rejection, no uncertain input replay, canceled authorization/tickets, and deadline recovery for shell and Herdr');
 } finally {
   await browser?.close(); server.kill('SIGTERM'); await exited; await fixture.close();
 }

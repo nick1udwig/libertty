@@ -23,6 +23,7 @@ struct Inner {
     input: crate::input_controller::Controller,
     dictation_id: String,
     shell: Option<crate::herdr::ShellInput>,
+    context: Option<String>,
     prompt: u64,
     prompt_revision: u64,
     editable: Option<Editable>,
@@ -72,6 +73,7 @@ pub struct View {
     history_delta: Mutex<Option<history::History>>,
     cancel: CancellationToken,
     services: crate::host::HostServices,
+    recording_scope: Mutex<String>,
 }
 impl View {
     pub fn open(
@@ -104,12 +106,14 @@ impl View {
                 input: Default::default(),
                 dictation_id: String::new(),
                 shell: None,
+                context: None,
                 prompt: 1,
                 prompt_revision: 0,
                 editable: None,
             }),
             capacity: Arc::new(Semaphore::new(128)),
             services: crate::host::HostServices::new(),
+            recording_scope: Mutex::new(crate::storage::random_hex(16)),
             pending_input,
             send,
             terminal,
@@ -137,19 +141,26 @@ impl View {
         tokio::spawn(async move {
             loop {
                 let Some(view) = weak.upgrade() else { break };
-                let shell = tokio::select! { biased; _=lifetime.cancelled()=>break, result=view.target.shell_input(&view.agent.pane_id)=>result.ok().flatten() };
+                let (shell, context) = tokio::select! { biased; _=lifetime.cancelled()=>break, result=view.target.input_state(&view.agent.pane_id)=>result.unwrap_or_default() };
                 let changed = {
                     let mut inner = view.inner.lock().unwrap();
-                    if inner.shell == shell {
-                        false
-                    } else {
+                    let moved = inner.shell != shell
+                        || inner
+                            .context
+                            .as_ref()
+                            .is_some_and(|before| before != &context);
+                    let changed = moved || inner.context.is_none();
+                    if changed {
                         inner.shell = shell;
-                        inner.editable = None;
-                        inner.revision += 1;
-                        inner.prompt += 1;
-                        inner.prompt_revision = inner.revision;
-                        true
+                        inner.context = Some(context);
+                        if moved {
+                            inner.editable = None;
+                            inner.revision += 1;
+                            inner.prompt += 1;
+                            inner.prompt_revision = inner.revision;
+                        }
                     }
+                    changed
                 };
                 if changed {
                     view.send_state();
@@ -285,6 +296,9 @@ impl View {
         }
         Ok(view)
     }
+    pub fn set_recording_scope(&self, scope: String) {
+        *self.recording_scope.lock().unwrap() = scope;
+    }
     pub fn enable_history_delta(&self) {
         *self.history_delta.lock().unwrap() = Some(history::History::default());
     }
@@ -353,6 +367,7 @@ impl View {
                 prompt: inner.prompt,
                 prompt_revision: inner.prompt_revision,
                 input_revision: inner.revision,
+                input_context: inner.context.clone(),
                 exit_code: None,
             },
         });
@@ -816,6 +831,7 @@ impl View {
                         || request.revision != Some(revision)
                     {
                         self.send(ServerMessage::Dictation {
+                            resume: None,
                             id: (id).to_string(),
                             state: DictationState::Error,
                             message: Some(
@@ -841,6 +857,7 @@ impl View {
                         id.clone(),
                         serial,
                         request.reading_phrases,
+                        &self.recording_scope.lock().unwrap(),
                     );
                     inner.input.dictation = Some((id, recording));
                 }
@@ -942,7 +959,9 @@ impl View {
 impl Drop for View {
     fn drop(&mut self) {
         self.cancel.cancel();
-        self.inner.get_mut().unwrap().input.dictation.take();
+        if let Some((_, recording)) = self.inner.get_mut().unwrap().input.dictation.take() {
+            recording.suspend();
+        }
     }
 }
 

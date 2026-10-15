@@ -72,6 +72,8 @@ pub enum ServerMessage {
         repairing: Option<bool>,
     },
     Dictation {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume: Option<crate::dictation::Checkpoint>,
         id: String,
         state: DictationState,
         #[serde(skip_serializing_if = "Option::is_none")]

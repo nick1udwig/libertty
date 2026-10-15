@@ -32,6 +32,10 @@ fn server_samples() -> Vec<ServerMessage> {
             repairing: Some(true),
         },
         ServerMessage::Dictation {
+            resume: Some(termai_server::dictation::Checkpoint {
+                accepted_frames: 0,
+                finished: false,
+            }),
             id: id(),
             state: DictationState::Ready,
             message: None,
@@ -88,6 +92,7 @@ fn server_samples() -> Vec<ServerMessage> {
             state: termai_server::session::ShellState {
                 cwd: "/fixture".into(),
                 input_revision: 2,
+                input_context: None,
                 prompt_revision: 1,
                 ready: true,
                 prompt: 1,

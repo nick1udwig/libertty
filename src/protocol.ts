@@ -8,6 +8,7 @@ export interface ShellState {
   cwd: string; inputRevision: number; promptRevision: number; ready: boolean; prompt: number; exited: boolean; exitCode?: number;
   /** Set by Bash's private prompt/busy markers; absent while starting or submitting. */
   inputTarget?: DictationTarget;
+  inputContext?: string;
   /** Native app scrolling is available through a scoped Herdr controller. */
   terminalScroll?: boolean;
 }
@@ -22,7 +23,7 @@ export type ServerMessage =
   | { type: 'input-line'; id: string; prompt: number; revision: number; text?: string; cursor?: number }
   | { type: 'transfer'; request: TransferRequest }
   | { type: 'pasted'; text: string; replace: boolean; prompt: number; revision: number; source?: 'dictation'; repairing?: boolean }
-  | { type: 'dictation'; id: string; state: 'ready' | 'done' | 'error'; message?: string }
+  | { type: 'dictation'; id: string; state: 'ready' | 'done' | 'error'; message?: string; resume?: { acceptedFrames: number; finished: boolean } }
   | { type: 'reading-file'; path: string }
   | { type: 'reading-capture'; id: string; name: string; exitCode: number }
   | { type: 'reading-error'; message: string }

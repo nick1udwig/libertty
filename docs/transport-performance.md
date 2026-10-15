@@ -231,3 +231,18 @@ Incoming output confirms matching prefixes and removes the overlay without writi
 Unknown editing, controls, Unicode input, line wrapping, geometry changes, disconnected sessions and foreground programs suppress prediction.
 A new known prompt enables prediction again, and unconfirmed overlays expire after four seconds.
 The browser harness delays input packets to verify prediction appears before the server receives them and disappears when authoritative output arrives.
+
+## Retained input and microphone audio
+
+Each terminal holds up to 64 KiB of keys that have never been passed to a WebSocket and releases them only after the replay or Herdr screen has painted.
+Native terminals require the original stream, prompt, input revision and target, while reconnecting Herdr views require the original foreground process and matching shell picture.
+A changed context rejects queued keys with a notice, and previously sent uncertain input is never replayed.
+Herdr publishes its foreground process context so a restarted agent cannot inherit another process's queued input or recording.
+
+The browser retains original numbered Opus frames in memory until delivery or explicit cancellation, bounded to two MiB and the existing five-minute capture limit.
+A terminal dropout keeps microphone capture active, and finishing while offline keeps the completed audio available for upload.
+Voxtype session IDs are scoped to the authenticated terminal and recording ID, and a transport detach closes its socket without cancelling the logical recording.
+Ready replies forward the accepted-frame checkpoint, allowing exact suffix upload or complete replay after daemon expiry or restart.
+A previously accepted finish retrieves the cached final without uploading audio again, and a lost finish control can be sent after an already accepted final audio frame.
+A changed input context or daemon error retains the encoded recording for an explicit retry at the current prompt or cancellation.
+Recordings remain in browser memory and are discarded when the page exits or the user cancels them.

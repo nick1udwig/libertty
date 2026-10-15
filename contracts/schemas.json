@@ -176,6 +176,9 @@
               "type": "boolean"
             }
           ]
+        },
+        "inputContext": {
+          "type": "string"
         }
       },
       "required": [
@@ -376,6 +379,24 @@
             },
             "message": {
               "type": "string"
+            },
+            "resume": {
+              "type": "object",
+              "properties": {
+                "acceptedFrames": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 15002
+                },
+                "finished": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "acceptedFrames",
+                "finished"
+              ],
+              "additionalProperties": true
             }
           },
           "required": [

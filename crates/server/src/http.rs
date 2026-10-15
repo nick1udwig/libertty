@@ -947,6 +947,14 @@ async fn herdr_socket_session(
         } else {
             None
         };
+        let recording_scope = json!([
+            ticket.owner,
+            ticket.source,
+            ticket.session,
+            ticket.terminal,
+            ticket.target.path().ok()
+        ])
+        .to_string();
         match herdr_view::View::open(
             ticket.target,
             agent,
@@ -957,6 +965,7 @@ async fn herdr_socket_session(
             cancel.clone(),
         ) {
             Ok(view) => {
+                view.set_recording_scope(recording_scope);
                 if ticket.history_delta {
                     view.enable_history_delta();
                 }

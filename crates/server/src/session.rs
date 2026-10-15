@@ -41,6 +41,8 @@ pub(crate) const RC: &str = include_str!("../assets/bashrc.sh");
 pub struct ShellState {
     pub cwd: String,
     pub input_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_context: Option<String>,
     pub prompt_revision: u64,
     pub ready: bool,
     pub prompt: u64,
@@ -226,6 +228,7 @@ impl Inner {
                             cwd
                         },
                         input_revision: self.state.input_revision + 1,
+                        input_context: None,
                         prompt_revision: self.state.input_revision + 1,
                         ready: true,
                         prompt: self.state.prompt + 1,
@@ -400,6 +403,7 @@ impl Session {
                 state: ShellState {
                     cwd: cwd.clone(),
                     input_revision: 0,
+                    input_context: None,
                     prompt_revision: 0,
                     ready: files_only,
                     prompt: 0,
@@ -573,7 +577,9 @@ impl Session {
             let _ = send.send(Transport::Close(1000, "Session ended".into()));
             return (0, receive);
         }
-        inner.input.dictation.take();
+        if let Some((_, recording)) = inner.input.dictation.take() {
+            recording.suspend();
+        }
         if let Some((_, cancel)) = inner.input.repair.take() {
             cancel.cancel();
         }
@@ -617,7 +623,9 @@ impl Session {
             return;
         }
         inner.socket = None;
-        inner.input.dictation.take();
+        if let Some((_, recording)) = inner.input.dictation.take() {
+            recording.suspend();
+        }
         if let Some((_, cancel)) = inner.input.repair.take() {
             cancel.cancel();
         }
@@ -827,6 +835,7 @@ impl Session {
                         || request.target() != target
                     {
                         inner.send(ServerMessage::Dictation {
+                            resume: None,
                             id: (id).to_string(),
                             state: DictationState::Error,
                             message: Some(
@@ -859,6 +868,7 @@ impl Session {
                         id.into(),
                         serial,
                         request.reading_phrases,
+                        &self.stream_id,
                     );
                     inner.input.dictation = Some((id.into(), recording));
                 }
