@@ -17,6 +17,8 @@ The Linux user service is `termai.service`; inspect its startup command to deter
 It listens on `127.0.0.1:7321`, mounts at `/t`, and allows `127.0.0.1`, `localhost`, and `omafwchy.taila510b.ts.net`.
 The phone URL is `https://omafwchy.taila510b.ts.net/t/` on the tailnet.
 Confirm the active service and route before deployment because the unit or installation mode may have changed.
+A `termai.service.d/branch.conf` drop-in means a branch worktree is deployed, as described in [Deploy a branch for development](#deploy-a-branch-for-development).
+Remove that drop-in before deploying the main checkout, or the restart keeps running the worktree.
 
 ```sh
 systemctl --user show termai.service --property=FragmentPath --property=ExecStart --property=WorkingDirectory --property=ActiveState
@@ -43,6 +45,36 @@ Check that both health responses report `ok: true` and the expected version from
 Open the phone URL, pair if needed, and verify that the frontend loads and a terminal connects.
 Read the pairing token locally from the startup journal or the configured data directory without committing or publishing it.
 The default token location is `~/.local/share/termai/pairing-token`.
+
+## Deploy a branch for development
+
+A deploy request from a branch worktree deploys that worktree as it is, so do not merge, rebase, fast-forward or switch branches in it or in the main checkout.
+The base unit stays pointed at the main checkout, and a systemd drop-in temporarily overrides only `ExecStart`.
+A release binary serves the `dist` directory of the checkout it was built in, and it shares the pairing token and data in `~/.local/share/termai`.
+Keep `WorkingDirectory` unchanged, so new shells still start in the main checkout.
+Build the release in the worktree, then point the service at it.
+
+```sh
+npm ci
+npm run build:release
+mkdir -p ~/.config/systemd/user/termai.service.d
+printf '%s\n' '# Development deployment of a branch worktree; remove this file to return to the main checkout.' '[Service]' 'ExecStart=' "ExecStart=$PWD/target/release/termai" > ~/.config/systemd/user/termai.service.d/branch.conf
+systemctl --user daemon-reload
+systemctl --user restart termai.service
+systemctl --user show termai.service --property=ExecStart --property=ActiveState
+curl -fsS http://127.0.0.1:7321/t/healthz
+curl -fsS https://omafwchy.taila510b.ts.net/t/healthz
+```
+
+`systemctl --user cat termai.service` shows whether a branch drop-in is active and which worktree it runs.
+Remove the drop-in before deleting a deployed worktree, because the service cannot restart once that binary is gone.
+To return to the main checkout, rebuild it there if needed, then remove the drop-in and restart.
+
+```sh
+rm ~/.config/systemd/user/termai.service.d/branch.conf
+systemctl --user daemon-reload
+systemctl --user restart termai.service
+```
 
 Tailscale Serve strips the `/t` prefix, which Termai supports with `TERMAI_BASE_PATH=/t`.
 Keep the existing `/`, `/tern`, `/codey`, and `/voxtype` routes intact.
