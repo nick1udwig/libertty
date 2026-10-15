@@ -2,6 +2,7 @@
 use std::{collections::VecDeque, sync::Arc};
 
 const WINDOW: usize = 128 * 1024;
+const BATCH: usize = 64 * 1024;
 #[derive(Clone)]
 pub(super) struct Output {
     pub seq: u64,
@@ -93,7 +94,26 @@ impl Replay {
         if self.outstanding_bytes >= WINDOW {
             return None;
         }
-        let output = self.pending.pop_front()?;
+        let mut output = self.pending.pop_front()?;
+        let limit = BATCH.min(WINDOW - self.outstanding_bytes);
+        if self
+            .pending
+            .front()
+            .is_some_and(|next| output.bytes + next.bytes <= limit)
+        {
+            let mut data = output.data.to_string();
+            while self
+                .pending
+                .front()
+                .is_some_and(|next| output.bytes + next.bytes <= limit)
+            {
+                let next = self.pending.pop_front().unwrap();
+                data.push_str(&next.data);
+                output.seq = next.seq;
+                output.bytes += next.bytes;
+            }
+            output.data = data.into();
+        }
         self.sent_seq = output.seq;
         self.outstanding.push_back((output.seq, output.bytes));
         self.outstanding_bytes += output.bytes;
@@ -134,7 +154,7 @@ mod tests {
         while let Some(output) = replay.next() {
             sent.push(output.seq);
         }
-        assert_eq!(sent, (1..=32).collect::<Vec<_>>());
+        assert_eq!(sent, vec![16, 32]);
         assert!(!replay.acknowledge(40));
         assert!(replay.next().is_none());
         assert!(replay.acknowledge(16));
@@ -142,7 +162,7 @@ mod tests {
         while let Some(output) = replay.next() {
             sent.push(output.seq);
         }
-        assert_eq!(sent, (1..=40).collect::<Vec<_>>());
+        assert_eq!(sent, vec![16, 32, 40]);
         replay.detach();
         let hello = replay.attach(0, false);
         assert!(hello.reset && hello.truncated);
@@ -172,7 +192,45 @@ mod tests {
                 ),
                 (reset, truncated, 4, 6)
             );
-            assert_eq!(replay.next().unwrap().seq, first_output);
+            let output = replay.next().unwrap();
+            assert_eq!(output.seq, 6);
+            assert_eq!(&*output.data, "界😀".repeat((7 - first_output) as usize));
         }
+    }
+    #[test]
+    fn batching_keeps_exact_bytes_and_final_cursors_across_reconnects() {
+        let mut replay = Replay::default();
+        let chunks: Vec<String> = (0..5000).map(|n| format!("{n}:界😀\r\n")).collect();
+        for chunk in &chunks {
+            replay.record(chunk.as_str().into(), false);
+        }
+        let attachment = replay.attach(0, false);
+        assert_eq!(attachment.last_seq, 5000);
+        let first = replay.next().unwrap();
+        assert!(first.bytes <= BATCH);
+        assert_eq!(&*first.data, chunks[..first.seq as usize].concat());
+        let encoded = crate::wire::encode(
+            &serde_json::json!({"type":"output","seq":first.seq,"data":first.data}),
+            crate::wire::Mode::Gzip,
+        );
+        assert_ne!(
+            encoded.bytes[3] & 128,
+            0,
+            "Small replay chunks should share one compressible message"
+        );
+        assert!(replay.acknowledge(first.seq - 1));
+        assert_eq!(
+            replay.outstanding_bytes(),
+            first.bytes,
+            "Only the final batch cursor releases its credit"
+        );
+        replay.attach(first.seq, false);
+        let mut suffix = String::new();
+        while let Some(output) = replay.next() {
+            suffix.push_str(&output.data);
+            assert!(replay.acknowledge(output.seq));
+        }
+        assert_eq!(suffix, chunks[first.seq as usize..].concat());
+        assert!(replay.pending_empty());
     }
 }

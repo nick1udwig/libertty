@@ -254,3 +254,10 @@ A failed direct terminal handshake falls back to authorization so expired cookie
 Cross-origin native terminals retain their authorization and single-use ticket flow.
 Terminal and Herdr metadata sockets stay connected for twenty seconds after the document becomes hidden, retaining the mobile PTY size and live picture during short app switches.
 After the grace expires, Herdr releases mobile geometry and idle terminals disconnect, while active dictation may retain its audio transport.
+
+## Terminal replay batches
+
+Consecutive queued output chunks share messages of up to 64 KiB within the existing 128 KiB acknowledgement window.
+Each message carries the final constituent sequence, and its acknowledgement releases the batch's total byte credit.
+Replay history retains the original chunks so reconnecting at an earlier cursor still returns exactly the missing bytes.
+Live output is sent immediately without a batching timer, and an existing oversized chunk remains whole.

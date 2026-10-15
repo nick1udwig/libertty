@@ -1538,8 +1538,8 @@ mod tests {
             }
             sent.len()
         };
-        assert_eq!(collect(&mut receive), 32);
-        for (seq, count) in [(16, 48), (16, 48), (48, 80), (80, 100), (101, 100)] {
+        assert_eq!(collect(&mut receive), 2);
+        for (seq, count) in [(8, 2), (16, 3), (16, 3), (48, 5), (80, 7), (101, 7)] {
             session.receive(attachment, json!({"type":"ack","seq":seq}));
             assert_eq!(collect(&mut receive), count);
         }
@@ -1549,7 +1549,7 @@ mod tests {
         );
         session.receive(attachment, json!({"type":"ack","seq":100}));
         assert_eq!(session.inner.lock().unwrap().replay.outstanding_bytes(), 0);
-        assert_eq!(sent, (1..=100).collect::<Vec<_>>());
+        assert_eq!(sent, vec![16, 32, 48, 64, 80, 96, 100]);
         assert!(session.inner.lock().unwrap().replay.pending_empty());
         assert!(!stub.paused.load(Ordering::SeqCst));
     }
@@ -1562,9 +1562,9 @@ mod tests {
                 inner.replay.record(seq.to_string().into(), false);
             }
         }
-        for (stream, reset, sequences) in [
-            ("previous-server-stream", true, vec![1, 2, 3]),
-            (session.stream_id.as_str(), false, vec![3]),
+        for (stream, reset, expected) in [
+            ("previous-server-stream", true, "123"),
+            (session.stream_id.as_str(), false, "3"),
         ] {
             let (_, mut receive) = session.attach(2, Some(stream));
             match receive.try_recv().unwrap() {
@@ -1577,12 +1577,15 @@ mod tests {
                 _ => panic!(),
             }
             let mut actual = Vec::new();
+            let mut data = String::new();
             while let Ok(Transport::Message(value)) = receive.try_recv() {
                 if value["type"] == "output" {
                     actual.push(value["seq"].as_u64().unwrap());
+                    data.push_str(value["data"].as_str().unwrap());
                 }
             }
-            assert_eq!(actual, sequences);
+            assert_eq!(actual, vec![3]);
+            assert_eq!(data, expected);
         }
         session.dispose().await;
         let (_, mut receive) = session.attach(0, None);
