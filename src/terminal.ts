@@ -11,6 +11,7 @@ import { Queue } from './queue.ts';
 import { dictationTarget } from './protocol.ts';
 import { UnsentInput, type InputContext } from './unsent-input.ts';
 import { applyTheme, terminalThemes, watchSystemTheme } from './theme.ts';
+import { adaptDarkAppColors } from './terminal-colors.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { TerminalFocus } from './terminal-focus.ts';
@@ -138,6 +139,7 @@ const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 /
   scrollback: 5000, cursorBlink: true, smoothScrollDuration: 0,
   theme: terminalThemes[terminalTheme] });
 term.open($('terminal'));
+if (terminalTheme === 'paper') adaptDarkAppColors(term.renderer as unknown as Parameters<typeof adaptDarkAppColors>[0], terminalThemes.paper);
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
 const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
