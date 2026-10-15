@@ -158,9 +158,26 @@ try {
   await wait(async () => (await herdrSnapshot(target)).spaces.find(space => space.id === beta)?.name === 'Review', 'shared space rename');
   await tab(beta).click();
   await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Create agent', exact: true }).waitFor();
-  const hold = async id => { const rect = await bounds(id); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd'); await page.locator('.herdr-tab-menu:visible').waitFor(); };
+  const hold = async id => {
+    if (await page.locator('.herdr-tab-menu:visible').count()) await page.keyboard.press('Escape');
+    const rect = await bounds(id); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(500); await touch('touchEnd'); await page.locator('.herdr-tab-menu:visible').waitFor();
+  };
   const menuAction = name => page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name, exact: true }).click();
   const selected = () => page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal');
+  const dismissMenu = async (x, y) => {
+    await touch('touchStart', x, y); await touch('touchEnd');
+    assert.equal(await page.locator('.herdr-tab-menu:visible').count(), 0, 'Tapping outside closes the space menu');
+    assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Dismissal restores access to the screen');
+  };
+  const terminalBounds = await page.locator('.herdr-terminal:visible').boundingBox();
+  await dismissMenu(terminalBounds.x + terminalBounds.width / 2, terminalBounds.y + 20);
+  for (const target of [() => bounds(alpha), () => bounds(beta), () => toggle.boundingBox()]) {
+    await hold(beta);
+    const rect = await target(); await dismissMenu(rect.x + rect.width / 2, rect.y + rect.height / 2);
+    assert.equal(await selected(), 'space:' + beta, 'The dismissing tap does not activate another control');
+  }
+  await hold(beta); await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Escape also removes the dismissal layer');
   await hold(alpha); await menuAction('New worktree'); await page.getByLabel('Branch', { exact: true }).waitFor();
   const branch = page.getByRole('combobox', { name: 'Branch', exact: true }), branchList = page.getByRole('listbox', { name: 'Existing branches', exact: true });
   await branchList.getByRole('option', { name: 'review/existing', exact: true }).waitFor();

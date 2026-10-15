@@ -92,7 +92,13 @@ export class HerdrView {
     const spinner = node('span', 'terminal-loading-spinner'); spinner.setAttribute('aria-hidden', 'true');
     this.loading.append(spinner, this.loadingLabel);
     this.screen.append(this.status, this.empty, this.loading);
-    this.element.append(this.screen, this.menu);
+    const backdrop = node('div', 'herdr-menu-backdrop'); backdrop.setAttribute('aria-hidden', 'true');
+    let dismissMenu = false;
+    backdrop.onpointerdown = event => { event.stopPropagation(); dismissMenu = true; };
+    backdrop.onpointercancel = () => { dismissMenu = false; };
+    // The release that opens a hold menu can click the newly visible backdrop.
+    backdrop.onclick = () => { if (dismissMenu) this.menu.hidden = true; dismissMenu = false; };
+    this.element.append(this.screen, this.menu, backdrop);
     const viewed = () => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     const messages = (event: MessageEvent) => {
       if (event.origin !== location.origin) return;
@@ -134,8 +140,11 @@ export class HerdrView {
     this.presenceTimer = setInterval(presence, 15000);
     const outside = (event: PointerEvent) => { if (!this.menu.contains(event.target as Node) && !(event.target as HTMLElement).closest('.herdr-agent-tab')) this.menu.hidden = true; };
     document.addEventListener('pointerdown', outside); this.unsubscribers.push(() => document.removeEventListener('pointerdown', outside));
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !this.menu.hidden) { event.preventDefault(); this.menu.hidden = true; this.strip.querySelector<HTMLButtonElement>('[aria-selected=true]')?.focus(); }
+    };
+    document.addEventListener('keydown', escape); this.unsubscribers.push(() => document.removeEventListener('keydown', escape));
     this.menu.onkeydown = event => {
-      if (event.key === 'Escape') { this.menu.hidden = true; this.strip.querySelector<HTMLButtonElement>('[aria-selected=true]')?.focus(); }
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const items = [...this.menu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement); items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus(); }
     };
     this.transport = new ReconnectingSocket({

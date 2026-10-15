@@ -225,6 +225,7 @@ try {
   await terminal.waitForFunction(cols => window.__testTerminal.cols === cols && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && getComputedStyle(frameElement).visibility !== 'hidden', mobileSize.cols);
   const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
   const hold = async locator => {
+    if (await page.locator('.herdr-tab-menu:visible').count()) await page.keyboard.press('Escape');
     let rect;
     await until(async () => {
       try {

@@ -30,6 +30,8 @@
 .herdr-connection{flex:none;color:var(--text-2);background:var(--bg);font:13px var(--font-ui);padding:8px 12px}.herdr-connection:empty{display:none}
 .herdr-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--muted);font:14px/1.6 var(--font-ui)}
 .herdr-tab-menu{position:absolute;z-index:12;min-width:180px;max-width:calc(100% - 16px);max-height:65%;overflow:auto;background:var(--overlay);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);padding:6px}
+.herdr-menu-backdrop{position:fixed;inset:0;z-index:11;touch-action:none}
+.herdr-tab-menu[hidden]+.herdr-menu-backdrop{display:none}
 .herdr-tab-menu button{display:block;background:none;color:var(--text);min-height:44px;width:100%;text-align:left;padding:10px 12px;border-radius:var(--r-md);font:14px var(--font-ui)}
 .herdr-tab-menu button:hover,.herdr-tab-menu button:focus-visible{background:var(--hover)}.herdr-tab-menu button:active{background:var(--press)}
 .herdr-tab-menu p{margin:8px 12px;font:13px var(--font-ui)}.herdr-tab-menu .herdr-menu-hint{color:var(--muted)}
