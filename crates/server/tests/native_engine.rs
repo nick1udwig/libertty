@@ -536,6 +536,133 @@ async fn spelled_cd_uses_directory_discovery_without_catalog_paths() {
 }
 
 #[tokio::test]
+async fn copy_destinations_resolve_spoken_components_against_existing_directories() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    std::fs::create_dir_all(root.path().join(".herdr/worktrees/termai/latency")).unwrap();
+    std::fs::create_dir_all(root.path().join(".hermes/worktrees")).unwrap();
+    std::fs::write(root.path().join("latency.md"), "notes").unwrap();
+    std::fs::write(root.path().join("other notes.md"), "more notes").unwrap();
+    executable(
+        &root.path().join("cp"),
+        "#!/bin/sh\nprintf '  -v, --verbose  Explain the copy operation\\n'\n",
+    );
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(cwd, &["cp"]),
+        BTreeMap::from([
+            ("HOME".into(), cwd.into()),
+            ("PATH".into(), format!("{cwd}:/usr/bin:/bin")),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    for (input, expected) in [
+        (
+            "cp latency.md ~/.herder/work trees/term AI/latency",
+            "cp latency.md ~/.herdr/worktrees/termai/latency/",
+        ),
+        (
+            "cp latency.md ~/.herder/work trees/term AI/latency/",
+            "cp latency.md ~/.herdr/worktrees/termai/latency/",
+        ),
+        (
+            "cp latency dot md tilde slash dot herder slash work trees slash term AI slash latency slash",
+            "cp latency.md ~/.herdr/worktrees/termai/latency/",
+        ),
+        (
+            "cp latency.md 'other notes.md' ~/.herder/work trees/term AI/latency/",
+            "cp latency.md 'other notes.md' ~/.herdr/worktrees/termai/latency/",
+        ),
+        (
+            "cp -- latency.md ~/.herder/work trees/term AI/latency/",
+            "cp -- latency.md ~/.herdr/worktrees/termai/latency/",
+        ),
+        (
+            "cp -v latency.md ~/.herder/work trees/term AI/latency/",
+            "cp -v latency.md ~/.herdr/worktrees/termai/latency/",
+        ),
+        (
+            "cp latency.md -v ~/.herder/work trees/term AI/latency/",
+            "cp latency.md -v ~/.herdr/worktrees/termai/latency/",
+        ),
+    ] {
+        let candidates = engine
+            .suggest(input, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        let candidates = candidates.as_array().unwrap();
+        assert!(
+            candidates.iter().any(|candidate| {
+                candidate["command"] == expected && candidate["literal"] != true
+            }),
+            "{input}: {candidates:?}"
+        );
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| { candidate["command"] == input && candidate["literal"] == true })
+        );
+    }
+}
+
+#[tokio::test]
+async fn copy_destinations_preserve_literal_paths_and_exact_spelling() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    std::fs::create_dir_all(root.path().join(".herdr/worktrees/termai/latency")).unwrap();
+    std::fs::write(root.path().join("latency.md"), "notes").unwrap();
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(cwd, &["cp"]),
+        BTreeMap::from([
+            ("HOME".into(), cwd.into()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    for input in [
+        "cp latency.md ~/.herder/work trees/term AI/missing/",
+        "cp latency.md '~/.herder/work trees/term AI/latency/'",
+        "cp -T latency.md ~/.herder/work trees/term AI/latency/",
+        "cp latency.md -T ~/.herder/work trees/term AI/latency/",
+        "cp latency.md -t ~/.herder/work trees/term AI/latency/",
+        "cp latency.md ~/.herder/work trees/term AI/latency/*",
+    ] {
+        let candidates = engine
+            .suggest(input, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(
+            candidates
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|candidate| { !candidate["command"].as_str().unwrap().contains("~/.herdr/") }),
+            "{input}: {candidates}"
+        );
+    }
+    std::fs::create_dir_all(root.path().join(".herder/work trees/term AI/latency")).unwrap();
+    let candidates = engine
+        .suggest(
+            "cp latency.md ~/.herder/work trees/term AI/latency/",
+            &host,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let repaired =
+        termai_engine::validation::simple_words(candidates[0]["command"].as_str().unwrap())
+            .unwrap();
+    assert_eq!(repaired.len(), 3, "{candidates}");
+    assert_eq!(repaired[2].value, "~/.herder/work trees/term AI/latency/");
+    assert!(repaired[2].home);
+}
+
+#[tokio::test]
 async fn directory_facts_preserve_hidden_names_symlinks_bounds_and_fresh_versions() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_str().unwrap();

@@ -412,6 +412,11 @@ pub fn directory_input(input: &str) -> Option<PathInput> {
         options = matched[1].into();
         target = matched[2].into();
     }
+    path_input(&command, &options, &target)
+}
+
+pub fn path_input(command: &str, options: &str, target: &str) -> Option<PathInput> {
+    let mut target = target.trim().to_owned();
     if target.is_empty()
         || target == "-"
         || test!(r###"[|&;<>`$\\\n\r]"###, &target)
@@ -456,8 +461,8 @@ pub fn directory_input(input: &str) -> Option<PathInput> {
         return None;
     }
     Some(PathInput {
-        command,
-        options,
+        command: command.into(),
+        options: options.into(),
         quoted,
         from_home,
         absolute,

@@ -5,7 +5,7 @@ use crate::{
     },
     completion::complete_arguments,
     discovery::Discovery,
-    file_repair::{repair_input_file, repair_option_paths},
+    file_repair::{repair_copy_destination, repair_input_file, repair_option_paths},
     history::history_candidates,
     host::{self, Host},
     path,
@@ -547,6 +547,13 @@ async fn suggest_one(
     let literal = Candidate::literal(input);
     let mut metadata = discovery.cached(catalog, env, host.now_ms());
     let home = env.get("HOME").map(String::as_str).unwrap_or_default();
+    if let Some(mut destinations) =
+        repair_copy_destination(input, catalog, home, host, &metadata).await?
+    {
+        *stage.borrow_mut() = Some("directory".into());
+        destinations.push(literal);
+        return Ok(destinations);
+    }
     if let Some(mut files) =
         repair_input_file(input, catalog, home, host, spoken_input, &metadata).await?
     {
@@ -693,6 +700,12 @@ async fn suggest_one(
         }
     }
     *stage.borrow_mut() = Some("discovery".into());
+    if let Some(mut destinations) =
+        repair_copy_destination(input, &catalog, home, host, &metadata).await?
+    {
+        destinations.push(literal);
+        return Ok(destinations);
+    }
     if let Some(files) =
         repair_input_file(input, &catalog, home, host, spoken_input, &metadata).await?
     {

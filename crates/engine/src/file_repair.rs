@@ -1,13 +1,105 @@
 use crate::{
     command_policy::{child_scope, flags_for, input_file_command, option_arity, script_operand},
     host::Host,
-    path_repair::{ExpectedType, PathInput, resolve_path},
+    path_repair::{ExpectedType, PathInput, path_input, resolve_path},
     shell_structure::word_spans,
     speech::expand_symbols,
     types::{Candidate, Catalog, CommandMetadata, Flag, ValueKind},
     util::utf16_len,
 };
 use crate::{replace, test};
+
+/// Resolve an existing copy destination without changing its source operands.
+pub async fn repair_copy_destination(
+    input: &str,
+    catalog: &Catalog,
+    home: &str,
+    host: &dyn Host,
+    metadata: &CommandMetadata,
+) -> Result<Option<Vec<Candidate>>, String> {
+    if !input
+        .split_whitespace()
+        .next()
+        .is_some_and(|command| command.eq_ignore_ascii_case("cp"))
+        || !catalog.commands.contains(&"cp".into())
+    {
+        return Ok(None);
+    }
+    let expanded = expand_symbols(input, true);
+    let Some(spans) = word_spans(&expanded) else {
+        return Ok(None);
+    };
+    let Some(words) = crate::validation::simple_words(&expanded) else {
+        return Ok(None);
+    };
+    if words.len() != spans.len() {
+        return Ok(None);
+    }
+    let flags = flags_for("cp", metadata);
+    let mut index = 1;
+    let mut options = true;
+    let mut operands = Vec::new();
+    while index < words.len() {
+        let option = &words[index].value;
+        if !options || !option.starts_with('-') {
+            operands.push(index);
+            index += 1;
+            continue;
+        }
+        if option == "--" {
+            options = false;
+            index += 1;
+            continue;
+        }
+        // These forms do not use the final operand as a destination directory.
+        if option.starts_with("--target-directory")
+            || option == "--no-target-directory"
+            || !option.starts_with("--") && option.contains(['t', 'T'])
+        {
+            return Ok(None);
+        }
+        let Some(takes_value) = option_arity(option, &flags) else {
+            return Ok(None);
+        };
+        index += if takes_value { 2 } else { 1 };
+    }
+    for start in operands
+        .into_iter()
+        .skip(1)
+        .filter(|&start| words[start].value.contains('/'))
+        .take(4)
+    {
+        if words[start + 1..]
+            .iter()
+            .any(|word| word.home || word.value.starts_with(['/', '-']))
+        {
+            continue;
+        }
+        let target = &expanded[spans[start].start..];
+        if test!(r###"[*?\[\]{}]"###, target) {
+            continue;
+        }
+        let command = format!(
+            "cp{}",
+            expanded[spans[0].end..spans[start].start].trim_end()
+        );
+        let Some(request) = path_input(&command, "", target) else {
+            continue;
+        };
+        let mut candidates = resolve_path(&request, catalog, home, host, ExpectedType::Directory)
+            .await?
+            .unwrap_or_default();
+        if !candidates.is_empty() {
+            for candidate in &mut candidates {
+                if !request.parts.is_empty() || request.from_home {
+                    candidate.command.push('/');
+                }
+            }
+            return Ok(Some(candidates));
+        }
+    }
+    Ok(None)
+}
 
 /// Describe a single existing-path operand; traversal is shared with directory repair.
 pub async fn repair_input_file(
