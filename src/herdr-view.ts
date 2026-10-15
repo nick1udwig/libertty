@@ -7,6 +7,7 @@ import { HerdrState, type HerdrNotification } from './herdr-state.ts';
 import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
 import { dropSpace, spaceLayout, spaceTerminal, worktreePath, type SpaceDrop } from './herdr-spaces.ts';
+import { herdrLane, herdrLaneNames, statusLanes, type HerdrLane } from './herdr-lanes.ts';
 import './herdr.css';
 
 interface Host {
@@ -23,7 +24,7 @@ interface Host {
 }
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; retain:boolean; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
 type StripItem = HerdrAgent & { space?: HerdrSpace };
-interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; spaceTerminals?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']>; snapshot?: unknown }
+interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; collapsedLanes?: HerdrLane[]; spaceTerminals?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']>; snapshot?: unknown }
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
   private strip = node('div', 'herdr-agent-strip');
@@ -67,6 +68,7 @@ export class HerdrView {
   private held = false;
   private dragOrderChanged = false;
   private dropTarget?: { id: string; drop: SpaceDrop };
+  private pinnedLane?: { id: string; lane: HerdrLane };
   private movingSpace = false;
   private creatingSpace = false;
   private closing = new Set<string>();
@@ -83,6 +85,8 @@ export class HerdrView {
     this.preferences.spaceTerminals ||= {};
     this.preferences.spaceGroups = Array.isArray(this.preferences.spaceGroups) ? this.preferences.spaceGroups : [];
     this.preferences.collapsedGroups = Array.isArray(this.preferences.collapsedGroups) ? this.preferences.collapsedGroups : [];
+    // Idle lanes start folded so the strip opens on agents that need attention.
+    this.preferences.collapsedLanes = Array.isArray(this.preferences.collapsedLanes) ? this.preferences.collapsedLanes.filter(lane => lane in herdrLaneNames) : ['idle'];
     delete (this.preferences as any).hidden; delete (this.preferences as any).hiddenSpaces;
     this.tracker = new HerdrState(this.preferences.state);
     this.selected = this.preferences.selected || '';
@@ -341,6 +345,7 @@ export class HerdrView {
     requestAnimationFrame(() => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } });
   }
   private get spaceMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStrip') || 'null') !== 'agents'; } catch { return true; } }
+  private get laneMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStripOrder') || 'null') === 'lanes'; } catch { return false; } }
   private get order() { return this.spaceMode ? this.preferences.spaceOrder! : this.preferences.order; }
   private set order(value: string[]) { if (this.spaceMode) this.preferences.spaceOrder = value; else this.preferences.order = value; }
   private get stripSelection() {
@@ -355,6 +360,13 @@ export class HerdrView {
     if (!item.space) return this.tracker.status(item);
     const statuses = this.tracker.agents.filter(agent => item.space!.terminalIds.includes(agent.terminalId)).map(agent => this.tracker.status(agent));
     return (['blocked', 'done', 'working'] as const).find(status => statuses.includes(status)) || 'idle';
+  }
+  private laneFor(item: StripItem) {
+    const lane = herdrLane(this.statusFor(item));
+    if (item.terminalId !== this.stripSelection) return lane;
+    // The open tab keeps its lane until another tab is selected, so viewing or answering it never moves it away.
+    if (this.pinnedLane?.id !== item.terminalId) this.pinnedLane = { id: item.terminalId, lane };
+    return this.pinnedLane.lane;
   }
   private terminalFor(item?: StripItem) {
     if (!item) return '';
@@ -403,8 +415,10 @@ export class HerdrView {
       return;
     }
     const scroll = this.strip.scrollLeft; this.strip.replaceChildren(this.tabsToggle);
-    const agents = this.ordered();
-    const stacks = new Map<string, HTMLElement>();
+    const lanes = this.laneMode ? statusLanes(this.ordered(), item => this.laneFor(item)) : undefined;
+    if (!lanes) this.pinnedLane = undefined;
+    const agents = lanes ? lanes.flatMap(lane => lane.items) : this.ordered();
+    const stacks = new Map<string, HTMLElement>(), laneGroups = new Map<HerdrLane, HTMLElement>();
     for (const agent of agents) {
       const tab = node('button', 'herdr-agent-tab'); tab.type = 'button'; tab.role = 'tab'; tab.dataset.terminal = agent.terminalId; tab.dataset.status = this.statusFor(agent);
       tab.setAttribute('aria-selected', String(agent.terminalId === this.stripSelection)); tab.tabIndex = agent.terminalId === this.stripSelection ? 0 : -1;
@@ -412,9 +426,27 @@ export class HerdrView {
       tab.setAttribute('aria-label', agent.name + ' · ' + this.statusFor(agent) + ' · ' + agent.workspace);
       tab.title = agent.name + ' · ' + agent.kind + ' · ' + this.statusFor(agent) + ' · ' + agent.workspace;
       tab.append(node('span', 'herdr-status-dot'), node('span', 'herdr-agent-name', agent.name + (agent.space && agent.space.terminalIds.length > 1 ? ' ▾' : '')));
-      const group = agent.space && this.preferences.spaceGroups!.find(group => group.includes(agent.terminalId));
+      const lane = lanes?.find(lane => lane.items.includes(agent));
+      const group = !lane && agent.space && this.preferences.spaceGroups!.find(group => group.includes(agent.terminalId));
       let parent: HTMLElement = this.strip;
-      if (group) {
+      if (lane) {
+        const collapsed = this.preferences.collapsedLanes!.includes(lane.lane);
+        let box = laneGroups.get(lane.lane);
+        if (!box) {
+          const name = herdrLaneNames[lane.lane], count = lane.items.length;
+          box = node('div', 'herdr-status-lane'); box.role = 'group'; box.dataset.lane = lane.lane;
+          box.setAttribute('aria-label', name + ', ' + count + ' ' + (this.spaceMode ? 'space' : 'agent') + (count === 1 ? '' : 's'));
+          const toggle = node('button', 'herdr-lane-toggle'); toggle.type = 'button'; toggle.dataset.status = lane.lane;
+          toggle.append(node('span', 'herdr-status-dot'), String(count));
+          toggle.setAttribute('aria-label', (collapsed ? 'Expand ' : 'Collapse ') + name.toLowerCase()); toggle.setAttribute('aria-expanded', String(!collapsed));
+          toggle.onclick = () => { this.preferences.collapsedLanes = collapsed ? this.preferences.collapsedLanes!.filter(id => id !== lane.lane) : [...this.preferences.collapsedLanes!, lane.lane]; this.save(); this.render(); };
+          box.append(toggle); laneGroups.set(lane.lane, box); this.strip.append(box);
+        }
+        parent = box;
+        // Lane headers carry the status, so a tab shows its own dot only while pinned in a lane it has left.
+        tab.classList.toggle('herdr-lane-moved', herdrLane(this.statusFor(agent)) !== lane.lane);
+        if (collapsed) tab.hidden = agent.terminalId !== this.stripSelection;
+      } else if (group) {
         let stack = stacks.get(group[0]);
         if (!stack) {
           stack = node('div', 'herdr-space-stack'); stack.role = 'group'; stack.setAttribute('aria-label', 'Stack of ' + group.length + ' spaces');
@@ -431,7 +463,8 @@ export class HerdrView {
       tabGestures(tab, {
         select: () => this.select(agent.terminalId), hold: () => this.openMenu(tab, agent), scroll: this.strip,
         dragging: () => { this.menu.hidden = true; this.clearDrop(); },
-        drag: x => {
+        // Status lanes own the order, so holding a tab only opens its actions.
+        drag: lanes ? undefined : x => {
           if (x < this.strip.getBoundingClientRect().left + 24) this.strip.scrollLeft -= 10;
           if (x > this.strip.getBoundingClientRect().right - 24) this.strip.scrollLeft += 10;
           if (agent.space) { this.previewDrop(tab, x); return; }
@@ -451,6 +484,7 @@ export class HerdrView {
         if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
         event.preventDefault(); const index = agents.indexOf(agent), next = agents[(index + (event.key === 'ArrowRight' ? 1 : agents.length - 1)) % agents.length];
         if (event.altKey) {
+          if (lanes) return;
           if (agent.space) { void this.moveSpace(agent.terminalId, next.terminalId, event.key === 'ArrowRight' ? 'after' : 'before'); return; }
           const a = this.order.indexOf(agent.terminalId), b = this.order.indexOf(next.terminalId);
           const order = [...this.order]; [order[a], order[b]] = [order[b], order[a]]; this.order = order; this.save(); this.render();
