@@ -1,5 +1,6 @@
 mod frames;
 mod history;
+mod input;
 use crate::protocol::{DictationSource, DictationState, ServerMessage};
 use crate::{
     herdr::Target,
@@ -172,10 +173,17 @@ impl View {
         let lifetime = view.cancel.clone();
         // One worker preserves receive order across typing, commands and dictation.
         tokio::spawn(async move {
+            let mut deferred = None;
             loop {
-                let input = tokio::select! {biased;_=lifetime.cancelled()=>break,input=inputs.recv()=>input};
-                let Some(input) = input else { break };
+                let input = match deferred.take() {
+                    Some(input) => Some(input),
+                    None => {
+                        tokio::select! {biased;_=lifetime.cancelled()=>break,input=inputs.recv()=>input}
+                    }
+                };
+                let Some(mut input) = input else { break };
                 let Some(view) = weak.upgrade() else { break };
+                let permits = input::coalesce(&mut input, &mut inputs, &mut deferred);
                 let guard = input
                     .guard
                     .as_ref()
@@ -183,6 +191,7 @@ impl View {
                 let result = view
                     .input_serial(&input.text, input.paste, guard, input.replacement.as_ref())
                     .await;
+                drop(permits);
                 if let Some(id) = input
                     .replacement
                     .as_ref()

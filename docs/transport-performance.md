@@ -268,3 +268,10 @@ Negotiated gzip-fast connections temporarily use the 2 KiB bulk threshold when o
 The server retains that profile for ten seconds after pressure clears, then returns to the 128 KiB fast-link threshold.
 This adapts to changing links and browsers without connection-speed reporting while retaining the negotiated wire format and the existing minimum compression saving.
 JSON and binary-only clients keep their negotiated encodings.
+
+## Queued Herdr typing
+
+The ordered input worker combines immediately queued plain-text keys into one pane validation and send, bounded by the existing 16,000 UTF-16-unit input limit.
+Controls, commands, pastes, replacements, guarded dictation and completion-bearing requests remain separate and retain receive order.
+Every original input keeps its admission permit until the combined operation completes, and each received key still advances the input revision independently.
+The worker never waits to gather more typing.

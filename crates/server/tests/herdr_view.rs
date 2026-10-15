@@ -43,6 +43,15 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
         expected.push_str(&text);
         view.receive(json!({"type":"input","data":text})).unwrap();
     }
+    for text in ["\x1b[D", "界", "😀", "\x7f"] {
+        view.receive(json!({"type":"input","data":text})).unwrap();
+        expected.push_str(text);
+    }
+    view.receive(json!({"type":"paste","text":"literal paste"}))
+        .unwrap();
+    expected.push_str("literal paste");
+    view.receive(json!({"type":"input","data":"tail"})).unwrap();
+    expected.push_str("tail");
     view.receive(json!({"type":"command","id":"ordered","command":"done"}))
         .unwrap();
     expected.push_str("done\r");
@@ -60,15 +69,39 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
     })
     .await
     .unwrap();
-    let actual = fixture
-        .actions
-        .lock()
-        .unwrap()
+    let actions = fixture.actions.lock().unwrap();
+    let sends: Vec<_> = actions
         .iter()
-        .filter(|action| action["method"] == "pane.send_text")
+        .filter(|action| {
+            matches!(
+                action["method"].as_str(),
+                Some("pane.send_text" | "pane.send_input")
+            )
+        })
+        .collect();
+    let actual = sends
+        .iter()
         .map(|action| action["params"]["text"].as_str().unwrap())
         .collect::<String>();
     assert_eq!(actual, expected);
+    assert!(
+        sends.len() < 100,
+        "Queued typing should use fewer Herdr calls"
+    );
+    for control in ["\x1b[D", "\x7f", "done\r"] {
+        assert!(
+            sends
+                .iter()
+                .any(|action| action["params"]["text"] == control)
+        );
+    }
+    assert!(
+        sends
+            .iter()
+            .any(|action| action["method"] == "pane.send_input"
+                && action["params"]["text"] == "literal paste")
+    );
+    drop(actions);
     cancel.cancel();
 }
 
