@@ -338,3 +338,260 @@ async fn installer_commands_quote_paths_and_validate_https_without_running_insta
     assert!(command.contains("VOXTYPE_MOBILE_REPO='https://github.com/example/voxtype.git'"));
     assert!(!root.path().join("executed").exists());
 }
+
+fn resume_environment(root: &std::path::Path, port: u16) -> BTreeMap<String, String> {
+    let file = root.join("token");
+    std::fs::write(&file, "resume-secret-".repeat(4)).unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    BTreeMap::from([
+        (
+            "TERMAI_VOXTYPE_TOKEN_FILE".into(),
+            file.to_string_lossy().into_owned(),
+        ),
+        (
+            "TERMAI_VOXTYPE_URL".into(),
+            format!("ws://127.0.0.1:{port}/v1/dictate"),
+        ),
+    ])
+}
+#[tokio::test]
+async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daemon_session() {
+    let root = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let env = resume_environment(root.path(), listener.local_addr().unwrap().port());
+    let (accepted, mut accepted_rx) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut first = tokio_tungstenite::accept_async(stream).await.unwrap();
+        first
+            .send(Message::Text(ready().to_string().into()))
+            .await
+            .unwrap();
+        let audio = first.next().await.unwrap().unwrap();
+        assert!(audio.is_binary());
+        assert_eq!(
+            dictation::parse_opus_frame(&audio.into_data())
+                .unwrap()
+                .sequence,
+            0
+        );
+        accepted.send(()).unwrap();
+        let detached = first.next().await.unwrap().unwrap();
+        assert!(
+            matches!(detached, Message::Close(_)),
+            "Disconnect must preserve the logical recording instead of sending cancel"
+        );
+        drop(first);
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut second = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let mut checkpoint = ready();
+        checkpoint["accepted_frames"] = json!(1);
+        second
+            .send(Message::Text(checkpoint.to_string().into()))
+            .await
+            .unwrap();
+        let audio = second.next().await.unwrap().unwrap();
+        assert_eq!(
+            dictation::parse_opus_frame(&audio.into_data())
+                .unwrap()
+                .sequence,
+            1
+        );
+        let finish: Value =
+            serde_json::from_slice(&second.next().await.unwrap().unwrap().into_data()).unwrap();
+        assert_eq!(finish["type"], "finish");
+        second
+            .send(Message::Text(
+                json!({"type":"final","text":"saved speech"})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        let ack: Value =
+            serde_json::from_slice(&second.next().await.unwrap().unwrap().into_data()).unwrap();
+        assert_eq!(ack["type"], "ack");
+    });
+    let results = Arc::new(Mutex::new(Vec::new()));
+    let (checkpoints, mut checkpoint_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (statuses, mut status_rx) = tokio::sync::mpsc::unbounded_channel();
+    let start = || {
+        let results = results.clone();
+        let checkpoints = checkpoints.clone();
+        let statuses = statuses.clone();
+        Recording::start_resumable(
+            env.clone(),
+            "a".repeat(32),
+            Arc::new(move |text| {
+                let results = results.clone();
+                Box::pin(async move {
+                    results.lock().unwrap().push(text);
+                    Ok(())
+                })
+            }),
+            Arc::new(move |state, error| {
+                statuses.send((state.to_owned(), error)).unwrap();
+            }),
+            Arc::new(move |checkpoint| {
+                checkpoints.send(checkpoint).unwrap();
+            }),
+        )
+    };
+    let first = start();
+    assert_eq!(
+        receive_with_timeout(&mut checkpoint_rx)
+            .await
+            .accepted_frames,
+        0
+    );
+    first.audio(frame(0, false, true));
+    receive_with_timeout(&mut accepted_rx).await;
+    first.suspend();
+    let resumed = start();
+    assert_eq!(
+        receive_with_timeout(&mut checkpoint_rx)
+            .await
+            .accepted_frames,
+        1
+    );
+    resumed.audio(frame(1, true, true));
+    resumed.finish();
+    let status = tokio::time::timeout(Duration::from_secs(5), status_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(status, ("done".into(), None));
+    assert_eq!(*results.lock().unwrap(), vec!["saved speech"]);
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn finished_daemon_checkpoints_deliver_cached_final_without_reupload_or_finish() {
+    let root = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let env = resume_environment(root.path(), listener.local_addr().unwrap().port());
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let mut checkpoint = ready();
+        checkpoint["accepted_frames"] = json!(2);
+        checkpoint["finished"] = json!(true);
+        socket
+            .send(Message::Text(checkpoint.to_string().into()))
+            .await
+            .unwrap();
+        socket
+            .send(Message::Text(
+                json!({"type":"final","text":"cached final"})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        let ack: Value =
+            serde_json::from_slice(&socket.next().await.unwrap().unwrap().into_data()).unwrap();
+        assert_eq!(
+            ack["type"], "ack",
+            "A cached final must not cause audio or finish to be resent"
+        );
+    });
+    let (finals, mut final_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (checkpoints, mut checkpoint_rx) = tokio::sync::mpsc::unbounded_channel();
+    let recording = Recording::start_resumable(
+        env,
+        "b".repeat(32),
+        Arc::new(move |text| {
+            let finals = finals.clone();
+            Box::pin(async move {
+                finals.send(text).unwrap();
+                Ok(())
+            })
+        }),
+        Arc::new(|state, message| assert_ne!(state, "error", "{message:?}")),
+        Arc::new(move |checkpoint| {
+            checkpoints.send(checkpoint).unwrap();
+        }),
+    );
+    assert!(receive_with_timeout(&mut checkpoint_rx).await.finished);
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), final_rx.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+        "cached final"
+    );
+    task.await.unwrap();
+    drop(recording);
+}
+
+#[tokio::test]
+async fn accepted_final_audio_can_finish_after_its_finish_control_was_lost() {
+    let root = tempfile::tempdir().unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let env = resume_environment(root.path(), listener.local_addr().unwrap().port());
+    let task = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let mut checkpoint = ready();
+        checkpoint["accepted_frames"] = json!(1);
+        socket
+            .send(Message::Text(checkpoint.to_string().into()))
+            .await
+            .unwrap();
+        let control = socket.next().await.unwrap().unwrap();
+        assert!(control.is_text());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&control.into_data()).unwrap()["type"],
+            "finish"
+        );
+        socket
+            .send(Message::Text(
+                json!({"type":"final","text":"complete retained audio"})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&socket.next().await.unwrap().unwrap().into_data())
+                .unwrap()["type"],
+            "ack"
+        );
+    });
+    let (checkpoints, mut checkpoint_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (finals, mut final_rx) = tokio::sync::mpsc::unbounded_channel();
+    let recording = Recording::start_resumable(
+        env,
+        "c".repeat(32),
+        Arc::new(move |text| {
+            let finals = finals.clone();
+            Box::pin(async move {
+                finals.send(text).unwrap();
+                Ok(())
+            })
+        }),
+        Arc::new(|state, message| assert_ne!(state, "error", "{message:?}")),
+        Arc::new(move |checkpoint| {
+            checkpoints.send(checkpoint).unwrap();
+        }),
+    );
+    assert_eq!(
+        receive_with_timeout(&mut checkpoint_rx)
+            .await
+            .accepted_frames,
+        1
+    );
+    recording.finish();
+    assert_eq!(
+        receive_with_timeout(&mut final_rx).await,
+        "complete retained audio"
+    );
+    task.await.unwrap();
+}
+
+async fn receive_with_timeout<T>(receive: &mut tokio::sync::mpsc::UnboundedReceiver<T>) -> T {
+    tokio::time::timeout(Duration::from_secs(5), receive.recv())
+        .await
+        .expect("Recording fixture timed out")
+        .expect("Recording fixture closed")
+}

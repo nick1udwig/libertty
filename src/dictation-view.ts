@@ -60,19 +60,19 @@ export class DictationView {
     try { localStorage.setItem('termai.micPositionFraction', JSON.stringify(this.fraction)); } catch {}
   }
   update(phase: string, visible: boolean, paused = false) {
-    const expanded = phase !== 'idle'; this.waiting = phase === 'finishing';
+    const expanded = phase !== 'idle'; this.waiting = phase === 'finishing' || phase === 'retry';
     this.button.hidden = !visible; this.panel.hidden = !visible || !expanded;
     this.button.classList.toggle('recording', expanded); this.button.classList.toggle('waiting', this.waiting);
     this.button.classList.toggle('paused', paused);
     this.button.setAttribute('aria-label', 'Termai dictation microphone');
-    this.button.setAttribute('aria-description', paused ? 'Audio capture paused. Unlock or return to resume, or cancel dictation.' : !expanded ? 'Dictate: hold and release, or tap to start and stop. Drag to move.' : this.waiting ? 'Transcribing. Drag to move.' : 'Stop dictation. Drag to move.');
+    this.button.setAttribute('aria-description', paused ? 'Audio capture paused. Unlock or return to resume, or cancel dictation.' : !expanded ? 'Dictate: hold and release, or tap to start and stop. Drag to move.' : phase === 'retry' ? 'Retry retained dictation at the current prompt, or drag to move.' : this.waiting ? 'Transcribing. Drag to move.' : 'Stop dictation. Drag to move.');
     this.button.setAttribute('aria-pressed', String(expanded));
     this.activity.setAttribute('aria-label', paused ? 'Audio capture paused' : this.waiting ? 'Transcribing' : 'Microphone activity');
-    this.label.textContent = paused ? 'Audio paused' : 'Transcribing…'; this.label.hidden = !this.waiting && !paused; this.meter.style.display = this.waiting || paused ? 'none' : '';
+    this.label.textContent = phase === 'retry' ? 'Tap to retry' : paused ? 'Audio paused' : 'Transcribing…'; this.label.hidden = !this.waiting && !paused; this.meter.style.display = this.waiting || paused ? 'none' : '';
     if (!expanded) { cancelAnimationFrame(this.frame); this.frame = 0; this.lastDraw = 0; this.levels.fill(0); this.drawn.fill(0); this.paint(performance.now()); }
     if (this.expanded !== expanded) {
       // Reflow the panel without moving the microphone out from under the finger.
-      this.layout(this.button.offsetLeft, this.button.offsetTop);
+      this.layout(this.button.hidden ? parseFloat(this.button.style.left) : this.button.offsetLeft, this.button.hidden ? parseFloat(this.button.style.top) : this.button.offsetTop);
       this.expanded = expanded;
     }
   }

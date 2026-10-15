@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { readFile, writeFile } from 'node:fs/promises';
 import { WebSocket, WebSocketServer } from 'ws';
 import { herdrFixture } from './herdr-fixture.ts';
+import { decodeWire, encodeWire, GZIP_FAST_PROTOCOL } from '../src/wire.ts';
 
 const fixture = await herdrFixture();
 const daemon = new WebSocketServer({ port: 0, host: '127.0.0.1' });
@@ -168,6 +169,25 @@ try {
   const invalid = await open('term_0'); invalid.resize(0, 40);
   assert.equal((await once(invalid.ws, 'close'))[0], 1008);
   assert.ok(!fixture.actions.some(a => a.method === 'fixture.terminal.resize' && a.params.cols === 0));
+
+  const adaptiveTicket = await api('herdr/ticket?terminalId=term_0', { frameAck: true });
+  const adaptive = new WebSocket(base.replace('http:', 'ws:') + '/herdr/ws?terminalId=term_0&ticket=' + adaptiveTicket.ticket, [GZIP_FAST_PROTOCOL], { origin });
+  sockets.push(adaptive);
+  const adaptiveFrames = []; let decoding = Promise.resolve();
+  adaptive.on('message', bytes => {
+    decoding = decoding.then(async () => adaptiveFrames.push({ value: await decodeWire(new Uint8Array(bytes).buffer), compressed: !!(bytes[3] & 128) }));
+  });
+  await once(adaptive, 'open');
+  await until(() => adaptiveFrames.some(frame => frame.value.type === 'herdr-frame'), 'adaptive baseline');
+  const baseline = adaptiveFrames.find(frame => frame.value.type === 'herdr-frame').value;
+  await delay(150); adaptive.send(encodeWire({ type: 'ack', seq: baseline.seq }, GZIP_FAST_PROTOCOL));
+  const bulk = Buffer.from('\x1b[2J\x1b[H' + 'status running\r\n'.repeat(500));
+  await fixture.setFrame(0, { type: 'terminal.frame', encoding: 'ansi', width: 80, height: 24, full: true, bytes: bulk.toString('base64') });
+  await until(() => adaptiveFrames.some(frame => frame.value.type === 'herdr-frame' && frame.value.seq > baseline.seq && Buffer.from(frame.value.bytes).equals(bulk)), 'adaptive compressed bulk');
+  const delivered = adaptiveFrames.find(frame => frame.value.type === 'herdr-frame' && Buffer.from(frame.value.bytes).equals(bulk));
+  assert.equal(adaptive.protocol, GZIP_FAST_PROTOCOL);
+  assert.equal(delivered.compressed, true, 'Server pressure lowers the bulk threshold without browser link information');
+  adaptive.close(); await decoding;
 
   fixture.snapshot.agents[1].foreground_cwd = '/workspace/sub project';
   assert.equal((await request('herdr/action', { action: 'create-space', workspaceId: 'closed' })).status, 400);

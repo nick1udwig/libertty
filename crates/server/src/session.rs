@@ -41,6 +41,8 @@ pub(crate) const RC: &str = include_str!("../assets/bashrc.sh");
 pub struct ShellState {
     pub cwd: String,
     pub input_revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_context: Option<String>,
     pub prompt_revision: u64,
     pub ready: bool,
     pub prompt: u64,
@@ -226,6 +228,7 @@ impl Inner {
                             cwd
                         },
                         input_revision: self.state.input_revision + 1,
+                        input_context: None,
                         prompt_revision: self.state.input_revision + 1,
                         ready: true,
                         prompt: self.state.prompt + 1,
@@ -400,6 +403,7 @@ impl Session {
                 state: ShellState {
                     cwd: cwd.clone(),
                     input_revision: 0,
+                    input_context: None,
                     prompt_revision: 0,
                     ready: files_only,
                     prompt: 0,
@@ -573,7 +577,9 @@ impl Session {
             let _ = send.send(Transport::Close(1000, "Session ended".into()));
             return (0, receive);
         }
-        inner.input.dictation.take();
+        if let Some((_, recording)) = inner.input.dictation.take() {
+            recording.suspend();
+        }
         if let Some((_, cancel)) = inner.input.repair.take() {
             cancel.cancel();
         }
@@ -617,7 +623,9 @@ impl Session {
             return;
         }
         inner.socket = None;
-        inner.input.dictation.take();
+        if let Some((_, recording)) = inner.input.dictation.take() {
+            recording.suspend();
+        }
         if let Some((_, cancel)) = inner.input.repair.take() {
             cancel.cancel();
         }
@@ -827,6 +835,7 @@ impl Session {
                         || request.target() != target
                     {
                         inner.send(ServerMessage::Dictation {
+                            resume: None,
                             id: (id).to_string(),
                             state: DictationState::Error,
                             message: Some(
@@ -859,6 +868,7 @@ impl Session {
                         id.into(),
                         serial,
                         request.reading_phrases,
+                        &self.stream_id,
                     );
                     inner.input.dictation = Some((id.into(), recording));
                 }
@@ -1528,8 +1538,8 @@ mod tests {
             }
             sent.len()
         };
-        assert_eq!(collect(&mut receive), 32);
-        for (seq, count) in [(16, 48), (16, 48), (48, 80), (80, 100), (101, 100)] {
+        assert_eq!(collect(&mut receive), 2);
+        for (seq, count) in [(8, 2), (16, 3), (16, 3), (48, 5), (80, 7), (101, 7)] {
             session.receive(attachment, json!({"type":"ack","seq":seq}));
             assert_eq!(collect(&mut receive), count);
         }
@@ -1539,7 +1549,7 @@ mod tests {
         );
         session.receive(attachment, json!({"type":"ack","seq":100}));
         assert_eq!(session.inner.lock().unwrap().replay.outstanding_bytes(), 0);
-        assert_eq!(sent, (1..=100).collect::<Vec<_>>());
+        assert_eq!(sent, vec![16, 32, 48, 64, 80, 96, 100]);
         assert!(session.inner.lock().unwrap().replay.pending_empty());
         assert!(!stub.paused.load(Ordering::SeqCst));
     }
@@ -1552,9 +1562,9 @@ mod tests {
                 inner.replay.record(seq.to_string().into(), false);
             }
         }
-        for (stream, reset, sequences) in [
-            ("previous-server-stream", true, vec![1, 2, 3]),
-            (session.stream_id.as_str(), false, vec![3]),
+        for (stream, reset, expected) in [
+            ("previous-server-stream", true, "123"),
+            (session.stream_id.as_str(), false, "3"),
         ] {
             let (_, mut receive) = session.attach(2, Some(stream));
             match receive.try_recv().unwrap() {
@@ -1567,12 +1577,15 @@ mod tests {
                 _ => panic!(),
             }
             let mut actual = Vec::new();
+            let mut data = String::new();
             while let Ok(Transport::Message(value)) = receive.try_recv() {
                 if value["type"] == "output" {
                     actual.push(value["seq"].as_u64().unwrap());
+                    data.push_str(value["data"].as_str().unwrap());
                 }
             }
-            assert_eq!(actual, sequences);
+            assert_eq!(actual, vec![3]);
+            assert_eq!(data, expected);
         }
         session.dispose().await;
         let (_, mut receive) = session.attach(0, None);

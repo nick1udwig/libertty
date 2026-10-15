@@ -1,3 +1,5 @@
+import { DictationAudio } from './dictation-audio.ts';
+import { sameInputContext, type InputContext } from './unsent-input.ts';
 import type { ClientMessage, ShellState } from './protocol.ts';
 import { dictationTarget } from './protocol.ts';
 import './dictation.css';
@@ -14,6 +16,7 @@ interface Host {
   focus(): void;
   waiting?(active: boolean): void;
   key: string;
+  context(): InputContext | undefined;
 }
 export class DictationControl {
   private view = new DictationView();
@@ -23,7 +26,7 @@ export class DictationControl {
   private available = false;
   private online = false;
   private visible = true;
-  private phase: 'idle' | 'starting' | 'recording' | 'finishing' = 'idle';
+  private phase: 'idle' | 'starting' | 'recording' | 'finishing' | 'retry' = 'idle';
   private stream?: MediaStream;
   private context?: AudioContext;
   private source?: MediaStreamAudioSourceNode;
@@ -44,8 +47,11 @@ export class DictationControl {
   private uploadTimer?: ReturnType<typeof setTimeout>;
   private daemonReady = false;
   private captureFlushed = false;
-  private pendingAudio: ArrayBuffer[] = [];
-  private pendingBytes = 0;
+  private audio = new DictationAudio();
+  private inputContext?: InputContext;
+  private needsResume = false;
+  private finishSent = false;
+  private retryAfterFlush = false;
   private host: Host;
   private wakeLock: DictationWakeLock;
   private capturePaused = false;
@@ -115,7 +121,50 @@ export class DictationControl {
   }
   private save(value: string) { try { localStorage.setItem('termai.voxtype:' + this.host.key, value); } catch {} }
   get active() { return this.phase !== 'idle'; }
-  connected(online: boolean) { this.online = online; if (!online) { this.available = false; if (this.active) this.host.notice('Connection lost during dictation. Recording stopped.'); this.cancel(); this.dialog.close(); } else void this.poll(); this.render(); }
+  connected(online: boolean) {
+    const changed = this.online !== online;
+    if (!online && this.active && this.phase !== 'retry') {
+      const context = this.host.context();
+      if (context && this.inputContext && sameInputContext(this.inputContext, context)) this.inputContext = context;
+      this.needsResume = true; this.daemonReady = false;
+      clearTimeout(this.readyTimer); clearTimeout(this.uploadTimer);
+      if (changed) this.host.notice('Recording is retained while the terminal reconnects.');
+    }
+    this.online = online;
+    if (!online) { if (!this.active) this.available = false; this.dialog.close(); }
+    else if (this.needsResume && this.active && this.phase !== 'starting') this.resume();
+    else if (changed) void this.poll();
+    this.render();
+  }
+  private resume() {
+    const context = this.host.context();
+    if (!this.inputContext || !context || !sameInputContext(this.inputContext, context)) {
+      this.retain('Input changed; the recording is retained for retry or cancellation.'); return;
+    }
+    this.inputContext = context; this.sendStart();
+  }
+  private sendStart() {
+    const state = this.host.state();
+    this.daemonReady = false; this.finishSent = false;
+    this.needsResume = !this.online || !this.host.send({ type: 'dictation', id: this.id, action: 'start', prompt: state.prompt, revision: state.inputRevision, target: dictationTarget(state) });
+    if (!this.needsResume) this.readyTimer = setTimeout(() => this.retain('Voxtype did not become ready; the recording is retained for retry.'), 10000);
+  }
+  private retain(message: string) {
+    if (!this.active) return;
+    this.host.notice(message); this.needsResume = false; this.daemonReady = false;
+    clearTimeout(this.readyTimer); clearTimeout(this.uploadTimer);
+    this.host.send({ type: 'dictation', id: this.id, action: 'cancel' });
+    this.retryAfterFlush = true;
+    if (this.phase === 'recording') this.finish();
+    else if (this.phase === 'starting') this.finishPending = true;
+    if (this.captureFlushed) { this.phase = 'retry'; this.host.waiting?.(false); }
+    clearTimeout(this.audioTimer); this.render();
+  }
+  private retry() {
+    if (!this.online || !dictationTarget(this.host.state())) { this.host.notice('Wait for the terminal to reconnect before retrying the retained recording.'); return; }
+    this.id = crypto.randomUUID(); this.inputContext = this.host.context(); this.retryAfterFlush = false;
+    this.phase = 'finishing'; this.host.prepare(); this.host.waiting?.(true); this.sendStart(); this.render();
+  }
   prompt() { this.offer(); }
   visibility(visible: boolean) { this.visible = visible; if (!visible) { this.cancel(); this.dialog.close(); } else void this.poll(); this.render(); }
   private async poll() {
@@ -144,10 +193,10 @@ export class DictationControl {
       : 'Install the daemon on your backend to dictate directly into this terminal.';
     this.offered = true; this.dialog.showModal();
   }
-  private render() { this.view.update(this.phase, this.available && this.online && this.visible, this.capturePaused); }
+  private render() { this.view.update(this.phase, (this.active || this.available && this.online) && this.visible, this.capturePaused); }
   private async start() {
     if (!this.online || !this.available || !dictationTarget(this.host.state())) { this.host.notice('Wait for terminal input before dictating.'); return; }
-    const generation = ++this.generation; this.id = crypto.randomUUID(); this.phase = 'starting'; this.finishPending = false; this.render();
+    const generation = ++this.generation; this.id = crypto.randomUUID(); this.inputContext = this.host.context(); this.retryAfterFlush = false; this.phase = 'starting'; this.finishPending = false; this.render();
     this.wakeLock.start();
     this.audioTimer = setTimeout(() => this.captureFailed('Microphone audio did not start. Check microphone permission and try again.'), 15000);
     try {
@@ -174,13 +223,13 @@ export class DictationControl {
         }
       };
       this.host.prepare();
-      const state = this.host.state();
-      if (!this.host.send({ type: 'dictation', id: this.id, action: 'start', prompt: state.prompt, revision: state.inputRevision, target: dictationTarget(state) })) throw new Error('The terminal is disconnected.');
+      if (this.online) this.inputContext = this.host.context();
+      this.sendStart();
       // Capture immediately, including speech while waiting for daemon admission.
       this.phase = 'recording'; this.source.connect(this.processor); this.processor.connect(context.destination);
       this.lastAudio = Date.now(); this.capturePaused = this.captureInterrupted = false;
       this.captureTimer = setInterval(() => this.checkCapture(), 1000); this.checkCapture();
-      this.readyTimer = setTimeout(() => { this.host.notice('Voxtype did not become ready.'); this.cancel(); }, 10000);
+
       clearTimeout(this.audioTimer);
       this.audioTimer = setTimeout(() => this.finish(), 299000);
       // Permission prompts or device startup can suspend an already resumed context.
@@ -238,39 +287,38 @@ export class DictationControl {
         else if (event.data.type === 'consumed') { this.encoderPending--; this.processor?.port.postMessage({ type: 'consumed' }); }
         else if (event.data.type === 'error') fail(event.data.message);
         else if (event.data.type === 'audio') {
-          this.pendingAudio.push(event.data.frame); this.pendingBytes += event.data.frame.byteLength;
-          if (this.pendingBytes > 256 * 1024) { fail('Connection is too slow for dictation. Please try again.'); return; }
+          try { this.audio.append(event.data.frame); } catch (error) { fail((error as Error).message); return; }
           this.upload();
-        } else if (event.data.type === 'flushed') { this.encoder?.terminate(); this.encoder = undefined; this.captureFlushed = true; this.upload(); }
+        } else if (event.data.type === 'flushed') { this.encoder?.terminate(); this.encoder = undefined; this.captureFlushed = true; if (this.retryAfterFlush) { this.phase = 'retry'; this.host.waiting?.(false); this.render(); } else this.upload(); }
       };
     });
   }
-  event(id: string, state: 'ready' | 'done' | 'error', message?: string) {
+  event(id: string, state: 'ready' | 'done' | 'error', message?: string, resume?: { acceptedFrames: number; finished: boolean }) {
     if (id !== this.id || this.phase === 'idle') return;
     if (state === 'ready') {
-      clearTimeout(this.readyTimer); this.daemonReady = true; this.upload();
-    } else { if (message) this.host.notice(message); this.cancel(false); }
+      clearTimeout(this.readyTimer);
+      try { this.audio.resume(resume?.acceptedFrames, resume?.finished); } catch (error) { this.retain((error as Error).message); return; }
+      this.daemonReady = true; this.upload();
+    } else if (state === 'error') this.retain(message || 'Dictation failed; the recording is retained for retry.');
+    else this.cancel(false);
     this.render();
   }
   private upload() {
     clearTimeout(this.uploadTimer);
     if (!this.daemonReady || this.phase === 'idle') return;
-    let sent = 0;
-    while (this.pendingAudio.length && sent++ < 4) {
-      const bytes = this.pendingAudio[0];
-      if (!this.host.audio(bytes)) break;
-      this.pendingAudio.shift(); this.pendingBytes -= bytes.byteLength;
-    }
-    if (this.pendingAudio.length) this.uploadTimer = setTimeout(() => this.upload(), 10);
-    else if (this.captureFlushed) { this.captureFlushed = false; if (!this.host.send({ type: 'dictation', id: this.id, action: 'finish' })) this.cancel(); }
+    if (!this.online || this.audio.finished) return;
+    const uploaded = this.audio.upload(frame => this.host.audio(frame));
+    if (!uploaded) this.uploadTimer = setTimeout(() => this.upload(), 10);
+    else if (this.captureFlushed && !this.finishSent) this.finishSent = this.host.send({ type: 'dictation', id: this.id, action: 'finish' });
   }
   private finish() {
+    if (this.phase === 'retry') { this.retry(); return; }
     if (this.phase === 'starting') { this.finishPending = true; return; }
     if (this.phase !== 'recording') return;
     if (this.capturePaused) { this.captureFailed('Recording was interrupted. Keep the screen on and try dictating again.'); return; }
     this.phase = 'finishing'; this.wakeLock.stop(); clearInterval(this.captureTimer); clearTimeout(this.audioTimer); this.processor!.port.postMessage('flush');
     this.host.waiting?.(true);
-    this.audioTimer = setTimeout(() => { this.host.notice('Dictation timed out.'); this.cancel(); }, 180000);
+    this.audioTimer = setTimeout(() => this.retain('Dictation timed out; the recording is retained for retry.'), 480000);
     this.render();
   }
   private releaseAudio() { this.stream?.getTracks().forEach(track => track.stop()); this.stream = undefined; this.source?.disconnect(); this.processor?.disconnect(); void this.context?.close().catch(() => {}); this.context = undefined; }
@@ -302,8 +350,9 @@ export class DictationControl {
     this.encoderStartupCancel?.(); this.encoderStartupCancel = undefined;
     this.encoder?.terminate(); this.encoder = undefined; this.encoderPending = 0;
     this.releaseAudio(); clearTimeout(this.audioTimer); clearTimeout(this.readyTimer); clearTimeout(this.uploadTimer);
-    this.pendingAudio = []; this.pendingBytes = 0; this.daemonReady = this.captureFlushed = false;
+    this.audio.clear(); this.inputContext = undefined; this.needsResume = this.finishSent = this.retryAfterFlush = false; this.daemonReady = this.captureFlushed = false;
     this.phase = 'idle'; this.render();
     this.host.waiting?.(false);
+    if (this.online) void this.poll();
   }
 }

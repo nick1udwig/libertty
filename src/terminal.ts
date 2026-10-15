@@ -8,10 +8,14 @@ import type { ClientMessage, ServerMessage, ShellState, RepairResult } from './p
 import './style.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
 import { Queue } from './queue.ts';
+import { dictationTarget } from './protocol.ts';
+import { UnsentInput, type InputContext } from './unsent-input.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { TerminalFocus } from './terminal-focus.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
+import { TerminalEcho } from './predicted-echo.ts';
+import { TerminalHistory } from './terminal-history.ts';
 import { TerminalProjection } from './terminal-projection.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
 import { DictationControl } from './dictation.ts';
@@ -30,7 +34,12 @@ let herdrLayoutPending = false, herdrLayoutMatched = false, herdrLayoutFrame = 0
 let herdrBarrier = false, herdrBarrierReady = true, herdrParkable = false, herdrParked = false, herdrPreserve = false;
 let herdrPresentation = '';
 let offeredWire: string[] | undefined;
+let supportsHeartbeat = false, supportsInputContexts = false;
 let accessToken: string | undefined = backendAccess(baseURL.href);
+let authorized = false, directAttempt = false;
+let hiddenExpired = false, hiddenTimer: ReturnType<typeof setTimeout> | undefined;
+const backgroundGrace = 20000;
+const keepingGeometry = () => !document.hidden || !hiddenExpired;
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
 function herdrEndpoint(name: string) {
   const url = new URL(name, baseURL);
@@ -42,8 +51,10 @@ function notify(type: string, data: object = {}) { if (embedded) parent.postMess
 if (embedded) document.documentElement.classList.add('embedded-terminal');
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const transport = new ReconnectingSocket({
-  available: () => !document.hidden && (!herdrTerminal || tabVisible) && navigator.onLine,
+  available: () => (keepingGeometry() || dictation.active) && (!herdrTerminal || tabVisible) && navigator.onLine,
   protocols: () => wireProtocols(offeredWire),
+  heartbeat: () => supportsHeartbeat,
+  stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
   prepare: prepareConnection, open: socketOpened, message: socketMessage, close: socketClosed, error: connectionError,
 });
 let state: ShellState = { cwd: '', inputRevision: 0, promptRevision: 0, ready: false, prompt: 0, exited: false };
@@ -54,7 +65,9 @@ let pendingCommand: { id: string } | undefined;
 const edits = new Map<string, (accepted: boolean) => void>();
 const inputLines = new Map<string, (line?: { text: string; cursor: number }) => void>();
 const repairs = new Map<string, (result: RepairResult) => void>();
-let pendingPaintInput: { socket: WebSocket; prompt: number; stream: string; data: string[]; length: number } | undefined;
+const unsentInput = new UnsentInput();
+let disconnectedContext: InputContext | undefined;
+let connectionEpoch = 0, synchronizedConnection = false;
 let shortcuts: Shortcut[] = structuredClone(defaults);
 try {
   const saved = localStorage.getItem('termai.shortcuts');
@@ -79,7 +92,7 @@ function toast(message: string) {
 }
 function connection(label: string, online = false) {
   $('connection-label').textContent = label;
-  $('reconnect-banner').textContent = label === 'Session ended' ? 'This terminal has ended. Open its saved host to reconnect.' : 'Reconnecting to your terminal…';
+  $('reconnect-banner').textContent = label === 'Session ended' ? 'This terminal has ended; open its saved host to reconnect.' : label.startsWith('Connection stalled') ? label : 'Reconnecting to your terminal…';
   $('reconnect-banner').hidden = online || label === 'Connecting' || label === 'Locked';
   updateRun();
 }
@@ -100,6 +113,7 @@ async function api<T>(url: string, data?: unknown, signal?: AbortSignal): Promis
   return requestJSON<T>(endpoint(url), data, { token: () => accessToken, signal });
 }
 function send(message: ClientMessage): boolean {
+  if (['paste', 'replace', 'command', 'dictation-paste', 'input-line', 'repair'].includes(message.type)) echo.cancel();
   if ((message.type === 'dictation' && message.action === 'start') || message.type === 'dictation-paste') {
     try { message.readingPhrases = readingPhrases(JSON.parse(localStorage.getItem('termai.readingPhrases') || 'null')); } catch { message.readingPhrases = ['look at']; }
   }
@@ -121,19 +135,53 @@ const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 /
 term.open($('terminal'));
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
+const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
 const projection = herdrTerminal ? new TerminalProjection(term, ghostty) : undefined;
 const terminalViewport = $('terminal-viewport');
+const echo = new TerminalEcho(term, $('terminal'));
 const presentation = new TerminalPresentation(terminalViewport, () => {
   updateRun();
-  const pending = pendingPaintInput; pendingPaintInput = undefined;
-  if (!pending) return;
-  if (pending.socket === transport.socket && pending.prompt === state.prompt && pending.stream === streamId && !capturedConnection && !state.exited) {
-    for (const data of pending.data) rawInput(data);
-  } else toast('Terminal input changed. Queued input was not sent.');
+  synchronizeInput();
 });
 let replayTarget: number | undefined, replayState = false;
+function inputContext(): InputContext | undefined {
+  const target = dictationTarget(state);
+  if (!target || state.exited || capturedConnection) return;
+  const context: InputContext = { session: baseURL.href + ':' + session + ':' + (herdrTerminal || ''), connection: connectionEpoch, prompt: state.prompt, revision: state.inputRevision, target };
+  if (!herdrTerminal) {
+    if (!streamId || !replayState) return;
+    return { ...context, stream: streamId };
+  }
+  if (!state.inputContext) return;
+  context.identity = state.inputContext;
+  if (target === 'shell') {
+    const buffer = term.buffer.active, lines: string[] = [];
+    for (let row = Math.max(0, buffer.length - 1000); row < buffer.length; row++) {
+      const line = buffer.getLine(row);
+      const text = line?.translateToString(true) || '';
+      if (line?.isWrapped && lines.length) lines[lines.length - 1] += text; else lines.push(text);
+    }
+    while (lines.at(-1) === '') lines.pop();
+    context.picture = JSON.stringify([lines, buffer.cursorX, buffer.cursorY, term.cols]);
+  }
+  return context;
+}
+function synchronizeInput() {
+  if (!replayState || presentation.pending || queue.length || !herdrTerminal && after < (replayTarget ?? after)
+    || herdrTerminal && (!herdrReady || herdrLayoutPending || herdrParked || supportsInputContexts && state.inputContext === undefined)) return;
+  if (unsentInput.length) {
+    const context = inputContext();
+    if (!context) return;
+    const pending = unsentInput.take(context);
+    if (pending) for (const data of pending) rawInput(data);
+    else toast('Queued input belongs to a changed prompt and was not sent.');
+  }
+  if (!synchronizedConnection) { synchronizedConnection = true; disconnectedContext = undefined; dictation.connected(true); }
+}
 function revealReplay() {
-  if (!herdrTerminal && replayState && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) presentation.reveal();
+  if (!herdrTerminal && replayState && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) {
+    presentation.reveal(); synchronizeInput();
+  }
 }
 const mobileViewport = matchMedia('(pointer: coarse) and (max-width: 1024px)');
 function mobileTerminal() { return !!herdrTerminal && mobileViewport.matches; }
@@ -153,7 +201,7 @@ function drain() {
   }
   if (chunks.length) {
     preserveScrollback(term, () => term.write(chunks.join(''))); after = last;
-    send({ type: 'ack', seq: after });
+    send({ type: 'ack', seq: after }); echo.output();
   }
   inline.refresh();
   if (queue.length) scheduleDrain();
@@ -193,7 +241,7 @@ function sizeTerminal() {
     projection?.resize(mobileTerminal());
     // Herdr resolves the selected pane asynchronously after the WS upgrade.
     // Send geometry only after its state acknowledges that the handler is ready.
-    if (!herdrTerminal || herdrReady) send({ type: 'resize', cols: term.cols, rows: term.rows, ...(herdrTerminal ? { mobile: mobileTerminal() && tabVisible && !document.hidden } : {}) }); inline.refresh();
+    if (!herdrTerminal || herdrReady) send({ type: 'resize', cols: term.cols, rows: term.rows, ...(herdrTerminal ? { mobile: mobileTerminal() && tabVisible && keepingGeometry() } : {}) }); inline.refresh();
     refreshHerdrFrame();
   } catch { /* hidden during layout */ }
 }
@@ -210,21 +258,19 @@ mobileViewport.addEventListener('change', sizeTerminal);
 function viewport() { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height || window.innerHeight}px`); }
 window.visualViewport?.addEventListener('resize', viewport); window.addEventListener('resize', viewport); viewport();
 function rawInput(data: string) {
-  if (presentation.pending) {
-    if (['\x1b[I', '\x1b[O'].includes(data)) return;
-    if (!herdrTerminal && transport.socket?.readyState === WebSocket.OPEN && streamId && !capturedConnection && !state.exited) {
-      pendingPaintInput ||= { socket: transport.socket, prompt: state.prompt, stream: streamId, data: [], length: 0 };
-      if (pendingPaintInput.length + data.length <= 65536) { pendingPaintInput.data.push(data); pendingPaintInput.length += data.length; }
-      else toast('Wait for the terminal to finish loading. Input was not sent.');
-    } else toast('Wait for the terminal to finish loading. Input was not sent.');
-    return;
-  }
-  if (herdrTerminal && !herdrReady) { toast('Connecting to the agent. Input was not sent.'); return; }
+  transport.activity();
+  if (['\x1b[I', '\x1b[O'].includes(data)) { if (!presentation.pending) send({ type: 'input', data }); return; }
   if (capturedConnection) { toast('Finish opening the connection first.'); return; }
   if (ctrl) { if (/^[a-zA-Z]$/.test(data)) data = String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64); setCtrl(false); }
-  if (!inline.raw(data)) return;
-  if (send({ type: 'input', data })) { state.inputRevision++; term.scrollToBottom(); }
-  else toast('Disconnected. Input was not sent.');
+  if (presentation.pending || herdrTerminal && (!herdrReady || herdrLayoutPending) || transport.socket?.readyState !== WebSocket.OPEN || !replayState) {
+    const context = unsentInput.context || disconnectedContext || inputContext();
+    if (!unsentInput.add(data, context)) toast('Input could not be queued for this terminal.');
+    return;
+  }
+  const predict = inline.predictionReady && !queue.length && !herdrLayoutPending;
+  if (!inline.raw(data)) { echo.cancel(); return; }
+  if (send({ type: 'input', data })) { term.scrollToBottom(); echo.input(data, state, predict); state.inputRevision++; }
+  else if (!unsentInput.add(data, disconnectedContext || inputContext())) toast('Input could not be queued for this terminal.');
 }
 function replaceLine(text: string): Promise<boolean> {
   if (capturedConnection || !state.ready || state.exited || transport.socket?.readyState !== WebSocket.OPEN) return Promise.resolve(false);
@@ -261,7 +307,7 @@ const inline = new InlineSuggestions(term, { state: () => state, replace: replac
     if (!herdrTerminal) return suggestions.suggest(text, signal);
     return requestJSON(herdrEndpoint('api/herdr/suggest'), { text }, { token: () => accessToken, signal });
   }, raw: rawInput, execute });
-const dictation = new DictationControl({ api, send, state: () => state, key: baseURL.href,
+const dictation = new DictationControl({ api, send, state: () => state, context: inputContext, key: baseURL.href,
   audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data, transport.socket.protocol)); return true; },
   prepare: () => inline.prepareExternalPaste(), waiting: active => inline.dictationPending(active), notice: toast, focus: () => term.focus() });
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
@@ -344,7 +390,7 @@ const gestures = new TerminalGestures(term, {
       send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
     },
   },
-  tap: (x, y) => { if (!presentation.pending && !queue.length && !capturedConnection) inline.moveCursor(x, y); }, copy: copyTerminalText,
+  tap: (x, y) => { transport.activity(); if (!presentation.pending && !queue.length && !capturedConnection) inline.moveCursor(x, y); }, copy: copyTerminalText,
 });
 
 async function socketURL(signal: AbortSignal) {
@@ -352,22 +398,25 @@ async function socketURL(signal: AbortSignal) {
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
   if (herdrTerminal) {
     sizeTerminal();
-    const geometry = { cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && !document.hidden };
+    const geometry = { historyDelta: true, frameAck: true, cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && keepingGeometry() };
     cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; herdrLayoutMatched = false;
     herdrPreserve = false; herdrMobileRendered = false;
     herdrLayoutPending = geometry.mobile;
     terminalViewport.classList.toggle('awaiting-herdr-layout', herdrLayoutPending && !herdrParked);
-    const result = await requestJSON<{ redrawBarrier?: boolean; parkViews?: boolean; ticket: string; wire?: string[] }>(herdrEndpoint('api/herdr/ticket'), geometry, { token: () => accessToken, signal });
-    herdrBarrier = result.redrawBarrier === true; herdrBarrierReady = !herdrBarrier; herdrParkable = result.parkViews === true;
-    socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire;
+    const result = await requestJSON<{ redrawBarrier?: boolean; parkViews?: boolean; ticket: string; inputContexts?: boolean; heartbeat?: boolean; wire?: string[] }>(herdrEndpoint('api/herdr/ticket'), geometry, { token: () => accessToken, signal });
+    supportsInputContexts = result.inputContexts === true; herdrBarrier = result.redrawBarrier === true; herdrBarrierReady = !herdrBarrier; herdrParkable = result.parkViews === true;
+    socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
   socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:'; socketURL.searchParams.set('after', String(after));
   if (streamId) socketURL.searchParams.set('stream', streamId);
   return socketURL;
 }
 async function prepareConnection(signal: AbortSignal, token?: string) {
-  const result = await api<{ state?: ShellState; accessToken: string; wire?: string[] }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
-  signal.throwIfAborted(); offeredWire = result.wire;
+  directAttempt = !token && (herdrTerminal ? !!accessToken : authorized && baseURL.origin === location.origin);
+  if (directAttempt) return socketURL(signal);
+  const result = await api<{ state?: ShellState; accessToken: string; heartbeat?: boolean; wire?: string[] }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
+  signal.throwIfAborted(); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
+  authorized = true;
   if (result.state) state = result.state; accessToken = result.accessToken; notify('terminal-authorized', { accessToken });
   rememberBackendAccess(baseURL.href, accessToken);
   $<HTMLInputElement>('token').value = '';
@@ -375,9 +424,11 @@ async function prepareConnection(signal: AbortSignal, token?: string) {
   return socketURL(signal);
 }
 function socketOpened() {
+  connectionEpoch++; synchronizedConnection = false;
+  history.reset();
   replayState = false;
   if (herdrTerminal) { herdrReady = false; state.inputRevision = 0; state.inputTarget = undefined; connection('Connecting'); }
-  else { connection('Connected', true); notify('terminal-ready'); dictation.connected(true); }
+  else { connection('Connected', true); notify('terminal-ready'); }
   sizeTerminal();
   if (herdrParked && herdrParkable) send({ type:'herdr-active', active:false });
 }
@@ -397,7 +448,7 @@ function revealHerdrLayout() {
 }
 function notifyHerdrRendered(presentationId = herdrPresentation) {
   if (!herdrLayoutPending && !herdrParked && presentationId === herdrPresentation) {
-    presentation.reveal();
+    presentation.reveal(); synchronizeInput();
     notify('terminal-rendered', { presentation: presentationId, cols:term.cols, rows:term.rows });
   }
 }
@@ -419,19 +470,25 @@ function socketMessage(event: MessageEvent) {
     return;
   }
   if (message.type === 'herdr-frame') {
-    if (herdrParked || herdrLayoutPending && herdrPreserve && !herdrBarrierReady) return;
-    if (herdrLayoutPending) {
-      if (message.width !== term.cols || message.height !== term.rows) {
-        herdrLayoutMatched = false; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; return;
+    try {
+      if (herdrParked || herdrLayoutPending && herdrPreserve && !herdrBarrierReady) return;
+      if (herdrLayoutPending) {
+        if (message.width !== term.cols || message.height !== term.rows) {
+          herdrLayoutMatched = false; cancelAnimationFrame(herdrLayoutFrame); herdrLayoutFrame = 0; return;
+        }
+        if (!herdrLayoutMatched && !message.full) return;
+        herdrLayoutMatched = true;
       }
-      if (!herdrLayoutMatched && !message.full) return;
-      herdrLayoutMatched = true;
-    }
-    if (projection?.frame(message) && !herdrLayoutPending) scheduleHerdrRendered();
-    revealHerdrLayout();
-    if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
+      if (projection?.frame(message) && !herdrLayoutPending) scheduleHerdrRendered();
+      revealHerdrLayout();
+      if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
+    } finally { echo.output(); if (message.seq !== undefined) send({ type: 'ack', seq: message.seq }); }
   }
-  if (message.type === 'screen') { if (herdrLayoutPending || herdrParked) return; projection?.update(message.text); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return; }
+  if (message.type === 'screen' || message.type === 'screen-delta') {
+    const text = history.receive(message);
+    if (text === undefined || herdrLayoutPending || herdrParked) return;
+    projection?.update(text); echo.output(); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return;
+  }
   if (message.type === 'input-line') {
     const intact = message.prompt === state.prompt && message.revision === state.inputRevision && state.ready;
     inputLines.get(message.id)?.(intact && typeof message.text === 'string' && typeof message.cursor === 'number' ? { text: message.text, cursor: message.cursor } : undefined);
@@ -465,7 +522,7 @@ function socketMessage(event: MessageEvent) {
       () => saveDownload(baseURL.href, () => api('/api/files/transfer', { id: message.request.id, action: 'download' }), message.request.name));
     return;
   }
-  if (message.type === 'dictation') { dictation.event(message.id, message.state, message.message); return; }
+  if (message.type === 'dictation') { dictation.event(message.id, message.state, message.message, message.resume); return; }
   if (message.type === 'reading-file') {
     showReading({ path: message.path });
   } else if (message.type === 'reading-capture') {
@@ -502,17 +559,18 @@ function socketMessage(event: MessageEvent) {
     if (message.seq > after) queue.push(message);
     if (!frameQueued) scheduleDrain();
   } else if (message.type === 'state') {
+    const initial = !replayState;
     replayState = true;
     transport.ready();
-    if (herdrTerminal) { herdrReady = true; sizeTerminal(); connection('Connected', true); notify('terminal-ready', { retainGeometry: herdrParkable }); dictation.connected(true); }
+    if (herdrTerminal) { herdrReady = true; sizeTerminal(); connection('Connected', true); notify('terminal-ready', { retainGeometry: herdrParkable }); }
     // A state acknowledgement can arrive after newer local keystrokes were
     // sent. Keep their optimistic revision until the backend catches up.
-    message.state.inputRevision = Math.max(state.inputRevision, message.state.inputRevision);
+    if (!initial) message.state.inputRevision = Math.max(state.inputRevision, message.state.inputRevision);
     state = message.state; notify('terminal-state', { state }); $('cwd').textContent = state.cwd; $('cwd').title = state.cwd;
     dictation.prompt();
     updateRun();
-    inline.onState(state);
-    revealReplay();
+    inline.onState(state); echo.state(state);
+    revealReplay(); synchronizeInput();
   } else if (message.type === 'edit-result') {
     edits.get(message.id)?.(message.accepted); edits.delete(message.id);
     if (!message.accepted) state.inputRevision = message.revision;
@@ -524,17 +582,19 @@ function socketMessage(event: MessageEvent) {
 
 }
 function socketClosed(event?: CloseEvent) {
-  if (pendingPaintInput) { pendingPaintInput = undefined; toast('Connection changed. Queued input was not sent.'); }
+  if (directAttempt && !replayState) authorized = false;
+  disconnectedContext = inputContext() || disconnectedContext;
+  dictation.connected(false); synchronizedConnection = false;
+  echo.reset();
   presentation.freeze(); replayState = false;
   herdrReady = false;
   if (event?.code === 4001 || state.exited) inline.disconnect(); else inline.suspend(); suggestions.disconnect();
-  dictation.connected(false);
   for (const resolve of edits.values()) resolve(false); edits.clear();
   for (const resolve of inputLines.values()) resolve(); inputLines.clear();
   for (const resolve of repairs.values()) resolve({ accepted: false, candidates: [], original: '', selected: '', prompt: state.prompt, revision: state.inputRevision }); repairs.clear();
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) { pendingCommand = undefined; toast('Connection lost before acknowledgement. Check the terminal before running again.'); }
-  if (event?.code === 4001) { connection('Other tab'); toast(event.reason); return false; }
+  if (event?.code === 4001) { unsentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason); return false; }
   if (embedded && state.exited) return false; // The workspace is replacing this finished shell.
   connection('Reconnecting');
   return true;
@@ -555,17 +615,20 @@ function connectionError(error: any, token?: string) {
   return true;
 }
 const connect = (token?: string) => transport.connect(token);
+document.addEventListener('pointerdown', () => transport.activity(), { passive: true });
 $('login-form').onsubmit = e => { e.preventDefault(); void connect($<HTMLInputElement>('token').value); };
 document.addEventListener('visibilitychange', () => {
+  clearTimeout(hiddenTimer);
   if (document.hidden) {
-    presentation.freeze();
-    // Dictation may keep the transport alive through lock; geometry still
-    // belongs to the desktop while this pane is no longer visible.
-    if (herdrTerminal) send({ type: 'resize', cols: term.cols, rows: term.rows, mobile: false });
-    // Keep both audio transport and shell input context while dictating through lock.
-    if (!dictation.active) { inline.suspend(); transport.suspend(); }
+    echo.cancel();
+    hiddenExpired = false;
+    hiddenTimer = setTimeout(() => {
+      hiddenExpired = true;
+      if (herdrTerminal) send({ type: 'resize', cols: term.cols, rows: term.rows, mobile: false });
+      if (!dictation.active) { inline.suspend(); transport.suspend(); }
+    }, backgroundGrace);
   }
-  else { void transport.resume(transport.socket?.readyState !== WebSocket.OPEN); sizeTerminal(); revealReplay(); }
+  else { hiddenExpired = false; void transport.resume(!transport.healthy); sizeTerminal(); revealReplay(); }
 });
 window.addEventListener('online', () => void transport.resume(true));
 window.addEventListener('offline', () => transport.suspend());
@@ -592,7 +655,7 @@ $('new-shell').onclick = async () => {
   try {
     inline.disconnect(); suggestions.disconnect();
     transport.suspend();
-    await api('/api/new', {}); after = 0; queue.clear(); pendingCommand = undefined;
+    await api('/api/new', {}); after = 0; streamId = ''; queue.clear(); unsentInput.clear(); disconnectedContext = undefined; pendingCommand = undefined;
     $<HTMLDialogElement>('options-dialog').close(); await connect();
   } catch (error: any) { toast(error.message); void connect(); }
 };

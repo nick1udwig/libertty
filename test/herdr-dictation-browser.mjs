@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, realpath } from 'node:fs/promi
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
+import { resumableVoxtype } from './support/voxtype-daemon.mjs';
 import { herdrRequest } from './support/herdr.ts';
 import { installWireObserver } from './wire-observer.mjs';
 
@@ -14,11 +15,7 @@ const target = { session: '', socketPath: directory + '/herdr.sock' }, base = 'h
 const env = { ...process.env, HOME: directory, XDG_CONFIG_HOME: directory + '/config', XDG_DATA_HOME: directory + '/data', XDG_STATE_HOME: directory + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 const daemon = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(daemon, 'listening');
 let transcript = 'C D work space';
-daemon.on('connection', (socket, request) => {
-  if (request.url === '/v1/capabilities') { socket.send(JSON.stringify({ type: 'capabilities', protocol: 2, dictation: true, sample_rate: 16000, channels: 1, format: 'opus', framing: 'sequence_opus_v1', audio_encodings: ['opus_v1'], results: ['final'] })); return; }
-  socket.send(JSON.stringify({ type: 'ready', protocol: 2, sample_rate: 16000, channels: 1, format: 'opus', audio_encoding: 'opus_v1', framing: 'sequence_opus_v1', max_seconds: 300, max_encoded_bytes: 2097152, resume: true, accepted_frames: 0, finished: false }));
-  socket.on('message', (bytes, binary) => { if (!binary && JSON.parse(bytes.toString()).type === 'finish') socket.send(JSON.stringify({ type: 'final', text: transcript })); });
-});
+const voice = resumableVoxtype(daemon, { transcript: () => transcript, finalDelay: () => 0 });
 let herdr, backend, browser;
 try {
   await mkdir(directory + '/work-space'); await mkdir(directory + '/config');
@@ -46,15 +43,25 @@ try {
   await page.locator('#token').fill(token); await page.locator('#login-form button').click();
   await page.waitForFunction(() => window.__state?.ready);
   const mic = page.locator('#termai-dictation'); await mic.waitFor();
-  async function dictate(text) {
+  async function dictate(text, reconnect = false) {
     transcript = text;
     await page.evaluate(() => window.__messages = []);
     // Lifecycle starts must not turn into hold-to-finish gestures on busy runners.
     await mic.press('Enter'); await page.waitForFunction(() => window.__messages.some(message => message.type === 'dictation' && message.state === 'ready'));
-    await delay(250); await mic.press('Enter');
+    await delay(250);
+    if (reconnect) {
+      const id = voice.currentId, before = voice.resumptions;
+      await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); }); await delay(1200);
+      assert.equal(await mic.getAttribute('aria-pressed'), 'true');
+      await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: true }); window.dispatchEvent(new Event('online')); });
+      await until(() => voice.resumptions > before, 'Herdr recording resume');
+      assert.equal(voice.currentId, id);
+      await delay(200);
+    }
+    await mic.press('Enter');
     await page.waitForFunction(() => window.__messages.some(message => message.type === 'dictation' && message.state === 'done'));
   }
-  await dictate('C D work space');
+  await dictate('C D work space', true);
   await page.locator('.alternative-choice.selected .choice-command').filter({ hasText: /^cd work-space$/ }).waitFor({ state: 'visible' });
   assert.ok(await page.locator('.alternative-choice .choice-command').filter({ hasText: /^C D work space$/ }).isVisible());
   let info = await herdrRequest(target, 'pane.process_info', { pane_id: pane.pane_id });
@@ -89,7 +96,7 @@ try {
   await dictate('C D work space');
   assert.equal(await page.locator('#alternatives-menu').isVisible(), false, 'Foreground programs keep literal dictation');
   assert.deepEqual(errors, []);
-  console.log('PASS Herdr shell dictation: real process detection, microphone and keyboard C D alternatives, scoped repair, preserved prefix/suffix, rejected external edits, selected command execution, literal foreground input');
+  console.log('PASS Herdr shell dictation: real process detection, retained microphone audio through reconnect, microphone and keyboard C D alternatives, scoped repair, preserved prefix/suffix, rejected external edits, selected command execution, literal foreground input');
 } catch (error) {
   for (const page of browser?.contexts().flatMap(context => context.pages()) || []) console.error(await page.evaluate(() => ({ messages: window.__messages, state: window.__state, choices: [...document.querySelectorAll('.choice-command')].map(item => item.textContent), notice: document.querySelector('#toast')?.textContent })));
   throw error;

@@ -164,6 +164,10 @@ Service workers are disabled to compare the page architectures consistently.
 Typing is effectively unchanged in this check.
 The tabbed UI adds about 7 ms to warm reloads and 65–96 ms in these single first-load samples.
 Preloading terminal assets and caching both HTML entry points reduces the new load waterfall, but **startup is not performance-neutral**.
+Cached workspace and terminal documents are served immediately while the service worker revalidates their canonical entries in the background.
+Hashed assets retain immutable caching, and API responses and terminal traffic remain outside the app-shell cache.
+Herdr saves at most 256 KiB of navigation metadata per backend, source and session, allowing the previous space or agent strip to appear before its first live snapshot.
+Cached navigation stays inactive and cannot attach a terminal until the fresh snapshot confirms its identities.
 Each tab also owns its renderer/WASM and, when applicable, worker, so memory and background work grow with open tabs.
 The before/after engine benchmark is not evidence that SSH matches direct-backend latency; remote fact access adds SSH/SFTP network round trips.
 

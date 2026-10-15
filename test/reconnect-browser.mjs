@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { herdrFixture } from './herdr-fixture.ts';
+import { installBackgroundGrace } from './support/background-grace.mjs';
 
 const fixturePort3178 = await freePort();
 
@@ -25,14 +26,21 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
+  await installBackgroundGrace(context);
   await context.addInitScript(() => {
     window.__sockets = []; window.__states = 0; window.__sent = []; window.__lateCloses = [];
     const Original = WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) {
+        if (window.__holdNextSocket) window.__preUpgradeOldState = window.__blackhole?.readyState;
         super(...args); window.__sockets.push(this);
+        if (window.__holdNextSocket) { window.__holdNextSocket = false; window.__heldSocket = this; this.__held = []; }
         this.addEventListener('message', async event => { if ((await window.__wireMessage(event.data, this)).type === 'state') window.__states++; });
       }
+      set onmessage(handler) {
+        this.addEventListener('message', event => { if (this !== window.__blackhole) { if (this.__held) this.__held.push(() => handler(event)); else handler(event); } });
+      }
+      set onopen(handler) { this.addEventListener('open', event => { if (this.__held) this.__held.unshift(() => handler(event)); else handler(event); }); }
       set onclose(handler) {
         this.addEventListener('close', event => {
           if (window.__holdCloses) window.__lateCloses.push(() => handler(event)); else handler(event);
@@ -50,6 +58,8 @@ try {
     assert.equal(await page.locator('#reconnect-banner').isVisible(), false);
   };
   await connected(0);
+  const connectRequests = [];
+  page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/api/connect')) connectRequests.push(request.url()); });
   const stateCount = () => page.evaluate(() => window.__states);
   const foreground = async () => page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
@@ -61,11 +71,65 @@ try {
   });
   const online = async () => page.evaluate(() => window.dispatchEvent(new Event('online')));
 
+  async function silentStall() {
+    const states = await stateCount();
+    const held = await stallNext(page.url().includes('herdrTerminal') ? '/api/herdr/ticket' : '/ws');
+    await page.evaluate(() => { window.__blackhole = window.__sockets.at(-1); });
+    await page.waitForFunction(() => document.querySelector('#connection-label').textContent.startsWith('Connection stalled'), undefined, { polling: 50, timeout: 8000 });
+    await held.entered;
+    assert.equal(await page.evaluate(() => location.search.includes('herdrTerminal') ? window.__blackhole.readyState : window.__preUpgradeOldState), 1, 'Keep the old connection until the replacement handshake starts');
+    await held.done();
+    await connected(states);
+    await page.waitForFunction(() => window.__blackhole.readyState === 3);
+    assert.equal(await page.evaluate(() => window.__blackhole.readyState), 3, 'the replacement releases its predecessor');
+    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+  }
+  await silentStall();
+
+  async function queuedTyping(text, changeContext) {
+    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+    await page.locator('#terminal textarea').focus();
+    await page.evaluate(() => {
+      window.__sent = [];
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+      window.dispatchEvent(new Event('offline'));
+    });
+    await page.keyboard.type(text);
+    const inputs = () => page.evaluate(() => window.__sent.filter(message => message.type === 'input' && !['\x1b[I', '\x1b[O'].includes(message.data)).map(message => message.data).join(''));
+    assert.equal(await inputs(), '', 'Disconnected keys have never been sent');
+    await changeContext?.();
+    const states = await stateCount();
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+      window.dispatchEvent(new Event('online'));
+    });
+    await connected(states); await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+    if (changeContext) {
+      await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('changed prompt'));
+      assert.equal(await inputs(), '', 'Changed prompts or processes cannot receive queued keys');
+    } else {
+      await page.waitForFunction(text => window.__sent.filter(message => message.type === 'input').map(message => message.data).join('').includes(text), text);
+      assert.equal(await inputs(), text, 'Queued keys are sent exactly once after replay paints');
+    }
+  }
+  await queuedTyping('queued-native-once');
+  await page.keyboard.press('Control+c'); await delay(100);
+  await queuedTyping('never-send-to-new-shell', () => page.evaluate(async () => {
+    const reply = await fetch(new URL('api/new', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!reply.ok) throw new Error('Could not replace the test shell');
+  }));
+  assert.equal(connectRequests.length, 0, 'Healthy same-origin reconnects skip HTTP authorization');
+
   // Recover before a closing socket delivers its close event to the app.
   let states = await stateCount();
+  await background();
+  assert.equal(await page.evaluate(() => window.__sockets.at(-1).readyState), 1, 'Short backgrounding retains the connection');
+  await foreground();
+  assert.equal(await stateCount(), states, 'Returning during grace needs no replay');
   await page.evaluate(() => {
     window.__holdCloses = true;
     Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'));
+    window.__expireBackground();
     Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange'));
   });
   await connected(states);
@@ -74,6 +138,7 @@ try {
 
   // An online event must replace an existing OPEN socket, without replaying input.
   states = await stateCount();
+  await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo reconnect-once');
   const inputs = await page.evaluate(() => window.__sent.filter(message => message.type === 'input').length);
   await online(); await connected(states);
@@ -101,6 +166,14 @@ try {
   await page.locator('.terminal-presentation').waitFor({state:'hidden'});
 
   async function stallNext(path) {
+    if (path === '/ws') {
+      await page.evaluate(() => { window.__heldSocket = undefined; window.__holdNextSocket = true; });
+      return {
+        entered: page.waitForFunction(() => window.__heldSocket?.readyState === 1),
+        aborted: async () => page.evaluate(() => window.__heldSocket.readyState === 3),
+        done: async () => page.evaluate(() => { const socket = window.__heldSocket, callbacks = socket.__held; socket.__held = undefined; if (socket.readyState === 1) for (const callback of callbacks) callback(); }),
+      };
+    }
     let seen, release, held = false, aborted = false;
     const entered = new Promise(resolve => seen = resolve), unblock = new Promise(resolve => release = resolve);
     const matcher = url => url.pathname.endsWith(path);
@@ -115,7 +188,7 @@ try {
   }
 
   // A request stranded by backgrounding cannot block the next foreground attempt.
-  let stalled = await stallNext('/api/connect'); states = await stateCount();
+  let stalled = await stallNext('/ws'); states = await stateCount();
   await online(); await stalled.entered;
   await page.locator('.terminal-loading-bar').waitFor({ state: 'visible' });
   const retainedPixels = await page.locator('.terminal-presentation canvas').evaluate(canvas => {
@@ -125,30 +198,39 @@ try {
     return painted;
   });
   assert.ok(retainedPixels > 100, 'Retain painted text while authorization is pending');
-  await background(); await foreground(); await connected(states);
+  await background(); await page.evaluate(() => window.__expireBackground()); await foreground(); await connected(states);
   await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   await page.waitForFunction(() => window.__sockets.filter(socket => socket.readyState === WebSocket.OPEN).length === 1);
-  assert.equal(stalled.aborted(), true, 'backgrounding aborts authorization'); await stalled.done();
+  assert.equal(await stalled.aborted(), true, 'Background expiry aborts an incomplete connection'); await stalled.done();
 
   // Even without a visibility/network event, the deadline drives another attempt.
-  stalled = await stallNext('/api/connect'); states = await stateCount();
+  stalled = await stallNext('/ws'); states = await stateCount();
   await online(); await stalled.entered; await connected(states, 22000);
-  assert.equal(stalled.aborted(), true, 'the connection deadline aborts authorization'); await stalled.done();
+  assert.equal(await stalled.aborted(), true, 'The connection deadline aborts a missing initial state'); await stalled.done();
+  assert.ok(connectRequests.length <= 2, 'Only failed direct reconnects repeat authorization');
+  const beforeCookieExpiry = connectRequests.length;
+  await context.clearCookies(); states = await stateCount(); await online(); await connected(states);
+  assert.equal(connectRequests.length, beforeCookieExpiry + 1, 'An expired session cookie recovers through remembered authorization');
+  connectRequests.length = 0;
 
   // Herdr also bounds/cancels the ticket request after authorization succeeds.
   await page.goto(base + 'terminal.html?herdrTerminal=term_0'); await connected(0);
+  await queuedTyping('queued-herdr-once');
+  await queuedTyping('never-send-to-new-process', async () => { fixture.setProcessGroup(3); });
+  await silentStall();
   stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
   await online(); await stalled.entered;
   await page.locator('.terminal-loading-bar').waitFor({ state: 'visible' });
   assert.ok(await page.locator('.terminal-presentation canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0), 'Keep the Herdr screen during ticket acquisition');
-  await background(); await foreground(); await connected(states);
+  await background(); await page.evaluate(() => window.__expireBackground()); await foreground(); await connected(states);
   await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   assert.equal(stalled.aborted(), true, 'backgrounding aborts Herdr ticket acquisition'); await stalled.done();
   stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
   await online(); await stalled.entered; await connected(states, 22000);
   assert.equal(stalled.aborted(), true, 'the connection deadline aborts Herdr ticket acquisition'); await stalled.done();
+  assert.equal(connectRequests.length, 0, 'A remembered Herdr token needs only fresh scoped tickets');
   assert.deepEqual(errors, []);
-  console.log('PASS reconnect browser: closing sockets, stale OPEN sockets, no input replay, canceled authorization/tickets, and deadline recovery for shell and Herdr');
+  console.log('PASS reconnect browser: closing sockets, stale OPEN sockets, queued unsent keys, changed-context rejection, no uncertain input replay, canceled authorization/tickets, and deadline recovery for shell and Herdr');
 } finally {
   await browser?.close(); server.kill('SIGTERM'); await exited; await fixture.close();
 }

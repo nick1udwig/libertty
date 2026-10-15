@@ -274,6 +274,8 @@ pub(super) async fn api_herdr_ticket(
     tickets.insert(
         ticket.clone(),
         HerdrTicket {
+            history_delta: input.history_delta,
+            frame_ack: input.frame_ack,
             size,
             owner: owner.into(),
             session: session_name,
@@ -284,6 +286,6 @@ pub(super) async fn api_herdr_ticket(
         },
     );
     ok(
-        json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
+        json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"heartbeat":true,"inputContexts":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
     )
 }

@@ -6,6 +6,7 @@ use termai_server::protocol::{
 fn server_samples() -> Vec<ServerMessage> {
     let id = || "fixture".to_owned();
     vec![
+        ServerMessage::Pong,
         ServerMessage::RepairResult(RepairReply::new(id(), "echo words".into(), 1, 2, true)),
         ServerMessage::InputLine {
             id: id(),
@@ -31,6 +32,10 @@ fn server_samples() -> Vec<ServerMessage> {
             repairing: Some(true),
         },
         ServerMessage::Dictation {
+            resume: Some(termai_server::dictation::Checkpoint {
+                accepted_frames: 0,
+                finished: false,
+            }),
             id: id(),
             state: DictationState::Ready,
             message: None,
@@ -59,7 +64,16 @@ fn server_samples() -> Vec<ServerMessage> {
             seq: 1,
             data: "世界\r\n".into(),
         },
+        ServerMessage::ScreenDelta {
+            base: 1,
+            version: 2,
+            drop: 0,
+            from: 1,
+            tail: 0,
+            text: "changed".into(),
+        },
         ServerMessage::Screen {
+            version: Some(1),
             text: "history".into(),
         },
         ServerMessage::HerdrLayout {
@@ -68,6 +82,7 @@ fn server_samples() -> Vec<ServerMessage> {
             ready: true,
         },
         ServerMessage::HerdrFrame(HerdrFrame {
+            seq: Some(1),
             width: 40,
             height: 30,
             full: true,
@@ -77,6 +92,7 @@ fn server_samples() -> Vec<ServerMessage> {
             state: termai_server::session::ShellState {
                 cwd: "/fixture".into(),
                 input_revision: 2,
+                input_context: None,
                 prompt_revision: 1,
                 ready: true,
                 prompt: 1,

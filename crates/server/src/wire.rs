@@ -67,6 +67,10 @@ pub fn encode(value: &Value, mode: Mode) -> Encoded {
                 );
             if let Some((((width, height), full), data)) = frame {
                 bytes[3] = 2;
+                if let Some(seq) = crate::protocol::unsigned(&value["seq"]) {
+                    bytes[3] = 7;
+                    bytes.extend_from_slice(&(seq as f64).to_le_bytes());
+                }
                 bytes.extend_from_slice(&(width as u16).to_le_bytes());
                 bytes.extend_from_slice(&(height as u16).to_le_bytes());
                 bytes.push(u8::from(full));
@@ -191,6 +195,17 @@ mod tests {
             encode(&frame, Mode::Binary).bytes,
             [b'T', b'M', 1, 2, 40, 0, 30, 0, 1, 0, 27, 128, 255]
         );
+    }
+    #[test]
+    fn acknowledged_frames_keep_the_sequence_in_the_compact_envelope() {
+        let frame = json!({"type":"herdr-frame","seq":42,"width":40,"height":30,"full":false,"bytes":STANDARD.encode([27,0,255])});
+        let encoded = encode(&frame, Mode::Binary);
+        assert_eq!(encoded.bytes[3], 7);
+        assert_eq!(
+            f64::from_le_bytes(encoded.bytes[4..12].try_into().unwrap()),
+            42.0
+        );
+        assert_eq!(&encoded.bytes[12..], &[40, 0, 30, 0, 0, 27, 0, 255]);
     }
     #[test]
     fn compact_inputs_keep_audio_separate_and_reject_invalid_messages() {

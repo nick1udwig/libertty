@@ -84,7 +84,7 @@ async fn run(target: Target, pane: String, resource: Arc<Resource>) {
         };
         match result.and_then(|value| value["read"]["text"].as_str().map(str::to_owned).ok_or("Herdr did not return terminal history. Update Herdr to a version supporting recent-unwrapped reads.".into())) {
             Ok(text) => if force || previous.as_ref() != Some(&text) {
-                let message = Arc::new(ServerMessage::Screen { text: Arc::from(text.as_str()) });
+                let message = Arc::new(ServerMessage::Screen { version: None, text: Arc::from(text.as_str()) });
                 force = false;
                 previous = Some(text); resource.send.send_replace(Some(Ok(message)));
             },

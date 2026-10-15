@@ -176,6 +176,9 @@
               "type": "boolean"
             }
           ]
+        },
+        "inputContext": {
+          "type": "string"
         }
       },
       "required": [
@@ -376,6 +379,24 @@
             },
             "message": {
               "type": "string"
+            },
+            "resume": {
+              "type": "object",
+              "properties": {
+                "acceptedFrames": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 15002
+                },
+                "finished": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "acceptedFrames",
+                "finished"
+              ],
+              "additionalProperties": true
             }
           },
           "required": [
@@ -540,6 +561,11 @@
             },
             "text": {
               "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -595,6 +621,11 @@
             },
             "bytes": {
               "type": "string"
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": [
@@ -709,6 +740,66 @@
             "type",
             "id",
             "accepted"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "pong",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "base": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "drop": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "from": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tail": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "type": {
+              "type": "string",
+              "const": "screen-delta"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "base",
+            "version",
+            "drop",
+            "from",
+            "tail",
+            "type",
+            "text"
           ],
           "additionalProperties": true
         }
@@ -1161,6 +1252,19 @@
           "required": [
             "type",
             "seq"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ping",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "additionalProperties": true
         }
@@ -7671,6 +7775,19 @@
           "required": [
             "type",
             "seq"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "ping",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
           ],
           "additionalProperties": true
         }

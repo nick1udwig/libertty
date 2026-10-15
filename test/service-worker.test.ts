@@ -7,8 +7,10 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
   const template = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8');
   const storage = new Map<string, Map<string, Response>>();
   let offline = false, requests = 0;
+  let held: Promise<void> | undefined;
   const fetch = async (request: string | { url: string }) => {
     requests++;
+    if (held) await held;
     if (offline) throw new Error('Offline');
     return new Response(typeof request === 'string' ? request : request.url);
   };
@@ -28,19 +30,21 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
   };
   function worker(version: string) {
     const handlers: Record<string, (event: any) => void> = {};
+    const pending: Promise<unknown>[] = [];
     const files = ['', 'terminal.html', 'icon.svg', 'manifest.webmanifest', `assets/${version}.js`, `assets/${version}.wasm`];
     runInNewContext(template.replace('__TERMAI_BUILD__', version).replace(/\/\*__TERMAI_ASSETS__\*\/\s*\[[^\]]*\]/, JSON.stringify(files)), {
       URL, Response, caches, fetch,
       self: { registration: { scope: 'https://example.com/t/' }, clients: { claim: async () => {} }, addEventListener: (name: string, handler: typeof handlers[string]) => handlers[name] = handler },
     });
     return {
-      async dispatch(name: string, url = '', mode = 'cors') {
+      async dispatch(name: string, url = '', mode = 'cors', settle = true) {
         const waits: Promise<unknown>[] = [];
         let response: Promise<Response> | undefined;
-        handlers[name]({ request: { url, mode, method: 'GET' }, waitUntil: (work: Promise<unknown>) => waits.push(work), respondWith: (work: Promise<Response>) => response = work });
+        handlers[name]({ request: { url, mode, method: 'GET' }, waitUntil: (work: Promise<unknown>) => { waits.push(work); pending.push(work); }, respondWith: (work: Promise<Response>) => response = work });
         const result = await response;
-        await Promise.all(waits); return result;
+        if (settle) await Promise.all(waits); return result;
       },
+      async settle() { await Promise.all(pending.splice(0)); },
     };
   }
   await caches.open('termai-shell:/other/:keep');
@@ -60,6 +64,17 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
   assert.equal(await (await first.dispatch('fetch', 'https://example.com/t/', 'navigate'))?.text(), 'https://example.com/t/?two');
   assert.equal(await (await first.dispatch('fetch', 'https://example.com/t/terminal.html', 'navigate'))?.text(), 'https://example.com/t/terminal.html?session=example');
   assert.equal((await first.dispatch('fetch', 'https://example.com/t/assets/one.js'))?.status, 200);
+  offline = false;
+  let release!: () => void;
+  held = new Promise<void>(resolve => release = resolve);
+  const cached = await Promise.race([
+    first.dispatch('fetch', 'https://example.com/t/terminal.html?slow', 'navigate', false),
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Cached navigation waited for the network')), 1000)),
+  ]);
+  assert.equal(await cached?.text(), 'https://example.com/t/terminal.html?session=example');
+  held = undefined; release(); await first.settle();
+  offline = true;
+  assert.equal(await (await first.dispatch('fetch', 'https://example.com/t/terminal.html', 'navigate'))?.text(), 'https://example.com/t/terminal.html?slow');
   offline = false;
   const second = worker('two'); await second.dispatch('install');
   offline = true;

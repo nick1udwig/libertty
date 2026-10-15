@@ -1,5 +1,6 @@
 import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
+import { installBackgroundGrace } from './support/background-grace.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -43,6 +44,7 @@ try {
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  await installBackgroundGrace(context);
   await context.route('**/assets/terminal-*.js', async route => {
     const response = await route.fetch(), source = await response.text();
     const body = source.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
@@ -84,6 +86,10 @@ try {
   await wait(async () => { const actual = await geometry(), wanted = await tablet.evaluate(() => ({ cols: window.__terminal?.cols, rows: window.__terminal?.rows })); return actual.cols > mobile.cols && JSON.stringify(actual) === JSON.stringify(wanted); }, 'second mobile viewer shares control');
   await tablet.close(); await wait(async () => JSON.stringify(await geometry()) === JSON.stringify(mobile), 'remaining phone keeps control');
   await phone.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await delay(200); assert.deepEqual(await geometry(), mobile, 'Short backgrounding retains mobile geometry');
+  await phone.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+  assert.equal(await phone.locator('.terminal-presentation').isVisible(), false, 'Returning during grace does not freeze or reload the picture');
+  await phone.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); window.__expireBackground(); });
   await wait(async () => JSON.stringify(await geometry()) === JSON.stringify(original), 'backgrounding releases native geometry');
   await phone.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
   await wait(async () => JSON.stringify(await geometry()) === JSON.stringify(mobile), 'foreground reconnect reacquires mobile geometry');

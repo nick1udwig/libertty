@@ -8,6 +8,7 @@ export interface ShellState {
   cwd: string; inputRevision: number; promptRevision: number; ready: boolean; prompt: number; exited: boolean; exitCode?: number;
   /** Set by Bash's private prompt/busy markers; absent while starting or submitting. */
   inputTarget?: DictationTarget;
+  inputContext?: string;
   /** Native app scrolling is available through a scoped Herdr controller. */
   terminalScroll?: boolean;
 }
@@ -17,11 +18,12 @@ export function dictationTarget(state: ShellState): DictationTarget | undefined 
   if (state.inputTarget === 'program') return 'program';
 }
 export type ServerMessage =
+  | { type: 'pong' }
   | ({ type: 'repair-result'; id: string; source?: 'dictation' } & RepairResult)
   | { type: 'input-line'; id: string; prompt: number; revision: number; text?: string; cursor?: number }
   | { type: 'transfer'; request: TransferRequest }
   | { type: 'pasted'; text: string; replace: boolean; prompt: number; revision: number; source?: 'dictation'; repairing?: boolean }
-  | { type: 'dictation'; id: string; state: 'ready' | 'done' | 'error'; message?: string }
+  | { type: 'dictation'; id: string; state: 'ready' | 'done' | 'error'; message?: string; resume?: { acceptedFrames: number; finished: boolean } }
   | { type: 'reading-file'; path: string }
   | { type: 'reading-capture'; id: string; name: string; exitCode: number }
   | { type: 'reading-error'; message: string }
@@ -29,14 +31,16 @@ export type ServerMessage =
   | { type: 'herdr-command'; id: string; command: string }
   | { type: 'ssh-released'; id: string }
   | { type: 'output'; seq: number; data: string }
-  | { type: 'screen'; text: string }
+  | { type: 'screen'; text: string; version?: number }
+  | { type: 'screen-delta'; base: number; version: number; drop: number; from: number; tail: number; text: string }
   | { type: 'herdr-layout'; cols: number; rows: number; ready: boolean }
-  | { type: 'herdr-frame'; width: number; height: number; full: boolean; bytes: string }
+  | { type: 'herdr-frame'; seq?: number; width: number; height: number; full: boolean; bytes: string }
   | { type: 'state'; state: ShellState }
   | { type: 'hello'; engine: EngineMode; reset: boolean; truncated: boolean; firstSeq: number; lastSeq?: number; streamId: string }
   | { type: 'edit-result'; id: string; accepted: boolean; revision: number }
   | { type: 'result'; id: string; accepted: boolean; message?: string };
 export type ClientMessage =
+  | { type: 'ping' }
   | { type: 'repair'; id: string; text: string; prompt: number; revision: number; intent?: RepairIntent }
   | { type: 'repair-cancel'; id: string }
   | { type: 'input-line'; id: string; prompt: number; revision: number }

@@ -23,3 +23,23 @@ test('mobile native resizing keeps stale polled history out of the visible appli
   projection.update('a delayed history read after the native redraw');
   assert.deepEqual(historyPaints, [], 'Polled history cannot replace the resized live application');
 });
+
+test('live native screens defer history parsing until the projection is needed', () => {
+  let rebuilds = 0;
+  const paints: string[] = [];
+  const projection = Object.assign(Object.create(TerminalProjection.prototype), {
+    term: { cols: 40, rows: 5 }, native: { cols: 40, rows: 5 }, mobile: true, live: true,
+    initialized: true, complete: true, columns: 40, rows: 5,
+    history: { getScrollbackLength: () => 0 }, previous: 'before', historyDirty: false,
+    rebuild() { rebuilds++; this.historyDirty = false; }, paint() { paints.push(this.previous); },
+  });
+  projection.update('live 界😀');
+  projection.update('new live 界😀');
+  assert.equal(rebuilds, 0, 'Native animation needs no history parser');
+  projection.resize(false);
+  assert.equal(rebuilds, 1);
+  assert.deepEqual(paints, ['new live 界😀']);
+  projection.mobile = true; projection.live = true;
+  projection.update('line\n'.repeat(20));
+  assert.equal(rebuilds, 2, 'Growing scrollback must be detected even while native frames are live');
+});

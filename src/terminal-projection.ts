@@ -29,6 +29,7 @@ const viewportText = (terminal: GhosttyTerminal) => {
 export class TerminalProjection {
   private previous = '';
   private initialized = false;
+  private historyDirty = false;
   private term: Terminal;
   private ghostty: Ghostty;
   private native?: GhosttyTerminal;
@@ -55,6 +56,9 @@ export class TerminalProjection {
     const normalized = text.replace(/\r?\n/g, '\r\n').replace(/\r\n$/, '');
     if (!reflow && this.initialized && normalized === this.previous) return;
     this.previous = normalized; this.initialized = true;
+    if (!reflow && (this.awaitingNativeResize || this.live && this.canRenderLive()) && this.fitsNative(normalized)) {
+      this.historyDirty = true; return;
+    }
     this.rebuild();
     // History reads can arrive after a newer frame. Cache them for fallback,
     // but never replace the live TUI with an older polled snapshot.
@@ -109,7 +113,14 @@ export class TerminalProjection {
       || this.initialized && this.history?.getScrollbackLength() !== 0) return false;
     this.awaitingFrame = true; return true;
   }
+  private fitsNative(text: string) {
+    if (!this.native) return false;
+    const lines = text.split('\r\n');
+    return lines.length <= this.native.rows && lines.every(line => tokens(line).reduce((width, token) =>
+      width + (token.startsWith('\x1b') ? 0 : token === '\t' ? 8 : token.codePointAt(0)! > 127 ? 2 : 1), 0) <= this.native!.cols);
+  }
   private rebuild() {
+    this.historyDirty = false;
     const columns = this.nativeColumns;
     if (!columns || !this.initialized) return;
     const rows = this.native?.rows || 24;
@@ -123,6 +134,7 @@ export class TerminalProjection {
     }
   }
   private paint() {
+    if (this.historyDirty) this.rebuild();
     this.live = false;
     if (!this.initialized) { this.hide(); return; }
     const point = this.nativePosition();
@@ -137,6 +149,7 @@ export class TerminalProjection {
   }
   private hide() { this.writeCursor('\x1b[?25l'); }
   private nativePosition() {
+    if (this.historyDirty) this.rebuild();
     const native = this.native, history = this.history;
     if (!native || !history || !native.getCursor().visible) return;
     const cursor = native.getCursor();

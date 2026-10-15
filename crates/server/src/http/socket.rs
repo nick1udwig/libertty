@@ -2,6 +2,8 @@ use super::*;
 use crate::protocol::{ClientMessage, ViewerMessage};
 use futures::stream::SplitSink;
 use tokio::sync::mpsc;
+mod pressure;
+use pressure::Pressure;
 
 pub(super) async fn upgrade(req: Request<Body>) -> Result<WebSocketUpgrade, Failure> {
     let (mut parts, _) = req.into_parts();
@@ -35,20 +37,33 @@ impl Input<'_> {
             "Invalid terminal message"
         }
     }
-    fn message(&self, message: ClientMessage) -> Result<(), &'static str> {
+    fn message(
+        &self,
+        message: ClientMessage,
+        pressure: &mut Pressure,
+    ) -> Result<bool, &'static str> {
+        if let ClientMessage::Ack { seq } = &message {
+            pressure.acknowledge(*seq, std::time::Instant::now());
+        }
+        if matches!(message, ClientMessage::Ping) {
+            return Ok(true);
+        }
         match self {
             Self::Native {
                 session,
                 attachment,
             } => {
                 session.receive(*attachment, message);
-                Ok(())
+                Ok(false)
             }
-            Self::Herdr(view) => view.receive(message).map_err(|_| self.invalid_text()),
-            Self::Metadata { .. } => Ok(()),
+            Self::Herdr(view) => view
+                .receive(message)
+                .map(|_| false)
+                .map_err(|_| self.invalid_text()),
+            Self::Metadata { .. } => Ok(false),
         }
     }
-    fn text(&self, text: &str) -> Result<(), &'static str> {
+    fn text(&self, text: &str, pressure: &mut Pressure) -> Result<bool, &'static str> {
         if let Self::Metadata {
             app,
             connection,
@@ -61,6 +76,7 @@ impl Input<'_> {
                 && let Ok(message) = serde_json::from_str::<ViewerMessage>(text)
             {
                 match message {
+                    ViewerMessage::Ping => return Ok(true),
                     ViewerMessage::NotificationPresence { device, focused } => {
                         let _ =
                             app.notifications
@@ -77,11 +93,11 @@ impl Input<'_> {
                     }
                 }
             }
-            return Ok(());
+            return Ok(false);
         }
         let message =
             serde_json::from_str::<ClientMessage>(text).map_err(|_| self.invalid_text())?;
-        self.message(message)
+        self.message(message, pressure)
     }
     fn audio(&self, bytes: Vec<u8>) {
         match self {
@@ -93,20 +109,25 @@ impl Input<'_> {
             Self::Metadata { .. } => {}
         }
     }
-    fn binary(&self, bytes: &[u8], mode: wire::Mode) -> Result<(), &'static str> {
+    fn binary(
+        &self,
+        bytes: &[u8],
+        mode: wire::Mode,
+        pressure: &mut Pressure,
+    ) -> Result<bool, &'static str> {
         if matches!(self, Self::Metadata { .. }) {
-            return Ok(());
+            return Ok(false);
         }
         if mode == wire::Mode::Json {
             self.audio(bytes.to_vec());
-            return Ok(());
+            return Ok(false);
         }
         match wire::decode_as::<ClientMessage>(bytes).map_err(|_| "Invalid wire message")? {
             wire::Incoming::Audio(audio) => {
                 self.audio(audio);
-                Ok(())
+                Ok(false)
             }
-            wire::Incoming::Message(message) => self.message(message),
+            wire::Incoming::Message(message) => self.message(message, pressure),
         }
     }
 }
@@ -128,6 +149,12 @@ impl Outgoing {
     }
 }
 impl Output {
+    fn queued(&self) -> bool {
+        match self {
+            Self::Native(receive) => !receive.is_empty(),
+            Self::Herdr(receive) => !receive.is_empty(),
+        }
+    }
     async fn receive(&mut self) -> Option<Outgoing> {
         match self {
             Self::Native(receive) => receive.recv().await.map(Outgoing::Native),
@@ -207,6 +234,7 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
     let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
     heartbeat.tick().await;
     let mut alive = true;
+    let mut pressure = Pressure::default();
     loop {
         let event = tokio::select! {
             biased;
@@ -234,8 +262,13 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
             Event::Output(Some(item)) => match item.transport() {
                 Transport::Message(message) => {
                     // Keep the queue reservation until the in-flight send completes.
-                    if !send(&mut sender, encode(message, mode), policy.send_timeout).await {
+                    let started = std::time::Instant::now();
+                    let selected = pressure.mode(mode, output.queued(), started);
+                    if !send(&mut sender, encode(message, selected), policy.send_timeout).await {
                         break;
+                    }
+                    if mode == wire::Mode::GzipFast {
+                        pressure.sent(message, started, std::time::Instant::now());
                     }
                 }
                 Transport::Close(code, reason) => {
@@ -254,20 +287,30 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
             }
             Event::Input(Some(Ok(message))) => {
                 let result = match message {
-                    Message::Text(text) => input.text(&text),
-                    Message::Binary(bytes) => input.binary(&bytes, mode),
+                    Message::Text(text) => input.text(&text, &mut pressure),
+                    Message::Binary(bytes) => input.binary(&bytes, mode, &mut pressure),
                     Message::Ping(bytes) => {
                         if !send(&mut sender, Message::Pong(bytes), None).await {
                             break;
                         }
-                        Ok(())
+                        Ok(false)
                     }
                     Message::Pong(_) => {
                         alive = true;
-                        Ok(())
+                        Ok(false)
                     }
                     Message::Close(_) => break,
                 };
+                if matches!(result, Ok(true))
+                    && !send(
+                        &mut sender,
+                        encode(&json!({"type":"pong"}), mode),
+                        policy.send_timeout,
+                    )
+                    .await
+                {
+                    break;
+                }
                 if let Err(reason) = result {
                     close(&mut sender, 1008, reason, None).await;
                     break;

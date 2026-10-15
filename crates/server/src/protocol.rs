@@ -33,6 +33,8 @@ impl DictationState {
 }
 #[derive(Clone, Serialize)]
 pub struct HerdrFrame {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seq: Option<u64>,
     pub width: u16,
     pub height: u16,
     pub full: bool,
@@ -45,6 +47,7 @@ pub struct HerdrFrame {
     rename_all_fields = "camelCase"
 )]
 pub enum ServerMessage {
+    Pong,
     RepairResult(RepairReply),
     InputLine {
         id: String,
@@ -69,6 +72,8 @@ pub enum ServerMessage {
         repairing: Option<bool>,
     },
     Dictation {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resume: Option<crate::dictation::Checkpoint>,
         id: String,
         state: DictationState,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,6 +102,16 @@ pub enum ServerMessage {
         data: std::sync::Arc<str>,
     },
     Screen {
+        text: std::sync::Arc<str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        version: Option<u64>,
+    },
+    ScreenDelta {
+        base: u64,
+        version: u64,
+        drop: usize,
+        from: usize,
+        tail: usize,
         text: std::sync::Arc<str>,
     },
     HerdrLayout {
@@ -171,6 +186,7 @@ impl RepairReply {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ViewerMessage {
+    Ping,
     NotificationPresence { device: String, focused: bool },
     NotificationAck { device: String, event: Value },
 }
@@ -278,6 +294,7 @@ pub fn dictation_target(value: &Value) -> Option<&str> {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ClientMessage {
+    Ping,
     Repair(Repair),
     RepairCancel {
         #[serde(deserialize_with = "id")]

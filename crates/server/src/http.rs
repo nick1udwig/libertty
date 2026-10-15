@@ -147,6 +147,8 @@ struct Ticket {
     until: Instant,
 }
 struct HerdrTicket {
+    history_delta: bool,
+    frame_ack: bool,
     size: Option<herdr_terminal_stream::Size>,
     owner: String,
     session: String,
@@ -945,6 +947,14 @@ async fn herdr_socket_session(
         } else {
             None
         };
+        let recording_scope = json!([
+            ticket.owner,
+            ticket.source,
+            ticket.session,
+            ticket.terminal,
+            ticket.target.path().ok()
+        ])
+        .to_string();
         match herdr_view::View::open(
             ticket.target,
             agent,
@@ -954,7 +964,16 @@ async fn herdr_socket_session(
             send,
             cancel.clone(),
         ) {
-            Ok(view) => Some(view),
+            Ok(view) => {
+                view.set_recording_scope(recording_scope);
+                if ticket.history_delta {
+                    view.enable_history_delta();
+                }
+                if ticket.frame_ack {
+                    view.enable_frame_ack();
+                }
+                Some(view)
+            }
             Err(_) => return,
         }
     };

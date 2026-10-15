@@ -43,7 +43,16 @@ New clients offer only advertised protocols and fall back to legacy JSON with ol
 Without browser decompression support, raw binary remains available.
 Input, acknowledgements and geometry use compact binary fields, terminal output retains its sequence, and Herdr frames carry their original ANSI bytes directly.
 Decoding remains ordered across asynchronous decompression and discards results from replaced sockets.
+Connect and ticket replies advertise application heartbeat support independently of the encoding.
+Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply within two more seconds.
+Live output and repeated state updates do not reset that deadline, so a working downlink cannot conceal a failed return path.
+A replacement handshake keeps the previous socket alive and the last painted screen visible until takeover, and user activity bypasses reconnect backoff.
+Older servers without the heartbeat capability retain their existing reconnect behavior.
 Audio retains its existing Opus bytes inside a distinct four-byte envelope and is never compressed.
+Herdr viewers opt into sequenced frames in their ticket request and acknowledge parsed frames through the existing acknowledgement control.
+Each viewer has two frames in flight and one pending ANSI update, with ordered deltas merged until they exceed the last full screen size.
+Oversized pending updates are discarded and replaced by a fresh full screen when acknowledgement credit returns, preserving the current geometry.
+Legacy viewers retain unsequenced frames, and sequenced binary frames use envelope kind 7.
 Each compressed message uses gzip level 1 with an independent dictionary and must save at least one eighth of the original representation.
 Constrained links compress messages from 2 KiB, while ordinary links compress only messages from 128 KiB.
 The browser selects the constrained profile only when its connection information reports 2G/3G or at most 2 Mbps.
@@ -199,3 +208,86 @@ The mobile paint certificate resets on reconnects and desktop layouts, so an ini
 Run `npm run test:herdr-loading` to exercise cold loading panels, pane and top-level handoffs, stale acknowledgements, viewport changes, cancellation, live composited canvas updates and input delivery through keyboard opening and dismissal.
 The native flash test samples visibility from the parent window, so it includes the old displayed pane and the incoming pane across iframe visibility transitions.
 The real-Herdr test also captures composited browser pixels independently of the terminal-buffer assertions.
+
+## Herdr history delivery
+
+`node scripts/measure-herdr-history.mjs` samples a live working agent without saving its terminal contents.
+A 67-poll sample on October 14, 2026 changed on 47 polls and produced 846,030 bytes of complete history messages, ranging from 17,839 to 18,292 bytes each.
+Gzip level 1 would reduce that sample to 139,544 bytes, but each message falls below the ordinary 128 KiB threshold.
+A common-prefix estimate used 131,917 bytes before delta metadata, which justified implementing per-view edits.
+The sample report is saved in `.test-artifacts/herdr-history-measurement.json`.
+
+Viewers opt into history deltas through their ticket request and receive a versioned full baseline first.
+Subsequent edits preserve a UTF-16 prefix and suffix and can discard leading complete lines as the 1,000-line window rolls forward.
+Each viewer compares against its own last delivered text, so a coalesced shared poll or a newly joined viewer cannot inherit another viewer's delta base.
+Missing bases request one fresh baseline, and short unrelated replacements use a full message.
+Matching live native screens retain the latest history text and defer its terminal parser until fallback, reflow or growing scrollback requires it.
+Legacy clients continue to receive complete history messages.
+
+## Predicted prompt echo
+
+A faint text overlay predicts printable ASCII appended to a known Bash input line before its remote echo arrives.
+The authoritative terminal buffer, selection, acknowledgements and submitted input retain their existing behavior.
+Incoming output confirms matching prefixes and removes the overlay without writing the predicted text into the terminal again.
+Unknown editing, controls, Unicode input, line wrapping, geometry changes, disconnected sessions and foreground programs suppress prediction.
+A new known prompt enables prediction again, and unconfirmed overlays expire after four seconds.
+The browser harness delays input packets to verify prediction appears before the server receives them and disappears when authoritative output arrives.
+
+## Retained input and microphone audio
+
+Each terminal holds up to 64 KiB of keys that have never been passed to a WebSocket and releases them only after the replay or Herdr screen has painted.
+Native terminals require the original stream, prompt, input revision and target, while reconnecting Herdr views require the original foreground process and matching shell picture.
+A changed context rejects queued keys with a notice, and previously sent uncertain input is never replayed.
+Herdr publishes its foreground process context so a restarted agent cannot inherit another process's queued input or recording.
+
+The browser retains original numbered Opus frames in memory until delivery or explicit cancellation, bounded to two MiB and the existing five-minute capture limit.
+A terminal dropout keeps microphone capture active, and finishing while offline keeps the completed audio available for upload.
+Voxtype session IDs are scoped to the authenticated terminal and recording ID, and a transport detach closes its socket without cancelling the logical recording.
+Ready replies forward the accepted-frame checkpoint, allowing exact suffix upload or complete replay after daemon expiry or restart.
+A previously accepted finish retrieves the cached final without uploading audio again, and a lost finish control can be sent after an already accepted final audio frame.
+A changed input context or daemon error retains the encoded recording for an explicit retry at the current prompt or cancellation.
+Recordings remain in browser memory and are discarded when the page exits or the user cancels them.
+
+## Reconnect and background grace
+
+An authorized same-origin terminal reconnects directly with its session cookie, and a Herdr pane with a remembered credential requests only a fresh scoped ticket.
+A failed direct terminal handshake falls back to authorization so expired cookies, revocation and ended sessions still reach the normal recovery flow.
+Cross-origin native terminals retain their authorization and single-use ticket flow.
+Terminal and Herdr metadata sockets stay connected for twenty seconds after the document becomes hidden, retaining the mobile PTY size and live picture during short app switches.
+After the grace expires, Herdr releases mobile geometry and idle terminals disconnect, while active dictation may retain its audio transport.
+
+## Terminal replay batches
+
+Consecutive queued output chunks share messages of up to 64 KiB within the existing 128 KiB acknowledgement window.
+Each message carries the final constituent sequence, and its acknowledgement releases the batch's total byte credit.
+Replay history retains the original chunks so reconnecting at an earlier cursor still returns exactly the missing bytes.
+Live output is sent immediately without a batching timer, and an existing oversized chunk remains whole.
+
+## Adaptive outgoing compression
+
+Negotiated gzip-fast connections temporarily use the 2 KiB bulk threshold when output is queued, a socket write takes at least 50 ms, or terminal frame acknowledgements take at least 100 ms.
+The server retains that profile for ten seconds after pressure clears, then returns to the 128 KiB fast-link threshold.
+This adapts to changing links and browsers without connection-speed reporting while retaining the negotiated wire format and the existing minimum compression saving.
+JSON and binary-only clients keep their negotiated encodings.
+
+## Queued Herdr typing
+
+The ordered input worker combines immediately queued plain-text keys into one pane validation and send, bounded by the existing 16,000 UTF-16-unit input limit.
+Controls, commands, pastes, replacements, guarded dictation and completion-bearing requests remain separate and retain receive order.
+Every original input keeps its admission permit until the combined operation completes, and each received key still advances the input revision independently.
+The worker never waits to gather more typing.
+
+## Loss and outage profiles
+
+The `lossy` wire profile retains the mobile profile's 150 ms RTT, 1 Mbps and sixfold script CPU throttle, adds a 200 ms retransmission wait for every thirty-seventh simulated 1,460-byte packet, and introduces a 700 ms outage on every eighth request.
+It delays ordered TCP writes rather than discarding WebSocket bytes, modelling retransmission and head-of-line blocking without corrupting the reliable stream.
+Sample reports include injected retransmission and outage counts alongside the existing decoded-payload hashes, timing and byte counters.
+The existing fast and mobile budgets remain unchanged, while lossy typing and random-data tails allow one extra 200 ms retransmission because packet boundaries differ between representations.
+Lossy log and ANSI medians retain the existing 25 percent improvement target.
+The fast verification uses 101 warm samples to reduce browser frame-timing phase noise, and mobile profiles retain fifteen warm samples by default.
+
+The native Herdr browser suite also runs with `TEST_WIRE=gzip TEST_LINK=lossy`.
+Its final recovery scenario adds ordered downstream propagation and retransmission delays, then withholds all socket messages for 5.5 seconds while the real application continues animating.
+It requires a stalled-connection notice, the retained terminal picture, a replacement connection and a screen that has caught up within three seconds of signal returning.
+The harness saves counters and recovery timing in `.test-artifacts/herdr-lossy-link.json`.
+Run `npm run verify:performance` for all three wire profiles or use `WIRE_PROFILES=lossy WIRE_VARIANTS=json,gzip node test/transport-benchmark.mjs` for the new comparison alone.

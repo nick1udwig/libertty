@@ -25,3 +25,4 @@ for (const file of [
   'herdr-dictation-browser.mjs', 'herdr-spaces-browser.mjs', 'herdr-resize-native.mjs',
   'herdr-space-flash-native.mjs', 'herdr-app-scroll-native.mjs',
 ]) run('test/' + file);
+run('test/herdr-app-scroll-native.mjs', { TEST_WIRE: 'gzip', TEST_LINK: 'lossy' });

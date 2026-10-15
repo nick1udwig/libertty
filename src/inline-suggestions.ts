@@ -299,6 +299,7 @@ export class InlineSuggestions {
     if ((!this.literal && !this.transcribing) || this.positionFrame) return;
     this.positionFrame = requestAnimationFrame(() => { this.positionFrame = 0; this.position(); });
   }
+  get predictionReady() { return this.line.known && this.line.cursor === this.line.text.length && !this.loading && !this.transcribing && !this.composing && !this.flushing; }
   raw(data: string): boolean {
     queueMicrotask(() => this.armInput());
     if (data === '\x1b[I' || data === '\x1b[O') return true;

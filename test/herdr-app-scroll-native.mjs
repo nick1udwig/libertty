@@ -1,5 +1,6 @@
 import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
+import { installBackgroundGrace } from './support/background-grace.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
@@ -52,17 +53,25 @@ try {
   const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
+  await installBackgroundGrace(context);
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
   await context.addInitScript(() => {
-    window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0;
+    window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0; window.__historyDeltas = 0;
     window.WebSocket = class extends WebSocket {
+      send(data) {
+        if (window.__holdAcks && window.__wireSent(data).type === 'ack') {
+          window.__releaseFrames = () => super.send(data);
+          return;
+        }
+        super.send(data);
+      }
       set onmessage(handler) {
         window.__receive = message => handler.call(this, { data: JSON.stringify(message) });
         super.onmessage = async event => {
           const message = await window.__wireMessage(event.data, this);
           if (message.type === 'herdr-frame') { window.__frames++; if (!message.full) window.__deltas++; }
-          if (message.type === 'screen') { window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }
+          if (message.type === 'screen') { if (message.delta) window.__historyDeltas++; window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }
           handler.call(this, event);
         };
       }
@@ -84,7 +93,7 @@ try {
   assert.ok((await herdrSnapshot(target)).terminals.some(item => item.terminalId === terminal.terminalId));
   const pane = await herdrRequest(target, 'pane.get', { pane_id: terminal.paneId }); assert.equal(pane.pane.scroll.max_offset_from_bottom, 0);
   assert.equal(await page.evaluate(() => window.__terminal.buffer.active.length), await page.evaluate(() => window.__terminal.rows));
-  await page.waitForFunction(() => window.__screens > 1 && window.__lastScreen.text.includes('TICK:'));
+  await page.waitForFunction(() => window.__screens > 1 && window.__historyDeltas > 0 && window.__lastScreen.text.includes('TICK:'));
   // Prove text uses native deltas, not the 150 ms snapshot loop: withhold all
   // history messages while sampling the displayed animation on browser paints.
   const animation = await page.evaluate(async () => {
@@ -103,6 +112,14 @@ try {
   });
   assert.ok(animation.paints >= 15, 'Live text keeps animating faster than the snapshot ceiling: ' + JSON.stringify(animation));
   assert.ok(animation.deltas > 0, 'Incremental native frames render without needing a new full snapshot');
+  await page.evaluate(() => { window.__holdAcks = true; });
+  await delay(250);
+  const held = await page.evaluate(() => ({ frames: window.__frames, tick: Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) }));
+  await delay(1500);
+  assert.equal(await page.evaluate(() => window.__frames), held.frames, 'The two-frame acknowledgement window stops stale frames from queueing');
+  await page.evaluate(() => { window.__holdAcks = false; window.__releaseFrames(); });
+  await page.waitForFunction(tick => Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) > tick + 30, held.tick, { timeout: 1500 });
+  assert.equal(await page.locator('#connection-label').textContent(), 'Connected', 'Backpressure does not reconnect a slow viewer');
   assert.equal(await page.evaluate(() => {
     const t = window.__terminal, before = t.buffer.active.getLine(0)?.translateToString(true);
     window.__receive(window.__staleScreen);
@@ -159,7 +176,7 @@ try {
   // Reopen a fullscreen alternate-buffer app after releasing mobile ownership.
   await page.bringToFront();
   await page.evaluate(() => {
-    Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange'));
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); window.__expireBackground();
   });
   await wait(async () => (await state()).cols > geometry.cols, 'background restores desktop geometry');
   await page.evaluate(() => {
@@ -170,6 +187,34 @@ try {
   await page.waitForFunction(() => window.__terminal?.buffer.active.getLine(0)?.translateToString(true).includes('Application transcript') && document.querySelector('#connection-label').textContent === 'Connected');
   const tick = await page.evaluate(() => window.__terminal.buffer.active.getLine(0).translateToString(true));
   await page.waitForFunction(before => window.__terminal.buffer.active.getLine(0).translateToString(true) !== before, tick);
+  if (process.env.TEST_LINK === 'lossy') {
+    await page.evaluate(() => { window.__linkProfile.enabled = true; });
+    await page.waitForFunction(() => window.__linkProfile.losses > 0);
+    const before = await page.evaluate(() => Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]));
+    await page.waitForFunction(before => Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) > before + 10, before);
+    let heldTicket, release;
+    const gate = new Promise(resolve => release = resolve);
+    const hold = async route => { if (!heldTicket) { heldTicket = route; await gate; } await route.continue().catch(() => {}); };
+    await page.route('**/api/herdr/ticket?**', hold);
+    const started = Date.now();
+    const stalledTick = await page.evaluate(() => {
+      const tick = Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]);
+      window.__linkProfile.pause(5500); return tick;
+    });
+    try {
+      await page.waitForFunction(() => document.querySelector('#connection-label').textContent.startsWith('Connection stalled'), undefined, { timeout: 8000 });
+      await wait(() => !!heldTicket, 'replacement ticket during the outage');
+      assert.equal(await page.locator('.terminal-presentation').isVisible(), true, 'An outage retains the previous terminal picture');
+    } finally { release(); await page.unroute('**/api/herdr/ticket?**', hold); }
+    await page.waitForFunction(tick => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('.terminal-presentation').hidden
+      && Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) > tick + 150, stalledTick, { timeout: 12000 });
+    const recoveryMs = Date.now() - started;
+    assert.ok(recoveryMs < 8500, 'The recovered screen must catch up within three seconds of signal returning: ' + recoveryMs);
+    const link = await page.evaluate(() => { window.__linkProfile.enabled = false; const { messages, losses, stalls } = window.__linkProfile; return { messages, losses, stalls }; });
+    assert.ok(link.losses > 0 && link.stalls === 1);
+    await writeFile(root + '.test-artifacts/herdr-lossy-link.json', JSON.stringify({ ...link, outageMs: 5500, recoveryMs }, null, 2));
+    console.log('PASS lossy gzip Herdr: ordered retransmission delays, retained picture during a silent outage, replacement connection, and fresh-screen catch-up in ' + recoveryMs + ' ms.');
+  }
   assert.deepEqual(errors, []);
   console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; shell-to-TUI/joining baselines, incremental frames, stale snapshots, cursor, native touch scrolling, hold/copy, plain/OSC-8 links and keyboard behavior and fullscreen background/reopen recovery passed.');
 } finally {

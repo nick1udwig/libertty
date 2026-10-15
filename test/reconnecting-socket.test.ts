@@ -16,6 +16,9 @@ function fixture(t: TestContext) {
     onopen?: () => void;
     onmessage?: (event: MessageEvent) => void;
     onclose?: (event: CloseEvent) => void;
+    autoPong = true;
+    sent: string[] = [];
+    send(data: string) { this.sent.push(data); if (this.autoPong) this.message('{"type":"pong"}'); }
     url: URL;
     constructor(url: URL) { this.url = url; sockets.push(this); }
     close() { this.readyState = 2; }
@@ -25,16 +28,20 @@ function fixture(t: TestContext) {
   }
   const original = globalThis.WebSocket;
   globalThis.WebSocket = FakeSocket as unknown as typeof WebSocket;
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   let available = true, opens = 0, closes = 0;
   const messages: string[] = [], errors: unknown[] = [], signals: AbortSignal[] = [], tokens: (string | undefined)[] = [];
   const url = new URL('ws://localhost/ws');
   const behavior = {
     prepare: async (_signal: AbortSignal, _token?: string) => url,
     close: (_event?: CloseEvent) => true,
+    stalled: [] as number[],
+    heartbeat: true,
     error: (_error: unknown) => true,
   };
   const connection = new ReconnectingSocket({
+    heartbeat: () => behavior.heartbeat,
+    stalled: seconds => behavior.stalled.push(seconds),
     available: () => available,
     prepare: (signal, token) => { signals.push(signal); tokens.push(token); return behavior.prepare(signal, token); },
     open: () => { opens++; },
@@ -133,9 +140,11 @@ test('network recovery replaces a socket that still appears open', async t => {
   const f = fixture(t);
   await f.connection.connect(); f.sockets[0].open(); f.sockets[0].message('state');
   await f.connection.resume(true);
-  assert.equal(f.sockets[0].readyState, 2);
+  assert.equal(f.sockets[0].readyState, 1, 'keep the old connection through the replacement handshake');
   assert.equal(f.connection.socket, f.sockets[1]);
-  assert.deepEqual(f.counts(), { opens: 1, closes: 1 });
+  f.sockets[1].open();
+  assert.equal(f.sockets[0].readyState, 2);
+  assert.deepEqual(f.counts(), { opens: 2, closes: 1 });
 });
 
 test('retryable failures wait for visibility and never overlap foreground recovery', async t => {
@@ -173,4 +182,65 @@ test('another-tab close stops reconnecting instead of reclaiming the terminal', 
   assert.equal(f.sockets.length, 1);
   await f.connection.connect();
   assert.equal(f.sockets.length, 2);
+});
+
+// A link can stop carrying data while WebSocket still reports OPEN.
+test('silent stalls retain the screen connection until a replacement opens', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const old = f.sockets[0]; old.open(); old.message('state'); old.autoPong = false;
+  t.mock.timers.tick(2000); await flush();
+  assert.deepEqual(old.sent, ['{"type":"ping"}']);
+  t.mock.timers.tick(2000); await flush();
+  assert.deepEqual(f.behavior.stalled, [4]);
+  assert.equal(f.sockets.length, 2);
+  assert.equal(old.readyState, 1);
+  assert.equal(f.connection.healthy, false);
+  old.message('obsolete state'); old.closed(4001);
+  assert.deepEqual(f.messages, ['state']);
+  f.sockets[1].open(); f.sockets[1].message('state');
+  assert.equal(old.readyState, 2);
+  assert.equal(f.connection.healthy, true);
+});
+
+test('incoming traffic prevents false stalls and heartbeat replies stay internal', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state');
+  for (let i = 0; i < 10; i++) { t.mock.timers.tick(2000); await flush(); }
+  assert.equal(f.sockets.length, 1);
+  assert.deepEqual(f.messages, ['state']);
+  assert.deepEqual(f.behavior.stalled, []);
+  f.connection.suspend();
+  t.mock.timers.tick(60000); await flush();
+  assert.equal(f.sockets.length, 1);
+});
+
+test('live output and repeated state updates cannot conceal missing heartbeat replies', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state'); socket.autoPong = false;
+  for (let i = 0; i < 4; i++) {
+    socket.message('live output'); socket.message('state');
+    t.mock.timers.tick(1000); await flush();
+  }
+  assert.deepEqual(socket.sent, ['{"type":"ping"}']);
+  assert.deepEqual(f.behavior.stalled, [4]);
+  assert.equal(f.sockets.length, 2);
+});
+
+test('typing or tapping retries immediately during backoff without overlapping attempts', async t => {
+  const f = fixture(t);
+  f.behavior.prepare = async () => { throw new Error('offline'); };
+  await f.connection.connect();
+  f.behavior.prepare = async () => f.url;
+  f.connection.activity(); f.connection.activity(); await flush();
+  assert.equal(f.sockets.length, 1);
+  t.mock.timers.tick(1000); await flush();
+  assert.equal(f.sockets.length, 1);
+});
+
+test('older servers without heartbeat support never receive unsupported messages', async t => {
+  const f = fixture(t); f.behavior.heartbeat = false;
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state');
+  t.mock.timers.tick(60000); await flush();
+  assert.deepEqual(socket.sent, []);
+  assert.equal(f.sockets.length, 1);
 });

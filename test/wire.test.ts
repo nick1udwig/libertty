@@ -39,3 +39,14 @@ test('compression negotiation uses capability and connection profile', () => {
   assert.deepEqual(wireProtocols([BINARY_PROTOCOL]), [BINARY_PROTOCOL]);
   assert.ok(wireProtocols([BINARY_PROTOCOL, GZIP_PROTOCOL, GZIP_FAST_PROTOCOL]).includes(BINARY_PROTOCOL));
 });
+
+test('acknowledged frames retain their sequence through binary and gzip encoding', async () => {
+  const payload = new Uint8Array(16); const view = new DataView(payload.buffer);
+  view.setFloat64(0, Number.MAX_SAFE_INTEGER, true); view.setUint16(8, 40, true); view.setUint16(10, 30, true);
+  payload.set([1, 27, 0, 255], 12);
+  const expected = { type: 'herdr-frame', seq: Number.MAX_SAFE_INTEGER, width: 40, height: 30, full: true, bytes: new Uint8Array([27, 0, 255]) };
+  assert.deepEqual(await decodeWire(envelope(7, payload)), expected);
+  assert.deepEqual(await decodeWire(envelope(135, gzipSync(payload))), expected);
+  view.setFloat64(0, -1, true);
+  await assert.rejects(decodeWire(envelope(7, payload)), /sequence/);
+});
