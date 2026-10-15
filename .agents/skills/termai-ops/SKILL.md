@@ -9,6 +9,7 @@ Run commands from the repository root and follow the work order and validation r
 Read [README.md](../../../README.md) for source prerequisites and the basic build and phone connection setup.
 Use [docs/setup.md](../../../docs/setup.md) for installed release upgrades and [docs/releases.md](../../../docs/releases.md) for packaging and publication.
 For a version bump, read [references/version-bumps.md](references/version-bumps.md).
+For deploy or push requests, apply the testing exception in [AGENTS.md](../../../AGENTS.md) throughout the request, including preparatory work.
 
 ## Existing local deployment
 
@@ -22,7 +23,7 @@ systemctl --user show termai.service --property=FragmentPath --property=ExecStar
 tailscale serve status
 ```
 
-Use the Node version pinned in `build/release-config.json` and complete the repository's required validation before deploying code changes.
+Use the Node version pinned in `build/release-config.json` and run deployment tests only when the user explicitly requests them.
 If the service runs this checkout's `target/release/termai`, rebuild the optimized native server and frontend before restarting it.
 For an installer-managed service, use the installed release upgrade procedure below instead.
 `npm run build` builds a debug backend and does not update `target/release/termai`.
@@ -89,7 +90,8 @@ To update only Termai to the latest published stable release without reconfiguri
 bash ./install.sh --no-companions --no-tailscale
 ```
 
-To deploy local code changes to an installer-managed service, build and verify a local archive using the release guide, then install that archive with its SHA-256 checksum.
+To deploy local code changes to an installer-managed service, build a local archive using the release guide, then install that archive with its SHA-256 checksum.
+Run the archive's test suites only when the user explicitly requests tests.
 Replace `VERSION`, `PLATFORM`, and `SHA256` below with the verified archive's values and add any existing custom installation settings.
 
 ```sh
@@ -102,5 +104,5 @@ Follow the setup guide for installer-managed Linux services, macOS LaunchAgents,
 Do not replace an existing checkout service with the installer unless migrating that deployment is part of the request.
 For a distributable Linux archive, use the pinned Voxtype Mobile checkout and daemon described in the release guide.
 `TERMAI_RELEASE_ALLOW_DIRTY=1` permits development packages without the companion daemon and must not be used for published releases.
-Run the package checks required by AGENTS.md before committing packaging changes.
+Run the package checks required by AGENTS.md before committing packaging changes, applying its deploy or push testing exception.
 Creating or updating operational documentation does not authorize restarting services, changing routes, or publishing releases.

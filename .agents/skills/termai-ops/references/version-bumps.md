@@ -55,7 +55,8 @@ git diff -- package.json package-lock.json Cargo.toml Cargo.lock docs/setup.md d
 ```
 
 All application version fields must agree, and any remaining old-version matches must belong to unrelated dependencies or intentionally historical text.
-Use the pinned Node version, run `npm ci`, and run `npm run verify:local` before committing version metadata changes.
+For standalone version bumps, use the pinned Node version, run `npm ci`, and run `npm run verify:local` before committing version metadata changes.
+For a version bump requested as part of deployment or a push, apply the testing exception in [AGENTS.md](../../../../AGENTS.md).
 Apply any additional validation required by AGENTS.md if the same item changes code or packaging.
 Stage only the version bump files, preserving unrelated changes already in the checkout.
 A version bump alone does not request deployment, a Git tag, a push, or release publication.

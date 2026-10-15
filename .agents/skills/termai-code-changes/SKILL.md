@@ -18,6 +18,9 @@ Use [the ops skill](../termai-ops/SKILL.md) for deployment, version bumps, and r
 
 ## Validation before committing or merging
 
+For deploy or push requests, apply the testing exception in [AGENTS.md](../../../AGENTS.md), including during preparatory commits, merges, version bumps and packaging.
+The test requirements below apply to other requests and when tests are explicitly requested as part of deploying or pushing.
+
 Run `npm run ci:quick`, `cargo fmt --all -- --check` and `npm run contracts:vocabulary -- --check` before creating a commit or merging.
 For changes to application code, version metadata, dependencies, contracts, build scripts or workflows, also run `npm run verify:local` before creating a commit or merging.
 Use the Node version pinned in `build/release-config.json` and install dependencies with `npm ci` before full validation.
