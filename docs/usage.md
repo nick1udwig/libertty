@@ -106,6 +106,11 @@ The stack’s count button expands or collapses its spaces; dragging a member be
 Closing an agent or space in this strip closes it on the Herdr server and ends its running processes.
 Closing the top-level Herdr connection tab disconnects its view.
 **Settings → Herdr strip shows** switches between **Spaces** (default) and **Agents**.
+**Settings → Herdr strip order** switches between **Manual** (default) and **Status lanes**.
+Status lanes group tabs into needs you, done, working and idle, in that order, and keep your manual order inside each lane.
+Tap a lane's count to fold or unfold it; the idle lane starts folded, and a folded lane still shows the selected tab.
+The selected tab stays in its lane until you switch away, and its own status circle appears if its status has changed.
+Dragging is paused while lanes are on, and switching back to **Manual** restores your order.
 Spaces include ordinary terminals.
 Tap a selected space again to choose a terminal or create an agent within it.
 Space ordering, names and closes update the Herdr server; stacks are saved in this web app.

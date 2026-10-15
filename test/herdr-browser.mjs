@@ -459,6 +459,34 @@ try {
   await until(async () => await tab(1).count() === 1 && await tab(1).getAttribute('data-status') === 'idle', 'restored view and acknowledgements');
   assert.equal(await page.locator('#tabs .herdr-tab .tab-name').textContent(), 'Agent team');
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
+  // Status lanes regroup the same tabs by urgency without changing the saved manual order.
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  assert.equal(await page.locator('#herdr-strip-order').inputValue(), 'manual', 'Manual order is the default');
+  await page.locator('#herdr-strip-order').selectOption('lanes'); await page.locator('#nav-terminals').click();
+  const lanes = () => page.locator('.herdr-agent-strip:visible .herdr-status-lane').evaluateAll(els => els.map(el => el.dataset.lane + ':' + [...el.querySelectorAll('.herdr-agent-tab')].filter(tab => !tab.hidden).map(tab => tab.dataset.terminal).join(',')));
+  const laneToggle = lane => page.locator('.herdr-agent-strip:visible .herdr-status-lane[data-lane=' + lane + '] .herdr-lane-toggle');
+  await until(async () => JSON.stringify(await lanes()) === JSON.stringify(['blocked:term_0', 'idle:term_1']), 'idle lane starts folded around the selected tab');
+  assert.equal(await laneToggle('idle').getAttribute('aria-expanded'), 'false'); assert.equal(await laneToggle('idle').textContent(), '2');
+  assert.equal(await tab(0).locator('.herdr-status-dot').isVisible(), false, 'Lane headers replace tab status circles');
+  await laneToggle('idle').click(); assert.deepEqual(await lanes(), ['blocked:term_0', 'idle:term_1,term_2']);
+  fixture.update(2, 'working');
+  await until(async () => JSON.stringify(await lanes()) === JSON.stringify(['blocked:term_0', 'working:term_2', 'idle:term_1']), 'working lane');
+  await tab(0).click(); await page.waitForFunction(() => document.querySelector('.herdr-agent-tab[data-terminal=term_0]').getAttribute('aria-selected') === 'true'); terminal = await agentFrame();
+  fixture.update(0, 'working');
+  await until(async () => await tab(0).getAttribute('data-status') === 'working', 'answered request');
+  assert.deepEqual(await lanes(), ['blocked:term_0', 'working:term_2', 'idle:term_1'], 'The open tab keeps its lane');
+  assert.equal(await tab(0).locator('.herdr-status-dot').isVisible(), true, 'A pinned tab shows its changed status');
+  await tab(1).click(); await page.waitForFunction(() => document.querySelector('.herdr-agent-tab[data-terminal=term_1]').getAttribute('aria-selected') === 'true'); terminal = await agentFrame();
+  assert.deepEqual(await lanes(), ['working:term_2,term_0', 'idle:term_1'], 'Leaving a tab moves it into its current lane');
+  await tab(1).focus(); await page.keyboard.press('Alt+ArrowRight'); await delay(100);
+  assert.deepEqual(await lanes(), ['working:term_2,term_0', 'idle:term_1'], 'Keyboard reordering is paused in lanes');
+  // Passing through unknown returns term_2 to idle without an unseen completion.
+  fixture.update(0, 'blocked'); fixture.update(2, 'unknown'); await until(async () => await tab(2).getAttribute('data-status') === 'unknown', 'unknown status'); fixture.update(2, 'idle');
+  await until(async () => JSON.stringify(await lanes()) === JSON.stringify(['blocked:term_0', 'idle:term_1,term_2']), 'restored statuses');
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
+  await page.locator('#herdr-strip-order').selectOption('manual'); await page.locator('#nav-terminals').click();
+  await until(async () => await page.locator('.herdr-agent-strip:visible .herdr-status-lane').count() === 0, 'manual strip');
+  assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0'], 'Manual order survives lanes');
   await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').click();
   await mkdir(root + '.test-artifacts', { recursive: true }); await page.screenshot({ path: root + '.test-artifacts/herdr-mobile.png' });
   await page.setViewportSize({ width: 1280, height: 800 }); await page.screenshot({ path: root + '.test-artifacts/herdr-desktop.png' });
