@@ -495,14 +495,14 @@ export class HerdrView {
     const close = node('button', '', agent.space ? 'Close' : 'Close tab'); close.role = 'menuitem'; close.disabled = this.closing.has(agent.terminalId); close.onclick = () => void this.closeTab(agent);
     this.menu.append(rename, close); this.popup(anchor); rename.focus({ preventScroll: true });
     if (agent.space) {
+      for (const [label, action] of [['New worktree', 'new-worktree'], ['Open worktree', 'open-worktree'], ['Split', 'split']] as const) {
+        if (agent.space.linkedWorktree && action !== 'split') continue;
+        const button = node('button', '', label); button.role = 'menuitem'; button.onclick = () => void this.spaceAction(agent, action); this.menu.insertBefore(button, close);
+      }
       if (agent.space.linkedWorktree) {
         const remove = node('button', 'danger', 'Delete worktree checkout'); remove.role = 'menuitem';
         remove.disabled = this.closing.has(agent.terminalId) || !agent.space.checkoutPath;
         remove.onclick = () => this.deleteWorktree(agent); this.menu.append(remove);
-      } else {
-        for (const [label, action] of [['New worktree', 'new-worktree'], ['Open worktree', 'open-worktree'], ['Split', 'split']] as const) {
-          const button = node('button', '', label); button.role = 'menuitem'; button.onclick = () => void this.spaceAction(agent, action); this.menu.insertBefore(button, close);
-        }
       }
       this.popup(anchor);
     }
