@@ -34,6 +34,7 @@ npm run verify:local
 It covers native repairs, SSH, reading, Herdr, plugins, pairing, reconnects, gestures, touch, dictation, files and workspace behavior.
 It also downloads and verifies the pinned Herdr release before running dictation, spaces, resize, flash and fullscreen scrolling against the real native integration.
 Every existing application harness remains available through its original npm command or `node test/<harness>.mjs`.
+Use `npm run format:workspace` to format the workspace entry point and modules with the configured 100-column width, or `npm run check:workspace-format` to check them without editing.
 `npm run verify:package -- release/termai-vVERSION-PLATFORM.tar.gz` retains packaged browser coverage locally by running both smoke checks and the browser suite against the extracted archive.
 The deleted tests covered only the removed CI suite selector and build manifests, while useful package checksum, permission, metadata and companion checks remain in `test/package-release.test.mjs`.
 

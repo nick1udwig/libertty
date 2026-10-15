@@ -48,7 +48,9 @@
     "test:herdr-loading": "node test/herdr-loading-browser.mjs",
     "build:test-support": "cargo build --locked -p termai-server --examples",
     "pretest": "npm run build:test-support",
-    "contracts:vocabulary": "node scripts/engine-vocabulary.mjs"
+    "contracts:vocabulary": "node scripts/engine-vocabulary.mjs",
+    "format:workspace": "prettier --write src/main.ts src/workspace-*.ts",
+    "check:workspace-format": "prettier --check src/main.ts src/workspace-*.ts"
   },
   "dependencies": {
     "ghostty-web": "0.4.0-next.20.g1858a59",
@@ -62,10 +64,11 @@
     "@types/ssh2": "^1.15.6",
     "@types/ws": "8.18.1",
     "ajv": "8.20.0",
-    "playwright-core": "1.63.0",
-    "typescript": "7.0.2",
-    "vite": "8.3.0",
     "node-pty": "1.1.0",
-    "ssh2": "1.17.0"
+    "playwright-core": "1.63.0",
+    "prettier": "3.6.2",
+    "ssh2": "1.17.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
   }
 }
