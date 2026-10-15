@@ -69,23 +69,54 @@ try {
     }
     // Deliberately omit pointer events. These previously got stopped without
     // ever starting a gesture, leaving both scrolling and selection inert.
-    const contacts = events => frame.evaluate(events => {
-      for (const { type, point, selector = '#terminal canvas' } of events) {
-        const target = document.querySelector(selector);
-        if (type.startsWith('touch')) {
-          const contact = { identifier: 42, target, clientX: point.x, clientY: point.y };
-          const touches = type === 'touchend' || type === 'touchcancel' ? [] : [contact];
-          // Linux WebKit exposes Touch but does not allow constructing one.
-          // Native taps are checked separately below.
-          const event = new Event(type, { bubbles: true, cancelable: true });
-          Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [contact] } });
-          target.dispatchEvent(event);
-        } else target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 42, pointerType: 'touch', isPrimary: true, clientX: point.x, clientY: point.y }));
-      }
-    }, events);
+    const contacts = (events, measure = false) => frame.evaluate(({ events, measure }) => {
+      const canvas = document.querySelector('#terminal canvas'), bounds = canvas.getBoundingClientRect;
+      let measurements = 0;
+      if (measure) canvas.getBoundingClientRect = function () { measurements++; return bounds.call(this); };
+      try {
+        for (const { type, point, selector = '#terminal canvas' } of events) {
+          const target = document.querySelector(selector);
+          if (type.startsWith('touch')) {
+            const contact = { identifier: 42, target, clientX: point.x, clientY: point.y };
+            const touches = type === 'touchend' || type === 'touchcancel' ? [] : [contact];
+            // Linux WebKit exposes Touch but does not allow constructing one.
+            // Native taps are checked separately below.
+            const event = new Event(type, { bubbles: true, cancelable: true });
+            Object.defineProperties(event, { touches: { value: touches }, changedTouches: { value: [contact] } });
+            target.dispatchEvent(event);
+          } else target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerId: 42, pointerType: 'touch', isPrimary: true, clientX: point.x, clientY: point.y }));
+        }
+      } finally { if (measure) canvas.getBoundingClientRect = bounds; }
+      return measurements;
+    }, { events, measure });
     const touch = (type, point, selector = '#terminal canvas') => contacts([{ type, point, selector }]);
     const pointer = (type, point = { x: 150, y: 180 }) => contacts([{ type, point }]);
     const start = { x: 150, y: 180 }, end = { x: 150, y: 280 };
+    const idleWork = await frame.evaluate(() => {
+      const term = window.__testTerminal, canvas = document.querySelector('#terminal canvas'), highlights = document.querySelector('.terminal-selection');
+      const bounds = canvas.getBoundingClientRect, replace = highlights.replaceChildren;
+      let measurements = 0, replacements = 0;
+      canvas.getBoundingClientRect = function () { measurements++; return bounds.call(this); };
+      highlights.replaceChildren = function (...nodes) { replacements++; return replace.apply(this, nodes); };
+      try { for (let i = 0; i < 12; i++) term.scrollLines(-1); }
+      finally { canvas.getBoundingClientRect = bounds; highlights.replaceChildren = replace; }
+      return { measurements, replacements };
+    });
+    assert.deepEqual(idleWork, { measurements: 0, replacements: 0 }, 'Scrolling without a selection does no overlay layout or DOM rebuilding');
+    await frame.evaluate(() => window.__testTerminal.scrollToBottom());
+    const measurements = await contacts([
+      { type: 'touchstart', point: start },
+      ...Array.from({ length: 12 }, (_, i) => ({ type: 'touchmove', point: { x: start.x, y: start.y + (i + 1) * 8 } })),
+      { type: 'touchcancel', point: end },
+    ], true);
+    assert.equal(measurements, 1, 'A twelve-move scroll gesture measures the canvas only once');
+    assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Cached geometry still scrolls terminal history');
+    await contacts([{ type: 'touchstart', point: start }, { type: 'touchmove', point: end }]);
+    const rows = await frame.evaluate(() => { const term = window.__testTerminal, rows = term.rows; term.resize(term.cols, rows - 1); return rows; });
+    const resizedMeasurements = await contacts([{ type: 'touchmove', point: { x: end.x, y: end.y + 8 } }, { type: 'touchcancel', point: end }], true);
+    assert.equal(resizedMeasurements, 1, 'Resizing invalidates geometry during an active scroll');
+    await frame.evaluate(rows => window.__testTerminal.resize(window.__testTerminal.cols, rows), rows);
+    await frame.evaluate(() => window.__testTerminal.scrollToBottom());
     // Keep synthetic drag sequences in one browser turn so slow test-driver
     // round trips cannot turn them into a 350ms long press.
     const drag = types => contacts(types.map(type => ({ type, point: type === 'touchmove' || type === 'touchend' ? end : start })));

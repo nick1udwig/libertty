@@ -14,7 +14,7 @@ run('test/reading-browser.mjs', { TEST_BASE_PATH: '/terminal' });
 for (const file of [
   'herdr-browser.mjs', 'herdr-loading-browser.mjs', 'plugins-browser.mjs', 'rust-herdr.mjs',
   'pairing-browser.mjs', 'reconnect-browser.mjs', 'herdr-reopen-browser.mjs',
-  'terminal-gestures-browser.mjs', 'terminal-touch-browser.mjs', 'dictation-browser.mjs',
+  'tab-scrolling-browser.mjs', 'terminal-gestures-browser.mjs', 'terminal-touch-browser.mjs', 'dictation-browser.mjs',
   'transfers-browser.mjs', 'files-browser.mjs', 'workspace-browser.mjs',
 ]) run('test/' + file);
 

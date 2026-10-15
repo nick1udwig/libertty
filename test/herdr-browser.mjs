@@ -265,6 +265,7 @@ try {
   const swipeStrip = async mode => {
     const style = await page.addStyleTag({ content: '.herdr-agent-strip .herdr-agent-tab { min-width: 260px; }' });
     const strip = page.locator('.herdr-agent-strip:visible');
+    await strip.evaluate(strip => { window.__nativeTabScrolls = 0; strip.addEventListener('pointercancel', () => window.__nativeTabScrolls++); });
     const state = () => strip.evaluate(strip => ({ scroll: strip.scrollLeft, order: [...strip.querySelectorAll('.herdr-agent-tab')].map(tab => tab.dataset.terminal), selected: strip.querySelector('[aria-selected=true]')?.dataset.terminal }));
     try {
       await strip.evaluate(strip => { strip.scrollLeft = 0; });
@@ -275,6 +276,7 @@ try {
       await touch('touchMove', rect.x + 60, y); await touch('touchEnd'); await delay(80);
       const forward = await state();
       assert.ok(forward.scroll > initial.scroll + 100, mode + ' swipe scrolls to later tabs, including after a pause');
+      assert.ok(await page.evaluate(() => window.__nativeTabScrolls > 0), mode + ' lets the browser own horizontal scrolling');
       assert.deepEqual(forward.order, initial.order, mode + ' swipe preserves tab order');
       assert.equal(forward.selected, initial.selected, mode + ' swipe does not select a tab');
       assert.equal(await page.locator('.herdr-tab-menu:visible, .herdr-agent-tab.dragging, .herdr-agent-tab[data-drop]').count(), 0, mode + ' swipe opens no actions or drag preview');

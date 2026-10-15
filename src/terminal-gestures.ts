@@ -28,11 +28,15 @@ export class TerminalGestures {
   private dragHandle?: number;
   private lastTouch = -Infinity;
   private scrollFraction = 0;
+  private scrollLinePixels?: number;
   private term: Terminal;
   constructor(term: Terminal, host: Host) {
     this.term = term;
     const element = term.element!;
     this.canvas = element.querySelector('canvas')!;
+    const geometry = new ResizeObserver(() => { this.scrollLinePixels = undefined; });
+    geometry.observe(this.canvas);
+    window.addEventListener('pagehide', event => { if (!event.persisted) geometry.disconnect(); });
     const surface = (target: EventTarget | null) => target === element || target === this.canvas || target === term.textarea;
     const stop = (event: Event) => { if (event.cancelable) event.preventDefault(); event.stopImmediatePropagation(); };
     this.highlights.className = 'terminal-selection';
@@ -91,7 +95,7 @@ export class TerminalGestures {
           return false;
         }
         host.focus.suppress(); this.dismissNotice(); this.lastTouch = performance.now();
-        this.cancelMomentum(); this.scrollFraction = 0; clearTimeout(this.hold);
+        this.cancelMomentum(); this.scrollFraction = 0; this.scrollLinePixels = undefined; clearTimeout(this.hold);
         this.press = { x, y, lastX: x, lastY: y, started: at, at, velocity: 0, mode: 'pending' };
         this.hold = setTimeout(() => {
           if (!this.press || this.press.mode !== 'pending') return;
@@ -143,7 +147,7 @@ export class TerminalGestures {
     term.onSelectionChange(() => this.render());
     term.onScroll(() => { if (this.start && !isPreservingScrollback(term)) this.clear(); else this.render(); });
     term.onData(() => { this.cancelMomentum(); this.clear(); });
-    term.onResize(() => this.clear());
+    term.onResize(() => { this.scrollLinePixels = undefined; this.clear(); });
     new TerminalScrollbar(term, () => {
       host.focus.suppress(); this.cancelMomentum(); clearTimeout(this.hold);
       this.press = undefined; this.lastTouch = performance.now(); this.clear();
@@ -178,7 +182,7 @@ export class TerminalGestures {
     return { col, row: this.topRow() + row };
   }
   private topRow() { return Math.max(0, this.term.buffer.active.length - this.term.rows - Math.floor(this.term.getViewportY())); }
-  private linePixels() { return Math.max(6, this.canvas.getBoundingClientRect().height / this.term.rows * .65); }
+  private linePixels() { return this.scrollLinePixels ??= Math.max(6, this.canvas.getBoundingClientRect().height / this.term.rows * .65); }
   private range() {
     if (!this.start || !this.end) return;
     const before = this.start.row < this.end.row || this.start.row === this.end.row && this.start.col <= this.end.col;
@@ -218,8 +222,10 @@ export class TerminalGestures {
     clearTimeout(this.noticeTimer); this.noticeTimer = setTimeout(() => { this.notice.hidden = true; }, 2200);
   }
   private render() {
+    const range = this.range();
+    if (!range && this.notice.hidden) return;
     this.highlights.replaceChildren();
-    const range = this.range(), bounds = this.canvas.getBoundingClientRect(), container = this.term.element!.getBoundingClientRect();
+    const bounds = this.canvas.getBoundingClientRect(), container = this.term.element!.getBoundingClientRect();
     const viewport = this.term.element!.parentElement?.id === 'terminal-viewport' ? this.term.element!.parentElement.getBoundingClientRect() : container;
     const width = bounds.width / this.term.cols, height = bounds.height / this.term.rows, top = this.topRow();
     this.handles.forEach(handle => handle.hidden = !range);
