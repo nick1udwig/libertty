@@ -150,6 +150,9 @@ try {
   await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').waitFor();
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces', 'New installations default to spaces');
+  assert.equal(await page.locator('#herdr-strip-order').inputValue(), 'lanes', 'New installations default to status lanes');
+  // The ordering checks below drag tabs, which lanes pause, so they use the manual order.
+  await page.locator('#herdr-strip-order').selectOption('manual');
   await page.locator('#herdr-strip').selectOption('agents'); await page.locator('#nav-terminals').click();
   await tab(0).waitFor(); let terminal = await agentFrame();
   assert.equal(await page.locator('.herdr-message').count(), 0);
@@ -474,7 +477,7 @@ try {
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   // Status lanes regroup the same tabs by urgency without changing the saved manual order.
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
-  assert.equal(await page.locator('#herdr-strip-order').inputValue(), 'manual', 'Manual order is the default');
+  assert.equal(await page.locator('#herdr-strip-order').inputValue(), 'manual', 'An explicit manual order survives reloads');
   await page.locator('#herdr-strip-order').selectOption('lanes'); await page.locator('#nav-terminals').click();
   const lanes = () => page.locator('.herdr-agent-strip:visible .herdr-status-lane').evaluateAll(els => els.map(el => el.dataset.lane + ':' + [...el.querySelectorAll('.herdr-agent-tab')].filter(tab => !tab.hidden).map(tab => tab.dataset.terminal).join(',')));
   const laneToggle = lane => page.locator('.herdr-agent-strip:visible .herdr-status-lane[data-lane=' + lane + '] .herdr-lane-toggle');

@@ -46,6 +46,8 @@ try {
       localStorage.setItem('termai.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', mode: 'herdr', backendId: 'primary', hostId: 'herdr-native' }]));
       localStorage.setItem('termai.activeTab', JSON.stringify(id));
     }
+    // Reordering and stacking need the manual order, because status lanes pause dragging.
+    if (!localStorage.getItem('termai.herdrStripOrder')) localStorage.setItem('termai.herdrStripOrder', JSON.stringify('manual'));
     document.addEventListener('pointerdown', event => { window.__touchSource = event.target.closest('.herdr-agent-tab')?.dataset.terminal || event.target.id; }, true);
   });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));

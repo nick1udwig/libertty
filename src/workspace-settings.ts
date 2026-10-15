@@ -90,7 +90,7 @@ export function createWorkspaceSettings(options: Options) {
     select('herdr-strip').value =
       saved<string>('herdrStrip', 'spaces') === 'agents' ? 'agents' : 'spaces';
     select('herdr-strip-order').value =
-      saved<string>('herdrStripOrder', 'manual') === 'lanes' ? 'lanes' : 'manual';
+      saved<string>('herdrStripOrder', 'lanes') === 'manual' ? 'manual' : 'lanes';
     input('show-downloads').checked = saved('showDownloads', true);
     input('font-size').value = String(saved('fontSizePt', 10));
     if (!input('font-size').checkValidity()) input('font-size').value = '10';

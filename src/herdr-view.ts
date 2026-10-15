@@ -388,7 +388,8 @@ export class HerdrView {
     requestAnimationFrame(() => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } });
   }
   private get spaceMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStrip') || 'null') !== 'agents'; } catch { return true; } }
-  private get laneMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStripOrder') || 'null') === 'lanes'; } catch { return false; } }
+  // Status lanes are the default order; only an explicit Manual choice keeps the saved order.
+  private get laneMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStripOrder') || 'null') !== 'manual'; } catch { return true; } }
   private get order() { return this.spaceMode ? this.preferences.spaceOrder! : this.preferences.order; }
   private set order(value: string[]) { if (this.spaceMode) this.preferences.spaceOrder = value; else this.preferences.order = value; }
   private get stripSelection() {

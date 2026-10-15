@@ -93,6 +93,7 @@ Agent API addresses remain independent.
 Top-level Termai tab names are local workspace labels.
 
 Settings → **Herdr strip shows** switches between **Spaces** (default) and **Agents**, preserving an explicit mode choice.
+Settings → **Herdr strip order** defaults to **Status lanes**, which group chips by urgency with the idle lane folded; **Manual** keeps your dragged order.
 The space or agent strip sits at the bottom of the terminal view, above Termai’s terminal tabs and configurable shortcut buttons.
 Hold menus open upward so their actions remain visible above the controls.
 **+** creates a new space with a shell in the selected terminal’s working directory, without a popover or form.
