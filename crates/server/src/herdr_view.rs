@@ -9,7 +9,10 @@ use crate::{
     session::Transport,
 };
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use termai_engine::utf16_len;
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -77,6 +80,9 @@ pub struct View {
     recording_scope: Mutex<String>,
     /// The layout epoch at which the pane last proved it still hosts this terminal.
     validated: Mutex<Option<u64>>,
+    /// Frames signal possible foreground changes; without a live stream the shell is polled.
+    output: tokio::sync::Notify,
+    streaming: AtomicBool,
 }
 impl View {
     pub fn open(
@@ -118,6 +124,8 @@ impl View {
             services: crate::host::HostServices::new(),
             recording_scope: Mutex::new(crate::storage::random_hex(16)),
             validated: Mutex::new(None),
+            output: tokio::sync::Notify::new(),
+            streaming: AtomicBool::new(false),
             pending_input,
             send,
             terminal,
@@ -145,6 +153,7 @@ impl View {
         tokio::spawn(async move {
             loop {
                 let Some(view) = weak.upgrade() else { break };
+                let started = tokio::time::Instant::now();
                 let (shell, context) = tokio::select! { biased; _=lifetime.cancelled()=>break, result=view.target.input_state(&view.agent.pane_id)=>result.unwrap_or_default() };
                 let changed = {
                     let mut inner = view.inner.lock().unwrap();
@@ -169,7 +178,15 @@ impl View {
                 if changed {
                     view.send_state();
                 }
-                tokio::select! { biased; _=lifetime.cancelled()=>break, _=tokio::time::sleep(std::time::Duration::from_millis(300))=>{} }
+                // Starting or finishing a program redraws the pane, so a quiet live stream needs only occasional checks.
+                let interval = std::time::Duration::from_millis(300);
+                let idle = if view.streaming.load(Ordering::Acquire) {
+                    std::time::Duration::from_secs(2)
+                } else {
+                    interval
+                };
+                tokio::select! { biased; _=lifetime.cancelled()=>break, _=view.output.notified()=>{}, _=tokio::time::sleep(idle)=>{} }
+                tokio::select! { biased; _=lifetime.cancelled()=>break, _=tokio::time::sleep_until(started + interval)=>{} }
             }
         });
         let weak = Arc::downgrade(&view);
@@ -223,6 +240,14 @@ impl View {
                 let frame = tokio::select! {biased;_=lifetime.cancelled()=>break, _=slow.cancelled()=>{if let Some(view)=weak.upgrade(){view.send.too_slow();}break;}, frame=receive.recv()=>frame};
                 let Some(frame) = frame else { break };
                 let Some(view) = weak.upgrade() else { break };
+                if let ServerMessage::HerdrFrame(frame) = &frame {
+                    // An empty reset frame means the stream stopped, so history and shell checks resume polling.
+                    let streaming = frame.width > 0;
+                    view.streaming.store(streaming, Ordering::Release);
+                    view.output.notify_one();
+                    view.history
+                        .activity(&view.target, &view.agent.pane_id, streaming);
+                }
                 if let ServerMessage::HerdrFrame(frame) = &frame
                     && frame.full
                 {

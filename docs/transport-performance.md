@@ -81,6 +81,9 @@ Snapshots remain scoped to the backend, session, selected file and credentials, 
 The sample skips rendering unchanged content and keeps its existing hidden-view polling pause.
 
 Herdr history viewers share one upstream poll per transport, socket and pane with latest-value replay for new viewers.
+While the pane's frame stream is live, its history is reread only after new frames, at most every 150 ms, with a ten-second recheck for a quiet pane.
+Without a stream, or after an empty reset frame, history is polled every 150 ms.
+Shell foreground checks follow the same frames, at most every 300 ms, and fall back to every two seconds for a quiet streamed pane.
 The final viewer cancels the poll, and slow viewers receive only the latest pending history rather than an accumulating queue.
 Identical metadata snapshots are suppressed while periodic recovery and changed status notifications remain active.
 The existing frame hub continues sharing the native ANSI stream.

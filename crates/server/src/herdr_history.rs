@@ -4,18 +4,27 @@ use crate::protocol::ServerMessage;
 use serde_json::json;
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 type Update = Option<Result<Arc<ServerMessage>, Arc<str>>>;
+/// Reads at most this often, and continuously while no frame stream reports changes.
+const INTERVAL: Duration = Duration::from_millis(150);
+/// A pane with a live frame stream only rechecks its history this often without new frames.
+const IDLE: Duration = Duration::from_secs(10);
 struct Resource {
     send: watch::Sender<Update>,
     users: Mutex<usize>,
     cancel: CancellationToken,
     refresh: Arc<tokio::sync::Notify>,
+    activity: tokio::sync::Notify,
+    streaming: AtomicBool,
 }
 #[derive(Default, Clone)]
 pub struct Hub {
@@ -35,13 +44,24 @@ impl Drop for Subscription {
         }
     }
 }
+fn key(target: &Target, pane: &str) -> Result<String, String> {
+    let transport = target
+        .remote
+        .as_ref()
+        .map(|host| format!("{:p}", Arc::as_ptr(host)));
+    Ok(json!([transport, target.path()?, pane]).to_string())
+}
 impl Hub {
+    /// A terminal frame means the pane's history may have changed; an empty reset frame means its stream stopped.
+    pub fn activity(&self, target: &Target, pane: &str, streaming: bool) {
+        let Ok(key) = key(target, pane) else { return };
+        if let Some(resource) = self.resources.lock().unwrap().get(&key) {
+            resource.streaming.store(streaming, Ordering::Release);
+            resource.activity.notify_one();
+        }
+    }
     pub fn subscribe(&self, target: Target, pane: String) -> Result<Subscription, String> {
-        let transport = target
-            .remote
-            .as_ref()
-            .map(|host| format!("{:p}", Arc::as_ptr(host)));
-        let key = json!([transport, target.path()?, pane]).to_string();
+        let key = key(&target, &pane)?;
         let mut resources = self.resources.lock().unwrap();
         resources.retain(|_, resource| !resource.cancel.is_cancelled());
         if let Some(resource) = resources.get(&key) {
@@ -61,6 +81,8 @@ impl Hub {
             users: Mutex::new(1),
             cancel: CancellationToken::new(),
             refresh: Arc::new(tokio::sync::Notify::new()),
+            activity: tokio::sync::Notify::new(),
+            streaming: AtomicBool::new(false),
         });
         resources.insert(key, resource.clone());
         tokio::spawn(run(target, pane, resource.clone()));
@@ -75,6 +97,7 @@ async fn run(target: Target, pane: String, resource: Arc<Resource>) {
     let mut previous = None;
     let mut force = false;
     loop {
+        let started = tokio::time::Instant::now();
         let request = target.request("pane.read", json!({"pane_id":pane,"source":"recent_unwrapped","lines":1000,"format":"ansi","strip_ansi":false}));
         let result = tokio::select! {
             biased;
@@ -90,6 +113,14 @@ async fn run(target: Target, pane: String, resource: Arc<Resource>) {
             },
             Err(error) => { resource.send.send_replace(Some(Err(error.into()))); break; }
         }
-        tokio::select! { biased; _=resource.cancel.cancelled()=>break, _=resource.refresh.notified()=>{force=true;}, _=tokio::time::sleep(Duration::from_millis(150))=>{} }
+        // Frames announce new output, so a quiet pane with a live stream is not reread every interval.
+        let idle = if resource.streaming.load(Ordering::Acquire) {
+            IDLE
+        } else {
+            INTERVAL
+        };
+        tokio::select! { biased; _=resource.cancel.cancelled()=>break, _=resource.refresh.notified()=>{force=true;}, _=resource.activity.notified()=>{}, _=tokio::time::sleep(idle)=>{} }
+        // A burst of frames still yields at most one read per interval.
+        tokio::select! { biased; _=resource.cancel.cancelled()=>break, _=resource.refresh.notified()=>{force=true;}, _=tokio::time::sleep_until(started + INTERVAL)=>{} }
     }
 }
