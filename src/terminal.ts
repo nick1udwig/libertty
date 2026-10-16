@@ -61,6 +61,8 @@ const transport = new ReconnectingSocket({
 });
 let state: ShellState = { cwd: '', inputRevision: 0, promptRevision: 0, ready: false, prompt: 0, exited: false };
 let after = 0;
+// The replay cursor covers queued output too, so a replacement socket never resends what is already held.
+let received = 0, socketSeq = 0, ackedSeq = 0;
 let streamId = '';
 let capturedConnection: string | undefined;
 let pendingCommand: { id: string } | undefined;
@@ -210,8 +212,11 @@ function drain() {
   }
   if (chunks.length) {
     preserveScrollback(term, () => term.write(chunks.join(''))); after = last;
-    send({ type: 'ack', seq: after }); echo.output();
+    echo.output();
   }
+  // Acknowledge only what this socket delivered, including duplicates of output painted earlier.
+  const acknowledged = Math.min(after, socketSeq);
+  if (acknowledged > ackedSeq && send({ type: 'ack', seq: acknowledged })) ackedSeq = acknowledged;
   inline.refresh();
   if (queue.length) scheduleDrain();
   else revealReplay();
@@ -410,6 +415,7 @@ const gestures = new TerminalGestures(term, {
 async function socketURL(signal: AbortSignal) {
   presentation.freeze();
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
+  socketSeq = ackedSeq = 0;
   if (herdrTerminal) {
     sizeTerminal();
     const geometry = { historyDelta: true, frameAck: true, cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && keepingGeometry() };
@@ -421,7 +427,7 @@ async function socketURL(signal: AbortSignal) {
     supportsInputContexts = result.inputContexts === true; herdrBarrier = result.redrawBarrier === true; herdrBarrierReady = !herdrBarrier; herdrParkable = result.parkViews === true;
     socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
-  socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:'; socketURL.searchParams.set('after', String(after));
+  socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:'; socketURL.searchParams.set('after', String(Math.max(after, received)));
   if (streamId) socketURL.searchParams.set('stream', streamId);
   return socketURL;
 }
@@ -564,13 +570,14 @@ function socketMessage(event: MessageEvent) {
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
-    if (message.reset) { presentation.freeze(); queue.clear(); after = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
+    if (message.reset) { presentation.freeze(); queue.clear(); after = received = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
     if (message.truncated) {
       term.write('\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n');
       toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.');
     }
   } else if (message.type === 'output') {
-    if (message.seq > after) queue.push(message);
+    socketSeq = Math.max(socketSeq, message.seq);
+    if (message.seq > received) { queue.push(message); received = message.seq; }
     if (!frameQueued) scheduleDrain();
   } else if (message.type === 'state') {
     const initial = !replayState;
@@ -686,7 +693,7 @@ $('new-shell').onclick = async () => {
   try {
     inline.disconnect(); suggestions.disconnect();
     transport.suspend();
-    await api('/api/new', {}); after = 0; streamId = ''; queue.clear(); unsentInput.clear(); disconnectedContext = undefined; pendingCommand = undefined;
+    await api('/api/new', {}); after = received = 0; streamId = ''; queue.clear(); unsentInput.clear(); disconnectedContext = undefined; pendingCommand = undefined;
     $<HTMLDialogElement>('options-dialog').close(); await connect();
   } catch (error: any) { toast(error.message); void connect(); }
 };

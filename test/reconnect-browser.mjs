@@ -165,6 +165,48 @@ try {
   await page.waitForFunction(() => window.__sent.some(message => message.type === 'input' && message.data === '\x03'));
   await page.locator('.terminal-presentation').waitFor({state:'hidden'});
 
+  // Output still queued behind painting is not replayed again, and the replacement keeps acknowledging.
+  await page.locator('#terminal textarea').focus();
+  await page.evaluate(() => {
+    window.__paintRAF = window.requestAnimationFrame;
+    window.__pendingPaintFrames = [];
+    window.requestAnimationFrame = callback => { window.__pendingPaintFrames.push(callback); return 0; };
+    window.__queuedOutput = 0;
+    window.__sockets.at(-1).addEventListener('message', async event => {
+      const message = await window.__wireMessage(event.data);
+      if (message.type === 'output') window.__queuedOutput = Math.max(window.__queuedOutput, message.seq);
+    });
+  });
+  await page.keyboard.type('seq 1 60000; echo $((6*7))-queued-done'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#shell-status').textContent === 'Running');
+  // Unpainted output is never acknowledged, so delivery stops once the window is full.
+  let queuedOutput = -1;
+  for (;;) {
+    await delay(500);
+    const current = await page.evaluate(() => window.__queuedOutput);
+    if (current > 0 && current === queuedOutput) break;
+    queuedOutput = current;
+  }
+  const replacement = await stallNext('/ws');
+  await online(); await replacement.entered;
+  await page.evaluate(() => {
+    window.__replayed = [];
+    window.__heldSocket.addEventListener('message', async event => {
+      const message = await window.__wireMessage(event.data);
+      if (message.type === 'output') window.__replayed.push(message.seq);
+    });
+    // Paint the earlier socket's queue before the replacement has delivered anything.
+    window.requestAnimationFrame = window.__paintRAF;
+    for (const callback of window.__pendingPaintFrames.splice(0)) requestAnimationFrame(callback);
+  });
+  await delay(300);
+  await replacement.done();
+  await page.waitForFunction(() => document.querySelector('#shell-status').textContent === 'At prompt', undefined, { timeout: 15000 });
+  const replayed = await page.evaluate(() => window.__replayed);
+  // Each replay message carries the final sequence of its batch, so any earlier value means resent output.
+  assert.ok(replayed.length && Math.min(...replayed) > queuedOutput, `Replay resumes after queued output ${queuedOutput}: ${replayed.slice(0, 3)}`);
+  await page.locator('.terminal-presentation').waitFor({state:'hidden'});
+
   async function stallNext(path) {
     if (path === '/ws') {
       await page.evaluate(() => { window.__heldSocket = undefined; window.__holdNextSocket = true; });

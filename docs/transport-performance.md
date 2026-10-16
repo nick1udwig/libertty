@@ -44,8 +44,10 @@ Without browser decompression support, raw binary remains available.
 Input, acknowledgements and geometry use compact binary fields, terminal output retains its sequence, and Herdr frames carry their original ANSI bytes directly.
 Decoding remains ordered across asynchronous decompression and discards results from replaced sockets.
 Connect and ticket replies advertise application heartbeat support independently of the encoding.
-Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply within two more seconds.
-Live output and repeated state updates do not reset that deadline, so a working downlink cannot conceal a failed return path.
+Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply.
+The reply deadline is two seconds or the smoothed round-trip time plus four deviations, whichever is longer, up to eight seconds.
+While messages are still arriving, a reply that may be queued behind them gets the full eight seconds.
+Live output and repeated state updates never reset the deadline, so a working downlink can delay but not conceal a failed return path.
 A replacement handshake keeps the previous socket alive and the last painted screen visible until takeover, and user activity bypasses reconnect backoff.
 Older servers without the heartbeat capability retain their existing reconnect behavior.
 The backend also pings native terminal sockets every five seconds and detaches a viewer that sends nothing for two intervals.
@@ -264,6 +266,8 @@ After the grace expires, Herdr releases mobile geometry and idle terminals disco
 Consecutive queued output chunks share messages of up to 64 KiB within the existing 128 KiB acknowledgement window.
 Each message carries the final constituent sequence, and its acknowledgement releases the batch's total byte credit.
 Replay history retains the original chunks so reconnecting at an earlier cursor still returns exactly the missing bytes.
+A replacement socket resumes after the last output the browser received, including output still waiting to paint, so held output is never sent twice.
+Each socket acknowledges only sequences it delivered, so painting output from an earlier socket cannot leave the replacement's window unacknowledged.
 Live output is sent immediately without a batching timer, and an existing oversized chunk remains whole.
 
 ## Adaptive outgoing compression

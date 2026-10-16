@@ -226,6 +226,33 @@ test('live output and repeated state updates cannot conceal missing heartbeat re
   assert.equal(f.sockets.length, 2);
 });
 
+test('a reply queued behind arriving output gets the full deadline without concealing a lost return path', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state'); socket.autoPong = false;
+  for (let i = 0; i < 19; i++) { socket.message('bulk output'); t.mock.timers.tick(500); await flush(); }
+  assert.deepEqual(socket.sent, ['{"type":"ping"}']);
+  assert.deepEqual(f.behavior.stalled, [], 'output still arriving explains a delayed reply');
+  socket.message('bulk output'); t.mock.timers.tick(500); await flush();
+  assert.deepEqual(f.behavior.stalled, [10]);
+  assert.equal(f.sockets.length, 2);
+});
+
+test('measured slow round trips extend the reply deadline on quiet links', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state'); socket.autoPong = false;
+  const pong = () => socket.message('{"type":"pong"}');
+  t.mock.timers.tick(2000); await flush();
+  t.mock.timers.tick(1000); await flush(); pong();
+  t.mock.timers.tick(2000); await flush();
+  t.mock.timers.tick(2500); await flush(); pong();
+  t.mock.timers.tick(2500); await flush();
+  assert.equal(socket.sent.length, 3);
+  t.mock.timers.tick(4000); await flush(); pong();
+  assert.deepEqual(f.behavior.stalled, [], 'a four-second reply matches this link');
+  assert.equal(f.sockets.length, 1);
+  assert.deepEqual(f.messages, ['state'], 'replies stay internal');
+});
+
 test('typing or tapping retries immediately during backoff without overlapping attempts', async t => {
   const f = fixture(t);
   f.behavior.prepare = async () => { throw new Error('offline'); };
