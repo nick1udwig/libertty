@@ -206,6 +206,15 @@ pub fn decode_as<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Result<Incomin
             ))
         }
         6 => Ok(Incoming::Audio(payload.to_vec())),
+        8 if payload.len() >= 8 => {
+            let data = std::str::from_utf8(&payload[8..]).map_err(|_| "Invalid wire UTF-8.")?;
+            Ok(Incoming::Message(
+                serde_json::from_value(
+                    json!({"type":"input","seq":integer(&payload[..8])?,"data":data}),
+                )
+                .map_err(|error| error.to_string())?,
+            ))
+        }
         _ => Err("Unsupported incoming wire message.".into()),
     }
 }
@@ -307,12 +316,19 @@ mod tests {
         assert!(
             matches!(decode(&[b'T',b'M',1,6,0,255]).unwrap(),Incoming::Audio(bytes) if bytes==[0,255])
         );
+        let mut numbered = vec![b'T', b'M', 1, 8];
+        numbered.extend_from_slice(&7.0f64.to_le_bytes());
+        numbered.extend_from_slice("界".as_bytes());
+        assert!(
+            matches!(decode(&numbered).unwrap(),Incoming::Message(value) if value==json!({"type":"input","seq":7.0,"data":"界"}))
+        );
         for invalid in [
             vec![],
             vec![b'T', b'M', 2, 3],
             vec![b'T', b'M', 1, 1],
             vec![b'T', b'M', 1, 4],
             vec![b'T', b'M', 1, 3, 255],
+            vec![b'T', b'M', 1, 8, 0],
         ] {
             assert!(decode(&invalid).is_err());
         }

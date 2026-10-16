@@ -9,7 +9,7 @@ import './style.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
 import { Queue } from './queue.ts';
 import { dictationTarget } from './protocol.ts';
-import { UnsentInput, type InputContext } from './unsent-input.ts';
+import { SentInput, UnsentInput, type InputContext } from './unsent-input.ts';
 import { applyTheme, terminalThemes, watchSystemTheme } from './theme.ts';
 import { adaptDarkAppColors } from './terminal-colors.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
@@ -69,6 +69,10 @@ const edits = new Map<string, (accepted: boolean) => void>();
 const inputLines = new Map<string, (line?: { text: string; cursor: number }) => void>();
 const repairs = new Map<string, (result: RepairResult) => void>();
 const unsentInput = new UnsentInput();
+// Numbered keys let a replacement connection resend exactly the ones its predecessor never delivered.
+const inputClient = crypto.randomUUID(), sentInput = new SentInput();
+// Only a backend that reports delivered keys accepts numbered ones.
+let inputSeq = 0, numberedInput = false;
 let disconnectedContext: InputContext | undefined;
 let connectionEpoch = 0, synchronizedConnection = false;
 let shortcuts: Shortcut[] = structuredClone(defaults);
@@ -284,7 +288,11 @@ function rawInput(data: string) {
   }
   const predict = inline.predictionReady && !queue.length && !herdrLayoutPending;
   if (!inline.raw(data)) { echo.cancel(); return; }
-  if (send({ type: 'input', data })) { term.scrollToBottom(); echo.input(data, state, predict); state.inputRevision++; }
+  const context = numberedInput && !herdrTerminal ? inputContext() : undefined, seq = numberedInput ? inputSeq + 1 : undefined;
+  if (send({ type: 'input', data, ...(seq ? { seq } : {}) })) {
+    if (seq) { inputSeq = seq; sentInput.add(seq, data, context); }
+    term.scrollToBottom(); echo.input(data, state, predict); state.inputRevision++;
+  }
   else if (!unsentInput.add(data, disconnectedContext || inputContext())) toast('Input could not be queued for this terminal.');
 }
 function replaceLine(text: string): Promise<boolean> {
@@ -425,6 +433,7 @@ async function socketURL(signal: AbortSignal) {
     socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
   socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:'; socketURL.searchParams.set('after', String(Math.max(after, received)));
+  socketURL.searchParams.set('client', inputClient);
   if (streamId) socketURL.searchParams.set('stream', streamId);
   return socketURL;
 }
@@ -441,7 +450,7 @@ async function prepareConnection(signal: AbortSignal, token?: string) {
   return socketURL(signal);
 }
 function socketOpened() {
-  connectionEpoch++; synchronizedConnection = false;
+  connectionEpoch++; synchronizedConnection = false; numberedInput = false;
   history.reset();
   replayState = false;
   if (herdrTerminal) { herdrReady = false; state.inputRevision = 0; state.inputTarget = undefined; connection('Connecting'); }
@@ -562,6 +571,11 @@ function socketMessage(event: MessageEvent) {
     else void api('/api/ssh/captured', { id: message.id, action: 'native' }).then(() => api('/api/ssh/captured', { id: message.id, action: 'ack' })).catch(error => toast(error.message));
   } else if (message.type === 'ssh-released') {
     if (capturedConnection === message.id) capturedConnection = undefined;
+  } else if (message.type === 'input-ack') {
+    // Keys the previous connection never delivered rejoin the unsent queue under the context they were typed in.
+    numberedInput = true;
+    const pending = sentInput.settle(message.seq);
+    if (pending && (!pending.complete || !unsentInput.prepend(pending.data, pending.context || disconnectedContext))) toast('Keys typed before the connection dropped were not delivered.');
   } else if (message.type === 'hello') {
     replayTarget = message.lastSeq ?? after;
     streamId = message.streamId;
@@ -612,7 +626,7 @@ function socketClosed(event?: CloseEvent) {
   for (const resolve of repairs.values()) resolve({ accepted: false, candidates: [], original: '', selected: '', prompt: state.prompt, revision: state.inputRevision }); repairs.clear();
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) { pendingCommand = undefined; toast('Connection lost before acknowledgement. Check the terminal before running again.'); }
-  if (event?.code === 4001) { unsentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason); return false; }
+  if (event?.code === 4001) { unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason); return false; }
   if (herdrTerminal && event?.code === 1000 && event.reason === 'Herdr terminal ended') { inline.disconnect(); connection('Session ended'); notify('terminal-ended'); return false; }
   if (embedded && state.exited) return false; // The workspace is replacing this finished shell.
   connection('Reconnecting');
@@ -690,7 +704,7 @@ $('new-shell').onclick = async () => {
   try {
     inline.disconnect();
     transport.suspend();
-    await api('/api/new', {}); after = received = 0; streamId = ''; queue.clear(); unsentInput.clear(); disconnectedContext = undefined; pendingCommand = undefined;
+    await api('/api/new', {}); after = received = 0; streamId = ''; queue.clear(); unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; pendingCommand = undefined;
     $<HTMLDialogElement>('options-dialog').close(); await connect();
   } catch (error: any) { toast(error.message); void connect(); }
 };

@@ -46,7 +46,7 @@ struct Browser {
 }
 impl Browser {
     fn attach(session: Arc<Session>, after: u64, stream: Option<&str>) -> Self {
-        let (id, receive) = session.attach(after, stream);
+        let (id, receive) = session.attach(after, stream, None);
         Self {
             session,
             id,

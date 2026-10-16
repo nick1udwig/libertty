@@ -8,6 +8,7 @@ use crate::{
     protocol::{ClientMessage, controls},
     session::Transport,
 };
+pub use input::{Ledger, Ledgers};
 use serde_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
@@ -57,6 +58,15 @@ struct Input {
     complete: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
     _permit: tokio::sync::OwnedSemaphorePermit,
     replacement: Option<Replacement>,
+    /// Each numbered key in the text, with the byte offset where it ends.
+    seqs: Vec<(u64, usize)>,
+}
+/// The browser connection a view serves.
+pub struct Viewer {
+    pub send: crate::viewer_queue::Sender,
+    pub cancel: CancellationToken,
+    /// The browser terminal's input ledger, and whether an earlier connection created it.
+    pub ledger: Option<(Arc<Ledger>, bool)>,
 }
 pub struct View {
     target: Target,
@@ -83,6 +93,8 @@ pub struct View {
     /// Frames signal possible foreground changes; without a live stream the shell is polled.
     output: tokio::sync::Notify,
     streaming: AtomicBool,
+    /// The browser terminal's delivered keys, and this connection's claim on delivering more.
+    ledger: Option<(Arc<Ledger>, u64)>,
 }
 impl View {
     pub fn open(
@@ -91,9 +103,13 @@ impl View {
         hub: &Hub,
         history: &crate::herdr_history::Hub,
         initial: Option<(Size, Option<u64>)>,
-        send: crate::viewer_queue::Sender,
-        cancel: CancellationToken,
+        viewer: Viewer,
     ) -> Result<Arc<Self>, String> {
+        let Viewer {
+            send,
+            cancel,
+            ledger,
+        } = viewer;
         let initial_size = initial.map(|(size, _)| size);
         let revision = initial.and_then(|(_, revision)| revision);
         let (frames, mut receive) = mpsc::channel(16);
@@ -107,6 +123,9 @@ impl View {
         let (active, _) = tokio::sync::watch::channel(true);
         let (layout, _) = tokio::sync::watch::channel(0);
         let (pending_input, mut inputs) = mpsc::channel::<Input>(128);
+        let (generation, delivered) = ledger
+            .as_ref()
+            .map_or((0, 0), |(ledger, _)| ledger.connect());
         let view = Arc::new(Self {
             target,
             agent,
@@ -126,6 +145,9 @@ impl View {
             validated: Mutex::new(None),
             output: tokio::sync::Notify::new(),
             streaming: AtomicBool::new(false),
+            ledger: ledger
+                .as_ref()
+                .map(|(ledger, _)| (ledger.clone(), generation)),
             pending_input,
             send,
             terminal,
@@ -145,6 +167,11 @@ impl View {
                 cols: size.cols,
                 rows: size.rows,
                 ready: false,
+            });
+        }
+        if let Some((_, known)) = ledger {
+            view.send(ServerMessage::InputAck {
+                seq: known.then_some(delivered),
             });
         }
         view.send_state();
@@ -204,13 +231,31 @@ impl View {
                 let Some(mut input) = input else { break };
                 let Some(view) = weak.upgrade() else { break };
                 let permits = input::coalesce(&mut input, &mut inputs, &mut deferred);
+                // Numbered keys wait for an older connection's send and keep only what it never delivered.
+                let delivery = match &view.ledger {
+                    Some((ledger, generation)) if !input.seqs.is_empty() => {
+                        let Some(gate) = ledger.claim(*generation, &mut input).await else {
+                            continue;
+                        };
+                        let (seq, _) = input.seqs[input.seqs.len() - 1];
+                        Some((gate, ledger.as_ref(), seq))
+                    }
+                    _ => None,
+                };
                 let guard = input
                     .guard
                     .as_ref()
                     .map(|(revision, id)| (*revision, id.as_str()));
                 let result = view
-                    .input_serial(&input.text, input.paste, guard, input.replacement.as_ref())
+                    .input_serial(
+                        &input.text,
+                        input.paste,
+                        guard,
+                        input.replacement.as_ref(),
+                        delivery.as_ref().map(|(_, ledger, seq)| (*ledger, *seq)),
+                    )
                     .await;
+                drop(delivery);
                 drop(permits);
                 if let Some(id) = input
                     .replacement
@@ -490,6 +535,7 @@ impl View {
                 complete: Some(complete),
                 _permit: permit,
                 replacement,
+                seqs: Vec::new(),
             })
             .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
         tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=result=>result.map_err(|_| "The agent view changed. No input was sent.".to_owned())?}
@@ -500,6 +546,7 @@ impl View {
         command: Option<String>,
         paste: bool,
         replacement: Option<Replacement>,
+        seq: Option<u64>,
     ) {
         let permit = match self.capacity.clone().try_acquire_owned() {
             Ok(permit) => permit,
@@ -512,6 +559,7 @@ impl View {
             }
         };
         if let Err(error) = self.pending_input.try_send(Input {
+            seqs: seq.map(|seq| (seq, text.len())).into_iter().collect(),
             text,
             paste,
             guard: None,
@@ -539,12 +587,14 @@ impl View {
             });
         }
     }
+    /// Send input in receive order; numbered keys finish their send even if this connection closes meanwhile.
     async fn input_serial(
         &self,
         text: &str,
         paste: bool,
         guard: Option<(u64, &str)>,
         replacement: Option<&Replacement>,
+        delivery: Option<(&Ledger, u64)>,
     ) -> Result<(), String> {
         if utf16_len(text) > 16000 {
             return Err("Terminal input exceeded its limit.".into());
@@ -594,6 +644,9 @@ impl View {
             } else {
                 text.to_owned()
             };
+            if let Some((ledger, seq)) = delivery {
+                ledger.sending(seq);
+            }
             if let Err(error) = self
                 .target
                 .request(
@@ -627,6 +680,9 @@ impl View {
             }
             Ok(())
         };
+        if delivery.is_some() {
+            return work.await;
+        }
         tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=work=>result}
     }
     pub fn audio(&self, bytes: Vec<u8>) {
@@ -808,16 +864,23 @@ impl View {
                 });
                 Ok(())
             }
-            ClientMessage::Input { data: text } => {
+            ClientMessage::Input { data: text, seq } => {
                 if utf16_len(&text) > 16000 {
                     return Err("Invalid input".into());
+                }
+                // A reconnecting browser resends keys it could not confirm, so skip the ones already delivered.
+                let seq = self.ledger.as_ref().and(seq);
+                if let (Some((ledger, _)), Some(seq)) = (&self.ledger, seq)
+                    && seq <= ledger.delivered()
+                {
+                    return Ok(());
                 }
                 {
                     let mut inner = self.inner.lock().unwrap();
                     inner.revision += 1;
                     inner.editable = None;
                 }
-                self.queue_input(text, None, false, None);
+                self.queue_input(text, None, false, None, seq);
                 Ok(())
             }
             ClientMessage::Paste { text } => {
@@ -825,7 +888,7 @@ impl View {
                     return Err("Invalid paste".into());
                 }
                 self.inner.lock().unwrap().revision += 1;
-                self.queue_input(text, None, true, None);
+                self.queue_input(text, None, true, None, None);
                 Ok(())
             }
             ClientMessage::Replace {
@@ -856,7 +919,7 @@ impl View {
                     })
                 };
                 if let Some(replacement) = replacement {
-                    self.queue_input(text, None, false, Some(replacement));
+                    self.queue_input(text, None, false, Some(replacement), None);
                 } else {
                     self.send(ServerMessage::EditResult {
                         id: (id).to_string(),
@@ -884,7 +947,7 @@ impl View {
                             edit_id: None,
                         })
                 };
-                self.queue_input(command + "\r", Some(id), false, replacement);
+                self.queue_input(command + "\r", Some(id), false, replacement, None);
                 Ok(())
             }
             ClientMessage::Dictation(request) => {

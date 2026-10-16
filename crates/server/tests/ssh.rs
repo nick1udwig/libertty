@@ -447,7 +447,7 @@ async fn remote_pty_and_sftp_share_session_guards_and_file_actions() {
     let session = Session::start_remote(host.clone(), false, HostServices::new())
         .await
         .unwrap();
-    let (attachment, mut receive) = session.attach(0, None);
+    let (attachment, mut receive) = session.attach(0, None, None);
     ready(&session, attachment, &mut receive, 0).await;
     assert_eq!(session.state().cwd, fixture.home());
     let snapshot = session.snapshot(true).await.unwrap();

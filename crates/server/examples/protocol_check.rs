@@ -115,6 +115,7 @@ fn server_samples() -> Vec<ServerMessage> {
             accepted: true,
             revision: 2,
         },
+        ServerMessage::InputAck { seq: Some(3) },
         ServerMessage::Result {
             id: id(),
             accepted: false,

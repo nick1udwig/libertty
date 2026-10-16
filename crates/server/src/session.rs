@@ -135,6 +135,8 @@ struct Inner {
     leases: usize,
     input_line: Option<InputLine>,
     input_serial: u64,
+    /// The browser terminal numbering its keys on this shell, and the last of them delivered.
+    input_client: Option<(String, u64)>,
     input: crate::input_controller::Controller,
     handoffs: Handoffs,
     results: VecDeque<(String, ServerMessage)>,
@@ -484,6 +486,7 @@ impl Session {
                 input_line: None,
                 input: Default::default(),
                 input_serial: 0,
+                input_client: None,
                 handoffs: Handoffs::default(),
                 results: VecDeque::new(),
                 reading: Captures::default(),
@@ -635,6 +638,7 @@ impl Session {
         self: &Arc<Self>,
         after: u64,
         stream: Option<&str>,
+        client: Option<&str>,
     ) -> (u64, mpsc::UnboundedReceiver<Transport>) {
         let (send, receive) = mpsc::unbounded_channel();
         let mut inner = self.inner.lock().unwrap();
@@ -668,6 +672,19 @@ impl Session {
             first_seq: replay.first_seq,
             last_seq: Some(replay.last_seq),
         });
+        if let Some(client) = client {
+            // Only the browser that numbered the delivered keys may rely on that count.
+            let delivered = match &inner.input_client {
+                Some((known, seq)) if known == client => Some(*seq),
+                _ => None,
+            };
+            if delivered.is_none() {
+                inner.input_client = Some((client.to_owned(), 0));
+            }
+            inner.send(ServerMessage::InputAck { seq: delivered });
+        } else {
+            inner.input_client = None;
+        }
         inner.state();
         if replay.snapshot {
             inner.send_snapshot();
@@ -867,6 +884,15 @@ impl Session {
         {
             return;
         }
+        if let ClientMessage::Input { seq: Some(seq), .. } = &message
+            && let Some((_, delivered)) = &mut inner.input_client
+        {
+            // A reconnecting browser resends keys it could not confirm, so drop the ones already delivered.
+            if *seq <= *delivered {
+                return;
+            }
+            *delivered = *seq;
+        }
         let same = inner.state.ready
             && !inner.state.exited
             && !inner.handoffs.active()
@@ -963,7 +989,7 @@ impl Session {
                     inner.screen.resize(rows, cols);
                 }
             }
-            ClientMessage::Input { data } => {
+            ClientMessage::Input { data, .. } => {
                 if !inner.state.exited && !inner.handoffs.active() {
                     inner.state.input_revision += 1;
                     if data.contains(['\r', '\n', '\x03']) {
@@ -1589,7 +1615,7 @@ mod tests {
             inner.pty = Some(Box::new(stub.clone()));
             inner.state.prompt = 1;
         }
-        let (attachment, mut receive) = session.attach(0, None);
+        let (attachment, mut receive) = session.attach(0, None, None);
         while receive.try_recv().is_ok() {}
         (session, stub, attachment, receive)
     }
@@ -1644,7 +1670,7 @@ mod tests {
             |m| m["type"] == "output" && m["data"].as_str().unwrap().contains("after snapshot")
         ));
         // A fresh viewer after this much output receives one snapshot instead of the raw history.
-        let (_, mut fresh) = session.attach(0, None);
+        let (_, mut fresh) = session.attach(0, None, None);
         let messages = drain(&mut fresh);
         assert_eq!(messages[0]["type"], "hello");
         assert_eq!(
@@ -1662,6 +1688,35 @@ mod tests {
                 .unwrap()
                 .contains("after snapshot")
         );
+    }
+    #[tokio::test]
+    async fn numbered_keys_reach_the_shell_once_across_reconnects_of_the_same_browser() {
+        let (session, stub, _, _) = fixture().await;
+        let input_ack = |receive: &mut mpsc::UnboundedReceiver<Transport>| {
+            std::iter::from_fn(|| receive.try_recv().ok())
+                .filter_map(|message| message.value())
+                .find(|m| m["type"] == "input-ack")
+                .expect("input-ack")
+        };
+        let (first, mut receive) = session.attach(0, None, Some("tab"));
+        assert_eq!(input_ack(&mut receive), json!({"type":"input-ack"}));
+        for (seq, data) in [(1, "a"), (2, "b")] {
+            session.receive(first, json!({"type":"input","data":data,"seq":seq}));
+        }
+        // The replacement learns which keys arrived, and the browser resends the rest with their numbers.
+        let (second, mut receive) = session.attach(0, None, Some("tab"));
+        assert_eq!(input_ack(&mut receive)["seq"], 2);
+        session.receive(first, json!({"type":"input","data":"late","seq":3}));
+        for (seq, data) in [(2, "b"), (3, "c"), (3, "c")] {
+            session.receive(second, json!({"type":"input","data":data,"seq":seq}));
+        }
+        session.receive(second, json!({"type":"input","data":"unnumbered"}));
+        assert_eq!(*stub.writes.lock().unwrap(), ["a", "b", "c", "unnumbered"]);
+        // Another browser cannot rely on this browser's count.
+        let (_, mut receive) = session.attach(0, None, Some("other"));
+        assert_eq!(input_ack(&mut receive), json!({"type":"input-ack"}));
+        let (_, mut receive) = session.attach(0, None, Some("tab"));
+        assert_eq!(input_ack(&mut receive), json!({"type":"input-ack"}));
     }
     #[tokio::test]
     async fn output_window_preserves_all_duplicate_partial_and_invalid_acknowledgements() {
@@ -1710,7 +1765,7 @@ mod tests {
             ("previous-server-stream", true, "123"),
             (session.stream_id.as_str(), false, "3"),
         ] {
-            let (_, mut receive) = session.attach(2, Some(stream));
+            let (_, mut receive) = session.attach(2, Some(stream), None);
             match receive.try_recv().unwrap().value() {
                 Some(hello) => {
                     assert_eq!(hello["reset"], reset);
@@ -1732,7 +1787,7 @@ mod tests {
             assert_eq!(data, expected);
         }
         session.dispose().await;
-        let (_, mut receive) = session.attach(0, None);
+        let (_, mut receive) = session.attach(0, None, None);
         assert!(matches!(receive.try_recv(), Ok(Transport::Close(1000, _))));
     }
     #[tokio::test]
@@ -1772,7 +1827,7 @@ mod tests {
         session.inner.lock().unwrap().detached = Instant::now() - Duration::from_secs(3601);
         assert!(session.mark_expired());
         assert!(session.lease().is_none());
-        let (_, mut receive) = session.attach(0, None);
+        let (_, mut receive) = session.attach(0, None, None);
         assert!(matches!(receive.try_recv(), Ok(Transport::Close(1000, _))));
     }
     #[tokio::test]

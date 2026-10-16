@@ -42,7 +42,11 @@ export async function decodeWire(data: string | ArrayBuffer | Blob): Promise<any
 export function encodeWire(message: { type: string; [key: string]: unknown }, protocol: string): string | ArrayBuffer {
   if (![BINARY_PROTOCOL, GZIP_PROTOCOL, GZIP_FAST_PROTOCOL].includes(protocol)) return JSON.stringify(message);
   let kind = 0, payload: Uint8Array;
-  if (message.type === 'input' && typeof message.data === 'string') { kind = 3; payload = encoder.encode(message.data); }
+  if (message.type === 'input' && typeof message.data === 'string' && Number.isSafeInteger(message.seq) && (message.seq as number) >= 0) {
+    const data = encoder.encode(message.data); kind = 8; payload = new Uint8Array(8 + data.length);
+    new DataView(payload.buffer).setFloat64(0, message.seq as number, true); payload.set(data, 8);
+  }
+  else if (message.type === 'input' && typeof message.data === 'string') { kind = 3; payload = encoder.encode(message.data); }
   else if (message.type === 'ack' && Number.isSafeInteger(message.seq) && (message.seq as number) >= 0) { kind = 4; payload = new Uint8Array(8); new DataView(payload.buffer).setFloat64(0, message.seq as number, true); }
   else if (message.type === 'resize' && [message.cols, message.rows].every(value => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 65535) && (message.mobile === undefined || typeof message.mobile === 'boolean')) { kind = 5; payload = new Uint8Array(5); const view = new DataView(payload.buffer); view.setUint16(0, message.cols as number, true); view.setUint16(2, message.rows as number, true); payload[4] = message.mobile === undefined ? 2 : Number(message.mobile); }
   else return JSON.stringify(message);

@@ -59,6 +59,7 @@ Herdr viewers opt into sequenced frames in their ticket request and acknowledge 
 Each viewer has two frames in flight and one pending ANSI update, with ordered deltas merged until they exceed the last full screen size.
 Oversized pending updates are discarded and replaced by a fresh full screen when acknowledgement credit returns, preserving the current geometry.
 Legacy viewers retain unsequenced frames, and sequenced binary frames use envelope kind 7.
+Numbered keys use envelope kind 8, which carries the key number before its UTF-8 text.
 Each compressed message uses gzip level 1 with an independent dictionary and must save at least one eighth of the original representation.
 Constrained links compress messages from 2 KiB, while ordinary links compress only messages from 128 KiB.
 The browser selects the constrained profile only when its connection information reports 2G/3G or at most 2 Mbps.
@@ -246,7 +247,13 @@ The browser harness delays input packets to verify prediction appears before the
 
 Each terminal holds up to 64 KiB of keys that have never been passed to a WebSocket and releases them only after the replay or Herdr screen has painted.
 Native terminals require the original stream, prompt, input revision and target, while reconnecting Herdr views require the original foreground process and matching shell picture.
-A changed context rejects queued keys with a notice, and previously sent uncertain input is never replayed.
+A changed context rejects queued keys with a notice.
+Each connection opens by reporting the last numbered key the shell or Herdr pane received from this browser terminal, and only then does the browser number its keys.
+The browser keeps the most recent 64 KiB of numbered keys it handed to a WebSocket.
+Keys after the reported one rejoin the queue under the context they were typed in, so typing into a link that died silently arrives exactly once.
+The backend drops numbers it has already delivered, and an older Herdr connection stops delivering once its replacement opens.
+A Herdr key counts as delivered once its send starts, so a send interrupted by the disconnect is never repeated.
+A backend that does not know the browser terminal, such as after a restart, vouches for no keys, and none are resent.
 Herdr publishes its foreground process context so a restarted agent cannot inherit another process's queued input or recording.
 
 The browser retains original numbered Opus frames in memory until delivery or explicit cancellation, bounded to two MiB and the existing five-minute capture limit.

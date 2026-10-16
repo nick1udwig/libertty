@@ -183,6 +183,7 @@ pub struct App {
     herdr_capacity: Arc<tokio::sync::Semaphore>,
     ssh_probes: tokio::sync::Semaphore,
     herdr_terminals: herdr_terminal_stream::Hub,
+    herdr_inputs: herdr_view::Ledgers,
     herdr_history: crate::herdr_history::Hub,
     notifications: Arc<notifications::Notifications>,
     services: HostServices,
@@ -288,6 +289,7 @@ impl App {
             herdr_capacity: Arc::new(tokio::sync::Semaphore::new(64)),
             ssh_probes: tokio::sync::Semaphore::new(4),
             herdr_terminals: herdr_terminal_stream::Hub::default(),
+            herdr_inputs: Default::default(),
             herdr_history: crate::herdr_history::Hub::default(),
             notifications,
             services,
@@ -871,6 +873,12 @@ async fn herdr_websocket(
         .map_err(|_| denied())?;
     let upgrade = socket::upgrade(req).await?;
     let app = app.clone();
+    let ledger = input_client(query)
+        .filter(|_| !terminal.is_empty())
+        .map(|client| {
+            app.herdr_inputs
+                .open(format!("{}/{terminal}/{client}", ticket.owner))
+        });
     Ok(upgrade
         .on_upgrade(move |socket| async move {
             let _permit = permit;
@@ -883,7 +891,7 @@ async fn herdr_websocket(
                     cancel.clone(),
                 ),
             );
-            herdr_socket_session(socket, &app, ticket, cancel.clone(), &id).await;
+            herdr_socket_session(socket, &app, ticket, cancel.clone(), &id, ledger).await;
             cancel.cancel();
             app.herdr_connections.lock().unwrap().remove(&id);
             app.notifications.disconnected(&id);
@@ -896,6 +904,7 @@ async fn herdr_socket_session(
     ticket: HerdrTicket,
     cancel: CancellationToken,
     id: &str,
+    ledger: Option<(Arc<herdr_view::Ledger>, bool)>,
 ) {
     let _source = if ticket.source.is_empty() {
         None
@@ -969,8 +978,11 @@ async fn herdr_socket_session(
             &app.herdr_terminals,
             &app.herdr_history,
             ticket.size.map(|size| (size, revision)),
-            send,
-            cancel.clone(),
+            herdr_view::Viewer {
+                send,
+                cancel: cancel.clone(),
+                ledger,
+            },
         ) {
             Ok(view) => {
                 view.set_recording_scope(recording_scope);
@@ -1052,17 +1064,29 @@ async fn websocket(
         app.tickets.lock().unwrap().remove(ticket);
     }
     let stream = query.get("stream").cloned();
+    let client = input_client(query);
     Ok(upgrade
-        .on_upgrade(move |socket| socket_session(socket, session, after as u64, stream))
+        .on_upgrade(move |socket| socket_session(socket, session, after as u64, stream, client))
         .into_response())
+}
+/// The browser terminal's own id for numbering its keys, ignored unless it is a short token.
+fn input_client(query: &HashMap<String, String>) -> Option<String> {
+    query
+        .get("client")
+        .filter(|id| {
+            (1..=64).contains(&id.len())
+                && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+        .cloned()
 }
 async fn socket_session(
     socket: WebSocket,
     session: Arc<Session>,
     after: u64,
     stream: Option<String>,
+    client: Option<String>,
 ) {
-    let (id, output) = session.attach(after, stream.as_deref());
+    let (id, output) = session.attach(after, stream.as_deref(), client.as_deref());
     socket::pump(
         socket,
         socket::Input::Native {

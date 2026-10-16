@@ -143,6 +143,11 @@ pub enum ServerMessage {
         accepted: bool,
         revision: u64,
     },
+    /// The last numbered key this terminal delivered for the connecting browser, absent when it is new here.
+    InputAck {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        seq: Option<u64>,
+    },
     Result {
         id: String,
         accepted: bool,
@@ -320,6 +325,9 @@ pub enum ClientMessage {
     Input {
         #[serde(deserialize_with = "input_text")]
         data: String,
+        /// Numbers keys per browser terminal so a reconnect can resend them exactly once.
+        #[serde(default, deserialize_with = "optional_safe")]
+        seq: Option<u64>,
     },
     Paste {
         #[serde(deserialize_with = "input_text")]
