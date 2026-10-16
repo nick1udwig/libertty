@@ -11,5 +11,4 @@ run('npm', ['run', 'test:rust']);
 run('npm', ['run', 'build']);
 run('npm', ['test']);
 run('npm', ['run', 'test:install']);
-run('npm', ['run', 'test:rust-state']);
 run('npm', ['run', 'verify:browser']);

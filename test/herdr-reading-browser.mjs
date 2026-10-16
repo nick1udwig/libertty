@@ -43,7 +43,7 @@ try {
     if (!localStorage.getItem('libertty.tabs')) {
       const id = crypto.randomUUID();
       localStorage.setItem('libertty.hosts', JSON.stringify([{ id: 'herdr-reader', name: 'Herdr', kind: 'herdr', backendId: 'primary' }]));
-      localStorage.setItem('libertty.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', pluginId: 'herdr', herdrSession: '', backendId: 'primary', hostId: 'herdr-reader' }]));
+      localStorage.setItem('libertty.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', pluginId: 'herdr', pluginVersion: '1', herdrSession: '', backendId: 'primary', hostId: 'herdr-reader' }]));
       localStorage.setItem('libertty.activeTab', JSON.stringify(id));
     }
   });
@@ -84,7 +84,7 @@ try {
     const source = await request('sessions', { name: 'SSH reader', files: true, ssh: input });
     await request('herdr/connect', { source: source.id });
     const id = crypto.randomUUID(), tabs = JSON.parse(localStorage.getItem('libertty.tabs'));
-    tabs.push({ id, session: source.id, name: 'SSH Herdr', pluginId: 'herdr', herdrSession: '', herdrSource: source.id, backendId: 'primary' });
+    tabs.push({ id, session: source.id, name: 'SSH Herdr', pluginId: 'herdr', pluginVersion: '1', herdrSession: '', herdrSource: source.id, backendId: 'primary' });
     localStorage.setItem('libertty.tabs', JSON.stringify(tabs)); localStorage.setItem('libertty.activeTab', JSON.stringify(id)); return source.id;
   }, { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, privateKey: identity.private, passphrase: 'fixture-passphrase', trust: fingerprint(ssh2.utils.parseKey(hostKey.private).getPublicSSH()) });
   await page.reload(); await terminal(); await type('look at note.txt');

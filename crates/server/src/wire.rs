@@ -22,7 +22,7 @@ impl Mode {
             Some(GZIP) => Self::Gzip,
             Some(GZIP_FAST) => Self::GzipFast,
             Some(BINARY) => Self::Binary,
-            _ => Self::Json,
+            _ => Self::Binary,
         }
     }
 }
@@ -68,11 +68,8 @@ pub fn encode_server(message: &crate::protocol::ServerMessage, mode: Mode) -> En
             bytes.extend_from_slice(data.as_bytes());
         }
         ServerMessage::HerdrFrame(frame) if mode != Mode::JsonGzip => {
-            bytes[3] = 2;
-            if let Some(seq) = frame.seq {
-                bytes[3] = 7;
-                bytes.extend_from_slice(&(seq as f64).to_le_bytes());
-            }
+            bytes[3] = 7;
+            bytes.extend_from_slice(&(frame.seq.expect("acknowledged frame") as f64).to_le_bytes());
             bytes.extend_from_slice(&frame.width.to_le_bytes());
             bytes.extend_from_slice(&frame.height.to_le_bytes());
             bytes.push(u8::from(frame.full));
@@ -113,11 +110,9 @@ pub fn encode(value: &Value, mode: Mode) -> Encoded {
                         .and_then(|bytes| STANDARD.decode(bytes).ok()),
                 );
             if let Some((((width, height), full), data)) = frame {
-                bytes[3] = 2;
-                if let Some(seq) = crate::protocol::unsigned(&value["seq"]) {
-                    bytes[3] = 7;
-                    bytes.extend_from_slice(&(seq as f64).to_le_bytes());
-                }
+                bytes[3] = 7;
+                let seq = crate::protocol::unsigned(&value["seq"]).expect("acknowledged frame");
+                bytes.extend_from_slice(&(seq as f64).to_le_bytes());
                 bytes.extend_from_slice(&(width as u16).to_le_bytes());
                 bytes.extend_from_slice(&(height as u16).to_le_bytes());
                 bytes.push(u8::from(full));
@@ -249,10 +244,12 @@ mod tests {
                 assert_eq!(&payload[8..], value["data"].as_str().unwrap().as_bytes());
             }
         }
-        let frame = json!({"type":"herdr-frame","width":40,"height":30,"full":true,"bytes":STANDARD.encode([0,27,128,255])});
+        let frame = json!({"type":"herdr-frame","seq":1,"width":40,"height":30,"full":true,"bytes":STANDARD.encode([0,27,128,255])});
         assert_eq!(
             encode(&frame, Mode::Binary).bytes,
-            [b'T', b'M', 1, 2, 40, 0, 30, 0, 1, 0, 27, 128, 255]
+            [
+                b'T', b'M', 1, 7, 0, 0, 0, 0, 0, 0, 240, 63, 40, 0, 30, 0, 1, 0, 27, 128, 255
+            ]
         );
     }
     #[test]

@@ -13,10 +13,8 @@ For deploy or push requests, apply the testing exception in [AGENTS.md](../../..
 
 ## Existing local deployment
 
-The Linux user service is `libertty.service` after migration, while existing deployments may still use `termai.service`.
+The Linux user service is `libertty.service`.
 Inspect the active unit's startup command to determine whether it runs a source checkout or the launcher installed by `./install.sh`.
-Use the active legacy unit name in the commands below until that service is migrated.
-For source deployments, update any old `target/release/termai` executable path to `target/release/libertty` before restarting.
 It listens on `127.0.0.1:7321`, mounts at `/t`, and allows `127.0.0.1`, `localhost`, and `omafwchy.taila510b.ts.net`.
 The phone URL is `https://omafwchy.taila510b.ts.net/t/` on the tailnet.
 Confirm the active service and route before deployment because the unit or installation mode may have changed.
@@ -24,7 +22,7 @@ A `libertty.service.d/branch.conf` drop-in means a branch worktree is deployed, 
 Remove that drop-in before deploying the main checkout, or the restart keeps running the worktree.
 
 ```sh
-systemctl --user show libertty.service termai.service --property=FragmentPath --property=ExecStart --property=WorkingDirectory --property=ActiveState
+systemctl --user show libertty.service --property=FragmentPath --property=ExecStart --property=WorkingDirectory --property=ActiveState
 tailscale serve status
 ```
 
@@ -47,7 +45,7 @@ curl -fsS https://omafwchy.taila510b.ts.net/t/healthz
 Check that both health responses report `ok: true` and the expected version from `package.json`.
 Open the phone URL, pair if needed, and verify that the frontend loads and a terminal connects.
 Read the pairing token locally from the startup journal or the configured data directory without committing or publishing it.
-The default token location is `~/.local/share/libertty/pairing-token`, with existing data in `~/.local/share/termai` retained during upgrades.
+The default token location is `~/.local/share/libertty/pairing-token`.
 
 ## Deploy a branch for development
 

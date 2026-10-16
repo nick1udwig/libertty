@@ -9,18 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { integrations, findExecutable } from './setup-integrations.mjs';
 
 const marker = '# Managed by the libertty installer';
-const legacyMarker = '# Managed by the Termai installer';
-const managed = text => [marker, legacyMarker].some(value => text?.toLowerCase().includes(value.toLowerCase()));
-function renamedEnvironment(environment) {
-  const result = { ...environment };
-  for (const [name, value] of Object.entries(environment)) {
-    if (!name.startsWith('TERMAI_')) continue;
-    const current = 'LIBERTTY_' + name.slice('TERMAI_'.length);
-    if (!(current in result)) result[current] = value;
-    delete result[name];
-  }
-  return result;
-}
+const managed = text => text?.includes(marker);
 export const shellQuote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 export function parseOptions(args) {
   const result = {};
@@ -76,23 +65,18 @@ export async function install(options, dependencies = {}) {
   const dataHome = installationPath(dependencies.dataHome || process.env.XDG_DATA_HOME || path.join(home, '.local/share'));
   const prefix = installationPath(path.resolve(options.prefix || path.join(dataHome, 'libertty')));
   const configFile = path.join(configHome, 'libertty/config.json');
-  const legacyConfigFile = path.join(configHome, 'termai/config.json');
   const launch = path.join(prefix, 'launch');
   const unit = platform === 'linux' ? path.join(configHome, 'systemd/user/libertty.service') : path.join(home, 'Library/LaunchAgents/com.libertty.server.plist');
-  const legacyUnit = platform === 'linux' ? path.join(configHome, 'systemd/user/termai.service') : path.join(home, 'Library/LaunchAgents/com.termai.server.plist');
   const metadata = JSON.parse(await readFile(path.join(bundle, 'release.json'), 'utf8'));
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(metadata.version) || metadata.tag !== 'v' + metadata.version || !/^[a-f0-9]{40}$/.test(metadata.commit)) throw new Error('Invalid release metadata.');
   if (metadata.platform !== platform + '-' + (dependencies.arch || process.arch)) throw new Error('This release does not match the host platform.');
-  if (metadata.backend !== undefined && !['node', 'rust'].includes(metadata.backend)) throw new Error('Unsupported release backend.');
+  if (metadata.backend !== 'rust') throw new Error('Unsupported release backend.');
   const previous = await read(configFile);
-  const legacyConfig = previous ? undefined : await read(legacyConfigFile);
-  const saved = previous || legacyConfig;
-  if (saved && !['libertty', 'termai'].includes(JSON.parse(saved).managedBy)) throw new Error('Existing config.json is not managed by libertty; review it before installing.');
-  const defaultData = !await exists(path.join(dataHome, 'libertty')) && await exists(path.join(dataHome, 'termai')) ? path.join(dataHome, 'termai') : path.join(dataHome, 'libertty');
-  const env = { HOST: '127.0.0.1', PORT: '7321', LIBERTTY_BASE_PATH: '/t', LIBERTTY_ALLOWED_HOSTS: 'localhost,127.0.0.1', LIBERTTY_DATA_DIR: defaultData, LIBERTTY_CWD: home, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome, PATH: [path.join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].join(':'), ...renamedEnvironment(saved ? JSON.parse(saved).env : {}) };
+  if (previous && JSON.parse(previous).managedBy !== 'libertty') throw new Error('Existing config.json is not managed by libertty; review it before installing.');
+  const env = { HOST: '127.0.0.1', PORT: '7321', LIBERTTY_BASE_PATH: '/t', LIBERTTY_ALLOWED_HOSTS: 'localhost,127.0.0.1', LIBERTTY_DATA_DIR: path.join(dataHome, 'libertty'), LIBERTTY_CWD: home, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome, PATH: [path.join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].join(':'), ...(previous ? JSON.parse(previous).env : {}) };
   if (options.port) env.PORT = options.port;
   if (options['base-path']) env.LIBERTTY_BASE_PATH = options['base-path'];
-  let bash = env.LIBERTTY_BASH || process.env.LIBERTTY_BASH || process.env.TERMAI_BASH || (platform === 'darwin' ? '/opt/homebrew/bin/bash' : '/bin/bash');
+  let bash = env.LIBERTTY_BASH || process.env.LIBERTTY_BASH || (platform === 'darwin' ? '/opt/homebrew/bin/bash' : '/bin/bash');
   const modern = candidate => run(candidate, ['-c', '(( BASH_VERSINFO[0] > 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 ))'], { optional: true, capture: true }).ok;
   if (!modern(bash) && platform === 'darwin') {
     if (!await ask('Install modern Bash with Homebrew?')) throw new Error('libertty needs Bash 4.4 or newer.');
@@ -116,22 +100,17 @@ export async function install(options, dependencies = {}) {
   const service = !options['no-service'] && userManager && await ask(platform === 'linux' ? 'Install and start libertty as a systemd user service?' : 'Install and start libertty as a login LaunchAgent?');
   if (!userManager && !options['no-service']) console.log('No systemd user manager is available; the launcher will be installed for manual use.');
   const oldUnit = await read(unit);
-  const oldLegacyUnit = await read(legacyUnit);
-  if (service && ((oldUnit && !managed(oldUnit)) || (oldLegacyUnit && !managed(oldLegacyUnit)))) throw new Error('Existing terminal service is not installer-managed; use --no-service or migrate it explicitly.');
+  if (service && oldUnit && !managed(oldUnit)) throw new Error('Existing terminal service is not installer-managed; use --no-service or migrate it explicitly.');
   const oldLauncher = await read(launch);
   if (oldLauncher && !managed(oldLauncher)) throw new Error('Existing launch file is not installer-managed.');
   const userBin = path.join(home, '.local/bin/libertty'), oldUserBin = await read(userBin);
-  const legacyUserBin = path.join(home, '.local/bin/termai'), oldLegacyUserBin = await read(legacyUserBin);
   if (oldUserBin && !managed(oldUserBin)) throw new Error('Existing ~/.local/bin/libertty is not installer-managed.');
   const current = path.join(prefix, 'current'), oldCurrent = await readlink(current).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
   const releaseDir = path.join(prefix, 'releases', metadata.tag + '-' + metadata.platform + '-' + metadata.commit.slice(0, 12));
   const oldRecord = await read(path.join(prefix, 'install.json'));
   const active = service && (platform === 'linux' ? run('systemctl', ['--user', 'is-active', '--quiet', 'libertty.service'], { optional: true, capture: true }).ok : run('launchctl', ['print', 'gui/' + process.getuid() + '/com.libertty.server'], { optional: true, capture: true }).ok);
   const enabled = service && platform === 'linux' && run('systemctl', ['--user', 'is-enabled', '--quiet', 'libertty.service'], { optional: true, capture: true }).ok;
-  const migrateService = service && !!oldLegacyUnit;
-  const legacyActive = migrateService && (platform === 'linux' ? run('systemctl', ['--user', 'is-active', '--quiet', 'termai.service'], { optional: true, capture: true }).ok : run('launchctl', ['print', 'gui/' + process.getuid() + '/com.termai.server'], { optional: true, capture: true }).ok);
-  const legacyEnabled = migrateService && platform === 'linux' && run('systemctl', ['--user', 'is-enabled', '--quiet', 'termai.service'], { optional: true, capture: true }).ok;
-  if ((active || legacyActive) && !await ask('Restart libertty to apply this release (ends live terminal connections)?')) throw new Error('Installation cancelled before changing the running service.');
+  if (active && !await ask('Restart libertty to apply this release (ends live terminal connections)?')) throw new Error('Installation cancelled before changing the running service.');
   await mkdir(path.dirname(releaseDir), { recursive: true, mode: 0o700 });
   if (!await exists(releaseDir)) {
     const staging = releaseDir + '.new-' + process.pid;
@@ -142,17 +121,11 @@ export async function install(options, dependencies = {}) {
   const restore = async (file, value, mode) => { if (value === undefined) await rm(file, { force: true }); else await atomic(file, value, mode); };
   const config = { managedBy: 'libertty', env, version: metadata.version, commit: metadata.commit };
   try {
-    if (migrateService) {
-      if (platform === 'linux') run('systemctl', ['--user', 'disable', '--now', 'termai.service']);
-      else if (legacyActive) run('launchctl', ['bootout', label + '/com.termai.server']);
-      await rm(legacyUnit);
-    }
     await rm(current + '.new', { force: true }); await symlink(releaseDir, current + '.new'); await rename(current + '.new', current);
     await atomic(configFile, JSON.stringify(config, null, 2) + '\n');
-    const command = metadata.backend === 'rust' ? shellQuote(path.join(current, 'bin/libertty-backend')) : shellQuote(path.join(current, 'bin/node')) + ' ' + shellQuote(path.join(current, 'scripts/launch.mjs'));
+    const command = shellQuote(path.join(current, 'bin/libertty-backend'));
     await atomic(launch, '#!/bin/sh\n' + marker + '\nexec ' + command + ' --config ' + shellQuote(configFile) + ' "$@"\n', 0o755);
     await atomic(userBin, '#!/bin/sh\n' + marker + '\nexec ' + shellQuote(launch) + ' "$@"\n', 0o755);
-    if (managed(oldLegacyUserBin)) await atomic(legacyUserBin, '#!/bin/sh\n' + marker + '\nexec ' + shellQuote(launch) + ' "$@"\n', 0o755);
     if (service) {
       if (platform === 'linux') {
         await atomic(unit, marker + '\n[Unit]\nDescription=libertty terminal workspace\nAfter=network.target\n\n[Service]\nType=simple\nExecStart="' + launch + '"\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n');
@@ -179,7 +152,6 @@ export async function install(options, dependencies = {}) {
     if (service) run(platform === 'linux' ? 'systemctl' : 'launchctl', platform === 'linux' ? ['--user', 'stop', 'libertty.service'] : ['bootout', label + '/com.libertty.server'], { optional: true });
     await rm(current, { force: true }); if (oldCurrent) await symlink(oldCurrent, current);
     await restore(configFile, previous); await restore(launch, oldLauncher, 0o755); await restore(userBin, oldUserBin, 0o755);
-    if (managed(oldLegacyUserBin)) await restore(legacyUserBin, oldLegacyUserBin, 0o755);
     await restore(path.join(prefix, 'install.json'), oldRecord);
     if (service) {
       await restore(unit, oldUnit);
@@ -188,14 +160,6 @@ export async function install(options, dependencies = {}) {
         if (!enabled) run('systemctl', ['--user', 'disable', 'libertty.service'], { optional: true });
         if (active) run('systemctl', ['--user', 'restart', 'libertty.service'], { optional: true });
       } else if (active) run('launchctl', ['bootstrap', label, unit], { optional: true });
-    }
-    if (migrateService) {
-      await restore(legacyUnit, oldLegacyUnit);
-      if (platform === 'linux') {
-        run('systemctl', ['--user', 'daemon-reload'], { optional: true });
-        if (legacyEnabled) run('systemctl', ['--user', 'enable', 'termai.service'], { optional: true });
-        if (legacyActive) run('systemctl', ['--user', 'restart', 'termai.service'], { optional: true });
-      } else if (legacyActive) run('launchctl', ['bootstrap', label, legacyUnit], { optional: true });
     }
     throw new Error(error.message + '\nPrevious release, configuration and service restored.');
   }

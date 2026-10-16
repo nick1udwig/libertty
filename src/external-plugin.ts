@@ -22,8 +22,6 @@ const sdk = `const mergeFileSnapshot = ${mergeFileSnapshot.toString()};` + Strin
       });
     }
   });
-  // Installed plugins may still use the original SDK global.
-  window.termai = window.libertty;
   window.addEventListener('message', event => {
     if (port || event.source !== parent || event.data?.type !== 'libertty-plugin-init' || !event.ports[0]) return;
     port = event.ports[0]; context = event.data.context;

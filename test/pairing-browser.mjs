@@ -51,19 +51,13 @@ try {
   assert.deepEqual(errors, []);
   assert.ok(hmr.some(m => m.includes('connected.')), 'authenticated Vite HMR should connect');
   const saved = await page.context().storageState();
-  const legacyCookie = saved.cookies.find(cookie => cookie.name === 'libertty');
-  assert.equal((await fetch(base + '@vite/client', { headers: { Cookie: 'termai=' + legacyCookie.value } })).status, 200, 'legacy pairing cookies must unlock protected development assets');
   assert.equal(await deniedUpgrade({ Origin: 'https://untrusted.invalid', Cookie: 'libertty=' + saved.cookies.find(cookie => cookie.name === 'libertty').value }), 403, 'paired Vite upgrades require an allowed origin');
   assert.ok(saved.cookies.find(cookie => cookie.name === 'libertty').expires > Date.now() / 1000, 'pairing cookie must survive browser shutdown');
   saved.cookies = [];
-  for (const entry of saved.origins) for (const item of entry.localStorage) if (item.name.startsWith('libertty.')) item.name = item.name.replace(/^libertty\./, 'termai.');
-  saved.origins[0].localStorage.push({ name: 'termai.theme', value: '"paper"' });
   const reopened = await browser.newContext({ storageState: saved }), reopenedPage = await reopened.newPage();
   await reopenedPage.goto(base); await reopenedPage.locator('#terminal-stack iframe').waitFor();
   const reopenedFrame = await (await reopenedPage.locator('#terminal-stack iframe').elementHandle()).contentFrame();
   await reopenedFrame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected');
-  assert.equal(await reopenedPage.evaluate(() => localStorage.getItem('libertty.theme')), '"paper"');
-  assert.equal(await reopenedPage.evaluate(() => localStorage.getItem('termai.theme')), null);
   await reopened.close();
   console.log('PASS ' + ('Rust') + ' development browser: mounted pairing gate, protected development assets, incorrect-token rejection, connected terminal, remembered pairing without cookies, authenticated Vite HMR');
 } finally { await browser?.close(); server.kill('SIGTERM'); await exited; await rm(directory, { recursive: true, force: true }); }

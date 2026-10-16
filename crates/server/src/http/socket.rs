@@ -109,17 +109,8 @@ impl Input<'_> {
             Self::Metadata { .. } => {}
         }
     }
-    fn binary(
-        &self,
-        bytes: &[u8],
-        mode: wire::Mode,
-        pressure: &mut Pressure,
-    ) -> Result<bool, &'static str> {
+    fn binary(&self, bytes: &[u8], pressure: &mut Pressure) -> Result<bool, &'static str> {
         if matches!(self, Self::Metadata { .. }) {
-            return Ok(false);
-        }
-        if mode == wire::Mode::Json {
-            self.audio(bytes.to_vec());
             return Ok(false);
         }
         match wire::decode_as::<ClientMessage>(bytes).map_err(|_| "Invalid wire message")? {
@@ -297,7 +288,7 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                 alive = true;
                 let result = match message {
                     Message::Text(text) => input.text(&text, &mut pressure),
-                    Message::Binary(bytes) => input.binary(&bytes, mode, &mut pressure),
+                    Message::Binary(bytes) => input.binary(&bytes, &mut pressure),
                     Message::Ping(bytes) => {
                         if !send(&mut sender, Message::Pong(bytes), None).await {
                             break;

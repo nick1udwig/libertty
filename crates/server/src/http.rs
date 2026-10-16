@@ -50,7 +50,7 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self, String> {
         let setting = |name: &str, fallback: &str| {
-            crate::environment::var(name)
+            std::env::var(name)
                 .ok()
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| fallback.into())
@@ -104,11 +104,13 @@ impl Config {
         let home = setting("HOME", ".");
         let data_directory = PathBuf::from(setting(
             "LIBERTTY_DATA_DIR",
-            &crate::environment::data_directory(&home).to_string_lossy(),
+            &PathBuf::from(&home)
+                .join(".local/share/libertty")
+                .to_string_lossy(),
         ));
         let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let packaged = crate::release::packaged_root().map(|root| root.join("dist"));
-        let dist = crate::environment::var_os("LIBERTTY_DIST_DIR")
+        let dist = std::env::var_os("LIBERTTY_DIST_DIR")
             .map(PathBuf::from)
             .or(packaged)
             .unwrap_or_else(|| source_root.join("dist"));
@@ -123,7 +125,7 @@ impl Config {
             allowed_origins: set("LIBERTTY_ALLOWED_ORIGINS", ""),
             release: crate::release::metadata(),
             dev_frontend: if setting("NODE_ENV", "production") == "development" {
-                crate::environment::var("LIBERTTY_DEV_FRONTEND")
+                std::env::var("LIBERTTY_DEV_FRONTEND")
                     .ok()
                     .map(|v| crate::dev::origin(&v))
                     .transpose()?
@@ -148,8 +150,6 @@ struct Ticket {
     until: Instant,
 }
 struct HerdrTicket {
-    history_delta: bool,
-    frame_ack: bool,
     size: Option<herdr_terminal_stream::Size>,
     owner: String,
     session: String,
@@ -266,13 +266,13 @@ impl App {
     pub async fn new(config: Config) -> Result<Arc<Self>, String> {
         let token = pairing_token(
             &config.data_directory,
-            crate::environment::var("LIBERTTY_TOKEN").ok().as_deref(),
+            std::env::var("LIBERTTY_TOKEN").ok().as_deref(),
         )
         .map_err(|e| e.to_string())?;
         let owners = Pairings::open(&config.data_directory, &token).map_err(|e| e.to_string())?;
         let owners = Arc::new(Mutex::new(owners));
         let registry = owners.clone();
-        let contact = crate::environment::var("LIBERTTY_PUSH_CONTACT")
+        let contact = std::env::var("LIBERTTY_PUSH_CONTACT")
             .ok()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| {
@@ -296,10 +296,7 @@ impl App {
         let services = HostServices::new();
         let commands = services
             .catalog
-            .executable_names(
-                &crate::environment::vars().collect(),
-                &CancellationToken::new(),
-            )
+            .executable_names(&std::env::vars().collect(), &CancellationToken::new())
             .await?;
         Ok(Arc::new(Self {
             vault: Arc::new(Vault::new(&config.data_directory)),
@@ -367,10 +364,7 @@ impl App {
             .and_then(|s| {
                 s.split(';').find_map(|s| {
                     let cookie = s.trim_start();
-                    cookie
-                        .strip_prefix("libertty=")
-                        .or_else(|| cookie.strip_prefix("termai="))
-                        .filter(|s| valid(s))
+                    cookie.strip_prefix("libertty=").filter(|s| valid(s))
                 })
             });
         bearer
@@ -435,7 +429,7 @@ impl App {
             return Ok(terminal.session.clone());
         }
         drop(registry);
-        let cwd = crate::environment::var("LIBERTTY_CWD")
+        let cwd = std::env::var("LIBERTTY_CWD")
             .ok()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| {
@@ -1073,12 +1067,6 @@ async fn herdr_socket_session(
         ) {
             Ok(view) => {
                 view.set_recording_scope(recording_scope);
-                if ticket.history_delta {
-                    view.enable_history_delta();
-                }
-                if ticket.frame_ack {
-                    view.enable_frame_ack();
-                }
                 Some(view)
             }
             Err(_) => return,

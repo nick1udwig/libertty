@@ -82,7 +82,7 @@ impl Cache {
             ShellContext {
                 commands: Arc::default(),
                 functions: Arc::default(),
-                environment: Arc::new(crate::environment::vars().collect()),
+                environment: Arc::new(std::env::vars().collect()),
             }
         } else {
             let State {
@@ -110,7 +110,7 @@ impl Cache {
                     .collect()),
                 cached(path::join(&[dir, "environment"]), environment, |raw| {
                     if raw.is_empty() {
-                        crate::environment::vars().collect()
+                        std::env::vars().collect()
                     } else {
                         raw.split('\0')
                             .filter_map(|s| s.split_once('='))

@@ -68,7 +68,7 @@ impl HelpProvider {
             return Ok(None);
         }
         let paths = if BUILTINS.contains(&command) {
-            vec![local_bash(&crate::environment::vars().collect())?]
+            vec![local_bash(&std::env::vars().collect())?]
         } else {
             env.get("PATH")
                 .map(String::as_str)

@@ -1,21 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { builtinIds, PluginRegistry, migratePluginTab, migrateReadingTab, type TabPlugin } from '../src/plugins.ts';
+import { builtinIds, PluginRegistry, type TabPlugin } from '../src/plugins.ts';
 import { parsePluginPackage, pluginRequest, pluginState } from '../src/plugin-package.ts';
 import { readingTab } from '../src/tabs.ts';
 import { readingOpen } from '../src/reading-request.ts';
 
 const host = { id: 'local', name: 'This machine', kind: 'http' as const, backendId: 'primary' };
-const tab = { id: 'tab', name: 'Test', session: 'default', backendId: 'primary' };
+const tab = { pluginId: 'terminal', pluginVersion: '1', id: 'tab', name: 'Test', session: 'default', backendId: 'primary' };
 function plugin(id: string, version = '1'): TabPlugin {
   return { id, version, name: id, connectLabel: 'Connect ' + id, icon: '', panelPrefix: 'plugin-', available: host => host.kind === 'http',
     connect: async () => {}, mount: async () => { throw new Error('Not used'); }, close: async () => true };
 }
-test('legacy tabs migrate and the registry preserves pinned versions and unavailable tabs', () => {
-  assert.equal(migratePluginTab(tab).pluginId, 'terminal');
-  assert.equal(migratePluginTab({ ...tab, mode: 'files' }).pluginId, 'files');
-  assert.equal(migratePluginTab({ ...tab, mode: 'herdr' }).pluginId, 'herdr');
+test('the registry preserves pinned versions and unavailable tabs', () => {
   const registry = new PluginRegistry(), old = plugin('example.logs'), next = plugin('example.logs', '2');
   registry.register(old); registry.register(next);
   assert.deepEqual(registry.actions(host), [next]);
@@ -26,16 +23,6 @@ test('legacy tabs migrate and the registry preserves pinned versions and unavail
   registry.enable(old.id, false); assert.equal(registry.get(old.id), undefined); assert.deepEqual(registry.actions(host), []);
   registry.enable(old.id, true); assert.equal(registry.get(old.id), next);
   registry.remove(old.id); assert.equal(registry.get(old.id, '1'), undefined); assert.equal(registry.get(old.id, '2'), undefined);
-});
-test('legacy reading tabs pin the reading plugin and borrow their source session', () => {
-  const registry = new PluginRegistry(), reader = plugin('reading'); registry.register(reader);
-  const file = migrateReadingTab({ ...tab, path: 'README.md', sourceTabId: 'terminal-tab', lastUsed: 123 });
-  assert.equal(registry.forTab(file), reader);
-  assert.equal(file.readPath, 'README.md'); assert.equal(file.parentTabId, 'terminal-tab');
-  assert.equal(file.ownsSession, false); assert.equal(file.session, tab.session); assert.equal(file.lastUsed, 123);
-  const capture = migrateReadingTab({ ...tab, path: 'git diff', sourceTabId: 'terminal-tab', capture: 'a'.repeat(32), exitCode: 2 });
-  assert.equal(capture.readCapture, 'a'.repeat(32)); assert.equal(capture.readExitCode, 2);
-  assert.equal(capture.readPath, 'git diff'); assert.equal(capture.pluginVersion, '1'); assert.equal(capture.ownsSession, false);
 });
 test('Herdr readers and linked files retain the pane connection and return to their source tab', () => {
   const source = { ...tab, pluginId: 'herdr', herdrSession: 'work', herdrSource: 'source-id', readHerdrTerminal: 'term_0' };

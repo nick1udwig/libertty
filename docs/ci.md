@@ -29,7 +29,7 @@ npx --no-install playwright-core install --with-deps chromium
 npm run verify:local
 ```
 
-[scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native Clippy, Rust tests, the complete build, JavaScript and contract tests, installer fixtures, saved-data compatibility and browser checks in sequence.
+[scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native Clippy, Rust tests, the complete build, JavaScript and contract tests, installer fixtures and browser checks in sequence.
 [scripts/check-browser.mjs](../scripts/check-browser.mjs) contains the single explicit browser list used by both local validation and the Linux release checking job.
 It covers native repairs, SSH, reading, Herdr, plugins, pairing, reconnects, gestures, touch, dictation, files and workspace behavior.
 It also downloads and verifies the pinned Herdr release before running dictation, spaces, resize, flash and fullscreen scrolling against the real native integration.

@@ -17,19 +17,17 @@ function pause(ms: number, signal?: AbortSignal | null) {
     signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
   });
 }
-/** Same-origin changes with a JSON body carry a key, so the backend replays an earlier attempt's reply instead of repeating it. */
-function idempotencyKey(url: URL | string, init: RequestInit) {
+/** Changes with a JSON body carry a key, so the backend replays an earlier attempt's reply instead of repeating it. */
+function idempotencyKey(init: RequestInit) {
   const method = (init.method || 'GET').toUpperCase();
-  const sameOrigin = typeof location === 'undefined' || new URL(url, location.href).origin === location.origin;
-  // Older cross-origin backends would reject the unfamiliar header during CORS preflight.
-  return sameOrigin && ['POST', 'DELETE'].includes(method) && (init.body == null || typeof init.body === 'string') ? crypto.randomUUID() : undefined;
+  return ['POST', 'DELETE'].includes(method) && (init.body == null || typeof init.body === 'string') ? crypto.randomUUID() : undefined;
 }
 /** Retry only what cannot repeat an action: reads, and changes the backend recognizes by their idempotency key. */
 export async function request(url: URL | string, options: RequestOptions = {}): Promise<Response> {
   const { token, recoverAuth, timeout = 12000, ...init } = options;
   const currentToken = () => typeof token === 'function' ? token() : token;
   const method = (init.method || 'GET').toUpperCase();
-  const send = async (credential?: string, key = new Headers(init.headers).get('Idempotency-Key') || idempotencyKey(url, init)) => {
+  const send = async (credential?: string, key = new Headers(init.headers).get('Idempotency-Key') || idempotencyKey(init)) => {
     const retried = ['GET', 'HEAD'].includes(method) || !!key;
     for (let attempt = 1, timedOut = false; ; attempt++) {
       const headers = new Headers(init.headers);

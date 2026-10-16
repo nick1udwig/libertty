@@ -38,7 +38,7 @@ Use **Actions → Release → Run workflow** to build without creating or modify
 Select the workflow branch and optionally supply a branch, tag or commit in the `ref` field.
 Manual runs produce downloadable workflow artifacts and never execute the publication job.
 
-One Linux x64 checking job runs Rust formatting, native Clippy, Rust and JavaScript tests, contracts, installer fixtures, saved-data compatibility and all browser and native Herdr harnesses.
+One Linux x64 checking job runs Rust formatting, native Clippy, Rust and JavaScript tests, contracts, installer fixtures and all browser and native Herdr harnesses.
 The release workflow and local validation use the same `npm run verify:local` command.
 All full validation and packaging use the Node version pinned in `build/release-config.json`.
 Each platform builds its frontend, then `release:package` compiles the optimized native executable once and creates the archive that both smoke checks exercise.

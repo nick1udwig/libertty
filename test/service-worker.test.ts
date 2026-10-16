@@ -48,8 +48,6 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
     };
   }
   await caches.open('libertty-shell:/other/:keep');
-  await caches.open('termai-shell:/t/:legacy');
-  await caches.open('termai-shell:/other/:keep');
   const first = worker('one');
   await first.dispatch('install'); await first.dispatch('activate');
   assert.equal(storage.get('libertty-shell:/t/:one')!.size, 6);
@@ -82,5 +80,5 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
   offline = true;
   assert.equal((await first.dispatch('fetch', 'https://example.com/t/assets/two.js'))?.status, 200);
   await second.dispatch('activate');
-  assert.deepEqual(await caches.keys(), ['libertty-shell:/other/:keep', 'termai-shell:/other/:keep', 'libertty-shell:/t/:two']);
+  assert.deepEqual(await caches.keys(), ['libertty-shell:/other/:keep', 'libertty-shell:/t/:two']);
 });

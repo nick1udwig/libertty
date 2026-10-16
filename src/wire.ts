@@ -8,11 +8,10 @@ export interface Link { effectiveType?: string; downlink?: number; rtt?: number 
 export function constrainedLink(link: Link | undefined = typeof navigator === 'undefined' ? undefined : (navigator as Navigator & { connection?: Link }).connection): boolean {
   return !!link && (['slow-2g', '2g', '3g'].includes(link.effectiveType || '') || (typeof link.downlink === 'number' && link.downlink <= 2));
 }
-export function wireProtocols(offered: string[] | undefined): string[] {
-  if (!offered?.includes(BINARY_PROTOCOL)) return [];
+export function wireProtocols(): string[] {
   if (typeof DecompressionStream !== 'function') return [BINARY_PROTOCOL];
-  if (constrainedLink() && offered.includes(GZIP_PROTOCOL)) return [GZIP_PROTOCOL, BINARY_PROTOCOL];
-  return offered.includes(GZIP_FAST_PROTOCOL) ? [GZIP_FAST_PROTOCOL, BINARY_PROTOCOL] : [BINARY_PROTOCOL];
+  if (constrainedLink()) return [GZIP_PROTOCOL, BINARY_PROTOCOL];
+  return [GZIP_FAST_PROTOCOL, BINARY_PROTOCOL];
 }
 async function inflate(bytes: Uint8Array): Promise<Uint8Array> {
   const input = new Uint8Array(bytes).buffer;
@@ -31,16 +30,15 @@ export async function decodeWire(data: string | ArrayBuffer | Blob): Promise<any
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
   if (kind === 0) return JSON.parse(decoder.decode(payload));
   if (kind === 1 && payload.length >= 8) { const seq = view.getFloat64(0, true); if (!Number.isSafeInteger(seq) || seq < 0) throw new Error('Invalid output sequence.'); return { type: 'output', seq, data: decoder.decode(payload.subarray(8)) }; }
-  if ((kind === 2 || kind === 7) && payload.length >= (kind === 7 ? 13 : 5)) {
-    const offset = kind === 7 ? 8 : 0, seq = kind === 7 ? view.getFloat64(0, true) : undefined;
-    if (seq !== undefined && (!Number.isSafeInteger(seq) || seq < 0)) throw new Error('Invalid frame sequence.');
-    if (payload[offset + 4] > 1) throw new Error('Invalid frame flags.');
-    return { type: 'herdr-frame', ...(seq !== undefined ? { seq } : {}), width: view.getUint16(offset, true), height: view.getUint16(offset + 2, true), full: payload[offset + 4] === 1, bytes: payload.subarray(offset + 5) };
+  if (kind === 7 && payload.length >= 13) {
+    const seq = view.getFloat64(0, true);
+    if (!Number.isSafeInteger(seq) || seq < 0) throw new Error('Invalid frame sequence.');
+    if (payload[12] > 1) throw new Error('Invalid frame flags.');
+    return { type: 'herdr-frame', seq, width: view.getUint16(8, true), height: view.getUint16(10, true), full: payload[12] === 1, bytes: payload.subarray(13) };
   }
   throw new Error('Unsupported outgoing wire message.');
 }
-export function encodeWire(message: { type: string; [key: string]: unknown }, protocol: string): string | ArrayBuffer {
-  if (![BINARY_PROTOCOL, GZIP_PROTOCOL, GZIP_FAST_PROTOCOL].includes(protocol)) return JSON.stringify(message);
+export function encodeWire(message: { type: string; [key: string]: unknown }): string | ArrayBuffer {
   let kind = 0, payload: Uint8Array;
   if (message.type === 'input' && typeof message.data === 'string' && Number.isSafeInteger(message.seq) && (message.seq as number) >= 0) {
     const data = encoder.encode(message.data); kind = 8; payload = new Uint8Array(8 + data.length);
@@ -52,10 +50,7 @@ export function encodeWire(message: { type: string; [key: string]: unknown }, pr
   else return JSON.stringify(message);
   const result = new Uint8Array(4 + payload.length); result.set([84, 77, 1, kind]); result.set(payload, 4); return result.buffer;
 }
-export function encodeAudio(data: ArrayBuffer, protocol: string): Uint8Array<ArrayBuffer> | ArrayBuffer;
-export function encodeAudio<B extends ArrayBufferLike>(data: Uint8Array<B>, protocol: string): Uint8Array<B> | Uint8Array<ArrayBuffer>;
-export function encodeAudio(data: Uint8Array | ArrayBuffer, protocol: string): Uint8Array | ArrayBuffer {
-  if (![BINARY_PROTOCOL, GZIP_PROTOCOL, GZIP_FAST_PROTOCOL].includes(protocol)) return data;
+export function encodeAudio(data: Uint8Array | ArrayBuffer): Uint8Array<ArrayBuffer> {
   const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : data;
   const result = new Uint8Array(bytes.length + 4); result.set([84, 77, 1, 6]); result.set(bytes, 4); return result;
 }

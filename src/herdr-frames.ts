@@ -2,7 +2,7 @@ import { node } from './dom.ts';
 import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
 
-interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; retain:boolean; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
+interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
 export interface FramesHost {
   url: string; session: string; source?: string;
   token(): string | undefined; authenticate(): Promise<void>;
@@ -46,7 +46,6 @@ export class HerdrFrames {
       entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
       entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible:this.host.visible() },location.origin);
     }
-    if (event.data.type === 'terminal-ready') entry.retain = event.data.retainGeometry === true;
     const geometry = event.data.cols + 'x' + event.data.rows;
     if (event.data.type === 'terminal-sizing' && active && event.data.presentation === entry.presentation) entry.geometry = geometry;
     if (event.data.type === 'terminal-rendered' && active && this.host.visible() && !this.host.held() && event.data.presentation === entry.presentation && geometry === entry.geometry) {
@@ -78,7 +77,7 @@ export class HerdrFrames {
     const id = frame.dataset.terminal!, entry = this.entries.get(id);
     if (!entry || entry.frame !== frame) { frame.remove(); return; }
     frame.inert = true;
-    if (keepVisible || matchMedia('(pointer: coarse) and (max-width: 1024px)').matches && entry.retain) {
+    if (keepVisible || matchMedia('(pointer: coarse) and (max-width: 1024px)').matches && entry.rendered) {
       frame.className = keepVisible ? 'herdr-terminal-previous' : 'herdr-terminal-cached'; frame.style.visibility = keepVisible ? '' : 'hidden';
       frame.contentWindow?.postMessage({type:'herdr-park',parked:true},location.origin);
     } else { frame.remove(); this.entries.delete(id); }
@@ -119,7 +118,7 @@ export class HerdrFrames {
       const url = new URL('terminal.html',document.baseURI);
       url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:selected,herdrSession:this.host.session,...(this.host.source?{herdrSource:this.host.source}:{})}).toString();
       frame.src = url.href; this.frame = frame;
-      const entry = {frame,session,pane:agent.paneId,retain:false,rendered:false}; this.entries.set(selected,entry); this.screen.append(frame); this.prepare(entry);
+      const entry = {frame,session,pane:agent.paneId,rendered:false}; this.entries.set(selected,entry); this.screen.append(frame); this.prepare(entry);
     }
     while (this.entries.size > 4) { const candidate = [...this.entries].find(([,entry]) => entry.frame !== this.frame && entry.frame !== this.displayed); if (!candidate) break; const [id, entry] = candidate; entry.frame.remove(); this.entries.delete(id); }
   }

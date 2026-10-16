@@ -1,3 +1,4 @@
+import { decodeWire } from '../src/wire.ts';
 // Actual terminal repair transactions with delay injected on both legs of the browser/backend boundary.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -37,8 +38,8 @@ try {
   const pending = new Map();
   const sent = [];
   socket = new WebSocket(base.replace('http:', 'ws:') + '/ws?after=0', { headers: { Origin: base, Cookie: cookie } });
-  socket.on('message', bytes => {
-    const message = JSON.parse(bytes.toString());
+  socket.on('message', async bytes => {
+    const message = await decodeWire(new Uint8Array(bytes).buffer);
     if (message.type === 'output') socket.send(JSON.stringify({ type: 'ack', seq: message.seq }));
     if (message.type === 'state') { state = message.state; inputRevision = Math.max(inputRevision, state.inputRevision); }
     if (message.type === 'repair-result') {

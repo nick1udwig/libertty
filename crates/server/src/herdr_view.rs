@@ -91,8 +91,8 @@ pub struct View {
     /// Advances with every layout change, so stale confirmations stop.
     layout: tokio::sync::watch::Sender<u64>,
     frame_ready: tokio::sync::Notify,
-    frames: Mutex<Option<frames::Frames>>,
-    history_delta: Mutex<Option<history::History>>,
+    frames: Mutex<frames::Frames>,
+    history_delta: Mutex<history::History>,
     cancel: CancellationToken,
     services: crate::host::HostServices,
     recording_scope: Mutex<String>,
@@ -168,8 +168,8 @@ impl View {
             }),
             layout,
             frame_ready: tokio::sync::Notify::new(),
-            frames: Mutex::new(None),
-            history_delta: Mutex::new(None),
+            frames: Mutex::new(frames::Frames::default()),
+            history_delta: Mutex::new(history::History::default()),
             cancel,
         });
         if let Some(size) = initial_size {
@@ -321,14 +321,10 @@ impl View {
                 }
                 if let ServerMessage::HerdrFrame(frame) = frame {
                     let mut frames = view.frames.lock().unwrap();
-                    if let Some(frames) = frames.as_mut() {
-                        if frames.push(frame) {
-                            view.terminal.snapshot();
-                        }
-                        if let Some(frame) = frames.next() {
-                            view.send(ServerMessage::HerdrFrame(frame));
-                        }
-                    } else {
+                    if frames.push(frame) {
+                        view.terminal.snapshot();
+                    }
+                    if let Some(frame) = frames.next() {
                         view.send(ServerMessage::HerdrFrame(frame));
                     }
                 } else if let ServerMessage::ReadingError { message } = frame {
@@ -363,12 +359,8 @@ impl View {
                             Ok(message) => {
                                 if let ServerMessage::Screen { text, .. } = message.as_ref() {
                                     let mut delivery = view.history_delta.lock().unwrap();
-                                    if let Some(delivery) = delivery.as_mut() {
-                                        if let Some(message) = delivery.next(text.clone()) {
-                                            view.send(message);
-                                        }
-                                    } else {
-                                        view.send(message.as_ref().clone());
+                                    if let Some(message) = delivery.next(text.clone()) {
+                                        view.send(message);
                                     }
                                 }
                             }
@@ -420,12 +412,6 @@ impl View {
     }
     pub fn set_recording_scope(&self, scope: String) {
         *self.recording_scope.lock().unwrap() = scope;
-    }
-    pub fn enable_history_delta(&self) {
-        *self.history_delta.lock().unwrap() = Some(history::History::default());
-    }
-    pub fn enable_frame_ack(&self) {
-        *self.frames.lock().unwrap() = Some(frames::Frames::default());
     }
     fn begin_layout(&self) -> u64 {
         self.layout.send_modify(|epoch| *epoch += 1);
@@ -794,20 +780,17 @@ impl View {
                 Ok(())
             }
             ClientMessage::Ack { seq } => {
-                if let Some(frames) = self.frames.lock().unwrap().as_mut() {
-                    if frames.acknowledge(seq) {
-                        self.terminal.snapshot();
-                    }
-                    if let Some(frame) = frames.next() {
-                        self.send(ServerMessage::HerdrFrame(frame));
-                    }
+                let mut frames = self.frames.lock().unwrap();
+                if frames.acknowledge(seq) {
+                    self.terminal.snapshot();
+                }
+                if let Some(frame) = frames.next() {
+                    self.send(ServerMessage::HerdrFrame(frame));
                 }
                 Ok(())
             }
             ClientMessage::HerdrFrameRequest => {
-                if let Some(delivery) = self.history_delta.lock().unwrap().as_mut() {
-                    delivery.reset();
-                }
+                self.history_delta.lock().unwrap().reset();
                 self.terminal.refresh();
                 // Subscribe briefly to refresh the shared active resource.
                 if let Ok(history) = self

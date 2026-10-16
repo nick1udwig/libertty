@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { decodeWire } from '../src/wire.ts';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -36,7 +37,7 @@ try {
   const { ticket } = await ticketResponse.json();
   const socket = new WebSocket(base.replace('http:', 'ws:') + 'ws?ticket=' + ticket, { origin: new URL(base).origin });
   const messages = [];
-  socket.on('message', bytes => messages.push(JSON.parse(bytes.toString())));
+  socket.on('message', async bytes => messages.push(await decodeWire(new Uint8Array(bytes).buffer)));
   await once(socket, 'open');
   const wait = async predicate => { for (let i = 0; i < 150; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 50)); } throw new Error('Packaged PTY smoke check timed out.'); };
   await wait(() => messages.some(message => message.type === 'state' && message.state.ready));
@@ -45,7 +46,7 @@ try {
   await wait(() => messages.some(message => message.type === 'output' && message.data.includes('RELEASE_PTY_OK')) && messages.filter(message => message.type === 'state' && message.state.ready).length > 1);
   socket.close();
   backend.kill(); await exited; backend = undefined;
-  console.log('Packaged release passed: version, mounted frontend, pairing, real PTY and Bash prompt hooks (' + (version.backend || 'node') + ').');
+  console.log('Packaged release passed: version, mounted frontend, pairing, real PTY and Bash prompt hooks (' + version.backend + ').');
 } finally {
   if (backend && backend.exitCode === null) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
   await rm(directory, { recursive: true, force: true });

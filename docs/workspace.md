@@ -6,7 +6,7 @@ It builds on the single repair library at `2a99127`; master and the former exper
 ## Runtime boundaries
 
 `src/main.ts` wires workspace services, backend authentication and startup.
-`workspace-storage.ts` validates and migrates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
+`workspace-storage.ts` validates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
 These modules share one live workspace state so replacing saved hosts, backends or tabs is visible to pending actions.
 Each terminal uses a same-origin `terminal.html` frame running the existing renderer and input pipeline.
 Frames stay mounted when switching tabs.

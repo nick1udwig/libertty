@@ -40,7 +40,7 @@ try {
   await cp(path.join(root, 'target/release/libertty'), path.join(temporary, 'bin/libertty-backend'));
   await chmod(path.join(temporary, 'bin/libertty-backend'), 0o755);
   await chmod(path.join(temporary, 'bin/node'), 0o755);
-  await writeFile(path.join(temporary, 'bin/libertty'), '#!/bin/sh\nset -eu\napp=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexport LIBERTTY_CWD="${LIBERTTY_CWD-${TERMAI_CWD:-$HOME}}"\ncd "$app"\nexec "$app/bin/libertty-backend" "$@"\n', { mode: 0o755 });
+  await writeFile(path.join(temporary, 'bin/libertty'), '#!/bin/sh\nset -eu\napp=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\nexport LIBERTTY_CWD="${LIBERTTY_CWD-$HOME}"\ncd "$app"\nexec "$app/bin/libertty-backend" "$@"\n', { mode: 0o755 });
   const metadata = { version: pkg.version, tag, commit: git('rev-parse', 'HEAD'), dirty: !!git('status', '--porcelain'), platform, backend, node: process.version, rust: execFileSync('rustc', ['--version'], { encoding: 'utf8' }).trim() };
   await writeFile(path.join(temporary, 'release.json'), JSON.stringify(metadata, null, 2) + '\n');
   if (process.env.VOXTYPE_MOBILE_CHECKOUT && process.platform === 'linux') {

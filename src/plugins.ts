@@ -1,17 +1,8 @@
-import type { HostProfile, LegacyReadingTab, TerminalTab } from './connections.ts';
+import type { HostProfile, TerminalTab } from './connections.ts';
 
 export const BUILTIN_VERSION = '1';
 export const builtinIds = ['terminal', 'files', 'herdr', 'reading'] as const;
-export function tabPluginId(tab: TerminalTab): string { return tab.pluginId || tab.mode || 'terminal'; }
-export function migratePluginTab(tab: TerminalTab): TerminalTab {
-  return { ...tab, pluginId: tabPluginId(tab), pluginVersion: tab.pluginVersion || BUILTIN_VERSION };
-}
-export function migrateReadingTab(tab: LegacyReadingTab): TerminalTab {
-  const { path, capture, exitCode, sourceTabId, ...base } = tab;
-  return { ...base, pluginId: 'reading', pluginVersion: BUILTIN_VERSION, ownsSession: false,
-    readPath: path, readCapture: capture, readExitCode: exitCode, parentTabId: sourceTabId };
-}
-
+export function tabPluginId(tab: TerminalTab): string { return tab.pluginId; }
 export interface PluginView {
   element: HTMLElement;
   setVisible(visible: boolean): void;
@@ -51,7 +42,7 @@ export class PluginRegistry {
     if (this.disabled.has(id)) return;
     return version ? this.versions.get(this.key(id, version)) : this.current.get(id);
   }
-  forTab(tab: TerminalTab) { return this.get(tabPluginId(tab), tab.pluginVersion || BUILTIN_VERSION); }
+  forTab(tab: TerminalTab) { return this.get(tabPluginId(tab), tab.pluginVersion); }
   actions(host: HostProfile) { return [...this.current.values()].filter(plugin => !this.disabled.has(plugin.id) && plugin.available(host)); }
   enable(id: string, enabled: boolean) { if (enabled) this.disabled.delete(id); else this.disabled.add(id); }
   remove(id: string) {

@@ -183,7 +183,7 @@ try {
   const secondSession = await (await request(second, 'api/sessions', secondOwner, { files: true })).json();
   await page.evaluate(({ owner, remote, fixture, second, secondOwner, secondSession }) => {
     localStorage.setItem('libertty.backends', JSON.stringify([{ id: 'second', name: 'Other backend', url: second }]));
-    localStorage.setItem('libertty.tabs', JSON.stringify([{ id: 'remote-files', name: 'SSH files', mode: 'files', backendId: 'primary', session: remote.id, directory: fixture + '/remote' }, { id: 'direct-files', name: 'Direct files', mode: 'files', backendId: 'second', session: secondSession.id }]));
+    localStorage.setItem('libertty.tabs', JSON.stringify([{ id: 'remote-files', name: 'SSH files', pluginId: 'files', pluginVersion: '1', backendId: 'primary', session: remote.id, directory: fixture + '/remote' }, { id: 'direct-files', name: 'Direct files', pluginId: 'files', pluginVersion: '1', backendId: 'second', session: secondSession.id }]));
     localStorage.setItem('libertty.activeTab', JSON.stringify('remote-files'));
     localStorage.setItem('libertty.access:' + second, secondOwner);
   }, { owner, remote, fixture, second, secondOwner, secondSession });

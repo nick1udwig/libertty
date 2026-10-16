@@ -23,7 +23,7 @@ async function build(command, args) {
 }
 try {
   await build('cargo', ['build', '--locked', '-p', 'libertty-server', '--bin', 'libertty']);
-  const segments = (process.env.LIBERTTY_BASE_PATH ?? process.env.TERMAI_BASE_PATH ?? '').split('/').filter(Boolean);
+  const segments = (process.env.LIBERTTY_BASE_PATH ?? '').split('/').filter(Boolean);
   if (segments.some(segment => !/^[A-Za-z0-9_-]+$/.test(segment))) throw Error('Invalid LIBERTTY_BASE_PATH.');
   const base = '/' + (segments.length ? segments.join('/') + '/' : '');
   vite = await createServer({ root, base, server: { host: '127.0.0.1', port: 0, strictPort: false,

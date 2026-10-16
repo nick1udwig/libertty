@@ -219,7 +219,7 @@ impl CatalogHost {
                                 .map_err(|e| e.to_string())?
                                 .to_string_lossy()
                                 .into_owned(),
-                            env: crate::environment::vars().collect(),
+                            env: std::env::vars().collect(),
                             timeout: Duration::from_millis(1500),
                             max_buffer: 128 * 1024,
                         };

@@ -4,8 +4,6 @@ export class HerdrLayout {
   pending = false;
   /** A full frame at the requested geometry has arrived. */
   matched = false;
-  /** The backend sends redraw barriers, so each layout also waits for one. */
-  barrier = false;
   barrierReady = true;
   /** The last certified picture stays visible while the new layout redraws. */
   preserve = false;
@@ -15,7 +13,7 @@ export class HerdrLayout {
   private viewport: HTMLElement;
   constructor(viewport: HTMLElement) { this.viewport = viewport; }
   /** Start waiting for a layout, covering the pane unless its picture is preserved. */
-  set({ pending, preserve = this.preserve, cover = pending && !preserve, barrierReady = !this.barrier }: { pending: boolean; preserve?: boolean; cover?: boolean; barrierReady?: boolean }) {
+  set({ pending, preserve = this.preserve, cover = pending && !preserve, barrierReady = false }: { pending: boolean; preserve?: boolean; cover?: boolean; barrierReady?: boolean }) {
     this.cancel();
     this.pending = pending; this.matched = false; this.preserve = preserve; this.barrierReady = barrierReady;
     this.viewport.classList.toggle('awaiting-herdr-layout', cover);

@@ -391,7 +391,7 @@ export function createWorkspaceConnections(options: Options) {
           (target?.herdrSession ? ' · ' + target.herdrSession : ''),
         lastUsed: Date.now(),
         ...(target
-          ? { mode: 'herdr', herdrSession: target.herdrSession, herdrSource: target.herdrSource }
+          ? { herdrSession: target.herdrSession, herdrSource: target.herdrSource }
           : {}),
       };
       if (request.herdrTab && !workspace.tabs.includes(request.herdrTab)) {
@@ -512,7 +512,6 @@ export function createWorkspaceConnections(options: Options) {
         hostId: host.id,
         pluginId: 'herdr',
         pluginVersion: '1',
-        mode: 'herdr',
         herdrSession: host.herdrSession,
         herdrSource: host.herdrSource,
         lastUsed: Date.now(),

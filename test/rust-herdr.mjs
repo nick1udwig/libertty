@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { readFile, writeFile } from 'node:fs/promises';
 import { WebSocket, WebSocketServer } from 'ws';
 import { herdrFixture } from './herdr-fixture.ts';
-import { decodeWire, encodeWire, GZIP_FAST_PROTOCOL } from '../src/wire.ts';
+import { decodeWire, encodeWire, encodeAudio, GZIP_FAST_PROTOCOL } from '../src/wire.ts';
 
 const fixture = await herdrFixture();
 const daemon = new WebSocketServer({ port: 0, host: '127.0.0.1' });
@@ -65,7 +65,8 @@ async function open(terminal = '') {
   const query = terminal ? '?terminalId=' + terminal : '';
   const { ticket } = await api('herdr/ticket' + query, {});
   const inbox = [], ws = new WebSocket(base.replace('http:', 'ws:') + '/herdr/ws?ticket=' + ticket + (terminal ? '&terminalId=' + terminal : ''), { origin });
-  ws.on('message', bytes => inbox.push(JSON.parse(String(bytes))));
+  let decoded = Promise.resolve();
+  ws.on('message', bytes => { decoded = decoded.then(async () => { const message = await decodeWire(new Uint8Array(bytes).buffer); inbox.push(message); if (message.type === 'herdr-frame') ws.send(JSON.stringify({ type: 'ack', seq: message.seq })); }); });
   ws.on('error', () => {});
   sockets.push(ws);
   await once(ws, 'open');
@@ -119,7 +120,7 @@ try {
   phone.ws.send(JSON.stringify({ type: 'dictation', action: 'start', id: dictationId, target: 'program', prompt: 1, revision: 2 }));
   await until(() => phone.inbox.some(m => m.type === 'dictation' && m.state === 'ready'), 'Herdr dictation ready');
   const frame = Buffer.alloc(22); frame[8] = 1; frame[9] = 3; frame.writeUInt32BE(160, 12); frame[16] = 1; frame.writeUInt16BE(3, 17); frame.set([1, 2, 3], 19);
-  phone.ws.send(frame);
+  phone.ws.send(encodeAudio(frame));
   phone.ws.send(JSON.stringify({ type: 'dictation', action: 'finish', id: dictationId }));
   await until(() => phone.inbox.some(m => m.type === 'pasted' && m.text === 'Dictated directly into Herdr'), 'Herdr final transcript insertion');
   await until(() => voiceAcks === 1, 'acknowledgement after remote insertion');
@@ -170,7 +171,7 @@ try {
   assert.equal((await once(invalid.ws, 'close'))[0], 1008);
   assert.ok(!fixture.actions.some(a => a.method === 'fixture.terminal.resize' && a.params.cols === 0));
 
-  const adaptiveTicket = await api('herdr/ticket?terminalId=term_0', { frameAck: true });
+  const adaptiveTicket = await api('herdr/ticket?terminalId=term_0', {});
   const adaptive = new WebSocket(base.replace('http:', 'ws:') + '/herdr/ws?terminalId=term_0&ticket=' + adaptiveTicket.ticket, [GZIP_FAST_PROTOCOL], { origin });
   sockets.push(adaptive);
   const adaptiveFrames = []; let decoding = Promise.resolve();
@@ -180,7 +181,7 @@ try {
   await once(adaptive, 'open');
   await until(() => adaptiveFrames.some(frame => frame.value.type === 'herdr-frame'), 'adaptive baseline');
   const baseline = adaptiveFrames.find(frame => frame.value.type === 'herdr-frame').value;
-  await delay(150); adaptive.send(encodeWire({ type: 'ack', seq: baseline.seq }, GZIP_FAST_PROTOCOL));
+  await delay(150); adaptive.send(encodeWire({ type: 'ack', seq: baseline.seq }));
   const bulk = Buffer.from('\x1b[2J\x1b[H' + 'status running\r\n'.repeat(500));
   await fixture.setFrame(0, { type: 'terminal.frame', encoding: 'ansi', width: 80, height: 24, full: true, bytes: bulk.toString('base64') });
   await until(() => adaptiveFrames.some(frame => frame.value.type === 'herdr-frame' && frame.value.seq > baseline.seq && Buffer.from(frame.value.bytes).equals(bulk)), 'adaptive compressed bulk');
