@@ -3,6 +3,7 @@ mod handoffs;
 #[path = "session/history.rs"]
 mod history_cache;
 mod output;
+mod screen;
 use crate::protocol::{DictationSource, DictationState, EngineMode, ServerMessage};
 use crate::{
     context,
@@ -127,6 +128,7 @@ struct Inner {
     paste: PasteMode,
     history: History,
     replay: Replay,
+    screen: screen::Screen,
     socket: Option<Attachment>,
     attachment: u64,
     detached: Instant,
@@ -333,8 +335,32 @@ impl Inner {
         if visible.is_empty() {
             return;
         }
+        self.screen.feed(&visible);
         self.replay.record(visible.into(), self.socket.is_some());
         self.flush();
+    }
+    /// Replace unsent output with the current picture, as a reset the viewer can resume from.
+    fn resync(&mut self, stream_id: &str) {
+        self.send(ServerMessage::Hello {
+            stream_id: stream_id.into(),
+            engine: EngineMode::Server,
+            reset: true,
+            truncated: false,
+            first_seq: self.replay.first_seq(),
+            last_seq: Some(self.replay.last_seq()),
+        });
+        self.send_snapshot();
+    }
+    fn send_snapshot(&mut self) {
+        let data = self.screen.snapshot();
+        let seq = self.replay.snapshot_sent(data.len());
+        self.send(ServerMessage::Output {
+            seq,
+            data: data.into(),
+        });
+        if let Some(pty) = &self.pty {
+            pty.pause(self.replay.paused());
+        }
     }
 }
 impl Session {
@@ -450,6 +476,7 @@ impl Session {
                 paste: PasteMode::default(),
                 history: History::new(history),
                 replay: Replay::default(),
+                screen: screen::Screen::new(24, 80),
                 socket: None,
                 attachment: 0,
                 detached: Instant::now(),
@@ -555,7 +582,12 @@ impl Session {
                 let Some(session) = weak.upgrade() else {
                     break;
                 };
-                session.inner.lock().unwrap().transfers.expire();
+                let mut inner = session.inner.lock().unwrap();
+                inner.transfers.expire();
+                // A slow viewer gets the current picture instead of holding the shell's output.
+                if inner.socket.is_some() && inner.replay.blocked(Instant::now()) {
+                    inner.resync(&session.stream_id);
+                }
             }
         });
     }
@@ -631,12 +663,15 @@ impl Session {
         inner.send(ServerMessage::Hello {
             stream_id: self.stream_id.clone(),
             engine: EngineMode::Server,
-            reset: replay.reset,
-            truncated: replay.truncated,
+            reset: replay.reset || replay.snapshot,
+            truncated: replay.truncated && !replay.snapshot,
             first_seq: replay.first_seq,
             last_seq: Some(replay.last_seq),
         });
         inner.state();
+        if replay.snapshot {
+            inner.send_snapshot();
+        }
         inner.flush();
         for capture in inner.reading.pending() {
             inner.send(ServerMessage::ReadingCapture(capture));
@@ -908,6 +943,9 @@ impl Session {
             }
             ClientMessage::Ack { seq } => {
                 if inner.replay.acknowledge(seq) {
+                    if inner.replay.take_stale() {
+                        inner.resync(&self.stream_id);
+                    }
                     inner.flush();
                 }
             }
@@ -919,7 +957,10 @@ impl Session {
                     && !inner.state.exited
                     && let Some(pty) = &inner.pty
                 {
-                    pty.resize(cols.clamp(2.0, 300.0) as u16, rows.clamp(2.0, 120.0) as u16);
+                    let (cols, rows) =
+                        (cols.clamp(2.0, 300.0) as u16, rows.clamp(2.0, 120.0) as u16);
+                    pty.resize(cols, rows);
+                    inner.screen.resize(rows, cols);
                 }
             }
             ClientMessage::Input { data } => {
@@ -1551,6 +1592,76 @@ mod tests {
         let (attachment, mut receive) = session.attach(0, None);
         while receive.try_recv().is_ok() {}
         (session, stub, attachment, receive)
+    }
+    #[tokio::test]
+    async fn slow_viewers_and_large_gaps_resume_from_the_screen_instead_of_raw_output() {
+        let (session, stub, attachment, mut receive) = fixture().await;
+        let drain = |receive: &mut mpsc::UnboundedReceiver<Transport>| {
+            let mut messages = Vec::new();
+            while let Some(value) = receive.try_recv().ok().and_then(|message| message.value()) {
+                messages.push(value);
+            }
+            messages
+        };
+        {
+            let mut inner = session.inner.lock().unwrap();
+            for line in 0..30000 {
+                inner.output(&format!("line {line}\r\n"), "/tmp");
+            }
+            assert!(
+                stub.paused.load(Ordering::SeqCst),
+                "an unacknowledged window pauses the shell"
+            );
+            let now = Instant::now();
+            assert!(!inner.replay.blocked(now));
+            assert!(inner.replay.blocked(now + output::RESYNC));
+            inner.resync(&session.stream_id);
+            assert!(
+                !stub.paused.load(Ordering::SeqCst),
+                "a resynchronized viewer no longer holds the shell"
+            );
+            inner.output("after snapshot\r\n", "/tmp");
+        }
+        let messages = drain(&mut receive);
+        let hello = messages.iter().find(|m| m["type"] == "hello").unwrap();
+        assert_eq!(hello["reset"], true);
+        let snapshot = messages
+            .iter()
+            .rev()
+            .find(|m| m["type"] == "output")
+            .unwrap();
+        assert_eq!(snapshot["seq"], hello["lastSeq"]);
+        assert!(snapshot["data"].as_str().unwrap().contains("line 29999"));
+        assert!(!messages.iter().any(|m| {
+            m["data"]
+                .as_str()
+                .is_some_and(|data| data.contains("after snapshot"))
+        }));
+        // Acknowledging the snapshot resumes lossless streaming from it.
+        session.receive(attachment, json!({"type":"ack","seq":snapshot["seq"]}));
+        let resumed = drain(&mut receive);
+        assert!(resumed.iter().any(
+            |m| m["type"] == "output" && m["data"].as_str().unwrap().contains("after snapshot")
+        ));
+        // A fresh viewer after this much output receives one snapshot instead of the raw history.
+        let (_, mut fresh) = session.attach(0, None);
+        let messages = drain(&mut fresh);
+        assert_eq!(messages[0]["type"], "hello");
+        assert_eq!(
+            (
+                messages[0]["reset"].clone(),
+                messages[0]["truncated"].clone()
+            ),
+            (json!(true), json!(false))
+        );
+        let outputs: Vec<_> = messages.iter().filter(|m| m["type"] == "output").collect();
+        assert_eq!(outputs.len(), 1);
+        assert!(
+            outputs[0]["data"]
+                .as_str()
+                .unwrap()
+                .contains("after snapshot")
+        );
     }
     #[tokio::test]
     async fn output_window_preserves_all_duplicate_partial_and_invalid_acknowledgements() {

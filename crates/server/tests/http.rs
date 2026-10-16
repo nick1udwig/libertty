@@ -302,7 +302,7 @@ async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_silent_viewer_is_detached_instead_of_pausing_the_shell() {
+async fn a_silent_viewer_neither_pauses_the_shell_nor_stays_attached() {
     use futures::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
     let backend = Backend::start("server");
@@ -330,6 +330,7 @@ async fn a_silent_viewer_is_detached_instead_of_pausing_the_shell() {
         .headers_mut()
         .insert("origin", origin.parse().unwrap());
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let connected = tokio::time::Instant::now();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if let Message::Text(text) = socket.next().await.unwrap().unwrap()
@@ -364,6 +365,8 @@ async fn a_silent_viewer_is_detached_instead_of_pausing_the_shell() {
         );
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+    // Reading would answer pings, so wait until the heartbeat must have released the socket.
+    tokio::time::sleep_until(connected + Duration::from_secs(12)).await;
     let closed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.next().await {

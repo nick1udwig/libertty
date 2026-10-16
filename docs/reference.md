@@ -218,9 +218,13 @@ Raw terminal input remains available while a program is running.
 The server keeps a session alive for up to **one hour after disconnection**.
 Backgrounding the app releases the output connection so a hidden browser's paused animation frames do not block shell output.
 Reconnecting to the same running server retains the shell and replays unseen output.
-Reloads can replay up to the last **2 MiB**, also bounded to 16,384 output chunks to limit small-chunk overhead.
-This bounded raw replay is not a complete VT snapshot: after truncation, interactive programs may need Ctrl-L or another redraw.
-The UI calls out truncation.
+The server keeps the last **2 MiB** of raw output, bounded to 16,384 chunks, and replays it exactly for short reconnects.
+It also keeps its own terminal model of each native session with 1,000 lines of scrollback.
+When more than 256 KiB is missing, or older output has left the raw history, a reload or reconnect receives a snapshot of that model instead.
+The snapshot restores the screen, scrollback, alternate screen, cursor, colors and input modes, written as lines that reflow at the viewer's width.
+Hyperlinks, strikethrough and other attributes the model does not track are not preserved in a snapshot.
+A viewer that leaves the 128 KiB acknowledgement window closed for five seconds receives a fresh snapshot, and its shell resumes instead of waiting for it.
+Lossless streaming continues once that viewer acknowledges the snapshot.
 
 Commands have request IDs to suppress duplicate delivery within a bounded recent-request cache.
 Unacknowledged commands and raw keystrokes are **never automatically resent**.

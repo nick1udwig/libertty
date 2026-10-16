@@ -1,8 +1,16 @@
 //! Bounded replay history and independent acknowledgement credit for the current viewer.
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 const WINDOW: usize = 128 * 1024;
 const BATCH: usize = 64 * 1024;
+/// Missing output beyond this, or output lost from history, is replaced by a screen snapshot.
+const SNAPSHOT: usize = 256 * 1024;
+/// A viewer that keeps its window closed this long is resynchronized instead of pausing the shell.
+pub(super) const RESYNC: Duration = Duration::from_secs(5);
 #[derive(Clone)]
 pub(super) struct Output {
     pub seq: u64,
@@ -12,6 +20,8 @@ pub(super) struct Output {
 pub(super) struct Attachment {
     pub reset: bool,
     pub truncated: bool,
+    /// The viewer should receive a screen snapshot instead of the raw replay.
+    pub snapshot: bool,
     pub first_seq: u64,
     pub last_seq: u64,
 }
@@ -26,6 +36,11 @@ pub(super) struct Replay {
     sent_seq: u64,
     max_bytes: usize,
     max_entries: usize,
+    /// While a snapshot at this sequence awaits acknowledgement, new output only enters history.
+    resync: Option<u64>,
+    /// Output arrived faster than lossless streaming could deliver since the last snapshot.
+    stale: bool,
+    blocked: Option<Instant>,
 }
 impl Default for Replay {
     fn default() -> Self {
@@ -45,6 +60,9 @@ impl Replay {
             sent_seq: 0,
             max_bytes,
             max_entries,
+            resync: None,
+            stale: false,
+            blocked: None,
         }
     }
     pub fn record(&mut self, data: Arc<str>, attached: bool) {
@@ -62,25 +80,42 @@ impl Replay {
             self.bytes -= self.outputs.pop_front().unwrap().bytes;
             self.truncated = true;
         }
-        if attached {
+        if attached && self.resync.is_none() {
             self.pending.push_back(output);
         }
     }
-    pub fn attach(&mut self, after: u64, changed: bool) -> Attachment {
-        self.outstanding.clear();
-        self.outstanding_bytes = 0;
-        self.sent_seq = 0;
-        let first = self.outputs.front().map_or(1, |output| output.seq);
-        let gap = changed || after > self.seq || (after > 0 && after < first - 1);
+    /// Queue output after `after`, and report whether a snapshot should replace it because history was lost or it is too much.
+    fn resume(&mut self, after: u64) -> bool {
         self.pending = self
             .outputs
             .iter()
-            .filter(|output| output.seq > if gap { 0 } else { after })
+            .filter(|output| output.seq > after)
             .cloned()
             .collect();
+        let lost = if after == 0 {
+            self.truncated
+        } else {
+            after < self.first_seq() - 1
+        };
+        self.seq > after
+            && (lost
+                || self
+                    .pending
+                    .iter()
+                    .map(|output| output.bytes)
+                    .sum::<usize>()
+                    > SNAPSHOT)
+    }
+    pub fn attach(&mut self, after: u64, changed: bool) -> Attachment {
+        self.detach();
+        self.sent_seq = 0;
+        let first = self.outputs.front().map_or(1, |output| output.seq);
+        let gap = changed || after > self.seq || (after > 0 && after < first - 1);
+        let snapshot = self.resume(if gap { 0 } else { after });
         Attachment {
             reset: after == 0 || gap,
             truncated: ((after == 0 || changed) && self.truncated) || (gap && !changed),
+            snapshot,
             first_seq: first,
             last_seq: self.seq,
         }
@@ -89,6 +124,39 @@ impl Replay {
         self.pending.clear();
         self.outstanding.clear();
         self.outstanding_bytes = 0;
+        self.resync = None;
+        self.stale = false;
+        self.blocked = None;
+    }
+    /// Account for a snapshot of everything through the latest sequence, and stream nothing until it is acknowledged.
+    pub fn snapshot_sent(&mut self, bytes: usize) -> u64 {
+        self.pending.clear();
+        self.outstanding.clear();
+        self.outstanding.push_back((self.seq, bytes));
+        self.outstanding_bytes = bytes;
+        self.sent_seq = self.seq;
+        self.resync = Some(self.seq);
+        self.stale = false;
+        self.blocked = None;
+        self.seq
+    }
+    pub fn last_seq(&self) -> u64 {
+        self.seq
+    }
+    pub fn first_seq(&self) -> u64 {
+        self.outputs.front().map_or(1, |output| output.seq)
+    }
+    /// After an acknowledged snapshot, too much output for lossless streaming needs another one.
+    pub fn take_stale(&mut self) -> bool {
+        std::mem::take(&mut self.stale)
+    }
+    /// Whether the window has stayed closed long enough to resynchronize this viewer.
+    pub fn blocked(&mut self, now: Instant) -> bool {
+        if !self.paused() {
+            self.blocked = None;
+            return false;
+        }
+        now.duration_since(*self.blocked.get_or_insert(now)) >= RESYNC
     }
     pub fn next(&mut self) -> Option<Output> {
         if self.outstanding_bytes >= WINDOW {
@@ -126,10 +194,19 @@ impl Replay {
         while self.outstanding.front().is_some_and(|(at, _)| *at <= seq) {
             self.outstanding_bytes -= self.outstanding.pop_front().unwrap().1;
         }
+        if let Some(snapshot) = self.resync.filter(|snapshot| seq >= *snapshot) {
+            // Resume lossless streaming from the acknowledged picture.
+            self.resync = None;
+            self.stale = self.resume(snapshot);
+            if self.stale {
+                self.pending.clear();
+            }
+        }
         true
     }
+    /// The shell pauses only while a viewer keeps up with lossless delivery.
     pub fn paused(&self) -> bool {
-        self.outstanding_bytes >= WINDOW || !self.pending.is_empty()
+        self.resync.is_none() && (self.outstanding_bytes >= WINDOW || !self.pending.is_empty())
     }
     #[cfg(test)]
     pub fn outstanding_bytes(&self) -> usize {
@@ -232,5 +309,42 @@ mod tests {
         }
         assert_eq!(suffix, chunks[first.seq as usize..].concat());
         assert!(replay.pending_empty());
+    }
+    #[test]
+    fn large_or_lost_history_selects_a_snapshot_and_snapshots_suspend_streaming() {
+        let mut replay = Replay::default();
+        for _ in 0..80 {
+            replay.record("x".repeat(4096).into(), false);
+        }
+        assert!(replay.attach(0, false).snapshot);
+        assert!(
+            !replay.attach(70, false).snapshot,
+            "a short contiguous gap replays exactly"
+        );
+        let mut small = Replay::new(8, 2);
+        for _ in 0..4 {
+            small.record("ab".into(), false);
+        }
+        assert!(
+            small.attach(0, false).snapshot,
+            "truncated history cannot replay from its start"
+        );
+        // While a snapshot awaits acknowledgement, output only enters history and never pauses the shell.
+        let seq = replay.snapshot_sent(1000);
+        replay.record("after".into(), true);
+        assert!(replay.next().is_none());
+        assert!(!replay.paused());
+        assert!(!replay.blocked(Instant::now() + RESYNC));
+        assert!(replay.acknowledge(seq));
+        assert!(!replay.take_stale());
+        assert_eq!(&*replay.next().unwrap().data, "after");
+        // Too much output since the snapshot needs another one instead of a raw catch-up.
+        let seq = replay.snapshot_sent(1000);
+        for _ in 0..80 {
+            replay.record("x".repeat(4096).into(), true);
+        }
+        assert!(replay.acknowledge(seq));
+        assert!(replay.take_stale());
+        assert!(replay.next().is_none());
     }
 }

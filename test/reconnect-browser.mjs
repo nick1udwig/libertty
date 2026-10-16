@@ -188,13 +188,22 @@ try {
     queuedOutput = current;
   }
   const replacement = await stallNext('/ws');
+  await page.evaluate(() => {
+    // Observe the replacement from its first message.
+    window.__replayed = [];
+    const Previous = window.WebSocket;
+    window.WebSocket = class extends Previous {
+      constructor(...args) {
+        super(...args); window.WebSocket = Previous;
+        this.addEventListener('message', async event => {
+          const message = await window.__wireMessage(event.data);
+          if (message.type === 'output') window.__replayed.push(message.seq);
+        });
+      }
+    };
+  });
   await online(); await replacement.entered;
   await page.evaluate(() => {
-    window.__replayed = [];
-    window.__heldSocket.addEventListener('message', async event => {
-      const message = await window.__wireMessage(event.data);
-      if (message.type === 'output') window.__replayed.push(message.seq);
-    });
     // Paint the earlier socket's queue before the replacement has delivered anything.
     window.requestAnimationFrame = window.__paintRAF;
     for (const callback of window.__pendingPaintFrames.splice(0)) requestAnimationFrame(callback);
@@ -206,6 +215,40 @@ try {
   // Each replay message carries the final sequence of its batch, so any earlier value means resent output.
   assert.ok(replayed.length && Math.min(...replayed) > queuedOutput, `Replay resumes after queued output ${queuedOutput}: ${replayed.slice(0, 3)}`);
   await page.locator('.terminal-presentation').waitFor({state:'hidden'});
+
+  // Far more output than a quick replay arrives as one snapshot of the backend's terminal.
+  await page.locator('#terminal textarea').focus();
+  await page.keyboard.type('sleep 1; seq 1 60000; echo $((6*7))-snapshot-done'); await page.keyboard.press('Enter');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    window.dispatchEvent(new Event('offline'));
+  });
+  await delay(3000);
+  states = await stateCount();
+  await page.evaluate(() => {
+    // Observe the replacement from its first message.
+    window.__snapshotMessages = [];
+    const Previous = window.WebSocket;
+    window.WebSocket = class extends Previous {
+      constructor(...args) {
+        super(...args); window.WebSocket = Previous;
+        this.addEventListener('message', async event => {
+          const message = await window.__wireMessage(event.data);
+          if (['hello', 'output'].includes(message.type)) window.__snapshotMessages.push(message);
+        });
+      }
+    };
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    window.dispatchEvent(new Event('online'));
+  });
+  await connected(states);
+  await page.waitForFunction(() => document.querySelector('#shell-status').textContent === 'At prompt');
+  await page.locator('.terminal-presentation').waitFor({state:'hidden'});
+  const [hello, ...snapshotOutputs] = await page.evaluate(() => window.__snapshotMessages);
+  assert.equal(hello.type, 'hello'); assert.equal(hello.reset, true); assert.equal(hello.truncated, false);
+  assert.equal(snapshotOutputs.length, 1, 'One snapshot replaces the raw replay');
+  assert.match(snapshotOutputs[0].data, /42-snapshot-done/);
+  assert.ok(snapshotOutputs[0].data.length < 200000, 'The snapshot is far smaller than the missed output');
 
   async function stallNext(path) {
     if (path === '/ws') {

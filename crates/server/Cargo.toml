@@ -24,6 +24,7 @@ tokio-util = { version = "0.7", features = ["rt", "io"] }
 futures = "0.3.34"
 libc = "0.2.190"
 flate2 = "1.1.9"
+vt100 = "0.16.2"
 unicode-normalization = "0.1.25"
 axum = { version = "0.8.9", features = ["ws"] }
 portable-pty = "0.9.0"
