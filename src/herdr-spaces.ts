@@ -1,8 +1,12 @@
-import type { HerdrSpace } from './herdr-protocol.ts';
+import type { HerdrSpace, HerdrStatus } from './herdr-protocol.ts';
 
 export interface SpaceLayout { order: string[]; groups: string[][] }
 export type SpaceDrop = 'before' | 'after' | 'group';
 export interface SpaceRepo { id: string; name: string; git: boolean; root?: HerdrSpace; spaces: HerdrSpace[] }
+export type RepoTap = 'recent' | 'root' | 'tree' | 'triage';
+/** An agent pane's displayed status, its Herdr sequence and its last completion, if it has finished. */
+export interface PaneState { terminalId: string; status: HerdrStatus; sequence: number; completion?: number }
+export interface SpaceTap { space: HerdrSpace; terminalId?: string }
 
 /** Worktree checkouts join their repository's root space; Herdr reports a repository only once it has a worktree, so other spaces stand alone. */
 export function spaceRepos(spaces: HerdrSpace[]): SpaceRepo[] {
@@ -23,6 +27,25 @@ export function spaceRepos(spaces: HerdrSpace[]): SpaceRepo[] {
 /** A repository opens the space last used there, then its root checkout. */
 export function repoSpace(repo: SpaceRepo, remembered?: string): HerdrSpace {
   return repo.spaces.find(space => space.id === remembered) || repo.spaces[0];
+}
+
+/** Tapping a repository with several checkouts opens its last used checkout, its root checkout, its most urgent pane, or nothing so its tree can choose. */
+export function repoTap(repo: SpaceRepo, mode: RepoTap, remembered?: string, panes: (space: HerdrSpace) => PaneState[] = () => []): SpaceTap | undefined {
+  if (repo.spaces.length < 2) return { space: repo.spaces[0] };
+  if (mode === 'tree') return undefined;
+  if (mode === 'root') return { space: repo.spaces[0] };
+  return mode === 'triage' && triageSpace(repo.spaces, panes) || { space: repoSpace(repo, remembered) };
+}
+
+/** Triage picks the checkout waiting longest for input, then for an unseen finish, then working longest, then finished longest ago. */
+export function triageSpace(spaces: HerdrSpace[], panes: (space: HerdrSpace) => PaneState[]): SpaceTap | undefined {
+  let best: { space: HerdrSpace; terminalId: string; tier: number; age: number } | undefined;
+  for (const space of spaces) for (const pane of panes(space)) {
+    const tier = pane.status === 'blocked' ? 0 : pane.status === 'done' ? 1 : pane.status === 'working' ? 2 : pane.completion !== undefined ? 3 : -1;
+    const age = tier === 1 || tier === 3 ? pane.completion ?? pane.sequence : pane.sequence;
+    if (tier >= 0 && (!best || tier < best.tier || tier === best.tier && age < best.age)) best = { space, terminalId: pane.terminalId, tier, age };
+  }
+  return best && { space: best.space, terminalId: best.terminalId };
 }
 
 export function spaceTerminal(space: HerdrSpace, remembered?: string): string {

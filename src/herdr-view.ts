@@ -6,7 +6,7 @@ import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSpace, type He
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
 import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
-import { dropSpace, repoSpace, spaceLayout, spaceRepos, spaceTerminal, worktreePath, type SpaceDrop, type SpaceRepo } from './herdr-spaces.ts';
+import { dropSpace, repoSpace, repoTap, spaceLayout, spaceRepos, spaceTerminal, worktreePath, type RepoTap, type SpaceDrop, type SpaceRepo } from './herdr-spaces.ts';
 import { herdrLane, herdrLaneNames, statusLanes, type HerdrLane } from './herdr-lanes.ts';
 import './herdr.css';
 
@@ -390,6 +390,7 @@ export class HerdrView {
   private get spaceMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStrip') || 'null') !== 'agents'; } catch { return true; } }
   // Status lanes are the default order; only an explicit Manual choice keeps the saved order.
   private get laneMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStripOrder') || 'null') !== 'manual'; } catch { return true; } }
+  private get tapMode(): RepoTap { try { const mode = JSON.parse(localStorage.getItem('termai.herdrSpaceTap') || 'null'); return mode === 'root' || mode === 'tree' || mode === 'triage' ? mode : 'recent'; } catch { return 'recent'; } }
   private get order() { return this.spaceMode ? this.preferences.spaceOrder! : this.preferences.order; }
   private set order(value: string[]) { if (this.spaceMode) this.preferences.spaceOrder = value; else this.preferences.order = value; }
   private get stripSelection() {
@@ -433,11 +434,15 @@ export class HerdrView {
   }
   private select(id: string) {
     const item = this.entries().find(item => item.terminalId === id);
-    if (item?.repo && this.stripSelection === id) {
+    const panes = (space: HerdrSpace) => this.tracker.agents.filter(agent => space.terminalIds.includes(agent.terminalId))
+      .map(agent => ({ terminalId: agent.terminalId, status: this.tracker.status(agent), sequence: agent.sequence, completion: this.tracker.completion(agent.terminalId) }));
+    // Tapping the selected chip opens its tree, as does tapping another repository when the tree setting is chosen.
+    const tap = item?.repo ? this.stripSelection === id ? undefined : repoTap(item.repo, this.tapMode, this.preferences.repoSpaces![item.repo.id], panes) : item?.space && { space: item.space };
+    if (item?.repo && !tap) {
       const anchor = this.strip.querySelector<HTMLElement>('[data-terminal="' + CSS.escape(id) + '"]');
       if (anchor) this.openTree(anchor, item.repo); return;
     }
-    this.selectTerminal(item ? this.terminalFor(item) : id);
+    this.selectTerminal(tap ? tap.terminalId || this.terminalFor(this.spaceItem(tap.space)) : id);
   }
   private selectTerminal(id: string) {
     this.closeMenu();

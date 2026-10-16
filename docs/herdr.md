@@ -103,6 +103,9 @@ Once a repository has a worktree, Herdr reports its repository and the strip sho
 A grouped chip shows the repository name and checkout count, and while selected also names its current checkout.
 Other spaces, including repositories without worktrees, keep their own chips.
 Selecting a chip reopens the checkout and pane last used in it.
+Settings → **Tapping a repository with worktrees opens** can instead open the most urgent worktree, the root checkout, or the tree without selecting a checkout.
+Most urgent ranks agent panes by needing input, then unseen finishes, then working, then seen finishes, and picks the oldest Herdr state change within the first nonempty rank.
+It opens that pane directly, and falls back to the last used checkout when no agent pane has a status to rank.
 Agent creation lets you choose a name, agent type and directory; the type must be installed on that host.
 
 Swipe left or right to scroll the strip in either Spaces or Agents mode.

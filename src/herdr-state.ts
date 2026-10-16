@@ -43,6 +43,7 @@ export class HerdrState {
     if (!state || state.completion === undefined || (state.seen ?? -1) >= state.completion) return false;
     state.seen = state.completion; return true;
   }
+  completion(terminalId: string) { return this.states.get(terminalId)?.completion; }
   status(agent: HerdrAgent): HerdrStatus {
     const state = this.states.get(agent.terminalId);
     if (state && (state.raw === 'idle' || state.raw === 'done'))

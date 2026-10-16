@@ -91,6 +91,10 @@ export function createWorkspaceSettings(options: Options) {
       saved<string>('herdrStrip', 'spaces') === 'agents' ? 'agents' : 'spaces';
     select('herdr-strip-order').value =
       saved<string>('herdrStripOrder', 'lanes') === 'manual' ? 'manual' : 'lanes';
+    const spaceTap = saved<string>('herdrSpaceTap', 'recent');
+    select('herdr-space-tap').value = ['triage', 'root', 'tree'].includes(spaceTap)
+      ? spaceTap
+      : 'recent';
     input('show-downloads').checked = saved('showDownloads', true);
     input('font-size').value = String(saved('fontSizePt', 10));
     if (!input('font-size').checkValidity()) input('font-size').value = '10';
@@ -221,6 +225,8 @@ export function createWorkspaceSettings(options: Options) {
     preferencesChanged('herdrStrip', select('herdr-strip').value);
   select('herdr-strip-order').onchange = () =>
     preferencesChanged('herdrStripOrder', select('herdr-strip-order').value);
+  select('herdr-space-tap').onchange = () =>
+    preferencesChanged('herdrSpaceTap', select('herdr-space-tap').value);
   select('herdr-layout').onchange = () =>
     preferencesChanged('herdrLayout', select('herdr-layout').value);
   input('show-downloads').onchange = () =>

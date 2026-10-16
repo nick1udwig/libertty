@@ -110,6 +110,8 @@ Closing an agent or space in this strip closes it on the Herdr server and ends i
 Closing the top-level Herdr connection tab disconnects its view.
 **Settings → Herdr strip shows** switches between **Spaces** (default) and **Agents**.
 **Settings → Herdr strip order** switches between **Status lanes** (default) and **Manual**.
+**Settings → Tapping a repository with worktrees opens** chooses the **Last used worktree** (default), the **Most urgent worktree**, the **Root checkout** or **Its worktree tree** without selecting a checkout.
+Most urgent opens the pane waiting longest for input, then the oldest unseen finish, then the longest working pane, then the oldest seen finish, and otherwise the last used worktree.
 Status lanes group tabs into needs you, done, working and idle, in that order, and keep your manual order inside each lane.
 Tap a lane's count to fold or unfold it; the idle lane starts folded, and a folded lane still shows the selected tab.
 The selected tab stays in its lane until you switch away, and its own status circle appears if its status has changed.
