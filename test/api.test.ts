@@ -52,7 +52,18 @@ test('reads and keyed changes retry lost connections, while uploads and exhauste
   t.mock.method(globalThis, 'fetch', async () => new Response('{}', { status: statuses.shift() }));
   assert.equal((await request('https://backend/api/files/list')).status, 200, 'A proxy failure is retried');
   let calls = 0;
-  t.mock.method(globalThis, 'fetch', (_url: unknown, init: RequestInit) => { calls++; return new Promise((_, reject) => init.signal!.addEventListener('abort', () => reject(init.signal!.reason))); });
+  t.mock.method(globalThis, 'fetch', (_url: unknown, init: RequestInit) => {
+    calls++;
+    return new Promise((_, reject) => {
+      const signal = init.signal!;
+      signal.throwIfAborted();
+      const pendingRequest = setTimeout(() => reject(new Error('The mocked request did not abort before its deadline')), 1000);
+      signal.addEventListener('abort', () => {
+        clearTimeout(pendingRequest);
+        reject(signal.reason);
+      }, { once: true });
+    });
+  });
   await assert.rejects(requestJSON(new URL('https://backend/api/files/action'), { action: 'delete' }, { timeout: 20 }), { name: 'TimeoutError' });
   assert.equal(calls, 2, 'A timed-out change may still be running, so it is retried only once');
 });
