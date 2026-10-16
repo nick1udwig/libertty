@@ -530,7 +530,10 @@
         400,
         401,
         403,
-        404
+        404,
+        409,
+        413,
+        429
       ],
       "query": {
         "type": "object",
@@ -540,6 +543,18 @@
           },
           "name": {
             "type": "string"
+          },
+          "upload": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "size": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "offset": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
           }
         },
         "required": [
@@ -906,32 +921,6 @@
         403,
         404
       ]
-    },
-    {
-      "method": "POST",
-      "path": "/api/herdr/suggest",
-      "authentication": "paired-client",
-      "origin": "required",
-      "request": {
-        "$ref": "#/$defs/SuggestRequest"
-      },
-      "response": {
-        "$ref": "#/$defs/HerdrSuggestReply"
-      },
-      "requestEncoding": "application/json",
-      "responseEncoding": "application/json",
-      "bodyLimitUTF16": 16384,
-      "error": {
-        "$ref": "#/$defs/Error"
-      },
-      "statuses": [
-        200,
-        400,
-        401,
-        403,
-        404
-      ],
-      "timeoutMs": 5000
     },
     {
       "method": "POST",

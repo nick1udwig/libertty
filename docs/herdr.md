@@ -80,7 +80,8 @@ Corrections replace only the latest dictated text and preserve surrounding input
 Edits from another viewer invalidate the correction before it can replace or submit that input.
 Agent and other foreground application panes keep literal dictation.
 Input is serialized and validates the current agent before writing.
-Uncertain input is never replayed after a disconnect.
+That validation is reused across a typing burst until a watched Herdr event or failed send could have changed the pane, which halves the Herdr requests per keystroke over SSH.
+Keys sent before a disconnect are resent only when the replacement connection reports Herdr never received them and the agent context still matches.
 Older scrollback and applications that do not handle terminal resizes can retain their original formatting.
 
 ## Tabs, names and notifications

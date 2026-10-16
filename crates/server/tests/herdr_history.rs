@@ -139,3 +139,41 @@ async fn unchanged_metadata_is_suppressed_but_changed_status_is_delivered() {
     cancel.cancel();
     task.await.unwrap();
 }
+
+#[tokio::test]
+async fn a_live_frame_stream_replaces_interval_polling_with_reads_on_activity() {
+    let fixture = support::Fixture::new().await;
+    let hub = Hub::default();
+    let mut history = hub
+        .subscribe(fixture.target.clone(), "w1:p0".into())
+        .unwrap();
+    history.receive.changed().await.unwrap();
+    let reads = || {
+        fixture
+            .actions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|action| action["method"] == "pane.read")
+            .count()
+    };
+    // Without frames the pane keeps the polling cadence.
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert!(reads() >= 3, "polling without a stream: {}", reads());
+    hub.activity(&fixture.target, "w1:p0", true);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let quiet = reads();
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    assert_eq!(reads(), quiet, "a quiet streamed pane is not reread");
+    fixture.screen.lock().unwrap().push_str(" with new output");
+    hub.activity(&fixture.target, "w1:p0", true);
+    tokio::time::timeout(Duration::from_millis(500), history.receive.changed())
+        .await
+        .expect("a frame prompts a history read")
+        .unwrap();
+    assert_eq!(reads(), quiet + 1);
+    // An empty reset frame means the stream stopped, so polling resumes.
+    hub.activity(&fixture.target, "w1:p0", false);
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    assert!(reads() >= quiet + 4, "polling resumes: {}", reads());
+}

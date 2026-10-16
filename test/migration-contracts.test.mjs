@@ -118,7 +118,7 @@ test('the Rust client parser accepts every declared client message and rejects m
     { type: 'repair', id, text: 'echo 🌍', prompt: 1, revision: 2 },
     { type: 'repair-cancel', id }, { type: 'input-line', id, prompt: 1, revision: 2 },
     { type: 'dictation', id, action: 'start', target: 'program', prompt: 1, revision: 2 },
-    { type: 'input', data: '\u001b[A' }, { type: 'paste', text: '🌍' },
+    { type: 'input', data: '\u001b[A', seq: 1 }, { type: 'paste', text: '🌍' },
     { type: 'dictation-paste', text: 'hello', applied: false, replace: false, prompt: 1, revision: 2 },
     { type: 'replace', id, text: 'echo', prompt: 1, revision: 2 },
     { type: 'command', id, command: 'echo', prompt: 1 },

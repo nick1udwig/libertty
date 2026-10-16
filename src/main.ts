@@ -347,8 +347,15 @@ async function boot() {
         workspace.active = workspace.tabs[0].id;
       store();
       renderTabs();
-      await Promise.all(
-        workspace.tabs.map((tab) => mount(tab).catch((error) => notice(error.message))),
+      // The visible tab mounts first; hidden tabs follow once the browser is idle.
+      const active = workspace.tabs.find((tab) => tab.id === workspace.active)!;
+      await mount(active).catch((error) => notice(error.message));
+      void idle().then(() =>
+        Promise.all(
+          workspace.tabs
+            .filter((tab) => tab !== active)
+            .map((tab) => mount(tab).catch((error) => notice(error.message))),
+        ),
       );
     }
     await consumePendingReading();
@@ -367,6 +374,13 @@ async function boot() {
   } catch (error: any) {
     $('empty-terminal').querySelector('p')!.textContent = error.message;
   }
+}
+function idle() {
+  return new Promise<void>((resolve) =>
+    'requestIdleCallback' in window
+      ? requestIdleCallback(() => resolve(), { timeout: 2000 })
+      : setTimeout(resolve, 500),
+  );
 }
 void boot();
 async function openHerdrNotification(tabId: unknown, terminalId: unknown) {

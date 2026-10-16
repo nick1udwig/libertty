@@ -301,6 +301,84 @@ async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_silent_viewer_neither_pauses_the_shell_nor_stays_attached() {
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let backend = Backend::start("server");
+    let origin = format!("http://127.0.0.1:{}", backend.port);
+    let token = backend.pair();
+    let state = || {
+        let response = backend.api(
+            "POST",
+            "/api/connect",
+            Some(&token),
+            Some(json!({"session":"default"})),
+        );
+        assert_eq!(response.status, 200);
+        response.json()["state"].clone()
+    };
+    state();
+    let ticket = backend.api("POST", "/api/ticket", Some(&token), Some(json!({})));
+    let url = format!(
+        "ws://127.0.0.1:{}/terminal/ws?ticket={}&after=0",
+        backend.port,
+        ticket.json()["ticket"].as_str().unwrap()
+    );
+    let mut request = url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("origin", origin.parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let connected = tokio::time::Instant::now();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Message::Text(text) = socket.next().await.unwrap().unwrap()
+                && serde_json::from_str::<Value>(&text).unwrap()["state"]["ready"] == true
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("shell prompt");
+    let prompt = state()["prompt"].as_u64().unwrap();
+    // Far more output than one acknowledgement window, then a computed marker.
+    socket
+        .send(Message::Text(
+            json!({"type":"input","data":"seq 1 100000; echo $((6*7))-done\r"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    // Stop reading and acknowledging, like a phone that lost its network without closing.
+    let deadline = Instant::now() + Duration::from_secs(25);
+    loop {
+        let current = state();
+        if current["ready"] == true && current["prompt"].as_u64().unwrap() > prompt {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the shell stayed paused behind a silent viewer: {current}"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    // Reading would answer pings, so wait until the heartbeat must have released the socket.
+    tokio::time::sleep_until(connected + Duration::from_secs(12)).await;
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match socket.next().await {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await;
+    assert!(closed.is_ok(), "the silent viewer's socket stayed open");
+}
+
 #[test]
 fn mounted_apis_accept_prefix_preserving_and_prefix_stripping_proxies() {
     let backend = Backend::start("server");
@@ -673,6 +751,40 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
     );
     assert_eq!(upload.status, 200);
     assert_eq!(upload.json()["bytes"], 5);
+    // A numbered upload keeps its partial file, so a retry continues from the bytes that arrived.
+    let resumable = |id: &str, size: u64, offset: u64, body: &[u8]| {
+        backend.request(
+            "POST",
+            &format!("/api/files/upload?session={sid}&path=.&name=resumed.bin&upload={id}&size={size}&offset={offset}"),
+            &[("Origin", &origin), ("Authorization", &bearer)],
+            body,
+        )
+    };
+    let root = backend.root.path();
+    assert_eq!(resumable("u1", 5, 0, &[1, 2]).json(), json!({"received":2}));
+    assert!(!root.join("resumed.bin").exists() && root.join(".termai-upload-u1").exists());
+    assert_eq!(
+        resumable("u1", 5, 0, &[]).json(),
+        json!({"received":2}),
+        "an attempt at another offset learns what arrived"
+    );
+    assert_eq!(
+        resumable("u1", 5, 2, &[3, 4, 5]).json(),
+        json!({"name":"resumed.bin","bytes":5})
+    );
+    assert_eq!(
+        std::fs::read(root.join("resumed.bin")).unwrap(),
+        [1, 2, 3, 4, 5]
+    );
+    assert!(!root.join(".termai-upload-u1").exists());
+    assert_eq!(
+        resumable("u2", 5, 0, &[]).status,
+        409,
+        "uploads never overwrite"
+    );
+    std::fs::remove_file(root.join("resumed.bin")).unwrap();
+    assert_eq!(resumable("u3", 2, 0, &[1, 2, 3]).status, 400);
+    assert!(!root.join("resumed.bin").exists());
     let listing = backend
         .api(
             "GET",
@@ -709,6 +821,45 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
             .contains("attachment; filename=\"download\"; filename*=UTF-8''sample.bin")
     );
     assert_eq!(backend.request("GET", &path, &[], b"").status, 404);
+    // An interrupted download resumes from its last byte, and reaching the end retires the ticket.
+    let ticket = |name: &str| {
+        let ticket = backend
+            .api(
+                "POST",
+                &format!("/api/files/download?session={sid}"),
+                Some(&owner),
+                Some(json!({ "path": name })),
+            )
+            .json();
+        format!(
+            "/api/files/download?ticket={}",
+            ticket["ticket"].as_str().unwrap()
+        )
+    };
+    let path = ticket("sample.bin");
+    let resumed = backend.request("GET", &path, &[("Range", "bytes=2-")], b"");
+    assert_eq!(
+        (resumed.status, &resumed.bytes[..]),
+        (206, &[65, 66, 67][..])
+    );
+    assert!(resumed.headers.contains("content-range: bytes 2-4/5"));
+    assert_eq!(backend.request("GET", &path, &[], b"").status, 404);
+    let path = ticket("sample.bin");
+    assert_eq!(
+        backend
+            .request("GET", &path, &[("Range", "bytes=5-")], b"")
+            .status,
+        416
+    );
+    std::fs::write(backend.root.path().join("sample.bin"), [1, 2, 3]).unwrap();
+    assert_eq!(
+        backend
+            .request("GET", &path, &[("Range", "bytes=1-")], b"")
+            .status,
+        409,
+        "a changed file cannot be spliced onto earlier bytes"
+    );
+    std::fs::write(backend.root.path().join("sample.bin"), [0, 255, 65, 66, 67]).unwrap();
     let revoke = backend
         .api(
             "POST",
@@ -745,6 +896,94 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
     assert_eq!(
         std::fs::read(backend.root.path().join("sample.bin")).unwrap(),
         [0, 255, 65, 66, 67]
+    );
+}
+
+#[test]
+fn retried_changes_with_one_idempotency_key_run_once_and_replay_their_reply() {
+    let backend = Backend::start("client");
+    let owner = backend.pair();
+    let sid = backend
+        .api(
+            "POST",
+            "/api/sessions",
+            Some(&owner),
+            Some(json!({"files":true})),
+        )
+        .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let origin = format!("http://127.0.0.1:{}", backend.port);
+    let mkdir = |owner: &str, key: &str| {
+        let bearer = format!("Bearer {owner}");
+        backend.request(
+            "POST",
+            &format!("/api/files/mkdir?session={sid}"),
+            &[
+                ("Origin", &origin),
+                ("Content-Type", "application/json"),
+                ("Authorization", &bearer),
+                ("Idempotency-Key", key),
+            ],
+            json!({"path":".","name":"once"}).to_string().as_bytes(),
+        )
+    };
+    let first = mkdir(&owner, "retry-1");
+    assert_eq!(first.status, 200);
+    // A retry whose first attempt already ran receives the original reply instead of an "already exists" failure.
+    let retry = mkdir(&owner, "retry-1");
+    assert_eq!((retry.status, retry.bytes), (200, first.bytes));
+    assert_eq!(
+        mkdir(&owner, "retry-2").status,
+        409,
+        "a new key is a new request"
+    );
+    let other = backend.pair();
+    assert_ne!(other, owner);
+    assert_eq!(
+        mkdir(&other, "retry-1").status,
+        404,
+        "another owner runs its own request and cannot see this session"
+    );
+    assert!(backend.root.path().join("once").is_dir());
+    // Concurrent attempts share the first one's work, so opening a terminal twice still opens one.
+    let bearer = format!("Bearer {owner}");
+    let open = || {
+        backend
+            .request(
+                "POST",
+                "/api/sessions",
+                &[
+                    ("Origin", &origin),
+                    ("Content-Type", "application/json"),
+                    ("Authorization", &bearer),
+                    ("Idempotency-Key", "open-once"),
+                ],
+                json!({"name":"Once"}).to_string().as_bytes(),
+            )
+            .json()["id"]
+            .clone()
+    };
+    let ids = std::thread::scope(|scope| {
+        let attempts: Vec<_> = (0..2).map(|_| scope.spawn(open)).collect();
+        attempts
+            .into_iter()
+            .map(|attempt| attempt.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(ids[0], ids[1]);
+    let sessions = backend
+        .api("GET", "/api/sessions", Some(&owner), None)
+        .json();
+    assert_eq!(
+        sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|session| session["name"] == "Once")
+            .count(),
+        1
     );
 }
 

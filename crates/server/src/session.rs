@@ -3,6 +3,7 @@ mod handoffs;
 #[path = "session/history.rs"]
 mod history_cache;
 mod output;
+mod screen;
 use crate::protocol::{DictationSource, DictationState, EngineMode, ServerMessage};
 use crate::{
     context,
@@ -56,8 +57,41 @@ pub struct ShellState {
 }
 #[derive(Clone)]
 pub enum Transport {
+    /// Typed messages keep terminal output and Herdr frames out of JSON until a JSON client needs them.
+    Server(ServerMessage),
     Message(Value),
     Close(u16, String),
+}
+impl Transport {
+    /// The JSON form a legacy client receives.
+    pub fn value(&self) -> Option<Value> {
+        match self {
+            Self::Server(message) => Some(message.value()),
+            Self::Message(value) => Some(value.clone()),
+            Self::Close(..) => None,
+        }
+    }
+    /// The acknowledged sequence of terminal output or a Herdr frame.
+    pub fn sequence(&self) -> Option<u64> {
+        match self {
+            Self::Server(ServerMessage::Output { seq, .. }) => Some(*seq),
+            Self::Server(ServerMessage::HerdrFrame(frame)) => frame.seq,
+            _ => None,
+        }
+    }
+    /// An encoded-size estimate that does not serialize bulk payloads.
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Server(ServerMessage::Output { data, .. }) => data.len() + 64,
+            Self::Server(ServerMessage::HerdrFrame(frame)) => frame.bytes.len() * 4 / 3 + 64,
+            Self::Server(
+                ServerMessage::Screen { text, .. } | ServerMessage::ScreenDelta { text, .. },
+            ) => text.len() + 64,
+            Self::Server(message) => crate::wire::json_len(message),
+            Self::Message(value) => crate::wire::json_len(value),
+            Self::Close(_, reason) => reason.len() + 2,
+        }
+    }
 }
 #[derive(Clone, Copy)]
 pub(crate) struct LineGuard {
@@ -94,12 +128,15 @@ struct Inner {
     paste: PasteMode,
     history: History,
     replay: Replay,
+    screen: screen::Screen,
     socket: Option<Attachment>,
     attachment: u64,
     detached: Instant,
     leases: usize,
     input_line: Option<InputLine>,
     input_serial: u64,
+    /// The browser terminal numbering its keys on this shell, and the last of them delivered.
+    input_client: Option<(String, u64)>,
     input: crate::input_controller::Controller,
     handoffs: Handoffs,
     results: VecDeque<(String, ServerMessage)>,
@@ -175,7 +212,7 @@ impl Inner {
     }
     fn send(&self, value: ServerMessage) {
         if let Some(socket) = &self.socket {
-            let _ = socket.send.send(Transport::Message(value.value()));
+            let _ = socket.send.send(Transport::Server(value));
         }
     }
     fn state(&self) {
@@ -300,8 +337,32 @@ impl Inner {
         if visible.is_empty() {
             return;
         }
+        self.screen.feed(&visible);
         self.replay.record(visible.into(), self.socket.is_some());
         self.flush();
+    }
+    /// Replace unsent output with the current picture, as a reset the viewer can resume from.
+    fn resync(&mut self, stream_id: &str) {
+        self.send(ServerMessage::Hello {
+            stream_id: stream_id.into(),
+            engine: EngineMode::Server,
+            reset: true,
+            truncated: false,
+            first_seq: self.replay.first_seq(),
+            last_seq: Some(self.replay.last_seq()),
+        });
+        self.send_snapshot();
+    }
+    fn send_snapshot(&mut self) {
+        let data = self.screen.snapshot();
+        let seq = self.replay.snapshot_sent(data.len());
+        self.send(ServerMessage::Output {
+            seq,
+            data: data.into(),
+        });
+        if let Some(pty) = &self.pty {
+            pty.pause(self.replay.paused());
+        }
     }
 }
 impl Session {
@@ -417,6 +478,7 @@ impl Session {
                 paste: PasteMode::default(),
                 history: History::new(history),
                 replay: Replay::default(),
+                screen: screen::Screen::new(24, 80),
                 socket: None,
                 attachment: 0,
                 detached: Instant::now(),
@@ -424,6 +486,7 @@ impl Session {
                 input_line: None,
                 input: Default::default(),
                 input_serial: 0,
+                input_client: None,
                 handoffs: Handoffs::default(),
                 results: VecDeque::new(),
                 reading: Captures::default(),
@@ -522,7 +585,12 @@ impl Session {
                 let Some(session) = weak.upgrade() else {
                     break;
                 };
-                session.inner.lock().unwrap().transfers.expire();
+                let mut inner = session.inner.lock().unwrap();
+                inner.transfers.expire();
+                // A slow viewer gets the current picture instead of holding the shell's output.
+                if inner.socket.is_some() && inner.replay.blocked(Instant::now()) {
+                    inner.resync(&session.stream_id);
+                }
             }
         });
     }
@@ -570,6 +638,7 @@ impl Session {
         self: &Arc<Self>,
         after: u64,
         stream: Option<&str>,
+        client: Option<&str>,
     ) -> (u64, mpsc::UnboundedReceiver<Transport>) {
         let (send, receive) = mpsc::unbounded_channel();
         let mut inner = self.inner.lock().unwrap();
@@ -598,12 +667,28 @@ impl Session {
         inner.send(ServerMessage::Hello {
             stream_id: self.stream_id.clone(),
             engine: EngineMode::Server,
-            reset: replay.reset,
-            truncated: replay.truncated,
+            reset: replay.reset || replay.snapshot,
+            truncated: replay.truncated && !replay.snapshot,
             first_seq: replay.first_seq,
             last_seq: Some(replay.last_seq),
         });
+        if let Some(client) = client {
+            // Only the browser that numbered the delivered keys may rely on that count.
+            let delivered = match &inner.input_client {
+                Some((known, seq)) if known == client => Some(*seq),
+                _ => None,
+            };
+            if delivered.is_none() {
+                inner.input_client = Some((client.to_owned(), 0));
+            }
+            inner.send(ServerMessage::InputAck { seq: delivered });
+        } else {
+            inner.input_client = None;
+        }
         inner.state();
+        if replay.snapshot {
+            inner.send_snapshot();
+        }
         inner.flush();
         for capture in inner.reading.pending() {
             inner.send(ServerMessage::ReadingCapture(capture));
@@ -799,6 +884,15 @@ impl Session {
         {
             return;
         }
+        if let ClientMessage::Input { seq: Some(seq), .. } = &message
+            && let Some((_, delivered)) = &mut inner.input_client
+        {
+            // A reconnecting browser resends keys it could not confirm, so drop the ones already delivered.
+            if *seq <= *delivered {
+                return;
+            }
+            *delivered = *seq;
+        }
         let same = inner.state.ready
             && !inner.state.exited
             && !inner.handoffs.active()
@@ -875,6 +969,9 @@ impl Session {
             }
             ClientMessage::Ack { seq } => {
                 if inner.replay.acknowledge(seq) {
+                    if inner.replay.take_stale() {
+                        inner.resync(&self.stream_id);
+                    }
                     inner.flush();
                 }
             }
@@ -886,10 +983,13 @@ impl Session {
                     && !inner.state.exited
                     && let Some(pty) = &inner.pty
                 {
-                    pty.resize(cols.clamp(2.0, 300.0) as u16, rows.clamp(2.0, 120.0) as u16);
+                    let (cols, rows) =
+                        (cols.clamp(2.0, 300.0) as u16, rows.clamp(2.0, 120.0) as u16);
+                    pty.resize(cols, rows);
+                    inner.screen.resize(rows, cols);
                 }
             }
-            ClientMessage::Input { data } => {
+            ClientMessage::Input { data, .. } => {
                 if !inner.state.exited && !inner.handoffs.active() {
                     inner.state.input_revision += 1;
                     if data.contains(['\r', '\n', '\x03']) {
@@ -1515,9 +1615,108 @@ mod tests {
             inner.pty = Some(Box::new(stub.clone()));
             inner.state.prompt = 1;
         }
-        let (attachment, mut receive) = session.attach(0, None);
+        let (attachment, mut receive) = session.attach(0, None, None);
         while receive.try_recv().is_ok() {}
         (session, stub, attachment, receive)
+    }
+    #[tokio::test]
+    async fn slow_viewers_and_large_gaps_resume_from_the_screen_instead_of_raw_output() {
+        let (session, stub, attachment, mut receive) = fixture().await;
+        let drain = |receive: &mut mpsc::UnboundedReceiver<Transport>| {
+            let mut messages = Vec::new();
+            while let Some(value) = receive.try_recv().ok().and_then(|message| message.value()) {
+                messages.push(value);
+            }
+            messages
+        };
+        {
+            let mut inner = session.inner.lock().unwrap();
+            for line in 0..30000 {
+                inner.output(&format!("line {line}\r\n"), "/tmp");
+            }
+            assert!(
+                stub.paused.load(Ordering::SeqCst),
+                "an unacknowledged window pauses the shell"
+            );
+            let now = Instant::now();
+            assert!(!inner.replay.blocked(now));
+            assert!(inner.replay.blocked(now + output::RESYNC));
+            inner.resync(&session.stream_id);
+            assert!(
+                !stub.paused.load(Ordering::SeqCst),
+                "a resynchronized viewer no longer holds the shell"
+            );
+            inner.output("after snapshot\r\n", "/tmp");
+        }
+        let messages = drain(&mut receive);
+        let hello = messages.iter().find(|m| m["type"] == "hello").unwrap();
+        assert_eq!(hello["reset"], true);
+        let snapshot = messages
+            .iter()
+            .rev()
+            .find(|m| m["type"] == "output")
+            .unwrap();
+        assert_eq!(snapshot["seq"], hello["lastSeq"]);
+        assert!(snapshot["data"].as_str().unwrap().contains("line 29999"));
+        assert!(!messages.iter().any(|m| {
+            m["data"]
+                .as_str()
+                .is_some_and(|data| data.contains("after snapshot"))
+        }));
+        // Acknowledging the snapshot resumes lossless streaming from it.
+        session.receive(attachment, json!({"type":"ack","seq":snapshot["seq"]}));
+        let resumed = drain(&mut receive);
+        assert!(resumed.iter().any(
+            |m| m["type"] == "output" && m["data"].as_str().unwrap().contains("after snapshot")
+        ));
+        // A fresh viewer after this much output receives one snapshot instead of the raw history.
+        let (_, mut fresh) = session.attach(0, None, None);
+        let messages = drain(&mut fresh);
+        assert_eq!(messages[0]["type"], "hello");
+        assert_eq!(
+            (
+                messages[0]["reset"].clone(),
+                messages[0]["truncated"].clone()
+            ),
+            (json!(true), json!(false))
+        );
+        let outputs: Vec<_> = messages.iter().filter(|m| m["type"] == "output").collect();
+        assert_eq!(outputs.len(), 1);
+        assert!(
+            outputs[0]["data"]
+                .as_str()
+                .unwrap()
+                .contains("after snapshot")
+        );
+    }
+    #[tokio::test]
+    async fn numbered_keys_reach_the_shell_once_across_reconnects_of_the_same_browser() {
+        let (session, stub, _, _) = fixture().await;
+        let input_ack = |receive: &mut mpsc::UnboundedReceiver<Transport>| {
+            std::iter::from_fn(|| receive.try_recv().ok())
+                .filter_map(|message| message.value())
+                .find(|m| m["type"] == "input-ack")
+                .expect("input-ack")
+        };
+        let (first, mut receive) = session.attach(0, None, Some("tab"));
+        assert_eq!(input_ack(&mut receive), json!({"type":"input-ack"}));
+        for (seq, data) in [(1, "a"), (2, "b")] {
+            session.receive(first, json!({"type":"input","data":data,"seq":seq}));
+        }
+        // The replacement learns which keys arrived, and the browser resends the rest with their numbers.
+        let (second, mut receive) = session.attach(0, None, Some("tab"));
+        assert_eq!(input_ack(&mut receive)["seq"], 2);
+        session.receive(first, json!({"type":"input","data":"late","seq":3}));
+        for (seq, data) in [(2, "b"), (3, "c"), (3, "c")] {
+            session.receive(second, json!({"type":"input","data":data,"seq":seq}));
+        }
+        session.receive(second, json!({"type":"input","data":"unnumbered"}));
+        assert_eq!(*stub.writes.lock().unwrap(), ["a", "b", "c", "unnumbered"]);
+        // Another browser cannot rely on this browser's count.
+        let (_, mut receive) = session.attach(0, None, Some("other"));
+        assert_eq!(input_ack(&mut receive), json!({"type":"input-ack"}));
+        let (_, mut receive) = session.attach(0, None, Some("tab"));
+        assert_eq!(input_ack(&mut receive), json!({"type":"input-ack"}));
     }
     #[tokio::test]
     async fn output_window_preserves_all_duplicate_partial_and_invalid_acknowledgements() {
@@ -1531,7 +1730,7 @@ mod tests {
         }
         let mut sent = Vec::new();
         let mut collect = |receive: &mut mpsc::UnboundedReceiver<Transport>| {
-            while let Ok(Transport::Message(value)) = receive.try_recv() {
+            while let Some(value) = receive.try_recv().ok().and_then(|message| message.value()) {
                 if value["type"] == "output" {
                     sent.push(value["seq"].as_u64().unwrap());
                 }
@@ -1566,9 +1765,9 @@ mod tests {
             ("previous-server-stream", true, "123"),
             (session.stream_id.as_str(), false, "3"),
         ] {
-            let (_, mut receive) = session.attach(2, Some(stream));
-            match receive.try_recv().unwrap() {
-                Transport::Message(hello) => {
+            let (_, mut receive) = session.attach(2, Some(stream), None);
+            match receive.try_recv().unwrap().value() {
+                Some(hello) => {
                     assert_eq!(hello["reset"], reset);
                     assert_eq!(hello["truncated"], false);
                     assert_eq!(hello["streamId"], session.stream_id);
@@ -1578,7 +1777,7 @@ mod tests {
             }
             let mut actual = Vec::new();
             let mut data = String::new();
-            while let Ok(Transport::Message(value)) = receive.try_recv() {
+            while let Some(value) = receive.try_recv().ok().and_then(|message| message.value()) {
                 if value["type"] == "output" {
                     actual.push(value["seq"].as_u64().unwrap());
                     data.push_str(value["data"].as_str().unwrap());
@@ -1588,7 +1787,7 @@ mod tests {
             assert_eq!(data, expected);
         }
         session.dispose().await;
-        let (_, mut receive) = session.attach(0, None);
+        let (_, mut receive) = session.attach(0, None, None);
         assert!(matches!(receive.try_recv(), Ok(Transport::Close(1000, _))));
     }
     #[tokio::test]
@@ -1628,7 +1827,7 @@ mod tests {
         session.inner.lock().unwrap().detached = Instant::now() - Duration::from_secs(3601);
         assert!(session.mark_expired());
         assert!(session.lease().is_none());
-        let (_, mut receive) = session.attach(0, None);
+        let (_, mut receive) = session.attach(0, None, None);
         assert!(matches!(receive.try_recv(), Ok(Transport::Close(1000, _))));
     }
     #[tokio::test]
@@ -1660,8 +1859,8 @@ mod tests {
             attachment,
             json!({"type":"input-line","id":"stale","prompt":1,"revision":0}),
         );
-        match receive.try_recv().unwrap() {
-            Transport::Message(message) => assert!(message.get("text").is_none()),
+        match receive.try_recv().unwrap().value() {
+            Some(message) => assert!(message.get("text").is_none()),
             _ => panic!(),
         }
         assert_eq!(*stub.writes.lock().unwrap(), ["\x04"]);
@@ -1684,8 +1883,8 @@ mod tests {
         }
         assert!(session.paste_dictation("Get in it.", 1, 0, "program", attachment, 1));
         assert_eq!(*stub.writes.lock().unwrap(), ["Get in it."]);
-        match receive.try_recv().unwrap() {
-            Transport::Message(message) => assert_eq!(message["source"], "dictation"),
+        match receive.try_recv().unwrap().value() {
+            Some(message) => assert_eq!(message["source"], "dictation"),
             _ => panic!(),
         }
         session.inner.lock().unwrap().paste.feed("\x1b[?2004h");
@@ -1747,8 +1946,8 @@ mod tests {
         for target in [json!({}), json!([]), json!(true), json!(7)] {
             session.receive(attachment, json!({"type":"dictation","id":current,"action":"start","prompt":1,"revision":0,"target":target}));
             assert!(session.inner.lock().unwrap().input.dictation.is_none());
-            match receive.try_recv().unwrap() {
-                Transport::Message(message) => assert_eq!(message["state"], "error"),
+            match receive.try_recv().unwrap().value() {
+                Some(message) => assert_eq!(message["state"], "error"),
                 _ => panic!(),
             }
         }

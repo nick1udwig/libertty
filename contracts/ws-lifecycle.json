@@ -56,6 +56,7 @@
           "replace-current-socket",
           "reset-ack-window",
           "send-hello",
+          "send-input-ack",
           "send-state",
           "replay-output",
           "replay-captures-and-transfers",

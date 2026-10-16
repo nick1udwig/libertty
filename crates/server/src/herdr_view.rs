@@ -8,8 +8,12 @@ use crate::{
     protocol::{ClientMessage, controls},
     session::Transport,
 };
+pub use input::{Ledger, Ledgers};
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use termai_engine::utf16_len;
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
@@ -54,6 +58,24 @@ struct Input {
     complete: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
     _permit: tokio::sync::OwnedSemaphorePermit,
     replacement: Option<Replacement>,
+    /// Each numbered key in the text, with the byte offset where it ends.
+    seqs: Vec<(u64, usize)>,
+}
+/// The mobile layout a viewer requests, and its progress toward a confirmed redraw.
+struct Geometry {
+    /// The requested mobile size, or none for a desktop viewer.
+    size: Option<Size>,
+    /// The size of the last full frame that matched the request.
+    baseline: Option<Size>,
+    /// The redraw revision a pending layout waits beyond, kept across rapid switches.
+    redraw_before: Option<u64>,
+}
+/// The browser connection a view serves.
+pub struct Viewer {
+    pub send: crate::viewer_queue::Sender,
+    pub cancel: CancellationToken,
+    /// The browser terminal's input ledger, and whether an earlier connection created it.
+    pub ledger: Option<(Arc<Ledger>, bool)>,
 }
 pub struct View {
     target: Target,
@@ -65,16 +87,22 @@ pub struct View {
     terminal: Subscription,
     history: crate::herdr_history::Hub,
     active: tokio::sync::watch::Sender<bool>,
-    size: Mutex<Option<Size>>,
+    geometry: Mutex<Geometry>,
+    /// Advances with every layout change, so stale confirmations stop.
     layout: tokio::sync::watch::Sender<u64>,
-    redraw_before: Mutex<Option<u64>>,
-    baseline: Mutex<Option<Size>>,
     frame_ready: tokio::sync::Notify,
     frames: Mutex<Option<frames::Frames>>,
     history_delta: Mutex<Option<history::History>>,
     cancel: CancellationToken,
     services: crate::host::HostServices,
     recording_scope: Mutex<String>,
+    /// The layout epoch at which the pane last proved it still hosts this terminal.
+    validated: Mutex<Option<u64>>,
+    /// Frames signal possible foreground changes; without a live stream the shell is polled.
+    output: tokio::sync::Notify,
+    streaming: AtomicBool,
+    /// The browser terminal's delivered keys, and this connection's claim on delivering more.
+    ledger: Option<(Arc<Ledger>, u64)>,
 }
 impl View {
     pub fn open(
@@ -83,9 +111,13 @@ impl View {
         hub: &Hub,
         history: &crate::herdr_history::Hub,
         initial: Option<(Size, Option<u64>)>,
-        send: crate::viewer_queue::Sender,
-        cancel: CancellationToken,
+        viewer: Viewer,
     ) -> Result<Arc<Self>, String> {
+        let Viewer {
+            send,
+            cancel,
+            ledger,
+        } = viewer;
         let initial_size = initial.map(|(size, _)| size);
         let revision = initial.and_then(|(_, revision)| revision);
         let (frames, mut receive) = mpsc::channel(16);
@@ -99,6 +131,9 @@ impl View {
         let (active, _) = tokio::sync::watch::channel(true);
         let (layout, _) = tokio::sync::watch::channel(0);
         let (pending_input, mut inputs) = mpsc::channel::<Input>(128);
+        let (generation, delivered) = ledger
+            .as_ref()
+            .map_or((0, 0), |(ledger, _)| ledger.connect());
         let view = Arc::new(Self {
             target,
             agent,
@@ -115,15 +150,23 @@ impl View {
             capacity: Arc::new(Semaphore::new(128)),
             services: crate::host::HostServices::new(),
             recording_scope: Mutex::new(crate::storage::random_hex(16)),
+            validated: Mutex::new(None),
+            output: tokio::sync::Notify::new(),
+            streaming: AtomicBool::new(false),
+            ledger: ledger
+                .as_ref()
+                .map(|(ledger, _)| (ledger.clone(), generation)),
             pending_input,
             send,
             terminal,
             history: history.clone(),
             active,
-            size: Mutex::new(initial_size),
+            geometry: Mutex::new(Geometry {
+                size: initial_size,
+                baseline: None,
+                redraw_before: revision,
+            }),
             layout,
-            redraw_before: Mutex::new(revision),
-            baseline: Mutex::new(None),
             frame_ready: tokio::sync::Notify::new(),
             frames: Mutex::new(None),
             history_delta: Mutex::new(None),
@@ -136,12 +179,18 @@ impl View {
                 ready: false,
             });
         }
+        if let Some((_, known)) = ledger {
+            view.send(ServerMessage::InputAck {
+                seq: known.then_some(delivered),
+            });
+        }
         view.send_state();
         let weak = Arc::downgrade(&view);
         let lifetime = view.cancel.clone();
         tokio::spawn(async move {
             loop {
                 let Some(view) = weak.upgrade() else { break };
+                let started = tokio::time::Instant::now();
                 let (shell, context) = tokio::select! { biased; _=lifetime.cancelled()=>break, result=view.target.input_state(&view.agent.pane_id)=>result.unwrap_or_default() };
                 let changed = {
                     let mut inner = view.inner.lock().unwrap();
@@ -166,7 +215,15 @@ impl View {
                 if changed {
                     view.send_state();
                 }
-                tokio::select! { biased; _=lifetime.cancelled()=>break, _=tokio::time::sleep(std::time::Duration::from_millis(300))=>{} }
+                // Starting or finishing a program redraws the pane, so a quiet live stream needs only occasional checks.
+                let interval = std::time::Duration::from_millis(300);
+                let idle = if view.streaming.load(Ordering::Acquire) {
+                    std::time::Duration::from_secs(2)
+                } else {
+                    interval
+                };
+                tokio::select! { biased; _=lifetime.cancelled()=>break, _=view.output.notified()=>{}, _=tokio::time::sleep(idle)=>{} }
+                tokio::select! { biased; _=lifetime.cancelled()=>break, _=tokio::time::sleep_until(started + interval)=>{} }
             }
         });
         let weak = Arc::downgrade(&view);
@@ -184,13 +241,31 @@ impl View {
                 let Some(mut input) = input else { break };
                 let Some(view) = weak.upgrade() else { break };
                 let permits = input::coalesce(&mut input, &mut inputs, &mut deferred);
+                // Numbered keys wait for an older connection's send and keep only what it never delivered.
+                let delivery = match &view.ledger {
+                    Some((ledger, generation)) if !input.seqs.is_empty() => {
+                        let Some(gate) = ledger.claim(*generation, &mut input).await else {
+                            continue;
+                        };
+                        let (seq, _) = input.seqs[input.seqs.len() - 1];
+                        Some((gate, ledger.as_ref(), seq))
+                    }
+                    _ => None,
+                };
                 let guard = input
                     .guard
                     .as_ref()
                     .map(|(revision, id)| (*revision, id.as_str()));
                 let result = view
-                    .input_serial(&input.text, input.paste, guard, input.replacement.as_ref())
+                    .input_serial(
+                        &input.text,
+                        input.paste,
+                        guard,
+                        input.replacement.as_ref(),
+                        delivery.as_ref().map(|(_, ledger, seq)| (*ledger, *seq)),
+                    )
                     .await;
+                drop(delivery);
                 drop(permits);
                 if let Some(id) = input
                     .replacement
@@ -220,6 +295,14 @@ impl View {
                 let frame = tokio::select! {biased;_=lifetime.cancelled()=>break, _=slow.cancelled()=>{if let Some(view)=weak.upgrade(){view.send.too_slow();}break;}, frame=receive.recv()=>frame};
                 let Some(frame) = frame else { break };
                 let Some(view) = weak.upgrade() else { break };
+                if let ServerMessage::HerdrFrame(frame) = &frame {
+                    // An empty reset frame means the stream stopped, so history and shell checks resume polling.
+                    let streaming = frame.width > 0;
+                    view.streaming.store(streaming, Ordering::Release);
+                    view.output.notify_one();
+                    view.history
+                        .activity(&view.target, &view.agent.pane_id, streaming);
+                }
                 if let ServerMessage::HerdrFrame(frame) = &frame
                     && frame.full
                 {
@@ -227,8 +310,9 @@ impl View {
                         cols: frame.width,
                         rows: frame.height,
                     });
-                    if size.is_some() && size == *view.size.lock().unwrap() {
-                        *view.baseline.lock().unwrap() = size;
+                    let mut geometry = view.geometry.lock().unwrap();
+                    if size.is_some() && size == geometry.size {
+                        geometry.baseline = size;
                         view.frame_ready.notify_waiters();
                     }
                 }
@@ -359,15 +443,23 @@ impl View {
                 let ready = view.frame_ready.notified();
                 tokio::pin!(ready);
                 ready.as_mut().enable();
-                if *view.baseline.lock().unwrap() == Some(size) {
+                if view.geometry.lock().unwrap().baseline == Some(size) {
                     break;
                 }
                 tokio::select! { biased; _=view.cancel.cancelled()=>return, _=layout.changed()=>return, _=&mut ready=>{} }
             }
             let redrawn = tokio::select! { biased; _=layout.changed()=>false, result=crate::herdr_redraw::wait(&view.target, &view.agent.pane_id, before, &view.cancel)=>result };
-            if redrawn && *view.layout.borrow() == epoch && *view.size.lock().unwrap() == Some(size)
-            {
-                *view.redraw_before.lock().unwrap() = None;
+            // Read the epoch before locking the geometry, so no path holds both.
+            let current = *view.layout.borrow() == epoch;
+            let confirmed = redrawn && current && {
+                let mut geometry = view.geometry.lock().unwrap();
+                let current = geometry.size == Some(size);
+                if current {
+                    geometry.redraw_before = None;
+                }
+                current
+            };
+            if confirmed {
                 view.send(ServerMessage::HerdrLayout {
                     cols: size.cols,
                     rows: size.rows,
@@ -379,7 +471,7 @@ impl View {
     }
     fn send(&self, message: ServerMessage) {
         if !self.cancel.is_cancelled() {
-            self.send.send(Transport::Message(message.value()));
+            self.send.send(Transport::Server(message));
         }
     }
     fn send_state(&self) {
@@ -462,6 +554,7 @@ impl View {
                 complete: Some(complete),
                 _permit: permit,
                 replacement,
+                seqs: Vec::new(),
             })
             .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
         tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=result=>result.map_err(|_| "The agent view changed. No input was sent.".to_owned())?}
@@ -472,6 +565,7 @@ impl View {
         command: Option<String>,
         paste: bool,
         replacement: Option<Replacement>,
+        seq: Option<u64>,
     ) {
         let permit = match self.capacity.clone().try_acquire_owned() {
             Ok(permit) => permit,
@@ -484,6 +578,7 @@ impl View {
             }
         };
         if let Err(error) = self.pending_input.try_send(Input {
+            seqs: seq.map(|seq| (seq, text.len())).into_iter().collect(),
             text,
             paste,
             guard: None,
@@ -511,12 +606,14 @@ impl View {
             });
         }
     }
+    /// Send input in receive order; numbered keys finish their send even if this connection closes meanwhile.
     async fn input_serial(
         &self,
         text: &str,
         paste: bool,
         guard: Option<(u64, &str)>,
         replacement: Option<&Replacement>,
+        delivery: Option<(&Ledger, u64)>,
     ) -> Result<(), String> {
         if utf16_len(text) > 16000 {
             return Err("Terminal input exceeded its limit.".into());
@@ -525,7 +622,12 @@ impl View {
             if self.cancel.is_cancelled() {
                 return Err("The agent view changed. No input was sent.".into());
             }
-            self.target.validate_terminal(&self.agent).await?;
+            // Typing bursts reuse one validation until Herdr reports a change; unwatched layouts always validate.
+            let epoch = self.target.layout_epoch();
+            if epoch.is_none() || *self.validated.lock().unwrap() != epoch {
+                self.target.validate_terminal(&self.agent).await?;
+                *self.validated.lock().unwrap() = epoch;
+            }
             if self.cancel.is_cancelled() {
                 return Err("This agent ended or moved. Reopen its tab. No input was sent.".into());
             }
@@ -561,7 +663,11 @@ impl View {
             } else {
                 text.to_owned()
             };
-            self.target
+            if let Some((ledger, seq)) = delivery {
+                ledger.sending(seq);
+            }
+            if let Err(error) = self
+                .target
                 .request(
                     if paste {
                         "pane.send_input"
@@ -570,7 +676,11 @@ impl View {
                     },
                     json!({"pane_id":self.agent.pane_id,"text":text}),
                 )
-                .await?;
+                .await
+            {
+                *self.validated.lock().unwrap() = None;
+                return Err(error);
+            }
             if let Some(replacement) = replacement {
                 if replacement.edit_id.is_some() {
                     let screen = self
@@ -589,6 +699,9 @@ impl View {
             }
             Ok(())
         };
+        if delivery.is_some() {
+            return work.await;
+        }
         tokio::select! {biased;_=self.cancel.cancelled()=>Err("The agent view changed. No input was sent.".into()),result=work=>result}
     }
     pub fn audio(&self, bytes: Vec<u8>) {
@@ -619,7 +732,7 @@ impl View {
         );
     }
     fn refresh_layout(self: &Arc<Self>, size: Size, epoch: u64, update: LayoutUpdate) {
-        *self.baseline.lock().unwrap() = None;
+        self.geometry.lock().unwrap().baseline = None;
         self.send(ServerMessage::HerdrLayout {
             cols: size.cols,
             rows: size.rows,
@@ -630,7 +743,7 @@ impl View {
             let Some(view) = weak.upgrade() else { return };
             // Reclaiming preserves an unfinished resize fence across rapid switches.
             let pending = match update {
-                LayoutUpdate::Reclaim => *view.redraw_before.lock().unwrap(),
+                LayoutUpdate::Reclaim => view.geometry.lock().unwrap().redraw_before,
                 LayoutUpdate::Resize => None,
             };
             let revision = match pending {
@@ -640,14 +753,16 @@ impl View {
                         .await
                 }
             };
-            if view.cancel.is_cancelled()
+            let stale = view.cancel.is_cancelled()
                 || *view.layout.borrow() != epoch
-                || *view.size.lock().unwrap() != Some(size)
-                || (matches!(update, LayoutUpdate::Reclaim) && !*view.active.borrow())
+                || (matches!(update, LayoutUpdate::Reclaim) && !*view.active.borrow());
             {
-                return;
+                let mut geometry = view.geometry.lock().unwrap();
+                if stale || geometry.size != Some(size) {
+                    return;
+                }
+                geometry.redraw_before = revision;
             }
-            *view.redraw_before.lock().unwrap() = revision;
             match update {
                 LayoutUpdate::Reclaim => view.terminal.claim(),
                 LayoutUpdate::Resize => {
@@ -711,7 +826,7 @@ impl View {
                     *self.layout.borrow()
                 };
                 if active && changed {
-                    let size = *self.size.lock().unwrap();
+                    let size = self.geometry.lock().unwrap().size;
                     if let Some(size) = size {
                         self.refresh_layout(size, epoch, LayoutUpdate::Reclaim);
                     } else {
@@ -738,12 +853,8 @@ impl View {
                 } else {
                     None
                 };
-                let changed = {
-                    let mut current = self.size.lock().unwrap();
-                    let changed = *current != size;
-                    *current = size;
-                    changed
-                };
+                let changed =
+                    std::mem::replace(&mut self.geometry.lock().unwrap().size, size) != size;
                 let epoch = if changed {
                     self.begin_layout()
                 } else {
@@ -770,16 +881,23 @@ impl View {
                 });
                 Ok(())
             }
-            ClientMessage::Input { data: text } => {
+            ClientMessage::Input { data: text, seq } => {
                 if utf16_len(&text) > 16000 {
                     return Err("Invalid input".into());
+                }
+                // A reconnecting browser resends keys it could not confirm, so skip the ones already delivered.
+                let seq = self.ledger.as_ref().and(seq);
+                if let (Some((ledger, _)), Some(seq)) = (&self.ledger, seq)
+                    && seq <= ledger.delivered()
+                {
+                    return Ok(());
                 }
                 {
                     let mut inner = self.inner.lock().unwrap();
                     inner.revision += 1;
                     inner.editable = None;
                 }
-                self.queue_input(text, None, false, None);
+                self.queue_input(text, None, false, None, seq);
                 Ok(())
             }
             ClientMessage::Paste { text } => {
@@ -787,7 +905,7 @@ impl View {
                     return Err("Invalid paste".into());
                 }
                 self.inner.lock().unwrap().revision += 1;
-                self.queue_input(text, None, true, None);
+                self.queue_input(text, None, true, None, None);
                 Ok(())
             }
             ClientMessage::Replace {
@@ -818,7 +936,7 @@ impl View {
                     })
                 };
                 if let Some(replacement) = replacement {
-                    self.queue_input(text, None, false, Some(replacement));
+                    self.queue_input(text, None, false, Some(replacement), None);
                 } else {
                     self.send(ServerMessage::EditResult {
                         id: (id).to_string(),
@@ -846,7 +964,7 @@ impl View {
                             edit_id: None,
                         })
                 };
-                self.queue_input(command + "\r", Some(id), false, replacement);
+                self.queue_input(command + "\r", Some(id), false, replacement, None);
                 Ok(())
             }
             ClientMessage::Dictation(request) => {

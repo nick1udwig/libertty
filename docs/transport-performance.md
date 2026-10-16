@@ -42,17 +42,24 @@ Production sockets advertise versioned binary, constrained gzip and fast-link gz
 New clients offer only advertised protocols and fall back to legacy JSON with older backends.
 Without browser decompression support, raw binary remains available.
 Input, acknowledgements and geometry use compact binary fields, terminal output retains its sequence, and Herdr frames carry their original ANSI bytes directly.
+The backend decodes Herdr's base64 once per frame and encodes terminal output and frames from typed messages, so neither passes through an intermediate JSON value or a second base64 round trip.
 Decoding remains ordered across asynchronous decompression and discards results from replaced sockets.
 Connect and ticket replies advertise application heartbeat support independently of the encoding.
-Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply within two more seconds.
-Live output and repeated state updates do not reset that deadline, so a working downlink cannot conceal a failed return path.
+Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply.
+The reply deadline is two seconds or the smoothed round-trip time plus four deviations, whichever is longer, up to eight seconds.
+While messages are still arriving, a reply that may be queued behind them gets the full eight seconds.
+Live output and repeated state updates never reset the deadline, so a working downlink can delay but not conceal a failed return path.
 A replacement handshake keeps the previous socket alive and the last painted screen visible until takeover, and user activity bypasses reconnect backoff.
 Older servers without the heartbeat capability retain their existing reconnect behavior.
+The backend also pings native terminal sockets every five seconds and detaches a viewer that sends nothing for two intervals.
+A phone that loses its network without closing the socket therefore cannot hold the shell's acknowledgement window closed and pause its program.
+Any client message counts as a reply, so queued audio ahead of a protocol pong does not disconnect dictation.
 Audio retains its existing Opus bytes inside a distinct four-byte envelope and is never compressed.
 Herdr viewers opt into sequenced frames in their ticket request and acknowledge parsed frames through the existing acknowledgement control.
 Each viewer has two frames in flight and one pending ANSI update, with ordered deltas merged until they exceed the last full screen size.
 Oversized pending updates are discarded and replaced by a fresh full screen when acknowledgement credit returns, preserving the current geometry.
 Legacy viewers retain unsequenced frames, and sequenced binary frames use envelope kind 7.
+Numbered keys use envelope kind 8, which carries the key number before its UTF-8 text.
 Each compressed message uses gzip level 1 with an independent dictionary and must save at least one eighth of the original representation.
 Constrained links compress messages from 2 KiB, while ordinary links compress only messages from 128 KiB.
 The browser selects the constrained profile only when its connection information reports 2G/3G or at most 2 Mbps.
@@ -76,6 +83,9 @@ Snapshots remain scoped to the backend, session, selected file and credentials, 
 The sample skips rendering unchanged content and keeps its existing hidden-view polling pause.
 
 Herdr history viewers share one upstream poll per transport, socket and pane with latest-value replay for new viewers.
+While the pane's frame stream is live, its history is reread only after new frames, at most every 150 ms, with a ten-second recheck for a quiet pane.
+Without a stream, or after an empty reset frame, history is polled every 150 ms.
+Shell foreground checks follow the same frames, at most every 300 ms, and fall back to every two seconds for a quiet streamed pane.
 The final viewer cancels the poll, and slow viewers receive only the latest pending history rather than an accumulating queue.
 Identical metadata snapshots are suppressed while periodic recovery and changed status notifications remain active.
 The existing frame hub continues sharing the native ANSI stream.
@@ -159,12 +169,13 @@ The revision is obtained through the read-only `pane.copy_motion` operation rath
 
 Mobile space switches retain up to four authenticated terminal iframes in least-recently-used order.
 Parked views keep their native mobile geometry while consuming and discarding stream frames on the backend, and they pause browser output and shared history polling.
+A parked view that loses its connection, for example while the app is in the background, stays disconnected until it is shown again, so the visible pane reconnects without competing handshakes.
 The initial warm-switch optimization showed its last certified mobile image immediately while reacquiring controller priority and fresh state.
 The loading handoff described below now retains the currently displayed view until the selected pane has a fresh certified paint.
 Uncertified incoming frames cannot overwrite that retained image.
 Cold views and changed dimensions stay hidden until the new layout barrier completes.
 Eviction, removal, disposal, leaving the top-level Herdr tab and changing to a desktop layout release the relevant mobile controllers.
-Returning to the top-level tab opens fresh connections and waits for mobile sizing again.
+Returning to the top-level tab opens a fresh connection for the shown pane and waits for mobile sizing again, while parked panes reconnect once they are shown.
 Older backends without the advertised parking capability retain the single-iframe lifecycle.
 
 The expanded real-Herdr regression captures Chromium's composited PNG frames and checks for the fixture's red desktop pixels in addition to inspecting every visible terminal buffer.
@@ -237,7 +248,13 @@ The browser harness delays input packets to verify prediction appears before the
 
 Each terminal holds up to 64 KiB of keys that have never been passed to a WebSocket and releases them only after the replay or Herdr screen has painted.
 Native terminals require the original stream, prompt, input revision and target, while reconnecting Herdr views require the original foreground process and matching shell picture.
-A changed context rejects queued keys with a notice, and previously sent uncertain input is never replayed.
+A changed context rejects queued keys with a notice.
+Each connection opens by reporting the last numbered key the shell or Herdr pane received from this browser terminal, and only then does the browser number its keys.
+The browser keeps the most recent 64 KiB of numbered keys it handed to a WebSocket.
+Keys after the reported one rejoin the queue under the context they were typed in, so typing into a link that died silently arrives exactly once.
+The backend drops numbers it has already delivered, and an older Herdr connection stops delivering once its replacement opens.
+A Herdr key counts as delivered once its send starts, so a send interrupted by the disconnect is never repeated.
+A backend that does not know the browser terminal, such as after a restart, vouches for no keys, and none are resent.
 Herdr publishes its foreground process context so a restarted agent cannot inherit another process's queued input or recording.
 
 The browser retains original numbered Opus frames in memory until delivery or explicit cancellation, bounded to two MiB and the existing five-minute capture limit.
@@ -255,12 +272,31 @@ A failed direct terminal handshake falls back to authorization so expired cookie
 Cross-origin native terminals retain their authorization and single-use ticket flow.
 Terminal and Herdr metadata sockets stay connected for twenty seconds after the document becomes hidden, retaining the mobile PTY size and live picture during short app switches.
 After the grace expires, Herdr releases mobile geometry and idle terminals disconnect, while active dictation may retain its audio transport.
+Terminals and the Herdr view share this lifecycle, which also reconnects on returning online and when a page is restored from the back-forward cache.
+
+## Request retries
+
+Reads retry up to twice after a lost connection or a proxy failure, pausing half a second and then one second.
+Same-origin changes with a JSON body carry a random `Idempotency-Key`, so they retry the same way.
+The backend runs a keyed request to completion even if the browser abandons it, and replays its reply to retries with the same key for ten minutes.
+A retry that arrives while the first attempt is still running waits for that attempt's reply instead of starting another.
+A request that timed out is retried only once, because it may still be running on a slow link.
+Streamed uploads are never repeated automatically, and cross-origin changes carry no key because an older backend would reject the header during CORS preflight.
+A download that fails or receives nothing for twenty seconds requests the rest of the file with an open-ended byte range, retrying up to five times.
+The backend refuses a resume once the file's size or modification time differs from when the link was issued.
+Uploads from the file browser carry an upload id, so an attempt that fails asks how many bytes arrived and sends only the rest, up to six attempts.
+A newer attempt for the same upload cancels an older one that a dead link may still hold open.
 
 ## Terminal replay batches
 
 Consecutive queued output chunks share messages of up to 64 KiB within the existing 128 KiB acknowledgement window.
 Each message carries the final constituent sequence, and its acknowledgement releases the batch's total byte credit.
 Replay history retains the original chunks so reconnecting at an earlier cursor still returns exactly the missing bytes.
+A replacement socket resumes after the last output the browser received, including output still waiting to paint, so held output is never sent twice.
+Each socket acknowledges only sequences it delivered, so painting output from an earlier socket cannot leave the replacement's window unacknowledged.
+Reloads and reconnects missing more than 256 KiB, or output no longer in history, receive one snapshot of the backend's terminal model instead of the raw replay.
+A smaller catch-up replay may use 256 KiB of credit until it is acknowledged, so it arrives in one round trip while input waits for it.
+A viewer whose window stays closed for five seconds is resynchronized with a snapshot, so a slow phone no longer pauses the shell's programs.
 Live output is sent immediately without a batching timer, and an existing oversized chunk remains whole.
 
 ## Adaptive outgoing compression

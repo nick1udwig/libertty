@@ -46,10 +46,7 @@ impl Sender {
         if self.slow.is_cancelled() {
             return false;
         }
-        let size = match &message {
-            Transport::Message(value) => value.to_string().len(),
-            Transport::Close(_, reason) => reason.len() + 2,
-        };
+        let size = message.size();
         let mut bytes = self.bytes.load(Ordering::Acquire);
         loop {
             let Some(sum) = bytes.checked_add(size).filter(|sum| *sum <= MAX_BYTES) else {

@@ -5,8 +5,25 @@ pub(super) async fn api_files_download_download(
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = parse_query(req.uri())?;
+    // Only an open-ended byte range resumes; any other range receives the whole file.
+    let offset = req
+        .headers()
+        .get("range")
+        .and_then(|value| {
+            value
+                .to_str()
+                .ok()?
+                .strip_prefix("bytes=")?
+                .strip_suffix('-')?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0);
     return app
-        .send_download(query.get("ticket").map(String::as_str).unwrap_or(""))
+        .send_download(
+            query.get("ticket").map(String::as_str).unwrap_or(""),
+            offset,
+        )
         .await;
 }
 
@@ -139,7 +156,7 @@ pub(super) async fn api_images_upload(
 }
 
 pub(super) async fn api_files_upload(
-    _app: &Arc<App>,
+    app: &Arc<App>,
     ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -153,16 +170,48 @@ pub(super) async fn api_files_upload(
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
     let payload = std::mem::take(req.body_mut());
+    let directory = query
+        .get("path")
+        .filter(|s| !s.is_empty())
+        .map(String::as_str)
+        .unwrap_or(".");
+    let name = query.get("name").map(String::as_str).unwrap_or("");
+    // A numbered upload keeps its partial file, so a retry continues from the bytes that arrived.
+    if let Some(id) = query.get("upload") {
+        let number = |key: &str| query.get(key).and_then(|value| value.parse::<u64>().ok());
+        let (Some(size), Some(offset)) = (number("size"), number("offset")) else {
+            return Err(fail("Invalid upload."));
+        };
+        if !(1..=64).contains(&id.len())
+            || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        {
+            return Err(fail("Invalid upload."));
+        }
+        return ok(app
+            .uploads
+            .receive(
+                &format!("{}/{}", ctx.owner, ctx.sid),
+                id,
+                &session.filesystem(),
+                crate::uploads::Destination {
+                    cwd: &cwd,
+                    home: &home,
+                    directory,
+                    name,
+                    size,
+                },
+                offset,
+                payload,
+            )
+            .await
+            .map_err(file_failure)?);
+    }
     return ok(files::upload_on(
         &session.filesystem(),
         &cwd,
         &home,
-        query
-            .get("path")
-            .filter(|s| !s.is_empty())
-            .map(String::as_str)
-            .unwrap_or("."),
-        query.get("name").map(String::as_str).unwrap_or(""),
+        directory,
+        name,
         payload,
         length.as_deref(),
     )

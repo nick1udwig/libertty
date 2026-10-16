@@ -226,6 +226,33 @@ test('live output and repeated state updates cannot conceal missing heartbeat re
   assert.equal(f.sockets.length, 2);
 });
 
+test('a reply queued behind arriving output gets the full deadline without concealing a lost return path', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state'); socket.autoPong = false;
+  for (let i = 0; i < 19; i++) { socket.message('bulk output'); t.mock.timers.tick(500); await flush(); }
+  assert.deepEqual(socket.sent, ['{"type":"ping"}']);
+  assert.deepEqual(f.behavior.stalled, [], 'output still arriving explains a delayed reply');
+  socket.message('bulk output'); t.mock.timers.tick(500); await flush();
+  assert.deepEqual(f.behavior.stalled, [10]);
+  assert.equal(f.sockets.length, 2);
+});
+
+test('measured slow round trips extend the reply deadline on quiet links', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state'); socket.autoPong = false;
+  const pong = () => socket.message('{"type":"pong"}');
+  t.mock.timers.tick(2000); await flush();
+  t.mock.timers.tick(1000); await flush(); pong();
+  t.mock.timers.tick(2000); await flush();
+  t.mock.timers.tick(2500); await flush(); pong();
+  t.mock.timers.tick(2500); await flush();
+  assert.equal(socket.sent.length, 3);
+  t.mock.timers.tick(4000); await flush(); pong();
+  assert.deepEqual(f.behavior.stalled, [], 'a four-second reply matches this link');
+  assert.equal(f.sockets.length, 1);
+  assert.deepEqual(f.messages, ['state'], 'replies stay internal');
+});
+
 test('typing or tapping retries immediately during backoff without overlapping attempts', async t => {
   const f = fixture(t);
   f.behavior.prepare = async () => { throw new Error('offline'); };
@@ -243,4 +270,36 @@ test('older servers without heartbeat support never receive unsupported messages
   t.mock.timers.tick(60000); await flush();
   assert.deepEqual(socket.sent, []);
   assert.equal(f.sockets.length, 1);
+});
+
+test('a followed page keeps its connection through the background grace and reconnects when shown, restored or online', async t => {
+  const f = fixture(t), page = Object.assign(new EventTarget(), { hidden: false }), windows = new EventTarget();
+  const globals = globalThis as unknown as { document?: unknown; window?: unknown };
+  const previous = { document: globals.document, window: globals.window };
+  globals.document = page; globals.window = windows;
+  t.after(() => Object.assign(globals, previous));
+  const calls: string[] = []; let keep = false;
+  const stop = f.connection.follow({ grace: 20000, hidden: () => calls.push('hidden'), shown: () => calls.push('shown'), expired: () => { calls.push('expired'); return keep ? false : undefined; } });
+  await f.connection.connect(); f.sockets[0].open(); f.sockets[0].message('state');
+  const hide = (hidden: boolean) => { page.hidden = hidden; page.dispatchEvent(new Event('visibilitychange')); };
+  hide(true); t.mock.timers.tick(19999);
+  assert.equal(f.connection.socket, f.sockets[0], 'A short trip to the background keeps the socket');
+  hide(false); t.mock.timers.tick(20000);
+  assert.deepEqual([calls, f.connection.backgroundExpired], [['hidden', 'shown'], false]);
+  keep = true; hide(true); t.mock.timers.tick(20000);
+  assert.equal(f.connection.socket, f.sockets[0], 'The page may keep its connection when the grace expires');
+  keep = false; hide(false); hide(true); t.mock.timers.tick(20000);
+  assert.deepEqual([f.connection.socket, f.connection.backgroundExpired], [undefined, true]);
+  hide(false); await flush();
+  assert.equal(f.sockets.length, 2, 'Showing the page reconnects');
+  windows.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false })); await flush();
+  assert.equal(f.sockets.length, 2, 'An ordinary load does not restart the connection');
+  windows.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); await flush();
+  assert.equal(f.sockets.length, 3, 'A page restored from the back-forward cache reconnects');
+  windows.dispatchEvent(new Event('offline'));
+  assert.equal(f.connection.socket, undefined);
+  windows.dispatchEvent(new Event('online')); await flush();
+  assert.equal(f.sockets.length, 4);
+  stop(); windows.dispatchEvent(new Event('offline'));
+  assert.equal(f.connection.socket, f.sockets[3], 'A stopped follower ignores later events');
 });

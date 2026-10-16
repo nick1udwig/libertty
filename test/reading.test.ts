@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultReadingPhrases, readingPath, readingPhrases, readingRequest, readingPipeline, readingSuggestionInput, readingSuggestionChoice } from '../src/reading-request.ts';
+import { defaultReadingPhrases, readingPath, readingPhrases, readingRequest, readingPipeline } from '../src/reading-request.ts';
+import { shellQuote, simpleWords } from '../src/shell-words.ts';
 import { nativeSuggest } from './support/engine.ts';
 import { mkdtemp, mkdir, writeFile, rm, stat, link } from 'node:fs/promises';
 import os from 'node:os';
@@ -29,6 +30,14 @@ test('reader pipelines preserve Bash input and ignore quoted pipe text', () => {
   assert.deepEqual(readingPipeline("git diff | head -20 | look at", ['look at']), { command: 'git diff | head -20', phrase: 'look at' });
   assert.equal(readingRequest("look at printf '%s' 'a b'", ['look at'])?.operand, "printf '%s' 'a b'");
 });
+
+// The backend repairs a reading operand as a `cat` command and keeps only single-file results.
+const readingSuggestionInput = (request: { path: string; operand?: string }) => 'cat ' + (request.operand || request.path);
+function readingSuggestionChoice(command: string, phrase: string) {
+  const words = simpleWords(command);
+  if (words?.length !== 2 || words[0].value !== 'cat') return undefined;
+  return phrase + ' ' + shellQuote(words[1].value);
+}
 
 test('reading alternatives use the command engine’s verified file and directory repairs', async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'termai-read-alternates-'));

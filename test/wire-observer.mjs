@@ -36,6 +36,7 @@ export async function installWireObserver(context) {
       if (!bytes || bytes[0]!==84 || bytes[1]!==77 || bytes[2]!==1) return { type:'audio' };
       const body=bytes.subarray(4), view=new DataView(body.buffer,body.byteOffset,body.byteLength);
       if (bytes[3]===3) return { type:'input',data:new TextDecoder().decode(body) };
+      if (bytes[3]===8) return { type:'input',seq:view.getFloat64(0,true),data:new TextDecoder().decode(body.subarray(8)) };
       if (bytes[3]===4) return { type:'ack',seq:view.getFloat64(0,true) };
       if (bytes[3]===5) return { type:'resize',cols:view.getUint16(0,true),rows:view.getUint16(2,true),...(body[4]<2?{mobile:body[4]===1}:{}) };
       return { type:'audio' };

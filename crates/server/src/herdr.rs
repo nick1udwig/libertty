@@ -281,6 +281,10 @@ impl Target {
             .map(|stream| Box::new(stream) as Connection)
             .map_err(|_| "Cannot connect to Herdr. Start its server on this machine first.".into())
     }
+    /// A counter that changes whenever Herdr may have moved or replaced a pane, while metadata events are watched.
+    pub fn layout_epoch(&self) -> Option<u64> {
+        self.shared.resource(self).ok()?.layout_epoch()
+    }
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
         self.shared
             .resource(self)?

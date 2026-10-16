@@ -38,6 +38,8 @@ export type ServerMessage =
   | { type: 'state'; state: ShellState }
   | { type: 'hello'; engine: EngineMode; reset: boolean; truncated: boolean; firstSeq: number; lastSeq?: number; streamId: string }
   | { type: 'edit-result'; id: string; accepted: boolean; revision: number }
+  /** The last numbered key the backend delivered for this browser terminal, absent when it does not know it. */
+  | { type: 'input-ack'; seq?: number }
   | { type: 'result'; id: string; accepted: boolean; message?: string };
 export type ClientMessage =
   | { type: 'ping' }
@@ -45,7 +47,7 @@ export type ClientMessage =
   | { type: 'repair-cancel'; id: string }
   | { type: 'input-line'; id: string; prompt: number; revision: number }
   | { type: 'dictation'; id: string; action: 'start' | 'finish' | 'cancel'; prompt?: number; revision?: number; target?: DictationTarget; readingPhrases?: string[] }
-  | { type: 'input'; data: string }
+  | { type: 'input'; data: string; seq?: number }
   | { type: 'paste'; text: string }
   | { type: 'dictation-paste'; text: string; applied: boolean; replace: boolean; prompt: number; revision: number; readingPhrases?: string[] }
   | { type: 'replace'; text: string; id: string; prompt: number; revision: number }

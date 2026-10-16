@@ -38,7 +38,13 @@ pub struct HerdrFrame {
     pub width: u16,
     pub height: u16,
     pub full: bool,
-    pub bytes: std::sync::Arc<str>,
+    /// Raw ANSI bytes, decoded once from Herdr and base64-encoded only for JSON clients.
+    #[serde(serialize_with = "base64")]
+    pub bytes: std::sync::Arc<[u8]>,
+}
+fn base64<S: serde::Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+    use base64::Engine;
+    serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 #[derive(Clone, Serialize)]
 #[serde(
@@ -136,6 +142,11 @@ pub enum ServerMessage {
         id: String,
         accepted: bool,
         revision: u64,
+    },
+    /// The last numbered key this terminal delivered for the connecting browser, absent when it is new here.
+    InputAck {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        seq: Option<u64>,
     },
     Result {
         id: String,
@@ -314,6 +325,9 @@ pub enum ClientMessage {
     Input {
         #[serde(deserialize_with = "input_text")]
         data: String,
+        /// Numbers keys per browser terminal so a reconnect can resend them exactly once.
+        #[serde(default, deserialize_with = "optional_safe")]
+        seq: Option<u64>,
     },
     Paste {
         #[serde(deserialize_with = "input_text")]

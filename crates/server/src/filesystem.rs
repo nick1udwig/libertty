@@ -9,7 +9,7 @@ use russh_sftp::{
 use std::{os::unix::fs::MetadataExt, sync::Arc, time::Duration};
 use tokio::{
     fs,
-    io::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncSeekExt, AsyncWrite},
 };
 pub type Reader = Box<dyn AsyncRead + Unpin + Send>;
 pub type Writer = Box<dyn AsyncWrite + Unpin + Send>;
@@ -25,6 +25,10 @@ pub struct Metadata {
 impl Metadata {
     pub fn len(&self) -> u64 {
         self.size
+    }
+    /// Size and modification time, which change when the file's content does.
+    pub fn version(&self) -> (u64, f64) {
+        (self.size, self.modified)
     }
     pub fn is_empty(&self) -> bool {
         self.size == 0
@@ -214,6 +218,30 @@ impl FileSystem {
             fs::DirBuilder::new().mode(mode).create(file).await?;
         }
         Ok(())
+    }
+    /// Open a file at a byte offset, so an interrupted download continues where it stopped.
+    pub async fn open_read_at(&self, file: &str, offset: u64) -> Result<Reader> {
+        if let Some(host) = &self.remote {
+            let mut file = call(host.files.open(file)).await?;
+            file.seek(std::io::SeekFrom::Start(offset)).await?;
+            Ok(Box::new(file))
+        } else {
+            let mut file = fs::File::open(file).await?;
+            file.seek(std::io::SeekFrom::Start(offset)).await?;
+            Ok(Box::new(file))
+        }
+    }
+    /// Open an existing file for writing at a byte offset, so a resumed upload continues its partial file.
+    pub async fn open_write_at(&self, file: &str, offset: u64) -> Result<Writer> {
+        if let Some(host) = &self.remote {
+            let mut file = call(host.files.open_with_flags(file, OpenFlags::WRITE)).await?;
+            file.seek(std::io::SeekFrom::Start(offset)).await?;
+            Ok(Box::new(file))
+        } else {
+            let mut file = fs::OpenOptions::new().write(true).open(file).await?;
+            file.seek(std::io::SeekFrom::Start(offset)).await?;
+            Ok(Box::new(file))
+        }
     }
     pub async fn open_read(&self, file: &str) -> Result<Reader> {
         if let Some(host) = &self.remote {

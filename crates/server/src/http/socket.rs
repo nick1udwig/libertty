@@ -1,5 +1,5 @@
 use super::*;
-use crate::protocol::{ClientMessage, ViewerMessage};
+use crate::protocol::{ClientMessage, ServerMessage, ViewerMessage};
 use futures::stream::SplitSink;
 use tokio::sync::mpsc;
 mod pressure;
@@ -166,23 +166,24 @@ impl Output {
 pub(super) struct Policy {
     cancel: CancellationToken,
     slow: CancellationToken,
-    heartbeat: bool,
+    heartbeat: Option<Duration>,
     send_timeout: Option<Duration>,
 }
 impl Policy {
+    /// A vanished viewer must not hold the shell's output window closed.
     pub fn native() -> Self {
         Self {
             cancel: CancellationToken::new(),
             slow: CancellationToken::new(),
-            heartbeat: false,
-            send_timeout: None,
+            heartbeat: Some(Duration::from_secs(5)),
+            send_timeout: Some(Duration::from_secs(20)),
         }
     }
     pub fn herdr(cancel: CancellationToken, slow: CancellationToken, heartbeat: bool) -> Self {
         Self {
             cancel,
             slow,
-            heartbeat,
+            heartbeat: heartbeat.then_some(Duration::from_secs(30)),
             send_timeout: Some(Duration::from_secs(5)),
         }
     }
@@ -215,8 +216,12 @@ async fn close(sender: &mut Sender, code: u16, reason: &str, deadline: Option<Du
     )
     .await;
 }
-fn encode(value: &Value, mode: wire::Mode) -> Message {
-    let encoded = wire::encode(value, mode);
+fn encode(message: &Transport, mode: wire::Mode) -> Message {
+    let encoded = match message {
+        Transport::Server(message) => wire::encode_server(message, mode),
+        Transport::Message(value) => wire::encode(value, mode),
+        Transport::Close(..) => unreachable!("close frames are sent separately"),
+    };
     if encoded.binary {
         Message::Binary(encoded.bytes.into())
     } else {
@@ -231,7 +236,9 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
             .and_then(|protocol| protocol.to_str().ok()),
     );
     let (mut sender, mut receive) = socket.split();
-    let mut heartbeat = tokio::time::interval(Duration::from_secs(30));
+    let mut heartbeat = tokio::time::interval(policy.heartbeat.unwrap_or(Duration::from_secs(30)));
+    // A blocked send must not turn missed ticks into an immediate disconnect.
+    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     heartbeat.tick().await;
     let mut alive = true;
     let mut pressure = Pressure::default();
@@ -241,7 +248,7 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
             _ = policy.slow.cancelled() => Event::Slow,
             _ = policy.cancel.cancelled() => Event::Cancelled,
             item = output.receive() => Event::Output(item),
-            _ = heartbeat.tick(), if policy.heartbeat => Event::Heartbeat,
+            _ = heartbeat.tick(), if policy.heartbeat.is_some() => Event::Heartbeat,
             message = receive.next() => Event::Input(message),
         };
         match event {
@@ -260,7 +267,11 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                 break;
             }
             Event::Output(Some(item)) => match item.transport() {
-                Transport::Message(message) => {
+                Transport::Close(code, reason) => {
+                    close(&mut sender, *code, reason, None).await;
+                    break;
+                }
+                message => {
                     // Keep the queue reservation until the in-flight send completes.
                     let started = std::time::Instant::now();
                     let selected = pressure.mode(mode, output.queued(), started);
@@ -268,12 +279,8 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                         break;
                     }
                     if mode == wire::Mode::GzipFast {
-                        pressure.sent(message, started, std::time::Instant::now());
+                        pressure.sent(message.sequence(), started, std::time::Instant::now());
                     }
-                }
-                Transport::Close(code, reason) => {
-                    close(&mut sender, *code, reason, None).await;
-                    break;
                 }
             },
             Event::Heartbeat => {
@@ -286,6 +293,8 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                 }
             }
             Event::Input(Some(Ok(message))) => {
+                // Any client traffic proves the viewer is alive, including queued audio ahead of a pong.
+                alive = true;
                 let result = match message {
                     Message::Text(text) => input.text(&text, &mut pressure),
                     Message::Binary(bytes) => input.binary(&bytes, mode, &mut pressure),
@@ -295,16 +304,13 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                         }
                         Ok(false)
                     }
-                    Message::Pong(_) => {
-                        alive = true;
-                        Ok(false)
-                    }
+                    Message::Pong(_) => Ok(false),
                     Message::Close(_) => break,
                 };
                 if matches!(result, Ok(true))
                     && !send(
                         &mut sender,
-                        encode(&json!({"type":"pong"}), mode),
+                        encode(&Transport::Server(ServerMessage::Pong), mode),
                         policy.send_timeout,
                     )
                     .await

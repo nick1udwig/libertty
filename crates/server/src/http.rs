@@ -1,4 +1,5 @@
 use termai_engine::utf16_len;
+mod idempotency;
 mod routes;
 mod socket;
 use crate::{
@@ -157,6 +158,7 @@ struct HerdrTicket {
     target: herdr::Target,
     until: Instant,
 }
+#[derive(Clone)]
 struct Download {
     owner: String,
     terminal: String,
@@ -165,6 +167,28 @@ struct Download {
     name: String,
     until: Instant,
     transfer: Option<String>,
+    /// The file's size and modification time when the ticket was issued, so a resume never splices two versions.
+    version: (u64, f64),
+    started: bool,
+}
+/// Retires a download once its last byte leaves, because a sized body ends without polling for its end.
+struct DownloadProgress {
+    app: Arc<App>,
+    ticket: String,
+    session: Arc<Session>,
+    transfer: Option<String>,
+    remaining: u64,
+}
+impl DownloadProgress {
+    fn sent(&mut self, bytes: usize) {
+        self.remaining = self.remaining.saturating_sub(bytes as u64);
+        if self.remaining == 0 {
+            if let Some(id) = self.transfer.take() {
+                self.session.remove_transfer(&id);
+            }
+            self.app.downloads.lock().unwrap().remove(&self.ticket);
+        }
+    }
 }
 pub struct App {
     pub config: Config,
@@ -183,6 +207,9 @@ pub struct App {
     herdr_capacity: Arc<tokio::sync::Semaphore>,
     ssh_probes: tokio::sync::Semaphore,
     herdr_terminals: herdr_terminal_stream::Hub,
+    herdr_inputs: herdr_view::Ledgers,
+    replies: idempotency::Replies,
+    uploads: crate::uploads::Uploads,
     herdr_history: crate::herdr_history::Hub,
     notifications: Arc<notifications::Notifications>,
     services: HostServices,
@@ -288,6 +315,9 @@ impl App {
             herdr_capacity: Arc::new(tokio::sync::Semaphore::new(64)),
             ssh_probes: tokio::sync::Semaphore::new(4),
             herdr_terminals: herdr_terminal_stream::Hub::default(),
+            herdr_inputs: Default::default(),
+            replies: Default::default(),
+            uploads: Default::default(),
             herdr_history: crate::herdr_history::Hub::default(),
             notifications,
             services,
@@ -545,26 +575,42 @@ impl App {
                 name: name.clone(),
                 until: Instant::now() + Duration::from_secs(60),
                 transfer,
+                version: attrs.version(),
+                started: false,
             },
         );
         Ok(json!({"ticket":ticket,"name":name,"size":attrs.len()}))
     }
-    async fn send_download(&self, ticket: &str) -> Result<Response<Body>, Failure> {
+    /// Stream a download, resuming from `offset` after an interruption; the ticket retires once a request reaches the end.
+    async fn send_download(
+        self: &Arc<Self>,
+        ticket: &str,
+        offset: u64,
+    ) -> Result<Response<Body>, Failure> {
         let expired = || {
             (
                 StatusCode::NOT_FOUND,
                 "This download link has expired. Download the file again.".into(),
             )
         };
-        let download = self
-            .downloads
-            .lock()
-            .unwrap()
-            .remove(ticket)
-            .ok_or_else(expired)?;
-        if download.until < Instant::now() || !self.owners.lock().unwrap().has(&download.owner) {
-            return Err(expired());
-        }
+        let download = {
+            let mut downloads = self.downloads.lock().unwrap();
+            let download = downloads.get_mut(ticket).ok_or_else(expired)?;
+            if download.until < Instant::now() || !self.owners.lock().unwrap().has(&download.owner)
+            {
+                downloads.remove(ticket);
+                return Err(expired());
+            }
+            // A started download may resume for as long as one attempt may last.
+            if !download.started {
+                download.started = true;
+                download.until = Instant::now() + Duration::from_secs(30 * 60);
+            }
+            download.clone()
+        };
+        let retire = || {
+            self.downloads.lock().unwrap().remove(ticket);
+        };
         let session = download.session.upgrade().ok_or_else(expired)?;
         if !self
             .sessions
@@ -585,32 +631,55 @@ impl App {
             .await
             .map_err(file_failure)?;
         if !attrs.is_file() {
+            retire();
             return Err(fail("Choose a regular file to download."));
+        }
+        if attrs.version() != download.version {
+            retire();
+            return Err((
+                StatusCode::CONFLICT,
+                "The file changed during the download. Download it again.".into(),
+            ));
+        }
+        let size = attrs.len();
+        if offset > 0 && offset >= size {
+            return Err((
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                "The download is already complete.".into(),
+            ));
         }
         let file = session
             .filesystem()
-            .open_read(&download.file)
+            .open_read_at(&download.file, offset)
             .await
             .map_err(file_failure)?;
         let stream = tokio_util::io::ReaderStream::new(file);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(30 * 60);
+        let mut progress = DownloadProgress {
+            app: self.clone(),
+            ticket: ticket.to_owned(),
+            session,
+            transfer: download.transfer,
+            remaining: size - offset,
+        };
+        progress.sent(0);
         let stream = futures::stream::unfold(
-            (stream, session, download.transfer, deadline),
-            |(mut stream, session, transfer, deadline)| async move {
+            (stream, deadline, progress),
+            |(mut stream, deadline, mut progress)| async move {
                 match tokio::time::timeout_at(deadline, stream.next()).await {
-                    Ok(Some(chunk)) => Some((chunk, (stream, session, transfer, deadline))),
-                    Ok(None) => {
-                        if let Some(id) = transfer {
-                            session.remove_transfer(&id);
+                    Ok(Some(chunk)) => {
+                        if let Ok(bytes) = &chunk {
+                            progress.sent(bytes.len());
                         }
-                        None
+                        Some((chunk, (stream, deadline, progress)))
                     }
+                    Ok(None) => None,
                     Err(_) => Some((
                         Err(std::io::Error::new(
                             std::io::ErrorKind::TimedOut,
                             "Download timed out.",
                         )),
-                        (stream, session, transfer, deadline),
+                        (stream, deadline, progress),
                     )),
                 }
             },
@@ -627,9 +696,17 @@ impl App {
                 }
             })
             .collect::<String>();
-        Ok(Response::builder()
+        let mut response = Response::builder()
             .header("content-type", "application/octet-stream")
-            .header("content-length", attrs.len())
+            .header("content-length", size - offset)
+            .header("accept-ranges", "bytes");
+        if offset > 0 {
+            response = response.status(StatusCode::PARTIAL_CONTENT).header(
+                "content-range",
+                format!("bytes {offset}-{}/{size}", size - 1),
+            );
+        }
+        Ok(response
             .header("cache-control", "no-store")
             .header(
                 "content-disposition",
@@ -649,6 +726,10 @@ impl App {
                 .fallback_service(api.fallback(static_request).with_state(self.clone()))
         };
         router
+            .layer(middleware::from_fn_with_state(
+                self.clone(),
+                idempotency::idempotent,
+            ))
             .layer(middleware::from_fn(compression))
             .layer(middleware::from_fn_with_state(self.clone(), security))
             .with_state(self.clone())
@@ -699,7 +780,7 @@ async fn security(State(app): State<Arc<App>>, req: Request<Body>, next: Next) -
             ("access-control-allow-credentials", "true"),
             (
                 "access-control-allow-headers",
-                "Content-Type, Authorization, If-None-Match, X-Termai-Link",
+                "Content-Type, Authorization, If-None-Match, X-Termai-Link, Idempotency-Key, Range",
             ),
             ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS"),
             ("access-control-allow-private-network", "true"),
@@ -871,6 +952,12 @@ async fn herdr_websocket(
         .map_err(|_| denied())?;
     let upgrade = socket::upgrade(req).await?;
     let app = app.clone();
+    let ledger = input_client(query)
+        .filter(|_| !terminal.is_empty())
+        .map(|client| {
+            app.herdr_inputs
+                .open(format!("{}/{terminal}/{client}", ticket.owner))
+        });
     Ok(upgrade
         .on_upgrade(move |socket| async move {
             let _permit = permit;
@@ -883,7 +970,7 @@ async fn herdr_websocket(
                     cancel.clone(),
                 ),
             );
-            herdr_socket_session(socket, &app, ticket, cancel.clone(), &id).await;
+            herdr_socket_session(socket, &app, ticket, cancel.clone(), &id, ledger).await;
             cancel.cancel();
             app.herdr_connections.lock().unwrap().remove(&id);
             app.notifications.disconnected(&id);
@@ -896,6 +983,7 @@ async fn herdr_socket_session(
     ticket: HerdrTicket,
     cancel: CancellationToken,
     id: &str,
+    ledger: Option<(Arc<herdr_view::Ledger>, bool)>,
 ) {
     let _source = if ticket.source.is_empty() {
         None
@@ -969,8 +1057,11 @@ async fn herdr_socket_session(
             &app.herdr_terminals,
             &app.herdr_history,
             ticket.size.map(|size| (size, revision)),
-            send,
-            cancel.clone(),
+            herdr_view::Viewer {
+                send,
+                cancel: cancel.clone(),
+                ledger,
+            },
         ) {
             Ok(view) => {
                 view.set_recording_scope(recording_scope);
@@ -1052,17 +1143,29 @@ async fn websocket(
         app.tickets.lock().unwrap().remove(ticket);
     }
     let stream = query.get("stream").cloned();
+    let client = input_client(query);
     Ok(upgrade
-        .on_upgrade(move |socket| socket_session(socket, session, after as u64, stream))
+        .on_upgrade(move |socket| socket_session(socket, session, after as u64, stream, client))
         .into_response())
+}
+/// The browser terminal's own id for numbering its keys, ignored unless it is a short token.
+fn input_client(query: &HashMap<String, String>) -> Option<String> {
+    query
+        .get("client")
+        .filter(|id| {
+            (1..=64).contains(&id.len())
+                && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+        .cloned()
 }
 async fn socket_session(
     socket: WebSocket,
     session: Arc<Session>,
     after: u64,
     stream: Option<String>,
+    client: Option<String>,
 ) {
-    let (id, output) = session.attach(after, stream.as_deref());
+    let (id, output) = session.attach(after, stream.as_deref(), client.as_deref());
     socket::pump(
         socket,
         socket::Input::Native {

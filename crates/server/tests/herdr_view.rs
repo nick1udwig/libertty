@@ -3,7 +3,7 @@ use std::{os::unix::fs::PermissionsExt, sync::atomic::Ordering, time::Duration};
 use termai_server::{
     herdr_history,
     herdr_terminal_stream::{Hub, Size},
-    herdr_view::View,
+    herdr_view::{Ledgers, View, Viewer},
     session::Transport,
     viewer_queue,
 };
@@ -37,19 +37,22 @@ async fn a_closed_terminal_controller_ends_quietly_before_history_detects_the_cl
         &Hub::default(),
         &herdr_history::Hub::default(),
         Some((Size { cols: 40, rows: 30 }, None)),
-        send,
-        cancel.clone(),
+        Viewer {
+            send,
+            cancel: cancel.clone(),
+            ledger: None,
+        },
     )
     .unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match receive.recv().await.unwrap().message {
-                Transport::Message(value) => assert_ne!(value["type"], "reading-error"),
                 Transport::Close(code, reason) => {
                     assert_eq!(code, 1000);
                     assert_eq!(reason, "Herdr terminal ended");
                     break;
                 }
+                message => assert_ne!(message.value().unwrap()["type"], "reading-error"),
             }
         }
     })
@@ -87,14 +90,17 @@ async fn history_errors_reconcile_closed_moved_and_replaced_panes_before_reporti
             &Hub::default(),
             &herdr_history::Hub::default(),
             None,
-            send,
-            cancel.clone(),
+            Viewer {
+                send,
+                cancel: cancel.clone(),
+                ledger: None,
+            },
         )
         .unwrap();
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let item = receive.recv().await.unwrap();
-                if let Transport::Message(value) = item.message
+                if let Some(value) = item.message.value()
                     && value["type"] == "screen"
                 {
                     break;
@@ -132,11 +138,13 @@ async fn history_errors_reconcile_closed_moved_and_replaced_panes_before_reporti
         let code = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 match receive.recv().await.unwrap().message {
-                    Transport::Message(value) if value["type"] == "reading-error" => {
-                        errors.push(value)
-                    }
                     Transport::Close(code, _) => break code,
-                    _ => {}
+                    message => {
+                        let value = message.value().unwrap();
+                        if value["type"] == "reading-error" {
+                            errors.push(value);
+                        }
+                    }
                 }
             }
         })
@@ -178,8 +186,11 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
         &frames,
         &history,
         None,
-        send,
-        cancel.clone(),
+        Viewer {
+            send,
+            cancel: cancel.clone(),
+            ledger: None,
+        },
     )
     .unwrap();
     let mut expected = String::new();
@@ -203,7 +214,7 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let item = receive.recv().await.unwrap();
-            if let Transport::Message(value) = item.message
+            if let Some(value) = item.message.value()
                 && value["type"] == "result"
                 && value["id"] == "ordered"
             {
@@ -250,6 +261,192 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
     cancel.cancel();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn typing_reuses_pane_validation_until_herdr_reports_a_change() {
+    let fixture = support::Fixture::new().await;
+    let mut target = fixture.target.clone();
+    target.binary = "/bin/false".into();
+    let count = |method: &str| {
+        fixture
+            .actions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|action| action["method"] == method)
+            .count()
+    };
+    let wait = |method: &'static str, expected: usize| {
+        let count = &count;
+        async move {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while count(method) < expected {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("{method} reached {expected}"));
+        }
+    };
+    let (send, _receive, _) = viewer_queue::channel();
+    let cancel = CancellationToken::new();
+    let view = View::open(
+        target.clone(),
+        target
+            .snapshot()
+            .await
+            .unwrap()
+            .terminal("term_0")
+            .unwrap()
+            .clone(),
+        &Hub::default(),
+        &herdr_history::Hub::default(),
+        None,
+        Viewer {
+            send,
+            cancel: cancel.clone(),
+            ledger: None,
+        },
+    )
+    .unwrap();
+    // Without watched events, every keystroke proves its pane first.
+    for i in 1..=2 {
+        view.receive(json!({"type":"input","data":"u"})).unwrap();
+        wait("pane.send_text", i).await;
+    }
+    assert_eq!(count("pane.get"), 2);
+    let (metadata, mut snapshots) = tokio::sync::mpsc::channel(16);
+    let task = tokio::spawn(termai_server::herdr::metadata(
+        target.clone(),
+        metadata,
+        cancel.clone(),
+    ));
+    snapshots.recv().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while target.layout_epoch().is_none() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    for i in 3..=7 {
+        view.receive(json!({"type":"input","data":"w"})).unwrap();
+        wait("pane.send_text", i).await;
+    }
+    assert_eq!(
+        count("pane.get"),
+        3,
+        "a watched typing burst validates once"
+    );
+    let before = target.layout_epoch();
+    fixture.notify();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while target.layout_epoch() == before {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    view.receive(json!({"type":"input","data":"e"})).unwrap();
+    wait("pane.send_text", 8).await;
+    assert_eq!(
+        count("pane.get"),
+        4,
+        "a Herdr event requires a fresh validation"
+    );
+    cancel.cancel();
+    task.await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn numbered_keys_reach_herdr_once_across_connections_of_one_browser_terminal() {
+    let fixture = support::Fixture::new().await;
+    let mut target = fixture.target.clone();
+    target.binary = "/bin/false".into();
+    let sent = || {
+        fixture
+            .actions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|action| action["method"] == "pane.send_text")
+            .map(|action| action["params"]["text"].as_str().unwrap().to_owned())
+            .collect::<String>()
+    };
+    let terminal = target
+        .snapshot()
+        .await
+        .unwrap()
+        .terminal("term_0")
+        .unwrap()
+        .clone();
+    let (hub, history, ledgers) = (
+        Hub::default(),
+        herdr_history::Hub::default(),
+        Ledgers::default(),
+    );
+    let mut connections = Vec::new();
+    let mut connect = || {
+        let (send, mut receive, _) = viewer_queue::channel();
+        let cancel = CancellationToken::new();
+        let view = View::open(
+            target.clone(),
+            terminal.clone(),
+            &hub,
+            &history,
+            None,
+            Viewer {
+                send,
+                cancel: cancel.clone(),
+                ledger: Some(ledgers.open("owner/term_0/tab".into())),
+            },
+        )
+        .unwrap();
+        let ack = std::iter::from_fn(|| receive.try_recv().ok())
+            .filter_map(|item| item.message.value())
+            .find(|message| message["type"] == "input-ack")
+            .unwrap();
+        connections.push((receive, cancel));
+        (view, ack)
+    };
+    let (first, ack) = connect();
+    assert_eq!(ack, json!({"type":"input-ack"}));
+    for (seq, data) in [(1, "a"), (2, "b")] {
+        first
+            .receive(json!({"type":"input","data":data,"seq":seq}))
+            .unwrap();
+    }
+    let until = |expected: &'static str| {
+        let sent = &sent;
+        async move {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while sent() != expected {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("sent {:?}, expected {expected:?}", sent()));
+        }
+    };
+    until("ab").await;
+    // The replacement learns which keys arrived; the superseded connection delivers nothing more.
+    let (second, ack) = connect();
+    assert_eq!(ack["seq"], 2);
+    first
+        .receive(json!({"type":"input","data":"late","seq":3}))
+        .unwrap();
+    for (seq, data) in [(2, "b"), (3, "c"), (3, "c")] {
+        second
+            .receive(json!({"type":"input","data":data,"seq":seq}))
+            .unwrap();
+    }
+    until("abc").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(sent(), "abc");
+    for (_, cancel) in connections {
+        cancel.cancel();
+    }
+}
+
 #[tokio::test]
 async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_updates() {
     let fixture = support::Fixture::new().await;
@@ -294,15 +491,18 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
         &frames,
         &history,
         Some((Size { cols: 40, rows: 30 }, Some(6))),
-        send,
-        cancel.clone(),
+        Viewer {
+            send,
+            cancel: cancel.clone(),
+            ledger: None,
+        },
     )
     .unwrap();
     let mut messages: Vec<Value> = vec![];
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let item = receive.recv().await.unwrap();
-            if let Transport::Message(value) = item.message {
+            if let Some(value) = item.message.value() {
                 let mobile = value["type"] == "herdr-frame" && value["width"] == 40;
                 messages.push(value);
                 if mobile {
@@ -325,7 +525,7 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
         .unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
     while let Ok(item) = receive.try_recv() {
-        if let Transport::Message(value) = item.message {
+        if let Some(value) = item.message.value() {
             assert!(
                 value["type"] != "herdr-layout" || value["ready"] != true,
                 "Returning during a resize must retain the original redraw fence"
@@ -336,7 +536,7 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let item = receive.recv().await.unwrap();
-            if let Transport::Message(value) = item.message
+            if let Some(value) = item.message.value()
                 && value["type"] == "herdr-layout"
                 && value["ready"] == true
             {
@@ -368,7 +568,7 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let item = receive.recv().await.unwrap();
-            if let Transport::Message(value) = item.message
+            if let Some(value) = item.message.value()
                 && value["type"] == "screen"
             {
                 assert_eq!(value["text"], "new while parked");

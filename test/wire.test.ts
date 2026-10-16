@@ -21,6 +21,9 @@ test('compact client controls keep sequence, geometry, input and audio distinct'
   assert.deepEqual(new Uint8Array(encodeWire({ type: 'resize', cols: 40, rows: 30, mobile: true }, BINARY_PROTOCOL) as ArrayBuffer), new Uint8Array([84, 77, 1, 5, 40, 0, 30, 0, 1]));
   assert.deepEqual(encodeAudio(new Uint8Array([0, 255]), BINARY_PROTOCOL), new Uint8Array([84, 77, 1, 6, 0, 255]));
   assert.equal(encodeWire({ type: 'input', data: 'legacy' }, ''), '{"type":"input","data":"legacy"}');
+  const numbered = new Uint8Array(encodeWire({ type: 'input', data: '界', seq: 7 }, BINARY_PROTOCOL) as ArrayBuffer);
+  assert.deepEqual([...numbered.subarray(0, 4)], [84, 77, 1, 8]);
+  assert.equal(new DataView(numbered.buffer).getFloat64(4, true), 7); assert.equal(new TextDecoder().decode(numbered.subarray(12)), '界');
   assert.equal(typeof encodeWire({ type: 'resize', cols: 1.5, rows: 30 }, BINARY_PROTOCOL), 'string');
 });
 test('malformed headers, sequences, UTF-8 and compressed streams reject without poisoning later messages', async () => {

@@ -765,12 +765,17 @@ export function createWorkspaceNavigation(options: Options) {
       authorizeTerminals(backend, event.data.accessToken);
     if (event.data?.type === 'terminal-loaded') {
       frame.contentWindow!.postMessage({ type: 'shortcut-host' }, location.origin);
+      // Visibility arrives first so a hidden tab does not connect until it is shown.
       frame.contentWindow!.postMessage(
-        { type: 'authorize', accessToken: tokenFor(backend) },
+        {
+          type: 'tab-visibility',
+          visible: tab.id === workspace.active && page === 'terminal',
+          active: tab.id === workspace.active,
+        },
         location.origin,
       );
       frame.contentWindow!.postMessage(
-        { type: 'tab-visibility', visible: tab.id === workspace.active && page === 'terminal' },
+        { type: 'authorize', accessToken: tokenFor(backend) },
         location.origin,
       );
     }

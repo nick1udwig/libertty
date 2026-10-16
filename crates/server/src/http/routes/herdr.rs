@@ -196,24 +196,6 @@ pub(super) async fn api_herdr_options(
     return ok(target.options().await.map_err(fail)?);
 }
 
-pub(super) async fn api_herdr_suggest(
-    app: &Arc<App>,
-    ctx: HerdrContext,
-    mut req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
-    let query = &ctx.query;
-    let target = ctx.target;
-    let input: crate::protocol::SuggestRequest = typed_body(&mut req, 16384).await?;
-    let text = input.text.as_str();
-    let terminal = query.get("terminalId").map(String::as_str).unwrap_or("");
-    return ok(bounded(async |cancel| {
-        target
-            .suggest(terminal, text, app.services.clone(), cancel)
-            .await
-    })
-    .await?);
-}
-
 pub(super) async fn api_herdr_action(
     _app: &Arc<App>,
     ctx: HerdrContext,

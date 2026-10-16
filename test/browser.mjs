@@ -496,7 +496,8 @@ try {
   await until(() => messages.some(m => m.type === 'result' && m.id === 'stale'));
   assert.equal(messages.find(m => m.type === 'result' && m.id === 'stale').accepted, false);
   const floodPrompt = lastState.prompt;
-  socket.send(JSON.stringify({ type: 'command', id: 'flood', command: "python3 -c 'print(\"output line\\n\" * 30000); print(\"FLOOD_DONE\")'", prompt: floodPrompt }));
+  // The echoed command never contains the joined marker, and prompt state can arrive before flow-controlled output.
+  socket.send(JSON.stringify({ type: 'command', id: 'flood', command: "python3 -c 'print(\"output line\\n\" * 30000); print(\"FLOOD\" + \"_DONE\")'", prompt: floodPrompt }));
   await until(() => allOutput.includes('FLOOD_DONE') && lastState.ready && lastState.prompt > floodPrompt, 20000);
   assert.ok(allOutput.length > 300000);
   socket.close();

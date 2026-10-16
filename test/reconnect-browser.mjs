@@ -28,14 +28,18 @@ try {
   await installWireObserver(context);
   await installBackgroundGrace(context);
   await context.addInitScript(() => {
-    window.__sockets = []; window.__states = 0; window.__sent = []; window.__lateCloses = [];
+    window.__sockets = []; window.__states = 0; window.__sent = []; window.__lateCloses = []; window.__output = '';
     const Original = WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) {
         if (window.__holdNextSocket) window.__preUpgradeOldState = window.__blackhole?.readyState;
         super(...args); window.__sockets.push(this);
         if (window.__holdNextSocket) { window.__holdNextSocket = false; window.__heldSocket = this; this.__held = []; }
-        this.addEventListener('message', async event => { if ((await window.__wireMessage(event.data, this)).type === 'state') window.__states++; });
+        this.addEventListener('message', async event => {
+          const message = await window.__wireMessage(event.data, this);
+          if (message.type === 'state') window.__states++;
+          if (message.type === 'output') window.__output += message.data;
+        });
       }
       set onmessage(handler) {
         this.addEventListener('message', event => { if (this !== window.__blackhole) { if (this.__held) this.__held.push(() => handler(event)); else handler(event); } });
@@ -46,7 +50,11 @@ try {
           if (window.__holdCloses) window.__lateCloses.push(() => handler(event)); else handler(event);
         });
       }
-      send(data) { if (window.__wireSent(data).type !== 'audio') window.__sent.push(window.__wireSent(data)); return super.send(data); }
+      send(data) {
+        if (window.__wireSent(data).type !== 'audio') window.__sent.push(window.__wireSent(data));
+        // A muted socket models an uplink that accepts messages and never delivers them.
+        if (this !== window.__muted) return super.send(data);
+      }
     };
   });
   const page = await context.newPage(), errors = [];
@@ -85,6 +93,28 @@ try {
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   }
   await silentStall();
+
+  // Keys handed to a dead link reach the terminal once: a dead uplink resends them, and a dead downlink does not.
+  async function stalledTyping(link, text) {
+    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+    await page.locator('#terminal textarea').focus();
+    const states = await stateCount();
+    await page.evaluate(link => { window.__dead = window[link === 'uplink' ? '__muted' : '__blackhole'] = window.__sockets.at(-1); }, link);
+    await page.keyboard.type(text);
+    // The heartbeat notices the dead link and replaces its socket.
+    await page.waitForFunction(() => window.__dead.readyState === WebSocket.CLOSED, undefined, { polling: 50, timeout: 15000 });
+    await connected(states);
+    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+  }
+  for (const link of ['uplink', 'downlink']) {
+    await stalledTyping(link, `echo $((40+2))-${link}-once`);
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(link => window.__output.includes(`42-${link}-once`), link);
+    await page.waitForFunction(() => document.querySelector('#shell-status').textContent === 'At prompt');
+    const output = await page.evaluate(() => window.__output);
+    assert.equal(output.split(`42-${link}-once`).length, 2, `Keys typed into a dead ${link} run once: ${JSON.stringify(output.slice(-200))}`);
+    assert.match(output, new RegExp(`42-${link}-once\r\n`));
+  }
 
   async function queuedTyping(text, changeContext) {
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
@@ -140,6 +170,8 @@ try {
   states = await stateCount();
   await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo reconnect-once');
+  // Once the shell echoes the keys, the replacement learns they arrived and resends none of them.
+  await page.waitForFunction(() => window.__output.includes('echo reconnect-once'));
   const inputs = await page.evaluate(() => window.__sent.filter(message => message.type === 'input').length);
   await online(); await connected(states);
   assert.equal(await page.evaluate(() => window.__sent.filter(message => message.type === 'input').length), inputs);
@@ -164,6 +196,91 @@ try {
   });
   await page.waitForFunction(() => window.__sent.some(message => message.type === 'input' && message.data === '\x03'));
   await page.locator('.terminal-presentation').waitFor({state:'hidden'});
+
+  // Output still queued behind painting is not replayed again, and the replacement keeps acknowledging.
+  await page.locator('#terminal textarea').focus();
+  await page.evaluate(() => {
+    window.__paintRAF = window.requestAnimationFrame;
+    window.__pendingPaintFrames = [];
+    window.requestAnimationFrame = callback => { window.__pendingPaintFrames.push(callback); return 0; };
+    window.__queuedOutput = 0;
+    window.__sockets.at(-1).addEventListener('message', async event => {
+      const message = await window.__wireMessage(event.data);
+      if (message.type === 'output') window.__queuedOutput = Math.max(window.__queuedOutput, message.seq);
+    });
+  });
+  await page.keyboard.type('seq 1 60000; echo $((6*7))-queued-done'); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelector('#shell-status').textContent === 'Running');
+  // Unpainted output is never acknowledged, so delivery stops once the window is full.
+  let queuedOutput = -1;
+  for (;;) {
+    await delay(500);
+    const current = await page.evaluate(() => window.__queuedOutput);
+    if (current > 0 && current === queuedOutput) break;
+    queuedOutput = current;
+  }
+  const replacement = await stallNext('/ws');
+  await page.evaluate(() => {
+    // Observe the replacement from its first message.
+    window.__replayed = [];
+    const Previous = window.WebSocket;
+    window.WebSocket = class extends Previous {
+      constructor(...args) {
+        super(...args); window.WebSocket = Previous;
+        this.addEventListener('message', async event => {
+          const message = await window.__wireMessage(event.data);
+          if (message.type === 'output') window.__replayed.push(message.seq);
+        });
+      }
+    };
+  });
+  await online(); await replacement.entered;
+  await page.evaluate(() => {
+    // Paint the earlier socket's queue before the replacement has delivered anything.
+    window.requestAnimationFrame = window.__paintRAF;
+    for (const callback of window.__pendingPaintFrames.splice(0)) requestAnimationFrame(callback);
+  });
+  await delay(300);
+  await replacement.done();
+  await page.waitForFunction(() => document.querySelector('#shell-status').textContent === 'At prompt', undefined, { timeout: 15000 });
+  const replayed = await page.evaluate(() => window.__replayed);
+  // Each replay message carries the final sequence of its batch, so any earlier value means resent output.
+  assert.ok(replayed.length && Math.min(...replayed) > queuedOutput, `Replay resumes after queued output ${queuedOutput}: ${replayed.slice(0, 3)}`);
+  await page.locator('.terminal-presentation').waitFor({state:'hidden'});
+
+  // Far more output than a quick replay arrives as one snapshot of the backend's terminal.
+  await page.locator('#terminal textarea').focus();
+  await page.keyboard.type('sleep 1; seq 1 60000; echo $((6*7))-snapshot-done'); await page.keyboard.press('Enter');
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    window.dispatchEvent(new Event('offline'));
+  });
+  await delay(3000);
+  states = await stateCount();
+  await page.evaluate(() => {
+    // Observe the replacement from its first message.
+    window.__snapshotMessages = [];
+    const Previous = window.WebSocket;
+    window.WebSocket = class extends Previous {
+      constructor(...args) {
+        super(...args); window.WebSocket = Previous;
+        this.addEventListener('message', async event => {
+          const message = await window.__wireMessage(event.data);
+          if (['hello', 'output'].includes(message.type)) window.__snapshotMessages.push(message);
+        });
+      }
+    };
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+    window.dispatchEvent(new Event('online'));
+  });
+  await connected(states);
+  await page.waitForFunction(() => document.querySelector('#shell-status').textContent === 'At prompt');
+  await page.locator('.terminal-presentation').waitFor({state:'hidden'});
+  const [hello, ...snapshotOutputs] = await page.evaluate(() => window.__snapshotMessages);
+  assert.equal(hello.type, 'hello'); assert.equal(hello.reset, true); assert.equal(hello.truncated, false);
+  assert.equal(snapshotOutputs.length, 1, 'One snapshot replaces the raw replay');
+  assert.match(snapshotOutputs[0].data, /42-snapshot-done/);
+  assert.ok(snapshotOutputs[0].data.length < 200000, 'The snapshot is far smaller than the missed output');
 
   async function stallNext(path) {
     if (path === '/ws') {
@@ -216,6 +333,14 @@ try {
   // Herdr also bounds/cancels the ticket request after authorization succeeds.
   await page.goto(base + 'terminal.html?herdrTerminal=term_0'); await connected(0);
   await queuedTyping('queued-herdr-once');
+  const herdrTyped = () => fixture.actions.filter(action => action.method === 'pane.send_text').map(action => action.params.text).join('');
+  for (const link of ['uplink', 'downlink']) {
+    const text = `herdr-${link}-once`;
+    await stalledTyping(link, text);
+    await until(() => herdrTyped().includes(text), `Herdr keys typed into a dead ${link}`);
+    await delay(300);
+    assert.equal(herdrTyped().split(text).length, 2, `Herdr keys typed into a dead ${link} arrive once: ${JSON.stringify(herdrTyped().slice(-120))}`);
+  }
   await queuedTyping('never-send-to-new-process', async () => { fixture.setProcessGroup(3); });
   await silentStall();
   stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
@@ -230,7 +355,7 @@ try {
   assert.equal(stalled.aborted(), true, 'the connection deadline aborts Herdr ticket acquisition'); await stalled.done();
   assert.equal(connectRequests.length, 0, 'A remembered Herdr token needs only fresh scoped tickets');
   assert.deepEqual(errors, []);
-  console.log('PASS reconnect browser: closing sockets, stale OPEN sockets, queued unsent keys, changed-context rejection, no uncertain input replay, canceled authorization/tickets, and deadline recovery for shell and Herdr');
+  console.log('PASS reconnect browser: closing sockets, stale OPEN sockets, queued unsent keys, exactly-once keys across dead uplinks and downlinks, changed-context rejection, no uncertain input replay, canceled authorization/tickets, and deadline recovery for shell and Herdr');
 } finally {
   await browser?.close(); server.kill('SIGTERM'); await exited; await fixture.close();
 }
