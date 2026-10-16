@@ -407,7 +407,7 @@ impl View {
     }
     fn send(&self, message: ServerMessage) {
         if !self.cancel.is_cancelled() {
-            self.send.send(Transport::Message(message.value()));
+            self.send.send(Transport::Server(message));
         }
     }
     fn send_state(&self) {

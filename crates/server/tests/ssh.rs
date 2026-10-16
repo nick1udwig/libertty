@@ -414,13 +414,14 @@ async fn next(
         .unwrap()
         .unwrap()
     {
-        Transport::Message(value) => {
+        Transport::Close(code, reason) => panic!("Unexpected remote close {code}: {reason}"),
+        message => {
+            let value = message.value().unwrap();
             if value["type"] == "output" {
                 session.receive(attachment, json!({"type":"ack","seq":value["seq"]}));
             }
             value
         }
-        Transport::Close(code, reason) => panic!("Unexpected remote close {code}: {reason}"),
     }
 }
 async fn ready(

@@ -61,7 +61,9 @@ impl Browser {
             .expect("PTY response timeout")
             .expect("live attachment")
         {
-            Transport::Message(value) => {
+            Transport::Close(code, reason) => panic!("Unexpected close {code}: {reason}"),
+            message => {
+                let value = message.value().unwrap();
                 if value["type"] == "output" {
                     let seq = value["seq"].as_u64().unwrap();
                     assert!(seq > self.seq, "Output must be ordered");
@@ -71,7 +73,6 @@ impl Browser {
                 }
                 value
             }
-            Transport::Close(code, reason) => panic!("Unexpected close {code}: {reason}"),
         }
     }
     fn send(&self, value: Value) {
@@ -512,7 +513,7 @@ async fn pty_contract_child() {
             .unwrap()
         {
             Some(Transport::Close(4001, _)) => break,
-            Some(Transport::Message(_)) => {}
+            Some(Transport::Server(_) | Transport::Message(_)) => {}
             other => panic!(
                 "Expected the previous attachment to close: {}",
                 other.is_some()

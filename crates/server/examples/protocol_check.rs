@@ -86,7 +86,7 @@ fn server_samples() -> Vec<ServerMessage> {
             width: 40,
             height: 30,
             full: true,
-            bytes: "".into(),
+            bytes: [].into(),
         }),
         ServerMessage::State {
             state: termai_server::session::ShellState {

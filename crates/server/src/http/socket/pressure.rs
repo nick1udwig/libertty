@@ -1,5 +1,4 @@
-use crate::{protocol, wire};
-use serde_json::Value;
+use crate::wire;
 use std::{
     collections::VecDeque,
     time::{Duration, Instant},
@@ -37,14 +36,12 @@ impl Pressure {
             negotiated
         }
     }
-    pub fn sent(&mut self, message: &Value, started: Instant, now: Instant) {
+    /// Records a sent message; only acknowledged output and frames carry a sequence.
+    pub fn sent(&mut self, sequence: Option<u64>, started: Instant, now: Instant) {
         if now.duration_since(started) >= Duration::from_millis(50) {
             self.slow(now);
         }
-        if !matches!(message["type"].as_str(), Some("output" | "herdr-frame")) {
-            return;
-        }
-        let Some(seq) = protocol::unsigned(&message["seq"]) else {
+        let Some(seq) = sequence else {
             return;
         };
         self.latest = seq;
@@ -101,8 +98,7 @@ mod tests {
     fn delayed_acks_and_blocked_writes_adapt_after_connection_and_recover() {
         let mut pressure = Pressure::default();
         let now = Instant::now();
-        let message = json!({"type":"herdr-frame","seq":1});
-        pressure.sent(&message, now, now);
+        pressure.sent(Some(1), now, now);
         pressure.acknowledge(99, now + SLOW_ACK);
         assert_eq!(pressure.outstanding.len(), 1);
         assert_eq!(
@@ -115,17 +111,13 @@ mod tests {
             pressure.mode(wire::Mode::GzipFast, false, now + SLOW_ACK + HOLD),
             wire::Mode::GzipFast
         );
-        pressure.sent(
-            &json!({"type":"snapshot"}),
-            now + HOLD,
-            now + HOLD + SLOW_ACK,
-        );
+        pressure.sent(None, now + HOLD, now + HOLD + SLOW_ACK);
         assert_eq!(
             pressure.mode(wire::Mode::GzipFast, false, now + HOLD + SLOW_ACK),
             wire::Mode::Gzip
         );
         let mut fast = Pressure::default();
-        fast.sent(&message, now, now);
+        fast.sent(Some(1), now, now);
         fast.acknowledge(1, now + Duration::from_millis(5));
         assert_eq!(
             fast.mode(wire::Mode::GzipFast, false, now + SLOW_ACK),

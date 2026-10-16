@@ -56,8 +56,41 @@ pub struct ShellState {
 }
 #[derive(Clone)]
 pub enum Transport {
+    /// Typed messages keep terminal output and Herdr frames out of JSON until a JSON client needs them.
+    Server(ServerMessage),
     Message(Value),
     Close(u16, String),
+}
+impl Transport {
+    /// The JSON form a legacy client receives.
+    pub fn value(&self) -> Option<Value> {
+        match self {
+            Self::Server(message) => Some(message.value()),
+            Self::Message(value) => Some(value.clone()),
+            Self::Close(..) => None,
+        }
+    }
+    /// The acknowledged sequence of terminal output or a Herdr frame.
+    pub fn sequence(&self) -> Option<u64> {
+        match self {
+            Self::Server(ServerMessage::Output { seq, .. }) => Some(*seq),
+            Self::Server(ServerMessage::HerdrFrame(frame)) => frame.seq,
+            _ => None,
+        }
+    }
+    /// An encoded-size estimate that does not serialize bulk payloads.
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Server(ServerMessage::Output { data, .. }) => data.len() + 64,
+            Self::Server(ServerMessage::HerdrFrame(frame)) => frame.bytes.len() * 4 / 3 + 64,
+            Self::Server(
+                ServerMessage::Screen { text, .. } | ServerMessage::ScreenDelta { text, .. },
+            ) => text.len() + 64,
+            Self::Server(message) => crate::wire::json_len(message),
+            Self::Message(value) => crate::wire::json_len(value),
+            Self::Close(_, reason) => reason.len() + 2,
+        }
+    }
 }
 #[derive(Clone, Copy)]
 pub(crate) struct LineGuard {
@@ -175,7 +208,7 @@ impl Inner {
     }
     fn send(&self, value: ServerMessage) {
         if let Some(socket) = &self.socket {
-            let _ = socket.send.send(Transport::Message(value.value()));
+            let _ = socket.send.send(Transport::Server(value));
         }
     }
     fn state(&self) {
@@ -1531,7 +1564,7 @@ mod tests {
         }
         let mut sent = Vec::new();
         let mut collect = |receive: &mut mpsc::UnboundedReceiver<Transport>| {
-            while let Ok(Transport::Message(value)) = receive.try_recv() {
+            while let Some(value) = receive.try_recv().ok().and_then(|message| message.value()) {
                 if value["type"] == "output" {
                     sent.push(value["seq"].as_u64().unwrap());
                 }
@@ -1567,8 +1600,8 @@ mod tests {
             (session.stream_id.as_str(), false, "3"),
         ] {
             let (_, mut receive) = session.attach(2, Some(stream));
-            match receive.try_recv().unwrap() {
-                Transport::Message(hello) => {
+            match receive.try_recv().unwrap().value() {
+                Some(hello) => {
                     assert_eq!(hello["reset"], reset);
                     assert_eq!(hello["truncated"], false);
                     assert_eq!(hello["streamId"], session.stream_id);
@@ -1578,7 +1611,7 @@ mod tests {
             }
             let mut actual = Vec::new();
             let mut data = String::new();
-            while let Ok(Transport::Message(value)) = receive.try_recv() {
+            while let Some(value) = receive.try_recv().ok().and_then(|message| message.value()) {
                 if value["type"] == "output" {
                     actual.push(value["seq"].as_u64().unwrap());
                     data.push_str(value["data"].as_str().unwrap());
@@ -1660,8 +1693,8 @@ mod tests {
             attachment,
             json!({"type":"input-line","id":"stale","prompt":1,"revision":0}),
         );
-        match receive.try_recv().unwrap() {
-            Transport::Message(message) => assert!(message.get("text").is_none()),
+        match receive.try_recv().unwrap().value() {
+            Some(message) => assert!(message.get("text").is_none()),
             _ => panic!(),
         }
         assert_eq!(*stub.writes.lock().unwrap(), ["\x04"]);
@@ -1684,8 +1717,8 @@ mod tests {
         }
         assert!(session.paste_dictation("Get in it.", 1, 0, "program", attachment, 1));
         assert_eq!(*stub.writes.lock().unwrap(), ["Get in it."]);
-        match receive.try_recv().unwrap() {
-            Transport::Message(message) => assert_eq!(message["source"], "dictation"),
+        match receive.try_recv().unwrap().value() {
+            Some(message) => assert_eq!(message["source"], "dictation"),
             _ => panic!(),
         }
         session.inner.lock().unwrap().paste.feed("\x1b[?2004h");
@@ -1747,8 +1780,8 @@ mod tests {
         for target in [json!({}), json!([]), json!(true), json!(7)] {
             session.receive(attachment, json!({"type":"dictation","id":current,"action":"start","prompt":1,"revision":0,"target":target}));
             assert!(session.inner.lock().unwrap().input.dictation.is_none());
-            match receive.try_recv().unwrap() {
-                Transport::Message(message) => assert_eq!(message["state"], "error"),
+            match receive.try_recv().unwrap().value() {
+                Some(message) => assert_eq!(message["state"], "error"),
                 _ => panic!(),
             }
         }

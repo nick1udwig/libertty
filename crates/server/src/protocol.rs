@@ -38,7 +38,13 @@ pub struct HerdrFrame {
     pub width: u16,
     pub height: u16,
     pub full: bool,
-    pub bytes: std::sync::Arc<str>,
+    /// Raw ANSI bytes, decoded once from Herdr and base64-encoded only for JSON clients.
+    #[serde(serialize_with = "base64")]
+    pub bytes: std::sync::Arc<[u8]>,
+}
+fn base64<S: serde::Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+    use base64::Engine;
+    serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 #[derive(Clone, Serialize)]
 #[serde(

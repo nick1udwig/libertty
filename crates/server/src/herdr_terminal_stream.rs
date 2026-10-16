@@ -1,6 +1,7 @@
 use crate::filesystem::{Reader, Writer};
 use crate::herdr::{Lines, Target};
 use crate::protocol::{HerdrFrame, ServerMessage};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -294,7 +295,7 @@ fn reset(viewers: &mut Vec<Viewer>, frame: &mut Option<HerdrFrame>) {
             width: 0,
             height: 0,
             full: true,
-            bytes: Arc::from(""),
+            bytes: Arc::from([]),
         }),
     );
 }
@@ -337,7 +338,8 @@ async fn run(
                 match line {
                     Ok(Some(raw)) if raw["type"] != "terminal.closed"=>{
                         if raw["type"] == "terminal.frame" && raw["encoding"] == "ansi" {
-                            if let (Some(width),Some(height),Some(bytes)) = (dimension(&raw["width"]), dimension(&raw["height"]),raw["bytes"].as_str()) {
+                            // Decode Herdr's base64 once; viewers forward the raw ANSI bytes.
+                            if let (Some(width),Some(height),Some(bytes)) = (dimension(&raw["width"]), dimension(&raw["height"]),raw["bytes"].as_str().and_then(|bytes| STANDARD.decode(bytes).ok())) {
                                 let message = HerdrFrame { seq: None, width, height, full: raw["full"] == true, bytes: Arc::from(bytes) };
                                 frame=if raw["full"]==true { Some(message.clone()) } else { None };
                                 broadcast(&mut viewers, ServerMessage::HerdrFrame(message));

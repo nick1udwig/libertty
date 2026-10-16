@@ -1,19 +1,15 @@
 use crate::protocol::HerdrFrame;
-use base64::{Engine, engine::general_purpose::STANDARD};
 use std::collections::VecDeque;
 
 const WINDOW: usize = 2;
 const MAX_PENDING: usize = 512 * 1024;
 
-struct Pending {
-    width: u16,
-    height: u16,
-    full: bool,
-    bytes: Vec<u8>,
-}
 #[derive(Default)]
 pub(super) struct Frames {
-    pending: Option<Pending>,
+    /// The next frame to send, shared with the stream until a viewer falls behind.
+    pending: Option<HerdrFrame>,
+    /// Ordered deltas that arrived after the pending frame, joined once when it is sent.
+    merged: Vec<u8>,
     outstanding: VecDeque<u64>,
     sequence: u64,
     full_size: usize,
@@ -23,19 +19,12 @@ pub(super) struct Frames {
 impl Frames {
     /// Merge unsent ANSI in order, or ask the producer for a current baseline.
     pub fn push(&mut self, frame: HerdrFrame) -> bool {
-        let Ok(bytes) = STANDARD.decode(frame.bytes.as_ref()) else {
-            return self.refresh();
-        };
         if frame.full {
-            self.full_size = bytes.len().clamp(1, MAX_PENDING);
+            self.full_size = frame.bytes.len().clamp(1, MAX_PENDING);
             self.awaiting_full = false;
             self.requested_full = false;
-            self.pending = Some(Pending {
-                width: frame.width,
-                height: frame.height,
-                full: true,
-                bytes,
-            });
+            self.pending = Some(frame);
+            self.merged.clear();
             return false;
         }
         if self.awaiting_full {
@@ -46,28 +35,24 @@ impl Frames {
         } else {
             self.full_size
         };
-        if let Some(pending) = &mut self.pending {
+        if let Some(pending) = &self.pending {
             if pending.width != frame.width
                 || pending.height != frame.height
-                || pending.bytes.len().saturating_add(bytes.len()) > limit
+                || pending.bytes.len() + self.merged.len() + frame.bytes.len() > limit
             {
                 return self.refresh();
             }
-            pending.bytes.extend_from_slice(&bytes);
-        } else if bytes.len() > limit {
+            self.merged.extend_from_slice(&frame.bytes);
+        } else if frame.bytes.len() > limit {
             return self.refresh();
         } else {
-            self.pending = Some(Pending {
-                width: frame.width,
-                height: frame.height,
-                full: false,
-                bytes,
-            });
+            self.pending = Some(frame);
         }
         false
     }
     fn refresh(&mut self) -> bool {
         self.pending = None;
+        self.merged.clear();
         self.awaiting_full = true;
         self.request_snapshot()
     }
@@ -83,16 +68,15 @@ impl Frames {
         if self.outstanding.len() >= WINDOW {
             return None;
         }
-        let pending = self.pending.take()?;
+        let mut frame = self.pending.take()?;
+        if !self.merged.is_empty() {
+            frame.bytes = [&*frame.bytes, &self.merged].concat().into();
+            self.merged.clear();
+        }
         self.sequence += 1;
         self.outstanding.push_back(self.sequence);
-        Some(HerdrFrame {
-            seq: Some(self.sequence),
-            width: pending.width,
-            height: pending.height,
-            full: pending.full,
-            bytes: STANDARD.encode(pending.bytes).into(),
-        })
+        frame.seq = Some(self.sequence);
+        Some(frame)
     }
     pub fn acknowledge(&mut self, sequence: u64) -> bool {
         if sequence > self.sequence {
@@ -114,7 +98,7 @@ mod tests {
             width: 40,
             height: 30,
             full,
-            bytes: STANDARD.encode(bytes).into(),
+            bytes: bytes.into(),
         }
     }
     #[test]
@@ -136,10 +120,7 @@ mod tests {
         frames.acknowledge(1);
         let merged = frames.next().unwrap();
         assert_eq!(merged.seq, Some(3));
-        assert_eq!(
-            STANDARD.decode(merged.bytes.as_ref()).unwrap(),
-            b"\x1b[3;1Hnext".repeat(30)
-        );
+        assert_eq!(&*merged.bytes, b"\x1b[3;1Hnext".repeat(30));
         frames.acknowledge(1);
         frames.push(frame(false, b"last"));
         assert!(
@@ -169,10 +150,7 @@ mod tests {
         frames.push(frame(true, b"current screen"));
         let latest = frames.next().unwrap();
         assert!(latest.full);
-        assert_eq!(
-            STANDARD.decode(latest.bytes.as_ref()).unwrap(),
-            b"current screen"
-        );
+        assert_eq!(&*latest.bytes, b"current screen");
         frames.push(frame(false, b"x"));
         let mut resized = frame(true, b"resized");
         resized.width = 50;

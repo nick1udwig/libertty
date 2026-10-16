@@ -42,6 +42,7 @@ Production sockets advertise versioned binary, constrained gzip and fast-link gz
 New clients offer only advertised protocols and fall back to legacy JSON with older backends.
 Without browser decompression support, raw binary remains available.
 Input, acknowledgements and geometry use compact binary fields, terminal output retains its sequence, and Herdr frames carry their original ANSI bytes directly.
+The backend decodes Herdr's base64 once per frame and encodes terminal output and frames from typed messages, so neither passes through an intermediate JSON value or a second base64 round trip.
 Decoding remains ordered across asynchronous decompression and discards results from replaced sockets.
 Connect and ticket replies advertise application heartbeat support independently of the encoding.
 Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply.

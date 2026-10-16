@@ -44,12 +44,12 @@ async fn a_closed_terminal_controller_ends_quietly_before_history_detects_the_cl
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match receive.recv().await.unwrap().message {
-                Transport::Message(value) => assert_ne!(value["type"], "reading-error"),
                 Transport::Close(code, reason) => {
                     assert_eq!(code, 1000);
                     assert_eq!(reason, "Herdr terminal ended");
                     break;
                 }
+                message => assert_ne!(message.value().unwrap()["type"], "reading-error"),
             }
         }
     })
@@ -94,7 +94,7 @@ async fn history_errors_reconcile_closed_moved_and_replaced_panes_before_reporti
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 let item = receive.recv().await.unwrap();
-                if let Transport::Message(value) = item.message
+                if let Some(value) = item.message.value()
                     && value["type"] == "screen"
                 {
                     break;
@@ -132,11 +132,13 @@ async fn history_errors_reconcile_closed_moved_and_replaced_panes_before_reporti
         let code = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 match receive.recv().await.unwrap().message {
-                    Transport::Message(value) if value["type"] == "reading-error" => {
-                        errors.push(value)
-                    }
                     Transport::Close(code, _) => break code,
-                    _ => {}
+                    message => {
+                        let value = message.value().unwrap();
+                        if value["type"] == "reading-error" {
+                            errors.push(value);
+                        }
+                    }
                 }
             }
         })
@@ -203,7 +205,7 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let item = receive.recv().await.unwrap();
-            if let Transport::Message(value) = item.message
+            if let Some(value) = item.message.value()
                 && value["type"] == "result"
                 && value["id"] == "ordered"
             {
@@ -395,7 +397,7 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let item = receive.recv().await.unwrap();
-            if let Transport::Message(value) = item.message {
+            if let Some(value) = item.message.value() {
                 let mobile = value["type"] == "herdr-frame" && value["width"] == 40;
                 messages.push(value);
                 if mobile {
@@ -418,7 +420,7 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
         .unwrap();
     tokio::time::sleep(Duration::from_millis(100)).await;
     while let Ok(item) = receive.try_recv() {
-        if let Transport::Message(value) = item.message {
+        if let Some(value) = item.message.value() {
             assert!(
                 value["type"] != "herdr-layout" || value["ready"] != true,
                 "Returning during a resize must retain the original redraw fence"
@@ -429,7 +431,7 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let item = receive.recv().await.unwrap();
-            if let Transport::Message(value) = item.message
+            if let Some(value) = item.message.value()
                 && value["type"] == "herdr-layout"
                 && value["ready"] == true
             {
@@ -461,7 +463,7 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let item = receive.recv().await.unwrap();
-            if let Transport::Message(value) = item.message
+            if let Some(value) = item.message.value()
                 && value["type"] == "screen"
             {
                 assert_eq!(value["text"], "new while parked");
