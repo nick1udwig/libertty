@@ -75,6 +75,8 @@ pub struct View {
     cancel: CancellationToken,
     services: crate::host::HostServices,
     recording_scope: Mutex<String>,
+    /// The layout epoch at which the pane last proved it still hosts this terminal.
+    validated: Mutex<Option<u64>>,
 }
 impl View {
     pub fn open(
@@ -115,6 +117,7 @@ impl View {
             capacity: Arc::new(Semaphore::new(128)),
             services: crate::host::HostServices::new(),
             recording_scope: Mutex::new(crate::storage::random_hex(16)),
+            validated: Mutex::new(None),
             pending_input,
             send,
             terminal,
@@ -525,7 +528,12 @@ impl View {
             if self.cancel.is_cancelled() {
                 return Err("The agent view changed. No input was sent.".into());
             }
-            self.target.validate_terminal(&self.agent).await?;
+            // Typing bursts reuse one validation until Herdr reports a change; unwatched layouts always validate.
+            let epoch = self.target.layout_epoch();
+            if epoch.is_none() || *self.validated.lock().unwrap() != epoch {
+                self.target.validate_terminal(&self.agent).await?;
+                *self.validated.lock().unwrap() = epoch;
+            }
             if self.cancel.is_cancelled() {
                 return Err("This agent ended or moved. Reopen its tab. No input was sent.".into());
             }
@@ -561,7 +569,8 @@ impl View {
             } else {
                 text.to_owned()
             };
-            self.target
+            if let Err(error) = self
+                .target
                 .request(
                     if paste {
                         "pane.send_input"
@@ -570,7 +579,11 @@ impl View {
                     },
                     json!({"pane_id":self.agent.pane_id,"text":text}),
                 )
-                .await?;
+                .await
+            {
+                *self.validated.lock().unwrap() = None;
+                return Err(error);
+            }
             if let Some(replacement) = replacement {
                 if replacement.edit_id.is_some() {
                     let screen = self

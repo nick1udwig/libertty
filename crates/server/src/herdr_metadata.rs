@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     sync::{
         Arc, LazyLock, Mutex, Weak,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -58,6 +58,9 @@ impl Shared {
 
 pub(crate) struct Resource {
     generation: AtomicU64,
+    /// Advances on every Herdr event and structural mutation; trusted only while events are watched.
+    layout: AtomicU64,
+    watching: AtomicBool,
     cache: Mutex<Option<(u64, Arc<Snapshot>)>>,
     fetching: tokio::sync::Mutex<()>,
     listeners: Mutex<Option<Listeners>>,
@@ -71,6 +74,8 @@ impl Default for Resource {
     fn default() -> Self {
         Self {
             generation: AtomicU64::new(0),
+            layout: AtomicU64::new(0),
+            watching: AtomicBool::new(false),
             cache: Default::default(),
             fetching: Default::default(),
             listeners: Default::default(),
@@ -89,7 +94,7 @@ impl Drop for Subscription {
             if active.count == 0 {
                 active.cancel.cancel();
                 *listeners = None;
-                self.resource.invalidate();
+                self.resource.unwatch();
             }
         }
     }
@@ -98,10 +103,14 @@ impl Drop for Subscription {
 struct InvalidateOnExit<'a>(&'a Resource);
 impl Drop for InvalidateOnExit<'_> {
     fn drop(&mut self) {
-        self.0.invalidate();
+        self.0.changed();
     }
 }
 
+/// Typing changes terminal contents, which Herdr reports through status events rather than the snapshot's structure.
+fn content_only(method: &str) -> bool {
+    matches!(method, "pane.send_text" | "pane.send_input")
+}
 fn read_only(method: &str) -> bool {
     matches!(
         method,
@@ -118,16 +127,31 @@ impl Resource {
     fn invalidate(&self) {
         self.generation.fetch_add(1, Ordering::AcqRel);
     }
+    /// A structural change also ends cached pane validations.
+    fn changed(&self) {
+        self.invalidate();
+        self.layout.fetch_add(1, Ordering::AcqRel);
+    }
+    fn unwatch(&self) {
+        self.watching.store(false, Ordering::Release);
+        self.changed();
+    }
+    /// The current layout epoch while a subscription is watching Herdr events.
+    pub(crate) fn layout_epoch(&self) -> Option<u64> {
+        self.watching
+            .load(Ordering::Acquire)
+            .then(|| self.layout.load(Ordering::Acquire))
+    }
     pub(crate) async fn request(
         &self,
         target: &Target,
         method: &str,
         params: Value,
     ) -> Result<Value, String> {
-        let mutation = !read_only(method);
+        let mutation = !read_only(method) && !content_only(method);
         let _invalidate_on_exit = mutation.then(|| InvalidateOnExit(self));
         if mutation {
-            self.invalidate();
+            self.changed();
         }
         let work = async {
             // Herdr closes ordinary RPC sockets after one response.
@@ -156,7 +180,7 @@ impl Resource {
             .and_then(|result| result)
     }
     pub(crate) async fn refresh_snapshot(&self, target: &Target) -> Result<Arc<Snapshot>, String> {
-        self.invalidate();
+        self.changed();
         self.snapshot(target).await
     }
     pub(crate) async fn snapshot(&self, target: &Target) -> Result<Arc<Snapshot>, String> {
@@ -231,6 +255,7 @@ async fn run(
     loop {
         let work = async {
             // The subscription acknowledgement triggers a refresh after the initial fetch.
+            resource.watching.store(false, Ordering::Release);
             let mut stream = BufReader::new(target.open().await?);
             let mut snapshot = resource.snapshot(&target).await?;
             let mut subscriptions: Vec<Value> = [
@@ -269,10 +294,15 @@ async fn run(
                 let reply = tokio::select! {
                     biased;
                     _ = cancel.cancelled() => return Ok(()),
-                    reply = lines.read(&mut stream) => reply?,
-                    _ = tokio::time::sleep(Duration::from_secs(10)) => Some(json!({})),
+                    reply = lines.read(&mut stream) => Some(reply?),
+                    _ = tokio::time::sleep(Duration::from_secs(10)) => None,
                 };
-                check_event(reply)?;
+                if let Some(reply) = reply {
+                    check_event(reply)?;
+                    // Any event may move or replace a pane, so cached input validations end here.
+                    resource.layout.fetch_add(1, Ordering::AcqRel);
+                    resource.watching.store(true, Ordering::Release);
+                }
                 let delay = tokio::time::sleep(Duration::from_millis(40));
                 tokio::pin!(delay);
                 loop {
@@ -283,6 +313,7 @@ async fn run(
                         reply = lines.read(&mut stream) => reply?,
                     };
                     check_event(reply)?;
+                    resource.layout.fetch_add(1, Ordering::AcqRel);
                 }
                 resource.invalidate();
                 snapshot = resource.snapshot(&target).await?;
@@ -295,7 +326,7 @@ async fn run(
         let result =
             tokio::select! { biased; _ = cancel.cancelled() => break, result = work => result };
         if let Err(message) = result {
-            resource.invalidate();
+            resource.unwatch();
             previous = None;
             send.send_replace(Some(Metadata::Error { message }));
             tokio::select! { biased; _ = cancel.cancelled() => break, _ = tokio::time::sleep(Duration::from_secs(2)) => {} }

@@ -250,6 +250,99 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
     cancel.cancel();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn typing_reuses_pane_validation_until_herdr_reports_a_change() {
+    let fixture = support::Fixture::new().await;
+    let mut target = fixture.target.clone();
+    target.binary = "/bin/false".into();
+    let count = |method: &str| {
+        fixture
+            .actions
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|action| action["method"] == method)
+            .count()
+    };
+    let wait = |method: &'static str, expected: usize| {
+        let count = &count;
+        async move {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while count(method) < expected {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("{method} reached {expected}"));
+        }
+    };
+    let (send, _receive, _) = viewer_queue::channel();
+    let cancel = CancellationToken::new();
+    let view = View::open(
+        target.clone(),
+        target
+            .snapshot()
+            .await
+            .unwrap()
+            .terminal("term_0")
+            .unwrap()
+            .clone(),
+        &Hub::default(),
+        &herdr_history::Hub::default(),
+        None,
+        send,
+        cancel.clone(),
+    )
+    .unwrap();
+    // Without watched events, every keystroke proves its pane first.
+    for i in 1..=2 {
+        view.receive(json!({"type":"input","data":"u"})).unwrap();
+        wait("pane.send_text", i).await;
+    }
+    assert_eq!(count("pane.get"), 2);
+    let (metadata, mut snapshots) = tokio::sync::mpsc::channel(16);
+    let task = tokio::spawn(termai_server::herdr::metadata(
+        target.clone(),
+        metadata,
+        cancel.clone(),
+    ));
+    snapshots.recv().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while target.layout_epoch().is_none() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    for i in 3..=7 {
+        view.receive(json!({"type":"input","data":"w"})).unwrap();
+        wait("pane.send_text", i).await;
+    }
+    assert_eq!(
+        count("pane.get"),
+        3,
+        "a watched typing burst validates once"
+    );
+    let before = target.layout_epoch();
+    fixture.notify();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while target.layout_epoch() == before {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap();
+    view.receive(json!({"type":"input","data":"e"})).unwrap();
+    wait("pane.send_text", 8).await;
+    assert_eq!(
+        count("pane.get"),
+        4,
+        "a Herdr event requires a fresh validation"
+    );
+    cancel.cancel();
+    task.await.unwrap();
+}
+
 #[tokio::test]
 async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_updates() {
     let fixture = support::Fixture::new().await;
