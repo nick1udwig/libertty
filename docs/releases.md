@@ -60,9 +60,9 @@ Dictation setup and Tailscale login use isolated fixtures in the installer suite
 Edit [build/release-config.json](../build/release-config.json) to change Node, the Voxtype Mobile source commit or the Herdr release and per-platform SHA-256 checksums.
 Use a full Voxtype Mobile parent commit so its recursive submodule pins select the matching daemon protocol.
 CI builds its `parakeet` feature with CPU inference and includes the upstream `scripts/install-daemon`, license and source provenance.
-Keep the daemon's model, Opus framing and capabilities protocol compatible with Libertty's dictation client when updating that pin.
+Keep the daemon's model, Opus framing and capabilities protocol compatible with libertty's dictation client when updating that pin.
 The speech model is downloaded by the upstream installer only when the user opts into dictation setup.
-Libertty and Voxtype use the current stable Rust toolchain and their respective Cargo lockfiles.
+libertty and Voxtype use the current stable Rust toolchain and their respective Cargo lockfiles.
 
 ## Local packaging
 
@@ -80,4 +80,4 @@ npm run verify:package -- release/libertty-v0.2.6-linux-x64.tar.gz
 Packaging requires a clean checkout, the pinned Node version and a complete Linux companion bundle.
 For local development checks only, `LIBERTTY_RELEASE_ALLOW_DIRTY=1` permits a different Node version, an uncommitted checkout or a Linux archive without the companion daemon.
 That override is never used by release CI.
-Local smoke checks create temporary application data and do not restart an existing Libertty server.
+Local smoke checks create temporary application data and do not restart an existing libertty server.

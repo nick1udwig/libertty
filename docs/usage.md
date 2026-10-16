@@ -151,7 +151,7 @@ See [Herdr connection details](herdr.md) for socket settings, persistence and va
 ## Plugins
 
 Terminal, SFTP / Files and Herdr are included plugins.
-Load a `.libertty-plugin.json` package in **Settings → Plugins** to add a connection action to HTTP and SSH host menus without rebuilding or restarting Libertty.
+Load a `.libertty-plugin.json` package in **Settings → Plugins** to add a connection action to HTTP and SSH host menus without rebuilding or restarting libertty.
 The [sample log viewer](../examples/plugins/example.log-viewer.libertty-plugin.json) reads one file chosen when connecting and saves its Filter and Follow preferences.
 You can enable, disable or remove loaded plugins in Settings.
 Unavailable tabs retain their state until the pinned package version is installed again; closing them releases their connection.
@@ -263,7 +263,7 @@ Tap to start/finish, hold and release, or use × to cancel.
 Drag to reposition the controls.
 The browser encodes mono 16 kHz capture to Opus at target 24 kbit/s in a WebAssembly worker.
 Only framed Opus packets cross the authenticated terminal connection and its loopback connection to the daemon.
-Libertty requires Voxtype mobile protocol 2 (`opus_v1`); legacy PCM daemons need a coordinated update.
+libertty requires Voxtype mobile protocol 2 (`opus_v1`); legacy PCM daemons need a coordinated update.
 Encoder lookahead and the exact original sample count preserve the start and tail.
 WebAssembly avoids requiring browser-native Opus encoding support.
 The backend consumes the daemon's revisable previews and inserts only final text, without a phone-to-backend transcript relay or automatic Enter.
@@ -279,7 +279,7 @@ During recording, libertty requests a screen wake lock to prevent automatic scre
 Finishing, cancelling, losing the connection, recording errors and leaving the recording terminal release it immediately.
 The browser can deny or release the lock; libertty reports that condition and retries when the page becomes visible again while recording.
 An explicit device lock can still turn off the screen and suspend microphone capture.
-Libertty preserves the recording’s input target and transport while the page is hidden, reports paused or ended audio capture, and attempts to resume a suspended audio context after unlocking.
+libertty preserves the recording’s input target and transport while the page is hidden, reports paused or ended audio capture, and attempts to resume a suspended audio context after unlocking.
 Speech during a capture pause may be missing, and the controls display **Audio paused** instead of microphone activity.
 Switching terminal tabs or losing the connection cancels it; a dropped connection now shows an error.
 The automated tests verify fake-microphone streaming and the wake lock lifecycle; actual locked-screen audio capture on Android and iOS browsers and installed web apps remains unverified.
@@ -300,7 +300,7 @@ For a published installer, set `LIBERTTY_VOXTYPE_INSTALL_URL` to its HTTPS URL.
 GitHub raw URLs identify the source repository automatically; other download hosts also need `LIBERTTY_VOXTYPE_REPO`.
 No published URL is assumed.
 Installation is performed in a local backend session.
-The Android app recognizes the visible `Libertty dictation microphone` accessibility control and hides its idle floating button while libertty's control is present.
+The Android app recognizes the visible `libertty dictation microphone` accessibility control and hides its idle floating button while libertty's control is present.
 
 ## Touch controls
 
@@ -335,7 +335,7 @@ Audio accuracy and Android accessibility behavior still need verification on a r
 
 Tap **Image** beside the terminal shortcuts to select PNG, JPEG, WebP or GIF images with the device’s file picker.
 Each image is limited to 20 MB and saved under a unique private filename in `/tmp` on the terminal’s host, including SSH and Herdr connections.
-Libertty pastes each uploaded path into the active application without submitting the prompt, allowing applications such as Codex to attach the image.
+libertty pastes each uploaded path into the active application without submitting the prompt, allowing applications such as Codex to attach the image.
 
 Open a saved host’s small menu and choose **Connect SFTP / Files**.
 The main host button still opens a terminal.
@@ -357,7 +357,7 @@ Run `node test/files-browser.mjs` for mobile browsing, local and real OpenSSH/SF
 
 Managed local and SSH terminals also provide these session-local utilities:
 
-Libertty prefixes upload, download, and Reading Mode commands with a space when they execute, keeping them out of Bash history and command suggestions.
+libertty prefixes upload, download, and Reading Mode commands with a space when they execute, keeping them out of Bash history and command suggestions.
 This also applies to pipelines into download or `look at`.
 
 ```sh

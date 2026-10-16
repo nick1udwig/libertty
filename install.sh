@@ -42,7 +42,7 @@ libertty_install() {
     [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || { echo 'No valid published release found; use --version vX.Y.Z for a prerelease.' >&2; return 1; }
     asset="libertty-$version-$platform-$machine.tar.gz"
     archive=$temporary/$asset
-    echo "Downloading Libertty $version for $platform-$machine…"
+    echo "Downloading libertty $version for $platform-$machine…"
     curl --proto '=https' --tlsv1.2 -fsSL --retry 2 --connect-timeout 10 --max-time 600 "https://github.com/$repository/releases/download/$version/$asset" -o "$archive"
     curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 10 --max-time 30 "https://github.com/$repository/releases/download/$version/$asset.sha256" -o "$temporary/checksum"
     expected=$(awk -v asset="$asset" '$2 == asset {print $1}' "$temporary/checksum")

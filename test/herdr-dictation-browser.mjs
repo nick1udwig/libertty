@@ -29,7 +29,7 @@ try {
   assert.ok(pane?.terminal_id, JSON.stringify(created));
   await until(async () => { const reply = await herdrRequest(target, 'pane.process_info', { pane_id: pane.pane_id }); return reply.process_info.shell_pid === reply.process_info.foreground_process_group_id; }, 'shell at prompt');
   backend = startBackend({ cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3191), LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_DATA_DIR: directory + '/libertty', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: directory, LIBERTTY_VOXTYPE_TOKEN_FILE: directory + '/token', LIBERTTY_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate' }, stdio: 'ignore' });
-  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'Libertty backend');
+  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'libertty backend');
   const token = (await readFile(directory + '/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });

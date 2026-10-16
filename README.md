@@ -1,6 +1,6 @@
 # libertty
 
-Previously named Termai, Libertty keeps existing pairing data, SSH keys, hosts and browser settings when upgraded at the same URL.
+Previously named Termai, libertty keeps existing pairing data, SSH keys, hosts and browser settings when upgraded at the same URL.
 Use the `libertty` executable and `LIBERTTY_*` settings for new installations.
 Existing `TERMAI_*` settings remain accepted, with `LIBERTTY_*` values taking precedence.
 

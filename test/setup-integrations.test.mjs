@@ -120,7 +120,7 @@ for (const condition of ['route conflict', 'public Funnel']) test('Tailscale ' +
   assert.equal(result.tailscale, 'failed'); assert.equal(await readFile(f.configFile, 'utf8'), previous);
   assert.deepEqual(f.serve, original); assert.ok(!f.calls.some(call => call.args.includes('--bg') || call.args.includes('restart')));
 });
-test('public Funnel on a separate port does not block the private Libertty listener', async t => {
+test('public Funnel on a separate port does not block the private libertty listener', async t => {
   const f = await fixture(t, { 'no-companions': true });
   f.serve.AllowFunnel = { [f.hostname + ':8443']: true };
   assert.equal((await integrations(f.installed, f.dependencies)).tailscale, 'ready');
@@ -149,7 +149,7 @@ test('a valid NeedsLogin status with nonzero exit still runs the interactive log
   };
   assert.equal((await integrations(f.installed, f.dependencies)).tailscale, 'ready'); assert.equal(loggedIn, true);
 });
-test('a conflicting optional Android route does not undo working Libertty HTTPS', async t => {
+test('a conflicting optional Android route does not undo working libertty HTTPS', async t => {
   const f = await fixture(t); f.serve.Web[f.hostname + ':443'].Handlers['/voxtype'] = { Proxy: 'http://127.0.0.1:8888' };
   const result = await integrations(f.installed, f.dependencies);
   assert.equal(result.tailscale, 'ready'); assert.equal(result.voxtype, 'ready'); assert.equal(result.voxtypeRoute, 'failed');

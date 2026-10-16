@@ -1,4 +1,4 @@
-# Install and set up Libertty
+# Install and set up libertty
 
 ## Upgrading from Termai
 
@@ -10,7 +10,7 @@ An existing installer-managed `termai` launcher becomes an alias for the new `li
 Source-managed services require their executable path to be updated to `target/release/libertty`.
 
 Keep the same browser origin and mount path to retain saved hosts, tabs, settings and pairing credentials.
-Libertty migrates browser settings on first load, retains the existing encrypted key database and accepts Termai encrypted key backups.
+libertty migrates browser settings on first load, retains the existing encrypted key database and accepts Termai encrypted key backups.
 Existing plugins can continue using `window.termai`, while new plugins use `window.libertty`.
 The backend accepts `TERMAI_*` environment variables as aliases, with `LIBERTTY_*` values taking precedence.
 
@@ -41,7 +41,7 @@ Interactive questions read from your terminal, so they still work when the scrip
 Accept the defaults to set up everything supported on your machine.
 Package installation and Linux Tailscale setup can require your sudo password.
 Tailscale login and enabling tailnet HTTPS can require following a browser link printed by the CLI.
-These approvals cannot be completed automatically by Libertty.
+These approvals cannot be completed automatically by libertty.
 Install Tailscale on your phone, join the same tailnet, open the printed URL and enter the pairing token.
 
 ## Supported machines
@@ -70,8 +70,8 @@ If Linux has no systemd user manager, setup installs a launcher and prints the c
 
 ## Tailscale setup
 
-Libertty listens on `127.0.0.1:7321` with the `/t` mount by default.
-Setup adds your machine's tailnet DNS name to Libertty's allowed hosts and uses this scoped Serve command:
+libertty listens on `127.0.0.1:7321` with the `/t` mount by default.
+Setup adds your machine's tailnet DNS name to libertty's allowed hosts and uses this scoped Serve command:
 
 ```sh
 tailscale serve --bg --https=443 --set-path=/t http://127.0.0.1:7321
@@ -80,12 +80,12 @@ tailscale serve --bg --https=443 --set-path=/t http://127.0.0.1:7321
 On Linux, setup uses sudo for Tailscale configuration without granting the account permanent operator permissions.
 The installer leaves existing routes in place and reuses an identical route on subsequent runs.
 If `/t` already serves another application, choose a different `--base-path` or change that route yourself.
-It refuses to add Libertty to an HTTPS listener with public Funnel exposure enabled.
-If new Serve setup fails, it restores Libertty's previous allowed hosts and removes only the route it added.
+It refuses to add libertty to an HTTPS listener with public Funnel exposure enabled.
+If new Serve setup fails, it restores libertty's previous allowed hosts and removes only the route it added.
 
 When Voxtype Mobile is ready, setup also offers an Android app endpoint at `wss://YOUR-HOST.ts.net/voxtype/v1/dictate`.
 It prints the daemon's token file for pairing the Android app.
-Libertty's built-in dictation connects directly to the local daemon and does not require that extra Serve route.
+libertty's built-in dictation connects directly to the local daemon and does not require that extra Serve route.
 Existing incompatible or custom Voxtype services may require manual migration, with the upstream installer refusing unexpected service commands.
 
 ## Options and unattended installation
@@ -110,7 +110,7 @@ To change the port and mount:
 bash /tmp/libertty-install.sh --port 7400 --base-path /terminal
 ```
 
-To install only Libertty without companion, service or Tailscale setup:
+To install only libertty without companion, service or Tailscale setup:
 
 ```sh
 bash /tmp/libertty-install.sh --yes --no-service --no-companions --no-tailscale
@@ -119,7 +119,7 @@ bash /tmp/libertty-install.sh --yes --no-service --no-companions --no-tailscale
 
 `--yes` accepts all installer questions and can start services or install system packages unless you exclude those steps.
 It does not bypass sudo authentication or Tailscale login.
-`--no-service` applies to the Libertty service, so also use `--no-companions` to avoid creating a Voxtype service.
+`--no-service` applies to the libertty service, so also use `--no-companions` to avoid creating a Voxtype service.
 `--prefix /absolute/path` changes where versioned application releases and the launcher are installed.
 `XDG_CONFIG_HOME` and `XDG_DATA_HOME` select the configuration and user data roots.
 
@@ -146,9 +146,9 @@ Rerun the one-liner to upgrade to the latest stable release or retry unfinished 
 Upgrades preserve the pairing token, application data and existing managed environment settings.
 An explicit port or mount option replaces that setting for the new installation.
 Previous releases remain on disk and are restored automatically if the new service fails its startup check.
-An existing unmanaged Libertty service or launcher requires explicit migration before the installer will replace it.
-Restarting Libertty ends live terminal connections, and interactive upgrades ask before restarting an active service.
-Optional setup failures leave Libertty installed, report the failing step and return exit code 2.
+An existing unmanaged libertty service or launcher requires explicit migration before the installer will replace it.
+Restarting libertty ends live terminal connections, and interactive upgrades ask before restarting an active service.
+Optional setup failures leave libertty installed, report the failing step and return exit code 2.
 
 Edit `config.json` to change server environment variables, then restart the service.
 Keep the configuration and token files private.

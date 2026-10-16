@@ -33,7 +33,7 @@ export async function request(url: URL | string, options: RequestOptions = {}): 
     const retried = ['GET', 'HEAD'].includes(method) || !!key;
     for (let attempt = 1, timedOut = false; ; attempt++) {
       const headers = new Headers(init.headers);
-      if (constrainedLink()) headers.set('X-Libertty-Link', 'constrained');
+      if (constrainedLink()) headers.set('X-libertty-Link', 'constrained');
       if (credential) headers.set('Authorization', 'Bearer ' + credential);
       if (key) headers.set('Idempotency-Key', key);
       const signal = timeout ? AbortSignal.any([...(init.signal ? [init.signal] : []), AbortSignal.timeout(timeout)]) : init.signal;

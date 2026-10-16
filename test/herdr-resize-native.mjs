@@ -40,7 +40,7 @@ try {
   const original = await geometry();
   const base = 'http://127.0.0.1:' + fixturePort3172;
   backend = spawn(new URL('../target/debug/libertty', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3172), LIBERTTY_BASE_PATH: '/', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base, LIBERTTY_DATA_DIR: dir + '/libertty', LIBERTTY_TOKEN: '', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: dir }, stdio: 'ignore' });
-  await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated Libertty backend');
+  await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated libertty backend');
   const token = (await readFile(dir + '/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });

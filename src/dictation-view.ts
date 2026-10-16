@@ -64,7 +64,7 @@ export class DictationView {
     this.button.hidden = !visible; this.panel.hidden = !visible || !expanded;
     this.button.classList.toggle('recording', expanded); this.button.classList.toggle('waiting', this.waiting);
     this.button.classList.toggle('paused', paused);
-    this.button.setAttribute('aria-label', 'Libertty dictation microphone');
+    this.button.setAttribute('aria-label', 'libertty dictation microphone');
     this.button.setAttribute('aria-description', paused ? 'Audio capture paused. Unlock or return to resume, or cancel dictation.' : !expanded ? 'Dictate: hold and release, or tap to start and stop. Drag to move.' : phase === 'retry' ? 'Retry retained dictation at the current prompt, or drag to move.' : this.waiting ? 'Transcribing. Drag to move.' : 'Stop dictation. Drag to move.');
     this.button.setAttribute('aria-pressed', String(expanded));
     this.activity.setAttribute('aria-label', paused ? 'Audio capture paused' : this.waiting ? 'Transcribing' : 'Microphone activity');

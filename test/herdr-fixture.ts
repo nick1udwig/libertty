@@ -14,7 +14,7 @@ export async function herdrFixture() {
   let foregroundGroup = 2;
   const remove = <T>(items: T[], matches: (item: T) => boolean) => { for (let i = items.length - 1; i >= 0; i--) if (matches(items[i])) items.splice(i, 1); };
   const snapshot = { version: 'test', protocol: 22,
-    workspaces: [{ workspace_id: 'w1', label: 'Libertty', active_tab_id: 't1' }] as any[],
+    workspaces: [{ workspace_id: 'w1', label: 'libertty', active_tab_id: 't1' }] as any[],
     tabs: ['api-refactor', 'tests', 'docs'].map((label, i) => ({ tab_id: 't' + (i + 1), workspace_id: 'w1', label })) as any[],
     panes: ['api-refactor', 'tests', 'docs'].map((label, i) => ({ pane_id: 'w1:p' + i, terminal_id: 'term_' + i, workspace_id: 'w1', tab_id: 't' + (i + 1), focused: true, label, cwd: '/workspace' })) as any[],
     agents: ['api-refactor', 'tests', 'docs'].map((name, i) => ({

@@ -1,17 +1,17 @@
 # Runtime plugin experiment
 
-Libertty's host menu gets its connection actions from a plugin registry.
+libertty's host menu gets its connection actions from a plugin registry.
 Terminal, SFTP / Files, Herdr and Reading Mode are included.
-Browser plugins can add a connection action and a tab at runtime by loading a package in Settings, without rebuilding Libertty or restarting its server.
+Browser plugins can add a connection action and a tab at runtime by loading a package in Settings, without rebuilding libertty or restarting its server.
 Reading Mode opens through terminal reading phrases such as `look at README.md` or `git diff | look at`, rather than a host-menu connection action.
 
 This experiment supports browser views with permission to read one user-selected text file and save their own view state.
-Pairing, SSH authentication, routing, credentials and resource cleanup stay in Libertty.
+Pairing, SSH authentication, routing, credentials and resource cleanup stay in libertty.
 New machine-side protocols still need a backend provider; packages cannot install server code.
 
 ## Try the log viewer
 
-1. Build and start Libertty normally with `npm run build` and `npm start`.
+1. Build and start libertty normally with `npm run build` and `npm start`.
 2. Open **Settings → Plugins → Load plugin package** and select [`examples/plugins/example.log-viewer.libertty-plugin.json`](../examples/plugins/example.log-viewer.libertty-plugin.json).
 3. Open a saved HTTP or SSH host's menu and select **Connect Log viewer**.
 4. Choose a UTF-8 text file on that host.
@@ -73,12 +73,12 @@ node examples/plugins/package.mjs
 node examples/plugins/package.mjs /path/to/my-plugin /tmp/my-plugin.libertty-plugin.json
 ```
 
-Building a plugin is independent of Libertty's Vite build.
+Building a plugin is independent of libertty's Vite build.
 Bundle any libraries into the HTML or inline JavaScript yourself; the frame does not fetch scripts, styles or fonts from external URLs.
 
 ## Browser API
 
-Libertty injects `window.libertty` into the isolated frame.
+libertty injects `window.libertty` into the isolated frame.
 Wait for `libertty.ready` before using its connection:
 
 ```js

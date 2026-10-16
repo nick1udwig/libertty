@@ -142,6 +142,17 @@ test('upgrades retain custom environment settings and previous versions', async 
   assert.equal(updated.config.env.PORT, '7600'); assert.equal(updated.config.env.LIBERTTY_CWD, '/custom/workspace');
   assert.ok(await stat(installed.releaseDir)); assert.notEqual(updated.releaseDir, installed.releaseDir);
 });
+test('upgrades accept the earlier capitalization of installer ownership markers', async t => {
+  const f = await fixture(t), installed = await install({ yes: true, 'no-service': true }, f.dependencies);
+  const marker = '# Managed by the libertty installer';
+  const earlierMarker = marker.replace('libertty', name => name[0].toUpperCase() + name.slice(1));
+  for (const file of [installed.launch, f.home + '/.local/bin/libertty']) {
+    const launcher = await readFile(file, 'utf8');
+    await writeFile(file, launcher.replace(marker, earlierMarker));
+  }
+  await install({ yes: true, 'no-service': true }, f.dependencies);
+  assert.ok((await readFile(installed.launch, 'utf8')).includes(marker));
+});
 test('machines without a user bus get a manual launcher without system service mutation', async t => {
   const f = await fixture(t, 'linux', false), installed = await install({ yes: true }, f.dependencies);
   assert.equal(installed.service, false); assert.ok(await stat(installed.launch));
@@ -189,7 +200,7 @@ test('bootstrap installs its launcher when the temporary directory is reached th
   const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: path.join(home, '.config'), XDG_DATA_HOME: path.join(home, '.local/share'), TMPDIR: temporary };
   const result = spawnSync('bash', [root + '/install.sh', '--archive', archive, '--sha256', digest, '--yes', '--no-service', '--no-companions', '--no-tailscale'], { env, encoding: 'utf8', timeout: 30000 });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Libertty 0\.1\.1 installed/);
+  assert.match(result.stdout, /libertty 0\.1\.1 installed/);
   assert.equal(execFileSync(path.join(home, '.local/bin/libertty'), ['--version'], { env, encoding: 'utf8' }).trim(), 'libertty 0.1.1');
   const config = JSON.parse(await readFile(path.join(home, '.config/libertty/config.json'), 'utf8'));
   assert.equal(config.version, '0.1.1');

@@ -73,7 +73,7 @@ export async function integrations(installed, dependencies = {}) {
     });
     await attempt('voxtype', async () => {
       if (await probe()) { results.voxtype = 'ready'; return; }
-      if (platform !== 'linux') { results.voxtype = 'unsupported'; console.log('Voxtype Mobile automatic setup currently supports Linux; Libertty and Herdr can run on macOS.'); return; }
+      if (platform !== 'linux') { results.voxtype = 'unsupported'; console.log('Voxtype Mobile automatic setup currently supports Linux; libertty and Herdr can run on macOS.'); return; }
       if (!await ask('Install or upgrade Voxtype Mobile, start its user service, and download its speech model (about 1 GB)?')) return;
       const companion = path.join(installed.releaseDir, 'companions/voxtype-mobile');
       try { await access(path.join(companion, 'daemon'), constants.X_OK); }
@@ -114,7 +114,7 @@ export async function integrations(installed, dependencies = {}) {
       }
       executable = await find('tailscale'); if (!executable) throw new Error('Tailscale CLI was not found after installation.');
     }
-    if (!await ask('Connect Tailscale and expose Libertty privately over HTTPS at ' + env.LIBERTTY_BASE_PATH + (platform === 'linux' ? ' (uses sudo for setup commands)?' : '?'))) return;
+    if (!await ask('Connect Tailscale and expose libertty privately over HTTPS at ' + env.LIBERTTY_BASE_PATH + (platform === 'linux' ? ' (uses sudo for setup commands)?' : '?'))) return;
     let elevated = false;
     const ts = (args, settings = {}) => run(elevated ? 'sudo' : executable, elevated ? [executable, ...args] : args, settings);
     let status = ts(['status', '--json'], { capture: true, optional: true });
@@ -137,7 +137,7 @@ export async function integrations(installed, dependencies = {}) {
     const hostname = state.Self?.DNSName?.replace(/\.$/, '');
     if (!hostname || !/^[a-zA-Z0-9.-]+\.ts\.net$/.test(hostname)) throw new Error('Tailscale did not provide a valid tailnet DNS name.');
     const serve = JSON.parse(ts(['serve', 'status', '--json'], { capture: true }).stdout || '{}');
-    if (serve.AllowFunnel?.[hostname + ':443']) throw new Error('This HTTPS listener has Funnel enabled; review public exposure before adding Libertty.');
+    if (serve.AllowFunnel?.[hostname + ':443']) throw new Error('This HTTPS listener has Funnel enabled; review public exposure before adding libertty.');
     const upstream = 'http://127.0.0.1:' + env.PORT;
     const route = tailscaleRoute(serve, hostname, env.LIBERTTY_BASE_PATH, upstream);
     const hosts = new Set(env.LIBERTTY_ALLOWED_HOSTS.split(',').filter(Boolean));
@@ -170,7 +170,7 @@ export async function integrations(installed, dependencies = {}) {
           } catch {}
           await new Promise(resolve => setTimeout(resolve, 250));
         }
-        if (!ready) throw new Error('Libertty did not respond through private HTTPS; check Tailscale DNS and HTTPS permissions.');
+        if (!ready) throw new Error('libertty did not respond through private HTTPS; check Tailscale DNS and HTTPS permissions.');
       }
       results.tailscale = 'ready'; results.url = url;
     } catch (error) {
@@ -183,7 +183,7 @@ export async function integrations(installed, dependencies = {}) {
       if (changed) {
         env.LIBERTTY_ALLOWED_HOSTS = oldHosts;
         await writeFile(installed.configFile, previous, { mode: 0o600 });
-        try { restart(); } catch (cleanup) { results.failures.push('Libertty restart after restoring hosts: ' + cleanup.message); }
+        try { restart(); } catch (cleanup) { results.failures.push('libertty restart after restoring hosts: ' + cleanup.message); }
       }
       throw error;
     }

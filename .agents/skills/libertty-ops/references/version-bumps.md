@@ -13,7 +13,7 @@ old_version=$(node -p "require('./package.json').version")
 git grep -nF -- "$old_version" -- . ':!archive/**'
 ```
 
-This search includes lockfile dependency versions that may coincidentally match Libertty's version, so inspect each match rather than replacing every occurrence.
+This search includes lockfile dependency versions that may coincidentally match libertty's version, so inspect each match rather than replacing every occurrence.
 Archived migration snapshots and third-party dependency versions are not application version fields.
 The active fields and examples to update are:
 
@@ -27,7 +27,7 @@ The active fields and examples to update are:
 | `docs/releases.md` | Local archive verification example |
 
 Both crate manifests inherit `version.workspace = true`, so they do not need separate version literals.
-`build/release-config.json` pins Node, Herdr, and Voxtype Mobile rather than Libertty's application version.
+`build/release-config.json` pins Node, Herdr, and Voxtype Mobile rather than libertty's application version.
 Release tags must match `v` plus the version in `package.json`.
 Archive names and generated `release.json` metadata derive from `package.json`.
 The Rust executable's `--version` and `/healthz` response derive from Cargo's package version.

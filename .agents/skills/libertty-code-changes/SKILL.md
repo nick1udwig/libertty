@@ -1,9 +1,9 @@
 ---
 name: libertty-code-changes
-description: Make and validate Libertty application or build changes, and select the required checks before any repository commit or merge.
+description: Make and validate libertty application or build changes, and select the required checks before any repository commit or merge.
 ---
 
-# Libertty code changes
+# libertty code changes
 
 Follow the writing rules and item-by-item implementation, testing, bug fixing, and commit order in [AGENTS.md](../../../AGENTS.md).
 Run commands from the repository root and select validation from the actual changes in the current item.

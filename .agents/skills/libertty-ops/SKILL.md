@@ -1,9 +1,9 @@
 ---
 name: libertty-ops
-description: Operate Libertty from this repository, including local source deployment, the existing systemd and Tailscale setup, version bumps, and release packaging.
+description: Operate libertty from this repository, including local source deployment, the existing systemd and Tailscale setup, version bumps, and release packaging.
 ---
 
-# Libertty operations
+# libertty operations
 
 Run commands from the repository root and follow the work order and validation routing in [AGENTS.md](../../../AGENTS.md).
 Read [README.md](../../../README.md) for source prerequisites and the basic build and phone connection setup.
@@ -79,7 +79,7 @@ systemctl --user daemon-reload
 systemctl --user restart libertty.service
 ```
 
-Tailscale Serve strips the `/t` prefix, which Libertty supports with `LIBERTTY_BASE_PATH=/t`.
+Tailscale Serve strips the `/t` prefix, which libertty supports with `LIBERTTY_BASE_PATH=/t`.
 Keep the existing `/`, `/tern`, `/codey`, and `/voxtype` routes intact.
 For this deployment, the scoped route command is:
 
@@ -108,7 +108,7 @@ tailscale serve --bg --set-path=/libertty http://127.0.0.1:7321
 ```
 
 Open `https://my-machine.tail1234.ts.net/libertty` and enter the pairing token printed at startup.
-Tailscale Serve does not start or supervise Libertty, so keep `npm start` running or configure a service.
+Tailscale Serve does not start or supervise libertty, so keep `npm start` running or configure a service.
 Use `LIBERTTY_CWD=/path/to/project` to choose the initial shell directory and `npm run dev` for authenticated frontend hot reload.
 
 ## Installed releases and packaging
@@ -119,7 +119,7 @@ Reuse its existing `--prefix`, `XDG_CONFIG_HOME`, and `XDG_DATA_HOME` settings w
 Preserve its service or manual-launch mode, adding `--no-service` when the installation has no managed service.
 The installer preserves the existing server environment, pairing token, and application data, except for port or mount settings explicitly overridden by installer options.
 Run the checkout's installer with Bash.
-To update only Libertty to the latest published stable release without reconfiguring companions or Tailscale, run:
+To update only libertty to the latest published stable release without reconfiguring companions or Tailscale, run:
 
 ```sh
 bash ./install.sh --no-companions --no-tailscale

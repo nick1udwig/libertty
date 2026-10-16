@@ -152,11 +152,11 @@ try {
   const firstSpaceTab = await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').elementHandle();
   const label = fixture.snapshot.panes[0].label; fixture.rename(0, label + ' renamed'); await delay(800);
   assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), true, 'An unrelated snapshot keeps the strip');
-  fixture.rename(0, label); fixture.snapshot.workspaces[0].label = 'Libertty renamed'; fixture.pauseEvents(false);
-  await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').filter({ hasText: 'Libertty renamed' }).waitFor();
+  fixture.rename(0, label); fixture.snapshot.workspaces[0].label = 'libertty renamed'; fixture.pauseEvents(false);
+  await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').filter({ hasText: 'libertty renamed' }).waitFor();
   assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), false);
-  fixture.snapshot.workspaces[0].label = 'Libertty'; fixture.pauseEvents(false);
-  await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').filter({ hasText: /^Libertty$/ }).waitFor();
+  fixture.snapshot.workspaces[0].label = 'libertty'; fixture.pauseEvents(false);
+  await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').filter({ hasText: /^libertty$/ }).waitFor();
   // The snapshot cache has its own key and is written when the page hides, not on every snapshot.
   const caches = () => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('libertty.herdr.')).map(key => [key, localStorage.getItem(key)]));
   await page.evaluate(() => {
@@ -632,7 +632,7 @@ try {
   assert.equal(await page.locator('.herdr-terminal').getAttribute('data-terminal'), 'term_2');
   assert.equal(await tree.count(), 0, 'Choosing a pane closes the tree');
   await spaceTab('w1').click();
-  assert.deepEqual(await tree.locator('.herdr-pane-add').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Split a pane in Libertty'], 'The tree offers + split and no separate + agent');
+  assert.deepEqual(await tree.locator('.herdr-pane-add').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Split a pane in libertty'], 'The tree offers + split and no separate + agent');
   await page.keyboard.press('Escape');
   fixture.addTerminal('w2', 'Mobile review', true);
   await page.reload(); await spaceTab('w2').waitFor();

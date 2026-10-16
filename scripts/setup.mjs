@@ -8,9 +8,9 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { integrations, findExecutable } from './setup-integrations.mjs';
 
-const marker = '# Managed by the Libertty installer';
+const marker = '# Managed by the libertty installer';
 const legacyMarker = '# Managed by the Termai installer';
-const managed = text => text?.includes(marker) || text?.includes(legacyMarker);
+const managed = text => [marker, legacyMarker].some(value => text?.toLowerCase().includes(value.toLowerCase()));
 function renamedEnvironment(environment) {
   const result = { ...environment };
   for (const [name, value] of Object.entries(environment)) {
@@ -87,7 +87,7 @@ export async function install(options, dependencies = {}) {
   const previous = await read(configFile);
   const legacyConfig = previous ? undefined : await read(legacyConfigFile);
   const saved = previous || legacyConfig;
-  if (saved && !['libertty', 'termai'].includes(JSON.parse(saved).managedBy)) throw new Error('Existing config.json is not managed by Libertty; review it before installing.');
+  if (saved && !['libertty', 'termai'].includes(JSON.parse(saved).managedBy)) throw new Error('Existing config.json is not managed by libertty; review it before installing.');
   const defaultData = !await exists(path.join(dataHome, 'libertty')) && await exists(path.join(dataHome, 'termai')) ? path.join(dataHome, 'termai') : path.join(dataHome, 'libertty');
   const env = { HOST: '127.0.0.1', PORT: '7321', LIBERTTY_BASE_PATH: '/t', LIBERTTY_ALLOWED_HOSTS: 'localhost,127.0.0.1', LIBERTTY_DATA_DIR: defaultData, LIBERTTY_CWD: home, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome, PATH: [path.join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].join(':'), ...renamedEnvironment(saved ? JSON.parse(saved).env : {}) };
   if (options.port) env.PORT = options.port;
@@ -95,7 +95,7 @@ export async function install(options, dependencies = {}) {
   let bash = env.LIBERTTY_BASH || process.env.LIBERTTY_BASH || process.env.TERMAI_BASH || (platform === 'darwin' ? '/opt/homebrew/bin/bash' : '/bin/bash');
   const modern = candidate => run(candidate, ['-c', '(( BASH_VERSINFO[0] > 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 ))'], { optional: true, capture: true }).ok;
   if (!modern(bash) && platform === 'darwin') {
-    if (!await ask('Install modern Bash with Homebrew?')) throw new Error('Libertty needs Bash 4.4 or newer.');
+    if (!await ask('Install modern Bash with Homebrew?')) throw new Error('libertty needs Bash 4.4 or newer.');
     run('brew', ['install', 'bash'], { timeout: 600000 });
     bash = run('brew', ['--prefix', 'bash'], { capture: true }).stdout.trim() + '/bin/bash';
   }
@@ -103,7 +103,7 @@ export async function install(options, dependencies = {}) {
   env.LIBERTTY_BASH = bash;
   const pythonReady = () => run('python3', ['-c', 'import sys; assert sys.version_info >= (3,8)'], { optional: true, capture: true, env }).ok;
   if (!pythonReady()) {
-    if (!await ask('Install Python 3 for Libertty shell integration?')) throw new Error('Libertty needs Python 3.8 or newer.');
+    if (!await ask('Install Python 3 for libertty shell integration?')) throw new Error('libertty needs Python 3.8 or newer.');
     const find = name => findExecutable(name, env);
     if (platform === 'darwin') run('brew', ['install', 'python'], { timeout: 600000 });
     else if (await find('apt-get')) run('sudo', [await find('apt-get'), 'install', '-y', 'python3'], { timeout: 600000 });
@@ -113,7 +113,7 @@ export async function install(options, dependencies = {}) {
     if (!pythonReady()) throw new Error('Python 3.8 or newer is still unavailable on the configured PATH.');
   }
   const userManager = platform === 'linux' ? run('systemctl', ['--user', 'show-environment'], { optional: true, capture: true }).ok : platform === 'darwin';
-  const service = !options['no-service'] && userManager && await ask(platform === 'linux' ? 'Install and start Libertty as a systemd user service?' : 'Install and start Libertty as a login LaunchAgent?');
+  const service = !options['no-service'] && userManager && await ask(platform === 'linux' ? 'Install and start libertty as a systemd user service?' : 'Install and start libertty as a login LaunchAgent?');
   if (!userManager && !options['no-service']) console.log('No systemd user manager is available; the launcher will be installed for manual use.');
   const oldUnit = await read(unit);
   const oldLegacyUnit = await read(legacyUnit);
@@ -131,7 +131,7 @@ export async function install(options, dependencies = {}) {
   const migrateService = service && !!oldLegacyUnit;
   const legacyActive = migrateService && (platform === 'linux' ? run('systemctl', ['--user', 'is-active', '--quiet', 'termai.service'], { optional: true, capture: true }).ok : run('launchctl', ['print', 'gui/' + process.getuid() + '/com.termai.server'], { optional: true, capture: true }).ok);
   const legacyEnabled = migrateService && platform === 'linux' && run('systemctl', ['--user', 'is-enabled', '--quiet', 'termai.service'], { optional: true, capture: true }).ok;
-  if ((active || legacyActive) && !await ask('Restart Libertty to apply this release (ends live terminal connections)?')) throw new Error('Installation cancelled before changing the running service.');
+  if ((active || legacyActive) && !await ask('Restart libertty to apply this release (ends live terminal connections)?')) throw new Error('Installation cancelled before changing the running service.');
   await mkdir(path.dirname(releaseDir), { recursive: true, mode: 0o700 });
   if (!await exists(releaseDir)) {
     const staging = releaseDir + '.new-' + process.pid;
@@ -155,7 +155,7 @@ export async function install(options, dependencies = {}) {
     if (managed(oldLegacyUserBin)) await atomic(legacyUserBin, '#!/bin/sh\n' + marker + '\nexec ' + shellQuote(launch) + ' "$@"\n', 0o755);
     if (service) {
       if (platform === 'linux') {
-        await atomic(unit, marker + '\n[Unit]\nDescription=Libertty terminal workspace\nAfter=network.target\n\n[Service]\nType=simple\nExecStart="' + launch + '"\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n');
+        await atomic(unit, marker + '\n[Unit]\nDescription=libertty terminal workspace\nAfter=network.target\n\n[Service]\nType=simple\nExecStart="' + launch + '"\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n');
         run('systemctl', ['--user', 'daemon-reload']); run('systemctl', ['--user', 'enable', 'libertty.service']); run('systemctl', ['--user', 'restart', 'libertty.service']);
       } else {
         const xml = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -170,7 +170,7 @@ export async function install(options, dependencies = {}) {
           } catch {}
           await new Promise(resolve => setTimeout(resolve, 250));
         }
-        throw new Error('Libertty did not become ready on its configured port.');
+        throw new Error('libertty did not become ready on its configured port.');
       });
       await probe();
     }
@@ -213,14 +213,14 @@ export async function main(args) {
   const companions = await integrations(installed);
   companions.failures.push(...failures);
   await atomic(path.join(installed.prefix, 'setup-status.json'), JSON.stringify(companions, null, 2) + '\n');
-  console.log(`Libertty ${installed.metadata.version} installed.\nLauncher: ${path.join(installed.home, '.local/bin/libertty')}`);
+  console.log(`libertty ${installed.metadata.version} installed.\nLauncher: ${path.join(installed.home, '.local/bin/libertty')}`);
   console.log(installed.service ? 'Open ' + companions.url : 'Start the server with the launcher above, then open ' + companions.url);
   const tokenFile = path.join(installed.config.env.LIBERTTY_DATA_DIR, 'pairing-token');
   const token = await read(tokenFile);
   if (token?.trim() && installed.service) console.log('Pairing token: ' + token.trim());
   else console.log('Pairing token file: ' + tokenFile);
   console.log(`Herdr: ${companions.herdr}; Voxtype Mobile: ${companions.voxtype}; Tailscale: ${companions.tailscale}.`);
-  if (companions.failures.length) { console.error('Libertty is installed; optional setup needs attention.\n' + companions.failures.join('\n')); process.exitCode = 2; }
+  if (companions.failures.length) { console.error('libertty is installed; optional setup needs attention.\n' + companions.failures.join('\n')); process.exitCode = 2; }
 }
 // macOS temporary paths commonly traverse /var -> /private/var.
 const entrypoint = process.argv[1] && await realpath(process.argv[1]).catch(() => undefined);

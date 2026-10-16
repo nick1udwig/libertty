@@ -472,13 +472,13 @@ async fn run(
                     if event["type"]=="ready"&&!ready {
                         if event["protocol"].as_f64()!=Some(2.0)||event["sample_rate"].as_f64()!=Some(16000.0)||event["channels"].as_f64()!=Some(1.0)||event["format"]!="opus"||event["audio_encoding"]!="opus_v1"||event["framing"]!="sequence_opus_v1"||event["resume"]!=true{return Err(concat!(
                             "Unsupported Voxtype audio format. ",
-                            "Update Libertty and Voxtype together."
+                            "Update libertty and Voxtype together."
                         ).into())}
                         let accepted = crate::protocol::unsigned(&event["accepted_frames"]).filter(|frames| *frames <= MAX_OPUS_FRAMES).ok_or("Invalid Voxtype audio checkpoint.")?;
                         let finished = event["finished"].as_bool().ok_or("Invalid Voxtype audio checkpoint.")?;
                         if resume.ready.is_none() && (accepted != 0 || finished) { return Err(concat!(
                             "Unsupported Voxtype audio format. ",
-                            "Update Libertty and Voxtype together."
+                            "Update libertty and Voxtype together."
                         ).into()); }
                         frames = accepted; accepted_frames = accepted; finishing = finished; audio_final = finished;
                         max_samples=(event["max_seconds"].as_f64().filter(|n|*n!=0.0).unwrap_or(300.0).clamp(1.0,300.0)*16000.0) as u32;

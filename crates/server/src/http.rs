@@ -788,7 +788,7 @@ async fn security(State(app): State<Arc<App>>, req: Request<Body>, next: Next) -
             ("access-control-allow-credentials", "true"),
             (
                 "access-control-allow-headers",
-                "Content-Type, Authorization, If-None-Match, X-Libertty-Link, Idempotency-Key, Range",
+                "Content-Type, Authorization, If-None-Match, X-libertty-Link, Idempotency-Key, Range",
             ),
             ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS"),
             ("access-control-allow-private-network", "true"),
@@ -902,7 +902,7 @@ async fn compression(req: Request<Body>, next: Next) -> Response<Body> {
         );
         parts.headers.append(
             "vary",
-            HeaderValue::from_static("Accept-Encoding, X-Libertty-Link"),
+            HeaderValue::from_static("Accept-Encoding, X-libertty-Link"),
         );
         Response::from_parts(parts, Body::from(compressed))
     } else {

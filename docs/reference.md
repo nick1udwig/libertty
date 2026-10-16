@@ -24,7 +24,7 @@ It sources your `.bashrc` for aliases/functions, then installs its own prompt/hi
 It does not edit your shell configuration or save new commands into your existing Bash history files.
 
 Ctrl-R and arrow-key history search Bash's in-memory history, initially loaded from the host's `~/.bash_eternal_history` in both local and SSH terminals.
-If that file is absent, Libertty loads `~/.bash_history`.
+If that file is absent, libertty loads `~/.bash_history`.
 Readline retains the latest 5,000 entries, including new commands from the current terminal.
 `LIBERTTY_HISTORY_FILE` overrides the local source, followed by `LIBERTTY_ETERNAL_HISTORY_FILE`; explicit overrides do not fall back to another file.
 Open a new terminal to load a changed source.

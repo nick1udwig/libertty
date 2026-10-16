@@ -29,7 +29,7 @@ try {
   await until(async () => { try { await herdrRequest(target, 'session.snapshot'); return true; } catch { return false; } }, 'Herdr server');
   const { root_pane: pane } = await herdrRequest(target, 'workspace.create', { cwd: dir + '/work tree', label: 'Reading', focus: false });
   start(root + 'target/debug/libertty', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), LIBERTTY_BASE_PATH: '/reading-test', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: origin, LIBERTTY_DATA_DIR: dir + '/libertty', LIBERTTY_TOKEN: '', LIBERTTY_CWD: dir, LIBERTTY_NO_RC: '1' } });
-  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'Libertty backend');
+  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'libertty backend');
   for (const path of ['reading', 'reading/file?path=/tmp/file', 'reading/capture?id=' + 'a'.repeat(32)]) {
     const response = await fetch(base + 'api/herdr/' + path, { ...(path === 'reading' ? { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: '{}' } : {}) });
     assert.equal(response.status, 401);

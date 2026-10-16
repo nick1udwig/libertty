@@ -757,7 +757,7 @@ export class HerdrView {
         const options = await this.host.api<{ actions?: string[] }>('api/herdr/options');
         if (!modal.open || this.disposed) return;
         progress.textContent = '';
-        if (!options.actions?.includes('split')) throw new Error('This Libertty backend is older than the interface. ' +
+        if (!options.actions?.includes('split')) throw new Error('This libertty backend is older than the interface. ' +
           'Restart it with the current build to enable Split.');
         field('Split direction', picker); picker.setAttribute('aria-label', 'Split direction');
         for (const [value, label] of [['right', 'Right (side by side)'], ['down', 'Down (above and below)']]) { const option = node('option', '', label); option.value = value; picker.append(option); }
