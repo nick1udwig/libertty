@@ -6,9 +6,19 @@ import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSpace, type He
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
 import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
-import { dropSpace, spaceLayout, spaceTerminal, worktreePath, type SpaceDrop } from './herdr-spaces.ts';
+import { dropSpace, repoSpace, repoTap, spaceLayout, spaceRepos, spaceTerminal, worktreePath, type RepoTap, type SpaceDrop, type SpaceRepo } from './herdr-spaces.ts';
 import { herdrLane, herdrLaneNames, statusLanes, type HerdrLane } from './herdr-lanes.ts';
 import './herdr.css';
+
+const icon = (body: string, size = 15) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const icons = {
+  folder: icon('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>', 16),
+  open: icon('<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>'),
+  branch: icon('<line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>'),
+  close: icon('<path d="M18 6 6 18M6 6l12 12"/>', 14),
+  check: icon('<path d="M20 6 9 17l-5-5"/>', 16),
+  plus: icon('<path d="M12 5v14M5 12h14"/>'),
+};
 
 interface Host {
   url: string; session: string; source?: string; key: string;
@@ -23,8 +33,8 @@ interface Host {
   notificationDevice?(): string | undefined;
 }
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; retain:boolean; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
-type StripItem = HerdrAgent & { space?: HerdrSpace };
-interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; collapsedLanes?: HerdrLane[]; spaceTerminals?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']>; snapshot?: unknown }
+type StripItem = HerdrAgent & { space?: HerdrSpace; repo?: SpaceRepo };
+interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; collapsedLanes?: HerdrLane[]; spaceTerminals?: Record<string, string>; repoSpaces?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']>; snapshot?: unknown }
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
   private strip = node('div', 'herdr-agent-strip');
@@ -40,6 +50,7 @@ export class HerdrView {
   private menu = node('div', 'herdr-tab-menu');
   private dropIndicator = node('div', 'herdr-drop-indicator');
   private dropLabel = node('span', 'herdr-drop-label');
+  private treeBridge = node('div', 'herdr-tree-bridge');
   private tracker = new HerdrState();
   private preferences: Preferences;
   private transport!: ReconnectingSocket;
@@ -62,6 +73,9 @@ export class HerdrView {
   private presenceDevice = '';
   private terminals: HerdrAgent[] = [];
   private spaces: HerdrSpace[] = [];
+  private repos: SpaceRepo[] = [];
+  private tree?: { repo: string; signature: string };
+  private renaming = false;
   private rendered = false;
   private handoffHeld = false;
   private navigationResize = 0;
@@ -83,6 +97,7 @@ export class HerdrView {
     this.preferences.order = this.preferences.order.filter(id => typeof id === 'string');
     this.preferences.spaceOrder = (this.preferences.spaceOrder || []).filter(id => typeof id === 'string');
     this.preferences.spaceTerminals ||= {};
+    this.preferences.repoSpaces ||= {};
     this.preferences.spaceGroups = Array.isArray(this.preferences.spaceGroups) ? this.preferences.spaceGroups : [];
     this.preferences.collapsedGroups = Array.isArray(this.preferences.collapsedGroups) ? this.preferences.collapsedGroups : [];
     // Idle lanes start folded so the strip opens on agents that need attention.
@@ -92,7 +107,7 @@ export class HerdrView {
     this.selected = this.preferences.selected || '';
     const cached = herdrCache(this.preferences.snapshot);
     if (cached) {
-      this.cached = true; this.terminals = cached.terminals || cached.agents; this.spaces = cached.spaces || [];
+      this.cached = true; this.terminals = cached.terminals || cached.agents; this.spaces = cached.spaces || []; this.repos = spaceRepos(this.spaces);
       this.tracker.agents = cached.agents; this.ensureSelection();
     }
     this.element.setAttribute('aria-label', 'Herdr connection');
@@ -101,9 +116,9 @@ export class HerdrView {
     this.tabsToggle.type = 'button'; this.tabsToggle.setAttribute('aria-controls', 'terminal-tabs-drawer');
     this.tabsToggle.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>';
     this.tabsToggle.onclick = () => this.host.toggleTerminalTabs?.(); this.setTerminalTabsExpanded(false);
-    this.menu.role = 'menu'; this.menu.hidden = true;
+    this.menu.role = 'menu'; this.menu.hidden = true; this.treeBridge.hidden = true; this.treeBridge.setAttribute('aria-hidden', 'true');
     this.dropIndicator.hidden = true; this.dropIndicator.setAttribute('aria-hidden', 'true');
-    this.dropIndicator.append(this.dropLabel); document.body.append(this.dropIndicator);
+    this.dropIndicator.append(this.dropLabel); document.body.append(this.dropIndicator, this.treeBridge);
     this.status.setAttribute('role', 'status');
     this.loading.role = 'status'; this.loading.hidden = true;
     const spinner = node('span', 'terminal-loading-spinner'); spinner.setAttribute('aria-hidden', 'true');
@@ -114,7 +129,14 @@ export class HerdrView {
     backdrop.onpointerdown = event => { event.stopPropagation(); dismissMenu = true; };
     backdrop.onpointercancel = () => { dismissMenu = false; };
     // The release that opens a hold menu can click the newly visible backdrop.
-    backdrop.onclick = () => { if (dismissMenu) this.menu.hidden = true; dismissMenu = false; };
+    backdrop.onclick = event => {
+      if (!dismissMenu) return;
+      dismissMenu = false;
+      // While a tree is open, tapping another chip moves the tree to that chip instead of only dismissing it.
+      const chip = this.tree && document.elementsFromPoint(event.clientX, event.clientY).find(element => element.matches('.herdr-agent-tab') && this.strip.contains(element)) as HTMLElement | undefined;
+      const repo = chip && chip.dataset.terminal !== this.tree!.repo && this.entries().find(item => item.terminalId === chip.dataset.terminal)?.repo;
+      if (chip && repo) this.openTree(chip, repo); else this.closeMenu();
+    };
     this.element.append(this.screen, this.menu, backdrop);
     const viewed = () => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     const messages = (event: MessageEvent) => {
@@ -163,15 +185,40 @@ export class HerdrView {
     document.addEventListener('visibilitychange', resume); window.addEventListener('online', resume); window.addEventListener('pageshow', resume);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', resume), () => window.removeEventListener('online', resume), () => window.removeEventListener('pageshow', resume));
     this.presenceTimer = setInterval(presence, 15000);
-    const outside = (event: PointerEvent) => { if (!this.menu.contains(event.target as Node) && !(event.target as HTMLElement).closest('.herdr-agent-tab')) this.menu.hidden = true; };
+    const outside = (event: PointerEvent) => { if (!this.menu.contains(event.target as Node) && !(event.target as HTMLElement).closest('.herdr-agent-tab')) this.closeMenu(); };
     document.addEventListener('pointerdown', outside); this.unsubscribers.push(() => document.removeEventListener('pointerdown', outside));
     const escape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !this.menu.hidden) { event.preventDefault(); this.menu.hidden = true; this.strip.querySelector<HTMLButtonElement>('[aria-selected=true]')?.focus(); }
+      if (event.key === 'Escape' && !this.menu.hidden) { event.preventDefault(); this.closeMenu(); this.strip.querySelector<HTMLButtonElement>('[aria-selected=true]')?.focus(); }
     };
     document.addEventListener('keydown', escape); this.unsubscribers.push(() => document.removeEventListener('keydown', escape));
     this.menu.onkeydown = event => {
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const items = [...this.menu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement); items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus(); }
     };
+    // Swiping the space tree down dismisses it, like the sheet its grab bar suggests.
+    let sheet: { id: number; y: number; dragging: boolean } | undefined, swiped = false;
+    this.menu.addEventListener('pointerdown', event => {
+      swiped = false;
+      if (this.tree && !this.renaming && !(event.target as HTMLElement).closest('input')) sheet = { id: event.pointerId, y: event.clientY, dragging: false };
+    });
+    this.menu.addEventListener('pointermove', event => {
+      if (!sheet || event.pointerId !== sheet.id) return;
+      const distance = event.clientY - sheet.y;
+      if (!sheet.dragging && (distance < 10 || this.menu.scrollTop > 0)) return;
+      sheet.dragging = true; this.treeBridge.hidden = true; this.menu.style.transform = 'translateY(' + Math.max(0, distance) + 'px)';
+    });
+    const release = (event: PointerEvent) => {
+      if (!sheet || event.pointerId !== sheet.id) return;
+      const dismissed = sheet.dragging && event.type === 'pointerup' && event.clientY - sheet.y > 56;
+      swiped = sheet.dragging; sheet = undefined;
+      if (dismissed) this.closeMenu();
+      else if (swiped) { this.menu.style.transform = ''; this.refreshTree(); }
+    };
+    this.menu.addEventListener('pointerup', release); this.menu.addEventListener('pointercancel', release);
+    // A swipe that returns to its start must not also press the control it began on.
+    this.menu.addEventListener('click', event => { if (swiped) { event.preventDefault(); event.stopPropagation(); swiped = false; } }, true);
+    const reposition = () => { if (this.tree) this.refreshTree(); };
+    window.addEventListener('resize', reposition); visualViewport?.addEventListener('resize', reposition);
+    this.unsubscribers.push(() => window.removeEventListener('resize', reposition), () => visualViewport?.removeEventListener('resize', reposition));
     this.transport = new ReconnectingSocket({
       available: () => !this.disposed && !this.recovering && (!document.hidden || !this.backgroundExpired) && navigator.onLine,
       protocols: () => wireProtocols(this.offeredWire),
@@ -208,7 +255,7 @@ export class HerdrView {
     if (!visible) {
       this.clearDrop();
       if (this.displayed && ![...this.terminalFrames.values()].some(entry => entry.frame === this.displayed)) { this.displayed.remove(); this.displayed = undefined; }
-      this.menu.hidden = true; this.setLoading(false);
+      this.closeMenu(); this.setLoading(false);
       for (const entry of [...this.terminalFrames.values()]) {
         if (entry.frame !== this.frame) this.park(entry.frame, entry.frame === this.displayed);
         else { entry.frame.inert = true; }
@@ -326,39 +373,52 @@ export class HerdrView {
     if (message.type !== 'snapshot') return;
     this.transport.ready(); this.connected = this.ws?.readyState === WebSocket.OPEN;
     this.liveSnapshot = true; this.cached = false; this.preferences.snapshot = herdrCache(message.snapshot);
+    const previousSpace = this.terminals.find(terminal => terminal.terminalId === this.selected)?.workspaceId;
     this.status.textContent = '';
-    this.terminals = message.snapshot.terminals || message.snapshot.agents; this.spaces = message.snapshot.spaces || [];
+    this.terminals = message.snapshot.terminals || message.snapshot.agents; this.spaces = message.snapshot.spaces || []; this.repos = spaceRepos(this.spaces);
     const notifications = this.tracker.update(message.snapshot);
     this.acknowledge(this.quietSnapshot ? this.currentNotifications() : notifications);
     if (!this.quietSnapshot) for (const event of notifications) this.host.notification(event);
     this.quietSnapshot = false;
     const live = this.tracker.agents.map(agent => agent.terminalId);
     this.preferences.order = [...this.preferences.order.filter(id => live.includes(id)), ...live.filter(id => !this.preferences.order.includes(id))];
-    const spaces = this.spaces.map(space => 'space:' + space.id);
-    const layout = spaceLayout(spaces, this.preferences.spaceGroups!, spaces);
+    // The strip orders repositories by their first space, and stacks saved before grouping follow each space into its repository.
+    const repos = this.repos.map(repo => repo.id), grouped = new Map(this.repos.flatMap(repo => repo.spaces.map(space => ['space:' + space.id, repo.id] as const)));
+    const layout = spaceLayout(repos, this.preferences.spaceGroups!.map(group => [...new Set(group.map(id => grouped.get(id) || id))]), repos);
     this.preferences.spaceOrder = layout.order; this.preferences.spaceGroups = layout.groups;
-    this.preferences.collapsedGroups = this.preferences.collapsedGroups!.filter(id => layout.groups.some(group => group[0] === id));
-    this.ensureSelection();
+    this.preferences.collapsedGroups = this.preferences.collapsedGroups!.map(id => grouped.get(id) || id).filter(id => layout.groups.some(group => group[0] === id));
+    for (const [repo, space] of Object.entries(this.preferences.repoSpaces!)) if (!grouped.has('space:' + space)) delete this.preferences.repoSpaces![repo];
+    this.ensureSelection(previousSpace);
     if (this.requestedTerminal && this.terminals.some(agent => agent.terminalId === this.requestedTerminal)) { this.selected = this.requestedTerminal; this.requestedTerminal = ''; }
     this.save(); this.render(); this.mountTerminal();
     if (!this.selected) this.host.ready?.();
     requestAnimationFrame(() => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } });
   }
   private get spaceMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStrip') || 'null') !== 'agents'; } catch { return true; } }
-  private get laneMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStripOrder') || 'null') === 'lanes'; } catch { return false; } }
+  // Status lanes are the default order; only an explicit Manual choice keeps the saved order.
+  private get laneMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStripOrder') || 'null') !== 'manual'; } catch { return true; } }
+  private get tapMode(): RepoTap { try { const mode = JSON.parse(localStorage.getItem('termai.herdrSpaceTap') || 'null'); return mode === 'root' || mode === 'tree' || mode === 'triage' ? mode : 'recent'; } catch { return 'recent'; } }
   private get order() { return this.spaceMode ? this.preferences.spaceOrder! : this.preferences.order; }
   private set order(value: string[]) { if (this.spaceMode) this.preferences.spaceOrder = value; else this.preferences.order = value; }
   private get stripSelection() {
     const terminal = this.terminals.find(t => t.terminalId === this.selected);
-    return this.spaceMode && terminal ? 'space:' + terminal.workspaceId : this.selected;
+    return this.spaceMode && terminal ? this.repoOf(terminal.workspaceId)?.id || 'space:' + terminal.workspaceId : this.selected;
+  }
+  private repoOf(spaceId?: string) { return this.repos.find(repo => repo.spaces.some(space => space.id === spaceId)); }
+  private spaceItem(space: HerdrSpace): StripItem {
+    return { terminalId: 'space:' + space.id, paneId: '', workspace: space.name, name: space.name, kind: 'Space', status: 'idle', sequence: 0, cwd: '', space };
   }
   private entries(): StripItem[] {
     if (!this.spaceMode) return this.tracker.agents;
-    return this.spaces.map(space => ({ terminalId: 'space:' + space.id, paneId: '', workspace: space.name, name: space.name, kind: 'Space', status: 'idle', sequence: 0, cwd: '', space }));
+    return this.repos.map(repo => {
+      const space = repoSpace(repo, this.preferences.repoSpaces![repo.id]);
+      return { ...this.spaceItem(space), terminalId: repo.id, workspace: repo.name, name: repo.spaces.length > 1 ? repo.name : space.name, repo };
+    });
   }
   private statusFor(item: StripItem) {
     if (!item.space) return this.tracker.status(item);
-    const statuses = this.tracker.agents.filter(agent => item.space!.terminalIds.includes(agent.terminalId)).map(agent => this.tracker.status(agent));
+    const terminals = (item.repo?.spaces || [item.space]).flatMap(space => space.terminalIds);
+    const statuses = this.tracker.agents.filter(agent => terminals.includes(agent.terminalId)).map(agent => this.tracker.status(agent));
     return (['blocked', 'done', 'working'] as const).find(status => statuses.includes(status)) || 'idle';
   }
   private laneFor(item: StripItem) {
@@ -373,19 +433,26 @@ export class HerdrView {
     if (!item.space) return item.terminalId;
     return spaceTerminal(item.space, this.preferences.spaceTerminals![item.space.id]);
   }
-  private ensureSelection() {
-    if (!this.terminals.some(t => t.terminalId === this.selected) || !this.ordered().some(item => item.terminalId === this.stripSelection)) this.selected = this.terminalFor(this.ordered()[0]);
+  private ensureSelection(previousSpace?: string) {
+    if (this.terminals.some(t => t.terminalId === this.selected) && this.ordered().some(item => item.terminalId === this.stripSelection)) return;
+    // Closing the open pane keeps its space open when another of its panes survives.
+    const space = this.spaceMode ? this.spaces.find(space => space.id === previousSpace && space.terminalIds.length) : undefined;
+    this.selected = space ? this.terminalFor(this.spaceItem(space)) : this.terminalFor(this.ordered()[0]);
   }
   private select(id: string) {
     const item = this.entries().find(item => item.terminalId === id);
-    if (item?.space && this.stripSelection === id) {
+    const panes = (space: HerdrSpace) => this.tracker.agents.filter(agent => space.terminalIds.includes(agent.terminalId))
+      .map(agent => ({ terminalId: agent.terminalId, status: this.tracker.status(agent), sequence: agent.sequence, completion: this.tracker.completion(agent.terminalId) }));
+    // Tapping the selected chip opens its tree, as does tapping another repository when the tree setting is chosen.
+    const tap = item?.repo ? this.stripSelection === id ? undefined : repoTap(item.repo, this.tapMode, this.preferences.repoSpaces![item.repo.id], panes) : item?.space && { space: item.space };
+    if (item?.repo && !tap) {
       const anchor = this.strip.querySelector<HTMLElement>('[data-terminal="' + CSS.escape(id) + '"]');
-      if (anchor) this.openAgents(anchor, item.space.id); return;
+      if (anchor) this.openTree(anchor, item.repo); return;
     }
-    this.selectTerminal(item ? this.terminalFor(item) : id);
+    this.selectTerminal(tap ? tap.terminalId || this.terminalFor(this.spaceItem(tap.space)) : id);
   }
   private selectTerminal(id: string) {
-    this.menu.hidden = true;
+    this.closeMenu();
     const terminal = this.terminals.find(t => t.terminalId === id);
     if (terminal?.workspaceId) this.preferences.spaceTerminals![terminal.workspaceId] = id;
     if (id === this.selected) { this.post({ type: 'focus-terminal' }); return; }
@@ -397,6 +464,9 @@ export class HerdrView {
   }
   private save() {
     this.preferences.selected = this.selected;
+    // Each repository chip reopens the checkout last used in it.
+    const workspace = this.terminals.find(terminal => terminal.terminalId === this.selected)?.workspaceId, repo = this.repoOf(workspace);
+    if (repo) this.preferences.repoSpaces![repo.id] = workspace!;
     this.preferences.state = this.tracker.checkpoint();
     try { localStorage.setItem(this.host.key, JSON.stringify(this.preferences)); } catch { /* This view still works without persistence. */ }
   }
@@ -423,9 +493,15 @@ export class HerdrView {
       const tab = node('button', 'herdr-agent-tab'); tab.type = 'button'; tab.role = 'tab'; tab.dataset.terminal = agent.terminalId; tab.dataset.status = this.statusFor(agent);
       tab.setAttribute('aria-selected', String(agent.terminalId === this.stripSelection)); tab.tabIndex = agent.terminalId === this.stripSelection ? 0 : -1;
       tab.setAttribute('aria-controls', this.screen.id); tab.setAttribute('aria-haspopup', 'menu');
-      tab.setAttribute('aria-label', agent.name + ' · ' + this.statusFor(agent) + ' · ' + agent.workspace);
-      tab.title = agent.name + ' · ' + agent.kind + ' · ' + this.statusFor(agent) + ' · ' + agent.workspace;
-      tab.append(node('span', 'herdr-status-dot'), node('span', 'herdr-agent-name', agent.name + (agent.space && agent.space.terminalIds.length > 1 ? ' ▾' : '')));
+      const checkouts = agent.repo && agent.repo.spaces.length > 1 ? agent.repo.spaces.length : 0, place = checkouts ? agent.space!.name : agent.workspace;
+      tab.setAttribute('aria-label', agent.name + ' · ' + this.statusFor(agent) + ' · ' + place);
+      tab.title = agent.name + ' · ' + agent.kind + ' · ' + this.statusFor(agent) + ' · ' + place;
+      tab.append(node('span', 'herdr-status-dot'));
+      if (checkouts && agent.terminalId === this.stripSelection) {
+        // The open repository names its current checkout beneath the repository and its checkout count.
+        const label = node('span', 'herdr-space-label');
+        label.append(node('span', 'herdr-repo-name', agent.name + ' · ' + checkouts), node('span', 'herdr-agent-name', agent.space!.name)); tab.append(label);
+      } else tab.append(node('span', 'herdr-agent-name', agent.name), ...checkouts ? [node('span', 'herdr-repo-count', String(checkouts))] : []);
       const lane = lanes?.find(lane => lane.items.includes(agent));
       const group = !lane && agent.space && this.preferences.spaceGroups!.find(group => group.includes(agent.terminalId));
       let parent: HTMLElement = this.strip;
@@ -461,8 +537,8 @@ export class HerdrView {
       }
       tab.addEventListener('pointerdown', event => { if (event.button === 0) this.held = true; });
       tabGestures(tab, {
-        select: () => this.select(agent.terminalId), hold: () => this.openMenu(tab, agent), scroll: this.strip,
-        dragging: () => { this.menu.hidden = true; this.clearDrop(); },
+        select: () => this.select(agent.terminalId), hold: () => agent.repo ? this.openTree(tab, agent.repo) : this.openMenu(tab, agent), scroll: this.strip,
+        dragging: () => { this.closeMenu(); this.clearDrop(); },
         // Status lanes own the order, so holding a tab only opens its actions.
         drag: lanes ? undefined : x => {
           if (x < this.strip.getBoundingClientRect().left + 24) this.strip.scrollLeft -= 10;
@@ -494,6 +570,7 @@ export class HerdrView {
       parent.append(tab);
     }
     const add = node('button', 'herdr-agent-add', '+'); add.type = 'button'; add.setAttribute('aria-label', 'Create space'); add.disabled = this.creatingSpace; add.onclick = () => void this.createSpace(); this.strip.append(add); this.strip.scrollLeft = scroll;
+    if (this.tree) this.refreshTree();
   }
   private clearDrop() {
     this.dropIndicator.hidden = true;
@@ -528,9 +605,12 @@ export class HerdrView {
     if (this.movingSpace) return;
     const layout = dropSpace(spaceLayout(this.preferences.spaceOrder!, this.preferences.spaceGroups!), source, target, drop);
     if (!layout.order.includes(source) || !layout.order.includes(target) || source === target) return;
-    const before = layout.order[layout.order.indexOf(source) + 1]; this.movingSpace = true;
+    // Herdr orders single spaces, so each checkout of a repository moves in front of the next repository's first space.
+    const next = layout.order[layout.order.indexOf(source) + 1], members = this.repos.find(repo => repo.id === source)?.spaces || [];
+    const before = next && this.spaces.find(space => this.repoOf(space.id)?.id === next)?.id, moving = this.spaces.filter(space => members.includes(space));
+    this.movingSpace = true;
     try {
-      await this.host.api('api/herdr/action', { action: 'move-space', workspaceId: source.slice(6), ...(before ? { beforeWorkspaceId: before.slice(6) } : {}) });
+      for (const space of moving) await this.host.api('api/herdr/action', { action: 'move-space', workspaceId: space.id, ...(before ? { beforeWorkspaceId: before } : {}) });
       if (this.disposed) return;
       this.preferences.spaceGroups = layout.groups;
       if (drop === 'group') this.preferences.collapsedGroups = this.preferences.collapsedGroups!.filter(id => !layout.groups.find(group => group.includes(source))?.includes(id));
@@ -540,7 +620,7 @@ export class HerdrView {
   }
   private async createSpace() {
     if (this.creatingSpace) return;
-    this.creatingSpace = true; this.menu.hidden = true; this.render();
+    this.creatingSpace = true; this.closeMenu(); this.render();
     const terminal = this.terminals.find(terminal => terminal.terminalId === this.selected);
     const space = this.spaces.find(space => space.id === terminal?.workspaceId) || this.spaces[0];
     try {
@@ -550,13 +630,14 @@ export class HerdrView {
       try { localStorage.setItem('termai.herdrStrip', JSON.stringify('spaces')); } catch { /* Default to spaces when preferences are unavailable. */ }
       this.selected = result.terminalId || snapshot.spaces?.find(space => space.id === result.workspaceId)?.selectedTerminalId || '';
       this.receive({ type: 'snapshot', snapshot });
-      this.strip.querySelector<HTMLElement>('[data-terminal="' + CSS.escape('space:' + result.workspaceId) + '"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      this.strip.querySelector<HTMLElement>('[data-terminal="' + CSS.escape(this.repoOf(result.workspaceId)?.id || 'space:' + result.workspaceId) + '"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     } catch (error: any) { if (!this.disposed) this.host.notice(error.message); }
     finally { this.creatingSpace = false; if (!this.disposed) this.render(); }
   }
   private popup(anchor: HTMLElement) {
     this.menu.hidden = false;
     const parent = this.element.getBoundingClientRect(), rect = anchor.getBoundingClientRect();
+    this.menu.role = 'menu'; this.menu.style.width = '';
     this.menu.style.left = Math.max(8, Math.min(rect.left - parent.left, parent.width - this.menu.offsetWidth - 8)) + 'px';
     this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 5) + 'px';
   }
@@ -564,25 +645,152 @@ export class HerdrView {
     this.menu.replaceChildren();
     this.menu.setAttribute('aria-label', agent.name + ' tab actions');
     const rename = node('button', '', 'Rename'); rename.role = 'menuitem'; rename.onclick = () => void this.rename(agent);
-    const close = node('button', '', agent.space ? 'Close' : 'Close tab'); close.role = 'menuitem'; close.disabled = this.closing.has(agent.terminalId); close.onclick = () => void this.closeTab(agent);
+    const close = node('button', '', 'Close tab'); close.role = 'menuitem'; close.disabled = this.closing.has(agent.terminalId); close.onclick = () => void this.closeTab(agent);
     this.menu.append(rename, close); this.popup(anchor); rename.focus({ preventScroll: true });
-    if (agent.space) {
-      for (const [label, action] of [['New worktree', 'new-worktree'], ['Open worktree', 'open-worktree'], ['Split', 'split']] as const) {
-        if (agent.space.linkedWorktree && action !== 'split') continue;
-        const button = node('button', '', label); button.role = 'menuitem'; button.onclick = () => void this.spaceAction(agent, action); this.menu.insertBefore(button, close);
+  }
+  private closeMenu() {
+    this.menu.hidden = true; this.tree = undefined; this.renaming = false;
+    this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.touchAction = this.menu.style.width = '';
+    this.treeBridge.hidden = true; this.screen.classList.remove('herdr-screen-dim');
+    for (const anchor of this.strip.querySelectorAll('.herdr-tree-anchor')) anchor.classList.remove('herdr-tree-anchor');
+  }
+  /** A repository's spaces, panes and worktree actions open as a tree attached to its chip. */
+  private openTree(anchor: HTMLElement, repo: SpaceRepo) {
+    if (this.actionDialog) return;
+    this.closeMenu(); anchor.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    this.tree = { repo: repo.id, signature: '' };
+    this.menu.role = 'dialog'; this.menu.setAttribute('aria-label', repo.name + ' spaces'); this.menu.classList.add('herdr-tree');
+    this.menu.hidden = false; this.screen.classList.add('herdr-screen-dim');
+    this.refreshTree(true);
+    this.menu.querySelector<HTMLElement>('[aria-current=true]')?.focus({ preventScroll: true });
+  }
+  private refreshTree(rebuild = false) {
+    const repo = this.repos.find(repo => repo.id === this.tree?.repo);
+    const anchor = repo && this.strip.querySelector<HTMLElement>('.herdr-agent-tab[data-terminal="' + CSS.escape(repo.id) + '"]');
+    if (!this.tree || !repo || !anchor || anchor.hidden) { this.closeMenu(); return; }
+    if (!this.renaming) {
+      const panes = this.terminals.filter(terminal => repo.spaces.some(space => space.id === terminal.workspaceId)).map(terminal => [terminal.terminalId, terminal.name]);
+      const signature = JSON.stringify([repo.spaces.map(space => [space.id, space.name, space.terminalIds]), panes, this.selected, [...this.closing]]);
+      if (rebuild || signature !== this.tree.signature) { this.tree.signature = signature; this.buildTree(repo); }
+      else for (const pane of this.menu.querySelectorAll<HTMLElement>('.herdr-pane')) {
+        const terminal = this.terminals.find(terminal => terminal.terminalId === pane.dataset.terminal);
+        if (terminal) pane.dataset.status = this.tracker.status(terminal);
       }
-      if (agent.space.linkedWorktree) {
-        const remove = node('button', 'danger', 'Delete worktree checkout'); remove.role = 'menuitem';
-        remove.disabled = this.closing.has(agent.terminalId) || !agent.space.checkoutPath;
-        remove.onclick = () => this.deleteWorktree(agent); this.menu.append(remove);
-      }
-      this.popup(anchor);
     }
+    for (const other of this.strip.querySelectorAll('.herdr-tree-anchor')) if (other !== anchor) other.classList.remove('herdr-tree-anchor');
+    anchor.classList.add('herdr-tree-anchor');
+    // Phones get a full-width tree; wider screens keep it beside its chip.
+    const parent = this.element.getBoundingClientRect(), rect = anchor.getBoundingClientRect(), width = parent.width > 560 ? 420 : parent.width - 16;
+    this.menu.style.width = width + 'px';
+    this.menu.style.left = Math.max(8, Math.min(rect.left - parent.left, parent.width - width - 8)) + 'px';
+    this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 6) + 'px';
+    // Without overflow the whole tree can be swiped away; otherwise only its grab bar can.
+    this.menu.style.touchAction = this.menu.scrollHeight > this.menu.clientHeight ? '' : 'none';
+    // The bridge joins the tree to its chip so it reads as that chip's own panel.
+    const menu = this.menu.getBoundingClientRect();
+    Object.assign(this.treeBridge.style, { left: rect.left + 'px', width: rect.width + 'px', top: menu.bottom - 1 + 'px', height: Math.max(0, rect.top - menu.bottom + 3) + 'px' });
+    this.treeBridge.hidden = false;
+  }
+  private buildTree(repo: SpaceRepo) {
+    const grabber = node('div', 'herdr-tree-grabber'); grabber.setAttribute('aria-hidden', 'true');
+    this.menu.replaceChildren(grabber);
+    const root = repo.root, children = repo.spaces.filter(space => space !== root);
+    if (root) this.menu.append(this.treeNode(root, repo));
+    else {
+      // Worktrees whose root checkout is not open still group under their repository.
+      const head = node('div', 'herdr-tree-head'), title = node('span', 'herdr-tree-title');
+      title.innerHTML = icons.folder; title.append(node('span', 'herdr-tree-name', repo.name)); head.append(title); this.menu.append(head);
+    }
+    if (children.length) {
+      const kids = node('div', 'herdr-tree-kids'); kids.role = 'group'; kids.setAttribute('aria-label', 'Worktrees');
+      for (const space of children) kids.append(this.treeNode(space, repo));
+      this.menu.append(kids);
+    }
+    // Herdr records a repository only once a worktree exists, so any root checkout may still start one.
+    const actions = node('div', 'herdr-tree-actions');
+    for (const [label, action, svg] of [['New worktree', 'new-worktree', icons.plus], ['Open worktree…', 'open-worktree', icons.open]] as const) {
+      const button = node('button'); button.type = 'button'; button.innerHTML = svg; button.append(label);
+      button.disabled = !root; if (!root) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
+      button.onclick = () => { if (root) void this.spaceAction(this.spaceItem(root), action); };
+      actions.append(button);
+    }
+    this.menu.append(actions);
+  }
+  private treeNode(space: HerdrSpace, repo: SpaceRepo) {
+    const item = this.spaceItem(space), current = this.terminals.find(t => t.terminalId === this.selected)?.workspaceId === space.id, root = space === repo.root;
+    const box = node('div', 'herdr-tree-node'), head = node('div', 'herdr-tree-head'), title = node('button', 'herdr-tree-title');
+    box.dataset.space = space.id; box.classList.toggle('herdr-tree-root', root); head.classList.toggle('herdr-tree-current', current);
+    title.type = 'button'; title.innerHTML = root ? icons.folder : icons.branch; title.append(node('span', 'herdr-tree-name', space.name));
+    if (root && repo.git && repo.name !== space.name) title.append(node('span', 'herdr-tree-repo', repo.name));
+    title.setAttribute('aria-label', 'Open ' + space.name + (current ? ', the current space' : '') + '. Hold to rename.');
+    tabGestures(title, { select: () => { const terminal = this.terminalFor(item); if (terminal) this.selectTerminal(terminal); }, hold: () => this.renameInline(head, item) });
+    const close = node('button', 'herdr-tree-close'); close.type = 'button'; close.innerHTML = icons.close;
+    close.setAttribute('aria-label', 'Close ' + space.name); close.disabled = this.closing.has(item.terminalId); close.onclick = () => this.confirmCloseSpace(item);
+    head.append(title, close);
+    const panes = node('div', 'herdr-tree-panes'); panes.role = 'group'; panes.setAttribute('aria-label', space.name + ' panes');
+    for (const id of space.terminalIds) {
+      const terminal = this.terminals.find(terminal => terminal.terminalId === id);
+      if (!terminal) continue;
+      const pill = node('div', 'herdr-pane'), focus = node('button', 'herdr-pane-focus'), status = this.tracker.status(terminal);
+      pill.dataset.terminal = id; pill.dataset.status = status;
+      focus.type = 'button'; focus.append(node('span', 'herdr-status-dot'), node('span', 'herdr-pane-name', terminal.name));
+      focus.setAttribute('aria-label', terminal.name + ' · ' + status + '. Hold to rename.');
+      if (id === this.selected) focus.setAttribute('aria-current', 'true');
+      tabGestures(focus, { select: () => this.selectTerminal(id), hold: () => this.renameInline(pill, terminal) });
+      const remove = node('button', 'herdr-pane-close'); remove.type = 'button'; remove.innerHTML = icons.close;
+      remove.setAttribute('aria-label', 'Close ' + terminal.name); remove.disabled = this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
+      pill.append(focus, remove); panes.append(pill);
+    }
+    const split = node('button', 'herdr-pane-add', '+ split'); split.type = 'button'; split.setAttribute('aria-label', 'Split a pane in ' + space.name); split.onclick = () => void this.spaceAction(item, 'split');
+    panes.append(split); box.append(head, panes);
+    return box;
+  }
+  /** Holding a space or pane name edits it in place; the shared label also changes on the desktop. */
+  private renameInline(target: HTMLElement, item: StripItem) {
+    if (this.renaming || !this.tree) return;
+    this.renaming = true;
+    const form = node('form', 'herdr-tree-rename ' + (item.space ? 'herdr-tree-head' : 'herdr-pane')), input = node('input'), save = node('button', 'herdr-tree-save');
+    input.value = item.name; input.maxLength = 100; input.required = true; input.autocomplete = 'off'; input.spellcheck = false;
+    input.setAttribute('aria-label', item.space ? 'Space name' : 'Pane name');
+    save.type = 'submit'; save.innerHTML = icons.check; save.setAttribute('aria-label', 'Save name');
+    const finish = () => { this.renaming = false; if (this.tree) this.refreshTree(true); };
+    input.onkeydown = event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); finish(); } };
+    form.onsubmit = async event => {
+      event.preventDefault(); if (save.disabled) return;
+      save.disabled = input.disabled = true;
+      try {
+        await this.host.api('api/herdr/action', { action: item.space ? 'rename-space' : 'rename', terminalId: item.terminalId, workspaceId: item.space?.id, name: herdrName(input.value) });
+        this.renaming = false; await this.refreshSnapshot(); finish();
+      } catch (error: any) {
+        if (this.disposed || !form.isConnected) return;
+        this.renaming = true; save.disabled = input.disabled = false; this.host.notice(error.message); input.focus();
+      }
+    };
+    form.append(input, save); target.replaceWith(form); input.focus(); input.select();
+  }
+  private confirmCloseSpace(item: StripItem) {
+    const space = item.space;
+    if (!space || this.actionDialog || this.closing.has(item.terminalId)) return;
+    this.closeMenu();
+    const modal = this.actionDialog = node('dialog', 'herdr-space-action herdr-close-space'), form = node('form');
+    const title = node('h2', '', 'Close ' + space.name + '?'); title.id = 'close-space-' + crypto.randomUUID(); modal.setAttribute('aria-labelledby', title.id);
+    const count = space.terminalIds.length;
+    const explanation = node('p', '', 'This ends ' + (count === 1 ? 'its terminal' : 'its ' + count + ' terminals') + ' on the Herdr server.');
+    const checkout = node('p', 'hint', 'The checkout stays on disk. Delete it to remove the folder too; the branch is kept.');
+    const linked = !!space.linkedWorktree && !!space.checkoutPath; checkout.hidden = !linked;
+    const actions = node('div', 'actions'), cancel = node('button', 'secondary', 'Cancel'), close = node('button', 'danger', 'Close space'), remove = node('button', 'danger', 'Delete checkout…');
+    cancel.type = 'button'; close.type = 'submit'; remove.type = 'button'; remove.hidden = !linked;
+    cancel.onclick = () => modal.close();
+    modal.onclose = () => { if (this.actionDialog === modal) this.actionDialog = undefined; modal.remove(); };
+    // Dialogs report closing asynchronously, so release this one before the deletion dialog opens.
+    remove.onclick = () => { this.actionDialog = undefined; modal.close(); this.deleteWorktree(item); };
+    form.onsubmit = event => { event.preventDefault(); modal.close(); void this.closeTab(item); };
+    actions.append(cancel, close, remove); form.append(title, explanation, checkout, actions); modal.append(form); document.body.append(modal); modal.showModal(); cancel.focus();
   }
   private deleteWorktree(item: StripItem) {
     const space = item.space;
     if (!space?.linkedWorktree || !space.checkoutPath || this.actionDialog || this.closing.has(item.terminalId)) return;
-    this.menu.hidden = true;
+    this.closeMenu();
     const modal = this.actionDialog = node('dialog', 'herdr-space-action herdr-delete-worktree'), form = node('form');
     const title = node('h2', '', 'Delete worktree checkout?'); title.id = 'delete-worktree-title'; modal.setAttribute('aria-labelledby', title.id);
     const explanation = node('p', '', 'This removes the checkout folder:');
@@ -614,7 +822,7 @@ export class HerdrView {
   private async spaceAction(item: StripItem, action: 'new-worktree' | 'open-worktree' | 'split') {
     if (!item.space || this.actionDialog) return;
     const space = item.space, terminalId = this.terminalFor(item);
-    this.menu.hidden = true;
+    this.closeMenu();
     const modal = this.actionDialog = node('dialog', 'herdr-space-action'), form = node('form');
     const title = node('h2', '', action === 'split' ? 'Split terminal' : action === 'new-worktree' ? 'New worktree' : 'Open worktree');
     const context = node('p', '', space.name), fields = node('div'), progress = node('p'), error = node('p', 'form-error'), actions = node('div', 'actions');
@@ -710,7 +918,7 @@ export class HerdrView {
   }
   private async closeTab(item: StripItem) {
     if (this.closing.has(item.terminalId)) return;
-    this.closing.add(item.terminalId); this.menu.hidden = true;
+    this.closing.add(item.terminalId); if (!this.tree) this.closeMenu();
     try {
       await this.host.api('api/herdr/action', item.space
         ? { action: 'close-space', workspaceId: item.space.id }
@@ -723,55 +931,9 @@ export class HerdrView {
     const snapshot = await this.host.api<import('./herdr-protocol.ts').HerdrSnapshot>('api/herdr/snapshot');
     if (!this.disposed) this.receive({ type: 'snapshot', snapshot });
   }
-  private openAgents(anchor: HTMLElement, spaceId?: string) {
-    this.menu.replaceChildren();
-    const create = node('button', '', 'Create agent'); create.role = 'menuitem'; create.onclick = () => void this.createAgent(spaceId);
-    this.menu.append(create, node('p', 'herdr-menu-hint', this.spaceMode ? 'Open existing terminal' : 'Open existing agent'));
-    const terminals = (this.spaceMode ? this.terminals : this.tracker.agents).filter(agent => !spaceId || agent.workspaceId === spaceId);
-    if (!terminals.length) this.menu.append(node('p', 'herdr-menu-hint', 'No terminals are running here.'));
-    for (const agent of terminals) {
-      const item = node('button', '', agent.name + ' · ' + agent.workspace); item.role = 'menuitem';
-      item.onclick = () => {
-        this.selectTerminal(agent.terminalId); this.save(); this.render();
-      };
-      this.menu.append(item);
-    }
-    this.popup(anchor);
-  }
-  private async createAgent(spaceId?: string) {
-    this.menu.hidden = true;
-    const modal = node('dialog'), form = node('form'), title = node('h2', '', 'Create agent');
-    const name = node('input'), kind = node('select'), space = node('select'), cwd = node('input'), error = node('p', 'form-error'), actions = node('div', 'actions');
-    name.required = true; name.maxLength = 100; name.value = 'New agent'; name.setAttribute('aria-label', 'Agent name');
-    kind.setAttribute('aria-label', 'Agent type'); space.setAttribute('aria-label', 'Space'); cwd.setAttribute('aria-label', 'Working directory'); cwd.placeholder = 'Use the space’s directory';
-    for (const value of this.spaces) { const option = node('option', '', value.name); option.value = value.id; space.append(option); }
-    space.value = spaceId || this.terminals.find(t => t.terminalId === this.selected)?.workspaceId || this.spaces[0]?.id || '';
-    const setDirectory = () => { cwd.value = this.terminals.find(t => t.workspaceId === space.value)?.cwd || ''; }; setDirectory(); space.onchange = setDirectory;
-    const cancel = node('button', 'secondary', 'Cancel'), create = node('button', 'primary', 'Create agent'); cancel.type = 'button'; create.type = 'submit'; create.disabled = true; cancel.onclick = () => modal.close();
-    const field = (text: string, control: HTMLElement) => { const label = node('label', '', text); label.append(control); return label; };
-    actions.append(cancel, create); form.append(title, field('Name', name), field('Agent type', kind), field('Space', space), field('Working directory', cwd), error, actions); modal.append(form); document.body.append(modal); modal.onclose = () => modal.remove();
-    modal.showModal(); name.focus(); name.select();
-    try {
-      const options = await this.host.api<{ kinds: string[] }>('api/herdr/options');
-      for (const value of options.kinds) { const option = node('option', '', value); option.value = value; kind.append(option); }
-      const current = this.terminals.find(t => t.terminalId === this.selected)?.kind;
-      kind.value = options.kinds.includes(current || '') ? current! : options.kinds.includes('codex') ? 'codex' : options.kinds[0] || '';
-      create.disabled = !kind.value || !space.value;
-      if (!kind.value) error.textContent = 'This Herdr server has no supported agent types.';
-    } catch (reason: any) { error.textContent = reason.message; }
-    form.onsubmit = async event => {
-      event.preventDefault(); if (create.disabled) return; create.disabled = true; cancel.disabled = true;
-      try {
-        const result = await this.host.api<{ terminalId: string; error?: string }>('api/herdr/action', { action: 'create', name: herdrName(name.value), kind: kind.value, workspaceId: space.value, ...(cwd.value.trim() ? { cwd: cwd.value.trim() } : {}) });
-        this.receive({ type: 'snapshot', snapshot: await this.host.api('api/herdr/snapshot') });
-        this.selectTerminal(result.terminalId); modal.close();
-        if (result.error) this.host.notice('Created a terminal, but the agent could not start: ' + result.error);
-      } catch (reason: any) { error.textContent = reason.message; }
-      finally { create.disabled = false; cancel.disabled = false; }
-    };
-  }
+
   private async rename(agent: StripItem) {
-    this.menu.hidden = true;
+    this.closeMenu();
     const modal = node('dialog', 'herdr-rename'), form = node('form'), title = node('h2', '', agent.space ? 'Rename space' : 'Rename agent tab'), input = node('input'), error = node('p', 'form-error'), actions = node('div', 'actions');
     input.value = agent.name; input.maxLength = 100; input.required = true; input.setAttribute('aria-label', agent.space ? 'Space name' : 'Agent tab name');
     const hint = node('p', 'hint', 'This changes the name in the desktop Herdr session too.');
@@ -810,7 +972,7 @@ export class HerdrView {
   dispose() {
     if (this.disposed) return; this.disposed = true;
     this.actionDialog?.close();
-    this.dropIndicator.remove();
+    this.dropIndicator.remove(); this.treeBridge.remove();
     clearTimeout(this.backgroundTimer); clearTimeout(this.recoveryRetry); this.transport.suspend(); clearInterval(this.presenceTimer); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
   }

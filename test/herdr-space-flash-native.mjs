@@ -45,7 +45,8 @@ try {
   await installWireObserver(context);
   await context.route('**/assets/terminal-*.js',async route=>{const response=await route.fetch(),source=await response.text();const body=source.replace(/new ([\w$]+)\(\{ghostty:/,'window.__terminal=new $1({ghostty:');assert.notEqual(body,source);await route.fulfill({response,body});});
   await context.addInitScript(()=>{
-    if(window===parent&&!localStorage.getItem('termai.tabs')) {const id=crypto.randomUUID();localStorage.setItem('termai.hosts',JSON.stringify([{id:'herdr-native',name:'Herdr',kind:'herdr',backendId:'primary'}]));localStorage.setItem('termai.tabs',JSON.stringify([{id,session:'default',name:'Herdr',mode:'herdr',backendId:'primary',hostId:'herdr-native'}]));localStorage.setItem('termai.activeTab',JSON.stringify(id));}
+    // Folded status lanes would hide the idle spaces this test switches between.
+    if(window===parent&&!localStorage.getItem('termai.tabs')) {localStorage.setItem('termai.herdrStripOrder',JSON.stringify('manual'));const id=crypto.randomUUID();localStorage.setItem('termai.hosts',JSON.stringify([{id:'herdr-native',name:'Herdr',kind:'herdr',backendId:'primary'}]));localStorage.setItem('termai.tabs',JSON.stringify([{id,session:'default',name:'Herdr',mode:'herdr',backendId:'primary',hostId:'herdr-native'}]));localStorage.setItem('termai.activeTab',JSON.stringify(id));}
     if(window===parent) {
       window.__flashPaints=[];const previous=new WeakMap();
       const inspect=()=>{

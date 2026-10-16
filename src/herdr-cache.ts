@@ -22,6 +22,8 @@ function space(value: unknown): HerdrSpace | undefined {
   if (text(value.cwd)) result.cwd = value.cwd;
   if (text(value.checkoutPath)) result.checkoutPath = value.checkoutPath;
   if (typeof value.linkedWorktree === 'boolean') result.linkedWorktree = value.linkedWorktree;
+  if (text(value.repoKey) && value.repoKey) result.repoKey = value.repoKey;
+  if (text(value.repoName) && value.repoName) result.repoName = value.repoName;
   return result;
 }
 /** Retain bounded navigation metadata without history, credentials or opaque fields. */

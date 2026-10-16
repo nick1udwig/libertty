@@ -40,6 +40,8 @@ struct Workspace {
 struct Worktree {
     is_linked_worktree: Option<bool>,
     checkout_path: Option<String>,
+    repo_key: Option<String>,
+    repo_name: Option<String>,
 }
 #[derive(Deserialize)]
 struct WireSnapshot {
@@ -83,6 +85,11 @@ pub struct Space {
     pub linked_worktree: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checkout_path: Option<String>,
+    /// Checkouts of one repository share this key, so worktrees can group under their root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_name: Option<String>,
 }
 #[derive(Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -328,6 +335,16 @@ pub fn normalize(raw: &Value) -> Result<Snapshot, String> {
                     .worktree
                     .as_ref()
                     .and_then(|worktree| worktree.checkout_path.clone()),
+                repo_key: workspace
+                    .worktree
+                    .as_ref()
+                    .and_then(|worktree| worktree.repo_key.clone())
+                    .filter(|key| !key.is_empty()),
+                repo_name: workspace
+                    .worktree
+                    .as_ref()
+                    .and_then(|worktree| worktree.repo_name.clone())
+                    .filter(|name| !name.is_empty()),
             }
         })
         .collect();

@@ -100,19 +100,23 @@ Typing `herdr` in a local or SSH terminal also saves and opens that machine's He
 Its top-level tab opens a second strip of named spaces with live terminal views.
 **+** creates a space in the selected space’s directory and opens its shell immediately.
 Swipe left or right to scroll the strip in either Spaces or Agents mode.
-Hold a space to rename or close it.
-Hold, then drag to the left or right of another space to reorder, or onto its middle to make a stack.
+Once a repository has a worktree, its checkouts share one chip that names the repository, its checkout count and, while selected, the current checkout.
+Tap the selected chip again, or hold any chip, to open its tree of checkouts and panes.
+In the tree, tap to open a checkout or pane, hold a name to rename it, and use **+ split**, **New worktree**, **Open worktree…** or **×** to close.
+Tap another chip while a tree is open to open that chip's tree instead, or tap elsewhere or swipe the tree down to dismiss it.
+Hold, then drag to the left or right of another chip to reorder, or onto its middle to make a stack.
 The stack’s count button expands or collapses its spaces; dragging a member beside another space removes it from the stack.
 Closing an agent or space in this strip closes it on the Herdr server and ends its running processes.
 Closing the top-level Herdr connection tab disconnects its view.
 **Settings → Herdr strip shows** switches between **Spaces** (default) and **Agents**.
-**Settings → Herdr strip order** switches between **Manual** (default) and **Status lanes**.
+**Settings → Herdr strip order** switches between **Status lanes** (default) and **Manual**.
+**Settings → Tapping a repository with worktrees opens** chooses the **Last used worktree** (default), the **Most urgent worktree**, the **Root checkout** or **Its worktree tree** without selecting a checkout.
+Most urgent opens the pane waiting longest for input, then the oldest unseen finish, then the longest working pane, then the oldest seen finish, and otherwise the last used worktree.
 Status lanes group tabs into needs you, done, working and idle, in that order, and keep your manual order inside each lane.
 Tap a lane's count to fold or unfold it; the idle lane starts folded, and a folded lane still shows the selected tab.
 The selected tab stays in its lane until you switch away, and its own status circle appears if its status has changed.
 Dragging is paused while lanes are on, and switching back to **Manual** restores your order.
 Spaces include ordinary terminals.
-Tap a selected space again to choose a terminal or create an agent within it.
 Space ordering, names and closes update the Herdr server; stacks are saved in this web app.
 Names come from the desktop session, and renaming updates its pane label.
 Typing, dictation, shortcuts, touch scrolling and selection use the ordinary terminal interface.
@@ -322,7 +326,7 @@ Run `npm run test:touch` for touch-only delivery, interrupted pointer capture, s
 With Playwright WebKit installed, `TEST_BROWSER=webkit npm run test:touch` runs the same checks in WebKit.
 Event replay and native link taps complement the Chromium drag tests; iPhone gestures still need verification on a physical device.
 Run `npm run test:herdr-scroll` with Herdr installed to check native drag scrolling in a fullscreen app with no terminal scrollback, live animation without history snapshots, cursor placement, selection, copying and terminal links.
-Run `npm run test:herdr-spaces` for native space creation, ordering, rename/close, touch drops and persistent collapsible stacks using an isolated Herdr server.
+Run `npm run test:herdr-spaces` for native space creation, repository grouping, the space tree, worktrees, splits, ordering, rename/close, touch drops and persistent collapsible stacks using an isolated Herdr server.
 
 Run `node test/dictation-browser.mjs` for installation, cursor and fake-microphone integration checks.
 Audio accuracy and Android accessibility behavior still need verification on a real phone with the installed daemon.

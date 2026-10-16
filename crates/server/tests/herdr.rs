@@ -16,8 +16,7 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
             .unwrap_err()
             .contains("linked worktree")
     );
-    fixture.snapshot.lock().unwrap()["workspaces"][0]["worktree"] =
-        json!({"is_linked_worktree":true,"checkout_path":"/worktrees/repo/review"});
+    fixture.snapshot.lock().unwrap()["workspaces"][0]["worktree"] = json!({"is_linked_worktree":true,"checkout_path":"/worktrees/repo/review","repo_key":"/repo/.git","repo_name":"repo"});
     // A pane can cd into a subdirectory without changing the checkout being removed.
     fixture.snapshot.lock().unwrap()["panes"][0]["foreground_cwd"] =
         json!("/worktrees/repo/review/src");
@@ -28,6 +27,9 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
         snapshot.spaces[0].checkout_path.as_deref().unwrap(),
         "/worktrees/repo/review"
     );
+    // Worktrees share their repository's key so the strip can group them under its root.
+    assert_eq!(snapshot.spaces[0].repo_key.as_deref(), Some("/repo/.git"));
+    assert_eq!(snapshot.spaces[0].repo_name.as_deref(), Some("repo"));
     assert!(fixture.target.action(&json!({"action":"delete-worktree","workspaceId":"missing","path":"/worktrees/repo/review"})).await.unwrap_err().contains("closed"));
     for path in [json!("/other"), json!(null)] {
         assert!(

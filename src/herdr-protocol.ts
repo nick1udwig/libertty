@@ -4,7 +4,7 @@ export interface HerdrAgent {
   workspaceId?: string; tabId?: string;
   status: HerdrStatus; sequence: number; completion?: number; cwd: string;
 }
-export interface HerdrSpace { id: string; name: string; terminalIds: string[]; selectedTerminalId?: string; cwd?: string; linkedWorktree?: boolean; checkoutPath?: string }
+export interface HerdrSpace { id: string; name: string; terminalIds: string[]; selectedTerminalId?: string; cwd?: string; linkedWorktree?: boolean; checkoutPath?: string; repoKey?: string; repoName?: string }
 export interface HerdrSnapshot { version: string; protocol: number; agents: HerdrAgent[]; terminals?: HerdrAgent[]; spaces?: HerdrSpace[]; worktreeDirectory?: string }
 export interface HerdrWorktrees {
   source: { repo_name: string; repo_root: string };

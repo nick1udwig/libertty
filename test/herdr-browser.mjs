@@ -150,6 +150,9 @@ try {
   await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').waitFor();
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces', 'New installations default to spaces');
+  assert.equal(await page.locator('#herdr-strip-order').inputValue(), 'lanes', 'New installations default to status lanes');
+  // The ordering checks below drag tabs, which lanes pause, so they use the manual order.
+  await page.locator('#herdr-strip-order').selectOption('manual');
   await page.locator('#herdr-strip').selectOption('agents'); await page.locator('#nav-terminals').click();
   await tab(0).waitFor(); let terminal = await agentFrame();
   assert.equal(await page.locator('.herdr-message').count(), 0);
@@ -474,7 +477,7 @@ try {
   assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0']);
   // Status lanes regroup the same tabs by urgency without changing the saved manual order.
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
-  assert.equal(await page.locator('#herdr-strip-order').inputValue(), 'manual', 'Manual order is the default');
+  assert.equal(await page.locator('#herdr-strip-order').inputValue(), 'manual', 'An explicit manual order survives reloads');
   await page.locator('#herdr-strip-order').selectOption('lanes'); await page.locator('#nav-terminals').click();
   const lanes = () => page.locator('.herdr-agent-strip:visible .herdr-status-lane').evaluateAll(els => els.map(el => el.dataset.lane + ':' + [...el.querySelectorAll('.herdr-agent-tab')].filter(tab => !tab.hidden).map(tab => tab.dataset.terminal).join(',')));
   const laneToggle = lane => page.locator('.herdr-agent-strip:visible .herdr-status-lane[data-lane=' + lane + '] .herdr-lane-toggle');
@@ -601,17 +604,16 @@ try {
   const spaceTab = id => page.locator('.herdr-agent-strip:visible .herdr-agent-tab[data-terminal="space:' + id + '"]');
   await spaceTab('w2').waitFor(); await swipeStrip('Spaces'); await spaceTab('w2').click(); terminal = await agentFrame();
   await until(async () => (await text()).includes('Scratch shell'), 'ordinary terminal opened from a space');
+  // Tapping the selected space opens its tree, where a pane pill switches terminals and + split is the only way to add a pane.
   await spaceTab('w1').click(); await spaceTab('w1').click();
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'docs · Termai' }).click();
+  const tree = page.locator('.herdr-tree:visible');
+  await tree.locator('.herdr-pane[data-terminal=term_2] .herdr-pane-focus').click();
   assert.equal(await page.locator('.herdr-terminal').getAttribute('data-terminal'), 'term_2');
+  assert.equal(await tree.count(), 0, 'Choosing a pane closes the tree');
   await spaceTab('w1').click();
-  await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Create agent', exact: true }).click();
-  await page.getByLabel('Agent name', { exact: true }).fill('Mobile review');
-  await page.getByLabel('Agent type', { exact: true }).selectOption('codex'); await page.getByLabel('Space', { exact: true }).selectOption('w2');
-  await page.getByRole('dialog').getByRole('button', { name: 'Create agent', exact: true }).click();
-  await until(async () => await page.locator('.herdr-terminal').getAttribute('data-terminal') === 'term_4', 'created agent selected');
-  assert.equal(fixture.snapshot.agents.length, 4); assert.equal(fixture.snapshot.panes[4].label, 'Mobile review');
-  assert.equal(fixture.actions.filter(a => a.method === 'agent.start').length, 1);
+  assert.deepEqual(await tree.locator('.herdr-pane-add').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Split a pane in Termai'], 'The tree offers + split and no separate + agent');
+  await page.keyboard.press('Escape');
+  fixture.addTerminal('w2', 'Mobile review', true);
   await page.reload(); await spaceTab('w2').waitFor();
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces');
@@ -634,7 +636,8 @@ try {
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   await page.locator('#herdr-strip').selectOption('spaces'); await page.locator('#nav-terminals').click();
   await spaceTab('w2').click(); terminal = await agentFrame();
-  await hold(spaceTab('w2')); await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close', exact: true }).click();
+  await hold(spaceTab('w2')); await page.locator('.herdr-tree:visible').getByRole('button', { name: 'Close Scratch', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Close Scratch?' }).getByRole('button', { name: 'Close space', exact: true }).click();
   await until(async () => await spaceTab('w2').count() === 0, 'space removed after server close');
   assert.ok(!fixture.snapshot.workspaces.some(w => w.workspace_id === 'w2')); assert.ok(!fixture.snapshot.panes.some(p => p.workspace_id === 'w2'));
   assert.deepEqual(fixture.actions.filter(a => a.method === 'workspace.close').at(-1).params, { workspace_id: 'w2', close_group: false });

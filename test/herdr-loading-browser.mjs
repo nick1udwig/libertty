@@ -27,6 +27,8 @@ try {
   await context.addInitScript(({first,second}) => {
     if (window === parent) {
       localStorage.setItem('termai.herdrStrip', JSON.stringify('agents'));
+      // Folded status lanes would hide the idle tabs this test switches between.
+      localStorage.setItem('termai.herdrStripOrder', JSON.stringify('manual'));
       localStorage.setItem('termai.hosts', JSON.stringify([{id:'herdr',name:'Herdr',kind:'herdr',backendId:'primary'}]));
       localStorage.setItem('termai.tabs', JSON.stringify([first,second].map((id,i)=>({id,session:'default',name:'Herdr '+(i+1),mode:'herdr',backendId:'primary',hostId:'herdr'}))));
       localStorage.setItem('termai.activeTab', JSON.stringify(first));
