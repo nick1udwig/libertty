@@ -34,7 +34,7 @@ interface Host {
 }
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; retain:boolean; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
 type StripItem = HerdrAgent & { space?: HerdrSpace; repo?: SpaceRepo };
-interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; collapsedLanes?: HerdrLane[]; spaceTerminals?: Record<string, string>; repoSpaces?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']>; snapshot?: unknown }
+interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; collapsedLanes?: HerdrLane[]; spaceTerminals?: Record<string, string>; repoSpaces?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']>; /** Earlier versions kept the snapshot cache here. */ snapshot?: unknown }
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
   private strip = node('div', 'herdr-agent-strip');
@@ -81,6 +81,11 @@ export class HerdrView {
   private navigationResize = 0;
   private held = false;
   private dragOrderChanged = false;
+  /** The latest snapshot waiting to be cached, written when the page is idle or hidden instead of on every update. */
+  private uncached?: unknown;
+  private cacheTimer?: ReturnType<typeof setTimeout>;
+  /** What the strip last rendered, so an update that changes nothing it shows keeps its buttons. */
+  private stripKey = '';
   private dropTarget?: { id: string; drop: SpaceDrop };
   private pinnedLane?: { id: string; lane: HerdrLane };
   private movingSpace = false;
@@ -105,7 +110,9 @@ export class HerdrView {
     delete (this.preferences as any).hidden; delete (this.preferences as any).hiddenSpaces;
     this.tracker = new HerdrState(this.preferences.state);
     this.selected = this.preferences.selected || '';
-    const cached = herdrCache(this.preferences.snapshot);
+    let stored: unknown;
+    try { stored = JSON.parse(localStorage.getItem(host.key + '.snapshot') || 'null'); } catch { /* Start without the cache. */ }
+    const cached = herdrCache(stored ?? this.preferences.snapshot); delete this.preferences.snapshot;
     if (cached) {
       this.cached = true; this.terminals = cached.terminals || cached.agents; this.spaces = cached.spaces || []; this.repos = spaceRepos(this.spaces);
       this.tracker.agents = cached.agents; this.ensureSelection();
@@ -183,6 +190,9 @@ export class HerdrView {
       void this.transport.resume(event.type === 'online' || !this.transport.healthy);
     };
     document.addEventListener('visibilitychange', resume); window.addEventListener('online', resume); window.addEventListener('pageshow', resume);
+    const persist = () => { if (document.visibilityState === 'hidden') this.writeCache(); }, leave = () => this.writeCache();
+    document.addEventListener('visibilitychange', persist); window.addEventListener('pagehide', leave);
+    this.unsubscribers.push(() => document.removeEventListener('visibilitychange', persist), () => window.removeEventListener('pagehide', leave));
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', resume), () => window.removeEventListener('online', resume), () => window.removeEventListener('pageshow', resume));
     this.presenceTimer = setInterval(presence, 15000);
     const outside = (event: PointerEvent) => { if (!this.menu.contains(event.target as Node) && !(event.target as HTMLElement).closest('.herdr-agent-tab')) this.closeMenu(); };
@@ -372,7 +382,7 @@ export class HerdrView {
     if (message.type === 'error') { this.status.textContent = message.message; this.setLoading(false); this.host.ready?.(); return; }
     if (message.type !== 'snapshot') return;
     this.transport.ready(); this.connected = this.ws?.readyState === WebSocket.OPEN;
-    this.liveSnapshot = true; this.cached = false; this.preferences.snapshot = herdrCache(message.snapshot);
+    this.liveSnapshot = true; this.cached = false; this.cacheLater(message.snapshot);
     const previousSpace = this.terminals.find(terminal => terminal.terminalId === this.selected)?.workspaceId;
     this.status.textContent = '';
     this.terminals = message.snapshot.terminals || message.snapshot.agents; this.spaces = message.snapshot.spaces || []; this.repos = spaceRepos(this.spaces);
@@ -470,6 +480,16 @@ export class HerdrView {
     this.preferences.state = this.tracker.checkpoint();
     try { localStorage.setItem(this.host.key, JSON.stringify(this.preferences)); } catch { /* This view still works without persistence. */ }
   }
+  private cacheLater(snapshot: unknown) {
+    this.uncached = snapshot;
+    this.cacheTimer ??= setTimeout(() => typeof requestIdleCallback === 'function' ? requestIdleCallback(() => this.writeCache(), { timeout: 5000 }) : this.writeCache(), 5000);
+  }
+  private writeCache() {
+    clearTimeout(this.cacheTimer); this.cacheTimer = undefined;
+    const snapshot = this.uncached === undefined ? undefined : herdrCache(this.uncached);
+    this.uncached = undefined;
+    if (snapshot) try { localStorage.setItem(this.host.key + '.snapshot', JSON.stringify(snapshot)); } catch { /* The next load waits for a live snapshot. */ }
+  }
   private render() {
     this.strip.inert = !this.liveSnapshot;
     this.strip.setAttribute('aria-busy', String(!this.liveSnapshot));
@@ -484,10 +504,14 @@ export class HerdrView {
       }
       return;
     }
-    const scroll = this.strip.scrollLeft; this.strip.replaceChildren(this.tabsToggle);
     const lanes = this.laneMode ? statusLanes(this.ordered(), item => this.laneFor(item)) : undefined;
     if (!lanes) this.pinnedLane = undefined;
     const agents = lanes ? lanes.flatMap(lane => lane.items) : this.ordered();
+    const key = JSON.stringify([this.liveSnapshot, this.spaceMode, this.creatingSpace, this.stripSelection, this.preferences.collapsedLanes, this.preferences.collapsedGroups,
+      this.preferences.spaceGroups, lanes?.map(lane => [lane.lane, lane.items.map(item => item.terminalId)]), agents.map(agent => [agent, this.statusFor(agent)])]);
+    if (key === this.stripKey) return;
+    this.stripKey = key;
+    const scroll = this.strip.scrollLeft; this.strip.replaceChildren(this.tabsToggle);
     const stacks = new Map<string, HTMLElement>(), laneGroups = new Map<HerdrLane, HTMLElement>();
     for (const agent of agents) {
       const tab = node('button', 'herdr-agent-tab'); tab.type = 'button'; tab.role = 'tab'; tab.dataset.terminal = agent.terminalId; tab.dataset.status = this.statusFor(agent);
@@ -971,7 +995,7 @@ export class HerdrView {
   copySelection() { this.post({ type: 'settings-action', action: 'copy-selection' }); }
   dispose() {
     if (this.disposed) return; this.disposed = true;
-    this.actionDialog?.close();
+    this.writeCache(); this.actionDialog?.close();
     this.dropIndicator.remove(); this.treeBridge.remove();
     clearTimeout(this.backgroundTimer); clearTimeout(this.recoveryRetry); this.transport.suspend(); clearInterval(this.presenceTimer); this.displayed?.remove(); for (const entry of this.terminalFrames.values()) entry.frame.remove(); this.terminalFrames.clear(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
