@@ -165,10 +165,15 @@ try {
   assert.equal(new URL(frame.url()).searchParams.get('session'), secondSession); assert.equal(sessionCreates, 1);
   await command(frame, 'export TAB_ID=second'); assert.equal(await page.locator('[role=tab]').count(), 2);
   await page.locator('[role=tab]').first().click(); frame = await activeFrame(page); await command(frame, "printf '%s' \"$TAB_ID\" > first-tab.txt"); assert.equal(await readFile(fixture + '/first-tab.txt', 'utf8'), 'first');
+  // After a reload, only the visible tab connects; a hidden tab connects when it is shown.
+  const terminalSockets = new Set();
+  page.on('websocket', socket => { const url = new URL(socket.url()); if (url.pathname.endsWith('/ws')) terminalSockets.add(url.searchParams.get('session') || 'default'); });
   await page.reload(); frame = await activeFrame(page); assert.equal(await page.locator('[role=tab]').count(), 2); await command(frame, "printf '%s' \"$TAB_ID\" > restored-tab.txt"); assert.equal(await readFile(fixture + '/restored-tab.txt', 'utf8'), 'first');
+  assert.deepEqual([...terminalSockets], [firstSession], 'Hidden tabs wait to connect until they are shown');
   // A background terminal must keep draining output while another tab is visible.
   await command(frame, `python3 -c 'import time; time.sleep(1); print("background line\\n" * 30000); open("background-done", "w").write("ok")' &`);
   await page.locator('[role=tab]').nth(1).click(); await until(async () => (await readFile(fixture + '/background-done', 'utf8').catch(() => '')) === 'ok');
+  await activeFrame(page); assert.deepEqual([...terminalSockets].sort(), [firstSession, secondSession].sort(), 'Showing a tab connects it');
   await page.locator('#terminal-back').click(); await page.locator('#library-add').click(); await page.locator('#host-name').fill('Build server'); await page.locator('#host-backend').selectOption('new'); await page.locator('#host-url').fill(secondary + '/'); await page.getByRole('button', { name: 'Save host', exact: true }).click();
   await page.getByRole('button', { name: 'Build server HTTP' }).click(); await page.locator('#backend-token').fill('test-backend-token-123456789'); await page.locator('#backend-login-form button[type=submit]').click(); frame = await activeFrame(page);
   await command(frame, 'printf routed > direct-backend.txt'); assert.equal(await readFile(fixture + '/direct-backend.txt', 'utf8'), 'routed');

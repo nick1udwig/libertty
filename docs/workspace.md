@@ -9,7 +9,10 @@ It builds on the single repair library at `2a99127`; master and the former exper
 `workspace-storage.ts` validates and migrates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
 These modules share one live workspace state so replacing saved hosts, backends or tabs is visible to pending actions.
 Each terminal uses a same-origin `terminal.html` frame running the existing renderer and input pipeline.
-Frames stay mounted when switching tabs; background output continues draining so flow control cannot stall a hidden terminal.
+Frames stay mounted when switching tabs.
+A terminal tab connects when it is first shown or selected, keeps draining output for twenty seconds after it is hidden, and then releases its socket.
+A shell without a connected viewer is never paused by flow control, so a released tab's programs keep running.
+After a reload, the selected tab mounts first and hidden tabs mount once the browser is idle.
 The tab header supplies new-tab and back controls.
 Connection actions and terminal/file/Herdr tab lifecycles now register through the [runtime plugin registry](plugins.md).
 User packages load from Settings into isolated frames with a scoped file-read bridge; the built-ins retain their existing trusted views.

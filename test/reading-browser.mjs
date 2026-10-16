@@ -123,7 +123,7 @@ try {
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   for (const input of ['git diff | look at', 'look at git diff']) {
     await page.locator('[role=tab]').first().click();
-    await frame.waitForFunction(() => window.__shellState.ready);
+    await frame.waitForFunction(() => window.__shellState?.ready);
     await frame.locator('#terminal textarea').focus(); await page.keyboard.type(input); await page.keyboard.press('Enter');
     await page.locator('.reading-view:not([hidden]) .reading-text').waitFor();
     const text = await page.locator('.reading-view:not([hidden]) .reading-text').textContent();
@@ -139,7 +139,7 @@ try {
     assert.equal(await page.locator('[role=tab]').count(), beforeReload, 'Reload must not duplicate a capture');
     await page.locator('[role=tab][aria-selected=true] .tab-close').click();
     frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
-    await frame.waitForFunction(() => window.__shellState.ready);
+    await frame.waitForFunction(() => window.__shellState?.ready);
     for (let i = 0; i < 40; i++) {
       const response = await page.request.get(base + '/api/reading/capture?id=' + capture);
       if (response.status() === 404) break;
@@ -147,7 +147,7 @@ try {
     }
   }
   for (const spoken of ['look at git dif', 'git dif pipe inspect']) {
-    await frame.waitForFunction(() => window.__shellState.ready);
+    await frame.waitForFunction(() => window.__shellState?.ready);
     await frame.locator('#terminal textarea').focus();
     await frame.locator('#terminal textarea').evaluate((el, data) => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data, bubbles: true, cancelable: true })), spoken);
     await frame.locator('.reading-choice').filter({ hasText: 'Read git diff' }).waitFor();
@@ -156,12 +156,12 @@ try {
     assert.match(await page.locator('.reading-view:not([hidden]) .reading-text').textContent(), /-before\n\+after/);
     await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   }
-  await frame.waitForFunction(() => window.__shellState.ready);
+  await frame.waitForFunction(() => window.__shellState?.ready);
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type('cat image.png | look at'); await page.keyboard.press('Enter');
   await page.waitForFunction(() => document.querySelector('.reading-view:not([hidden]) .reading-image')?.naturalWidth === 1);
   await writeFile(path.join(fixture, 'change.txt'), 'before\n');
   await page.locator('[role=tab]').first().click();
-  await frame.waitForFunction(() => window.__shellState.ready);
+  await frame.waitForFunction(() => window.__shellState?.ready);
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at git diff'); await page.keyboard.press('Enter');
   await page.locator('.reading-view.reading-empty:not([hidden]) .reading-hint').waitFor();
   assert.match(await page.locator('.reading-view.reading-empty:not([hidden])').textContent(), /no unstaged changes/i);
@@ -170,7 +170,7 @@ try {
   await page.locator('.reading-view.reading-empty:not([hidden]) .reading-hint').waitFor();
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
-  await frame.waitForFunction(() => window.__shellState.ready);
+  await frame.waitForFunction(() => window.__shellState?.ready);
   const missingExitCode = spawnSync('ls', ['/definitely/not/present'], { stdio: 'ignore' }).status;
   assert.ok(missingExitCode > 0, 'The missing-file fixture must fail on this platform.');
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at ls /definitely/not/present'); await page.keyboard.press('Enter');
@@ -182,7 +182,7 @@ try {
   await page.route('**/api/reading/file?**', route => {
     startedRead(); return new Promise(resolve => finishRead = async () => { await route.fulfill({ contentType: 'text/plain', body: 'Late reader content' }).catch(() => {}); resolve(); });
   });
-  await frame.waitForFunction(() => window.__shellState.ready);
+  await frame.waitForFunction(() => window.__shellState?.ready);
   await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at note.txt'); await page.keyboard.press('Enter');
   await readingStarted;
   await page.getByText('Opening file…', { exact: true }).waitFor();
@@ -191,7 +191,7 @@ try {
   await finishRead(); await page.unroute('**/api/reading/file?**');
   assert.equal(await page.locator('#' + pendingReader).count(), 0, 'Closing a pending reader disposes its plugin view');
   assert.equal(await page.getByText('Late reader content', { exact: true }).count(), 0);
-  await frame.waitForFunction(() => window.__shellState.ready);
+  await frame.waitForFunction(() => window.__shellState?.ready);
   await page.close();
   const standalone = await context.newPage();
   standalone.on('pageerror', error => errors.push(String(error)));

@@ -53,7 +53,7 @@ function notify(type: string, data: object = {}) { if (embedded) parent.postMess
 if (embedded) document.documentElement.classList.add('embedded-terminal');
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const transport = new ReconnectingSocket({
-  available: () => (keepingGeometry() || dictation.active) && (!herdrTerminal || tabVisible) && navigator.onLine,
+  available: () => (keepingGeometry() || dictation.active) && (herdrTerminal ? tabVisible : tabVisible || !tabExpired || dictation.active) && navigator.onLine,
   protocols: () => wireProtocols(offeredWire),
   heartbeat: () => supportsHeartbeat,
   stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
@@ -89,6 +89,8 @@ let toastTimer: ReturnType<typeof setTimeout>;
 const queue = new Queue<Extract<ServerMessage, { type: 'output' }>>();
 let frameQueued = false;
 let tabVisible = true, outputFrame = 0, outputTimer: ReturnType<typeof setTimeout>;
+// A workspace tab connects when first shown and keeps its socket for the background grace after it is hidden.
+let tabSeen = !embedded, tabExpired = false, tabTimer: ReturnType<typeof setTimeout> | undefined;
 function scheduleDrain() { frameQueued = true; if (embedded && !tabVisible) outputTimer = setTimeout(drain, 16); else outputFrame = requestAnimationFrame(drain); }
 function toast(message: string) {
   if (embedded) { notify('terminal-notice', { message }); return; }
@@ -735,6 +737,13 @@ if (embedded) {
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);
+    } else if (event.data?.type === 'tab-visibility') {
+      clearTimeout(tabTimer);
+      // The workspace's selected tab counts as shown while another page covers it.
+      tabSeen ||= tabVisible || event.data.active === true;
+      if (tabVisible) { tabExpired = false; void transport.resume(!transport.healthy); }
+      else if (!tabSeen) tabExpired = true;
+      else tabTimer = setTimeout(() => { tabExpired = true; if (!dictation.active) { inline.suspend(); transport.suspend(); } }, backgroundGrace);
     }
     if (event.data?.type === 'settings-changed') applySettings();
     if (event.data?.type === 'settings-action' && ['new-shell', 'copy-selection'].includes(event.data.action)) $(event.data.action).click();

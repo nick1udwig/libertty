@@ -83,8 +83,8 @@ try {
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).pluginVersion), '1.0.0', 'Open tabs keep their package version');
   await action('Connect Log viewer'); await page.locator('#plugin-read-path').fill('app.log'); await page.locator('#plugin-connect-form button[type=submit]').click(); await pluginFrame();
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).pluginVersion), '2.0.0');
-  await settings(); await page.getByRole('button', { name: 'Remove plugin', exact: true }).click(); await page.locator('#nav-terminals').click(); await page.getByText(/This plugin version is missing or disabled/).last().waitFor();
-  await page.reload(); await page.getByText(/This plugin version is missing or disabled/).last().waitFor();
+  await settings(); await page.getByRole('button', { name: 'Remove plugin', exact: true }).click(); await page.locator('#nav-terminals').click(); await page.getByText(/This plugin version is missing or disabled/).filter({ visible: true }).waitFor();
+  await page.reload(); await page.getByText(/This plugin version is missing or disabled/).filter({ visible: true }).waitFor();
   await loadPackage(sample); await page.locator('#nav-terminals').click();
   await showTerminalTabs(page); await page.locator('#tabs .tab').filter({ hasText: 'Log viewer' }).first().click(); frame = await pluginFrame(); assert.equal(await frame.locator('#filter').inputValue(), 'warning', 'Reinstalling restores retained state');
   await page.getByRole('button', { name: 'Close Log viewer · This machine', exact: true }).first().click();
