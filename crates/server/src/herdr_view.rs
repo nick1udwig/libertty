@@ -61,6 +61,15 @@ struct Input {
     /// Each numbered key in the text, with the byte offset where it ends.
     seqs: Vec<(u64, usize)>,
 }
+/// The mobile layout a viewer requests, and its progress toward a confirmed redraw.
+struct Geometry {
+    /// The requested mobile size, or none for a desktop viewer.
+    size: Option<Size>,
+    /// The size of the last full frame that matched the request.
+    baseline: Option<Size>,
+    /// The redraw revision a pending layout waits beyond, kept across rapid switches.
+    redraw_before: Option<u64>,
+}
 /// The browser connection a view serves.
 pub struct Viewer {
     pub send: crate::viewer_queue::Sender,
@@ -78,10 +87,9 @@ pub struct View {
     terminal: Subscription,
     history: crate::herdr_history::Hub,
     active: tokio::sync::watch::Sender<bool>,
-    size: Mutex<Option<Size>>,
+    geometry: Mutex<Geometry>,
+    /// Advances with every layout change, so stale confirmations stop.
     layout: tokio::sync::watch::Sender<u64>,
-    redraw_before: Mutex<Option<u64>>,
-    baseline: Mutex<Option<Size>>,
     frame_ready: tokio::sync::Notify,
     frames: Mutex<Option<frames::Frames>>,
     history_delta: Mutex<Option<history::History>>,
@@ -153,10 +161,12 @@ impl View {
             terminal,
             history: history.clone(),
             active,
-            size: Mutex::new(initial_size),
+            geometry: Mutex::new(Geometry {
+                size: initial_size,
+                baseline: None,
+                redraw_before: revision,
+            }),
             layout,
-            redraw_before: Mutex::new(revision),
-            baseline: Mutex::new(None),
             frame_ready: tokio::sync::Notify::new(),
             frames: Mutex::new(None),
             history_delta: Mutex::new(None),
@@ -300,8 +310,9 @@ impl View {
                         cols: frame.width,
                         rows: frame.height,
                     });
-                    if size.is_some() && size == *view.size.lock().unwrap() {
-                        *view.baseline.lock().unwrap() = size;
+                    let mut geometry = view.geometry.lock().unwrap();
+                    if size.is_some() && size == geometry.size {
+                        geometry.baseline = size;
                         view.frame_ready.notify_waiters();
                     }
                 }
@@ -432,15 +443,23 @@ impl View {
                 let ready = view.frame_ready.notified();
                 tokio::pin!(ready);
                 ready.as_mut().enable();
-                if *view.baseline.lock().unwrap() == Some(size) {
+                if view.geometry.lock().unwrap().baseline == Some(size) {
                     break;
                 }
                 tokio::select! { biased; _=view.cancel.cancelled()=>return, _=layout.changed()=>return, _=&mut ready=>{} }
             }
             let redrawn = tokio::select! { biased; _=layout.changed()=>false, result=crate::herdr_redraw::wait(&view.target, &view.agent.pane_id, before, &view.cancel)=>result };
-            if redrawn && *view.layout.borrow() == epoch && *view.size.lock().unwrap() == Some(size)
-            {
-                *view.redraw_before.lock().unwrap() = None;
+            // Read the epoch before locking the geometry, so no path holds both.
+            let current = *view.layout.borrow() == epoch;
+            let confirmed = redrawn && current && {
+                let mut geometry = view.geometry.lock().unwrap();
+                let current = geometry.size == Some(size);
+                if current {
+                    geometry.redraw_before = None;
+                }
+                current
+            };
+            if confirmed {
                 view.send(ServerMessage::HerdrLayout {
                     cols: size.cols,
                     rows: size.rows,
@@ -713,7 +732,7 @@ impl View {
         );
     }
     fn refresh_layout(self: &Arc<Self>, size: Size, epoch: u64, update: LayoutUpdate) {
-        *self.baseline.lock().unwrap() = None;
+        self.geometry.lock().unwrap().baseline = None;
         self.send(ServerMessage::HerdrLayout {
             cols: size.cols,
             rows: size.rows,
@@ -724,7 +743,7 @@ impl View {
             let Some(view) = weak.upgrade() else { return };
             // Reclaiming preserves an unfinished resize fence across rapid switches.
             let pending = match update {
-                LayoutUpdate::Reclaim => *view.redraw_before.lock().unwrap(),
+                LayoutUpdate::Reclaim => view.geometry.lock().unwrap().redraw_before,
                 LayoutUpdate::Resize => None,
             };
             let revision = match pending {
@@ -734,14 +753,16 @@ impl View {
                         .await
                 }
             };
-            if view.cancel.is_cancelled()
+            let stale = view.cancel.is_cancelled()
                 || *view.layout.borrow() != epoch
-                || *view.size.lock().unwrap() != Some(size)
-                || (matches!(update, LayoutUpdate::Reclaim) && !*view.active.borrow())
+                || (matches!(update, LayoutUpdate::Reclaim) && !*view.active.borrow());
             {
-                return;
+                let mut geometry = view.geometry.lock().unwrap();
+                if stale || geometry.size != Some(size) {
+                    return;
+                }
+                geometry.redraw_before = revision;
             }
-            *view.redraw_before.lock().unwrap() = revision;
             match update {
                 LayoutUpdate::Reclaim => view.terminal.claim(),
                 LayoutUpdate::Resize => {
@@ -805,7 +826,7 @@ impl View {
                     *self.layout.borrow()
                 };
                 if active && changed {
-                    let size = *self.size.lock().unwrap();
+                    let size = self.geometry.lock().unwrap().size;
                     if let Some(size) = size {
                         self.refresh_layout(size, epoch, LayoutUpdate::Reclaim);
                     } else {
@@ -832,12 +853,8 @@ impl View {
                 } else {
                     None
                 };
-                let changed = {
-                    let mut current = self.size.lock().unwrap();
-                    let changed = *current != size;
-                    *current = size;
-                    changed
-                };
+                let changed =
+                    std::mem::replace(&mut self.geometry.lock().unwrap().size, size) != size;
                 let epoch = if changed {
                     self.begin_layout()
                 } else {
