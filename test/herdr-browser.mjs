@@ -604,21 +604,16 @@ try {
   const spaceTab = id => page.locator('.herdr-agent-strip:visible .herdr-agent-tab[data-terminal="space:' + id + '"]');
   await spaceTab('w2').waitFor(); await swipeStrip('Spaces'); await spaceTab('w2').click(); terminal = await agentFrame();
   await until(async () => (await text()).includes('Scratch shell'), 'ordinary terminal opened from a space');
-  // Tapping the selected space opens its tree; a pane pill switches terminals and + agent creates one there.
+  // Tapping the selected space opens its tree, where a pane pill switches terminals and + split is the only way to add a pane.
   await spaceTab('w1').click(); await spaceTab('w1').click();
   const tree = page.locator('.herdr-tree:visible');
   await tree.locator('.herdr-pane[data-terminal=term_2] .herdr-pane-focus').click();
   assert.equal(await page.locator('.herdr-terminal').getAttribute('data-terminal'), 'term_2');
   assert.equal(await tree.count(), 0, 'Choosing a pane closes the tree');
   await spaceTab('w1').click();
-  await tree.getByRole('button', { name: 'Create an agent in Termai', exact: true }).click();
-  assert.equal(await page.getByLabel('Space', { exact: true }).inputValue(), 'w1', 'The tree preselects its space for a new agent');
-  await page.getByLabel('Agent name', { exact: true }).fill('Mobile review');
-  await page.getByLabel('Agent type', { exact: true }).selectOption('codex'); await page.getByLabel('Space', { exact: true }).selectOption('w2');
-  await page.getByRole('dialog').getByRole('button', { name: 'Create agent', exact: true }).click();
-  await until(async () => await page.locator('.herdr-terminal').getAttribute('data-terminal') === 'term_4', 'created agent selected');
-  assert.equal(fixture.snapshot.agents.length, 4); assert.equal(fixture.snapshot.panes[4].label, 'Mobile review');
-  assert.equal(fixture.actions.filter(a => a.method === 'agent.start').length, 1);
+  assert.deepEqual(await tree.locator('.herdr-pane-add').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label'))), ['Split a pane in Termai'], 'The tree offers + split and no separate + agent');
+  await page.keyboard.press('Escape');
+  fixture.addTerminal('w2', 'Mobile review', true);
   await page.reload(); await spaceTab('w2').waitFor();
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces');

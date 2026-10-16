@@ -742,8 +742,7 @@ export class HerdrView {
       pill.append(focus, remove); panes.append(pill);
     }
     const split = node('button', 'herdr-pane-add', '+ split'); split.type = 'button'; split.setAttribute('aria-label', 'Split a pane in ' + space.name); split.onclick = () => void this.spaceAction(item, 'split');
-    const agent = node('button', 'herdr-pane-add', '+ agent'); agent.type = 'button'; agent.setAttribute('aria-label', 'Create an agent in ' + space.name); agent.onclick = () => void this.createAgent(space.id);
-    panes.append(split, agent); box.append(head, panes);
+    panes.append(split); box.append(head, panes);
     return box;
   }
   /** Holding a space or pane name edits it in place; the shared label also changes on the desktop. */
@@ -932,38 +931,7 @@ export class HerdrView {
     const snapshot = await this.host.api<import('./herdr-protocol.ts').HerdrSnapshot>('api/herdr/snapshot');
     if (!this.disposed) this.receive({ type: 'snapshot', snapshot });
   }
-  private async createAgent(spaceId?: string) {
-    this.closeMenu();
-    const modal = node('dialog'), form = node('form'), title = node('h2', '', 'Create agent');
-    const name = node('input'), kind = node('select'), space = node('select'), cwd = node('input'), error = node('p', 'form-error'), actions = node('div', 'actions');
-    name.required = true; name.maxLength = 100; name.value = 'New agent'; name.setAttribute('aria-label', 'Agent name');
-    kind.setAttribute('aria-label', 'Agent type'); space.setAttribute('aria-label', 'Space'); cwd.setAttribute('aria-label', 'Working directory'); cwd.placeholder = 'Use the space’s directory';
-    for (const value of this.spaces) { const option = node('option', '', value.name); option.value = value.id; space.append(option); }
-    space.value = spaceId || this.terminals.find(t => t.terminalId === this.selected)?.workspaceId || this.spaces[0]?.id || '';
-    const setDirectory = () => { cwd.value = this.terminals.find(t => t.workspaceId === space.value)?.cwd || ''; }; setDirectory(); space.onchange = setDirectory;
-    const cancel = node('button', 'secondary', 'Cancel'), create = node('button', 'primary', 'Create agent'); cancel.type = 'button'; create.type = 'submit'; create.disabled = true; cancel.onclick = () => modal.close();
-    const field = (text: string, control: HTMLElement) => { const label = node('label', '', text); label.append(control); return label; };
-    actions.append(cancel, create); form.append(title, field('Name', name), field('Agent type', kind), field('Space', space), field('Working directory', cwd), error, actions); modal.append(form); document.body.append(modal); modal.onclose = () => modal.remove();
-    modal.showModal(); name.focus(); name.select();
-    try {
-      const options = await this.host.api<{ kinds: string[] }>('api/herdr/options');
-      for (const value of options.kinds) { const option = node('option', '', value); option.value = value; kind.append(option); }
-      const current = this.terminals.find(t => t.terminalId === this.selected)?.kind;
-      kind.value = options.kinds.includes(current || '') ? current! : options.kinds.includes('codex') ? 'codex' : options.kinds[0] || '';
-      create.disabled = !kind.value || !space.value;
-      if (!kind.value) error.textContent = 'This Herdr server has no supported agent types.';
-    } catch (reason: any) { error.textContent = reason.message; }
-    form.onsubmit = async event => {
-      event.preventDefault(); if (create.disabled) return; create.disabled = true; cancel.disabled = true;
-      try {
-        const result = await this.host.api<{ terminalId: string; error?: string }>('api/herdr/action', { action: 'create', name: herdrName(name.value), kind: kind.value, workspaceId: space.value, ...(cwd.value.trim() ? { cwd: cwd.value.trim() } : {}) });
-        this.receive({ type: 'snapshot', snapshot: await this.host.api('api/herdr/snapshot') });
-        this.selectTerminal(result.terminalId); modal.close();
-        if (result.error) this.host.notice('Created a terminal, but the agent could not start: ' + result.error);
-      } catch (reason: any) { error.textContent = reason.message; }
-      finally { create.disabled = false; cancel.disabled = false; }
-    };
-  }
+
   private async rename(agent: StripItem) {
     this.closeMenu();
     const modal = node('dialog', 'herdr-rename'), form = node('form'), title = node('h2', '', agent.space ? 'Rename space' : 'Rename agent tab'), input = node('input'), error = node('p', 'form-error'), actions = node('div', 'actions');

@@ -113,7 +113,7 @@ Tap the selected chip again, or hold any chip, to open its tree, which grows out
 The tree shows the root checkout with its worktrees nested beneath it, and each checkout's panes as pills.
 Tap a checkout or pane to open it, or hold its name to rename it in place.
 Enter or the check button saves a rename, and Escape cancels it.
-**+ split** splits that checkout's remembered pane, falling back to its desktop-selected pane, and **+ agent** creates an agent in it.
+**+ split** splits that checkout's remembered pane, falling back to its desktop-selected pane.
 **×** on a pane closes it at once and keeps the tree open, while **×** on a checkout asks before closing its space.
 **New worktree** and **Open worktree…** start from the root checkout just as on desktop, and are unavailable while only worktrees are open.
 New worktree creates a branch from `HEAD` in Herdr’s configured worktree directory, while Open worktree lists existing usable checkouts.

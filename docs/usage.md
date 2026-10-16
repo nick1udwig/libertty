@@ -102,7 +102,7 @@ Its top-level tab opens a second strip of named spaces with live terminal views.
 Swipe left or right to scroll the strip in either Spaces or Agents mode.
 Once a repository has a worktree, its checkouts share one chip that names the repository, its checkout count and, while selected, the current checkout.
 Tap the selected chip again, or hold any chip, to open its tree of checkouts and panes.
-In the tree, tap to open a checkout or pane, hold a name to rename it, and use **+ split**, **+ agent**, **New worktree**, **Open worktree…** or **×** to close.
+In the tree, tap to open a checkout or pane, hold a name to rename it, and use **+ split**, **New worktree**, **Open worktree…** or **×** to close.
 Tap another chip while a tree is open to open that chip's tree instead, or tap elsewhere or swipe the tree down to dismiss it.
 Hold, then drag to the left or right of another chip to reorder, or onto its middle to make a stack.
 The stack’s count button expands or collapses its spaces; dragging a member beside another space removes it from the stack.
