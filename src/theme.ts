@@ -1,7 +1,7 @@
 import type { ITheme } from 'ghostty-web';
 import { saved } from './persistence.ts';
 
-export const themeChoices = ['forest', 'paper', 'ink', 'auto'] as const;
+export const themeChoices = ['forest', 'paper', 'ink', '1776', 'auto'] as const;
 export type ThemeChoice = (typeof themeChoices)[number];
 export type ThemeName = Exclude<ThemeChoice, 'auto'>;
 
@@ -17,6 +17,12 @@ export const terminalThemes: Record<ThemeName, ITheme> = {
     background: '#000000', foreground: '#f2f2f2', cursor: '#8ee69a', cursorAccent: '#000000', selectionBackground: '#2f4a33', selectionForeground: '#ffffff',
     black: '#666666', red: '#ff8a8a', green: '#8ee69a', yellow: '#ffd27a', blue: '#7fb0ff', magenta: '#e0a0ff', cyan: '#7fe0ec', white: '#d0d0d0',
     brightBlack: '#8c8c8c', brightRed: '#ffb0b0', brightGreen: '#b0f0b8', brightYellow: '#ffe4a8', brightBlue: '#a8cbff', brightMagenta: '#ecc0ff', brightCyan: '#a8eef5', brightWhite: '#ffffff',
+  },
+  // 1776 keeps green for diffs and test results, so only the cursor and selection carry the flag colors.
+  1776: {
+    background: '#0b1430', foreground: '#e9edf7', cursor: '#ff4f64', cursorAccent: '#0b1430', selectionBackground: '#2a3f7a', selectionForeground: '#ffffff',
+    black: '#63719d', red: '#ff5c6f', green: '#7fd99a', yellow: '#f3c45a', blue: '#7aa7ff', magenta: '#d59cff', cyan: '#6fd6e8', white: '#d5dbea',
+    brightBlack: '#8592bb', brightRed: '#ff8a98', brightGreen: '#a6e8b9', brightYellow: '#f8d88e', brightBlue: '#a3c3ff', brightMagenta: '#e4bfff', brightCyan: '#9be6f1', brightWhite: '#ffffff',
   },
 };
 

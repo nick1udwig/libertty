@@ -43,6 +43,18 @@
   --glass:#000000e6;--glass-strong:#000000f0;--glass-surface:#141414e6;--glass-overlay:#1a1a1af0;
   --term-fg:#f2f2f2;--term-cursor:#8ee69a;--selected-ring:1px;
 }
+/* 1776 is a navy theme with star-white text and a red accent, and its danger red is a softer pink so it stays apart from the accent. */
+:root[data-theme="1776"]{
+  --bg:#0b1430;--surface:#101b3b;--raised:#182651;--overlay:#15224a;--hover:#1f2f5f;--press:#273a6e;
+  --line:#213160;--line-strong:#3a4f88;
+  --text:#f5f7fc;--text-2:#c8d0e6;--muted:#98a5c8;--faint:#7f8db3;
+  --accent:#ff4f64;--accent-hover:#ff7183;--accent-ink:#0b1430;--accent-soft:#ff4f641f;--accent-line:#ff4f6680;
+  --info:#8ab4ff;--warn:#f3c45a;--danger:#ff8f8f;--danger-soft:#ff8f8f1f;
+  --scrim:#050a18b8;
+  --selection:#2a3f7a;--scroll-thumb:#98a5c866;--warn-line:#f3c45a55;--info-soft:#8ab4ff1f;--info-selected:#8ab4ff14;--info-line:#8ab4ff66;
+  --glass:#0b1430cc;--glass-strong:#0b1430eb;--glass-surface:#101b3bcc;--glass-overlay:#15224aeb;
+  --term-fg:#e9edf7;--term-cursor:#ff4f64;--selected-ring:0px;
+}
 ::selection{background:var(--selection)}
 
 /* Shortcut keys look identical in the terminal dock and the workspace bar. */
