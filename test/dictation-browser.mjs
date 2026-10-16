@@ -142,9 +142,9 @@ try {
   await page.keyboard.type('Q'); await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__out.includes('Z12Q345\r\n'));
   await writeFile(path.join(fixture, 'token'), 'secret'.repeat(8), { mode: 0o600 });
-  // A token/binary and the legacy saved 'installed' flag do not prove API support.
+  // A token or binary does not prove API support.
   capabilities = false;
-  await page.evaluate(base => localStorage.setItem('libertty.voxtype:' + base + '/', 'installed'), base);
+  await page.evaluate(base => localStorage.removeItem('libertty.voxtype:' + base + '/'), base);
   await page.reload();
   await page.locator('#dictation-install').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#dictation-install h2').textContent(), 'Enable Voxtype dictation');

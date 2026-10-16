@@ -29,6 +29,9 @@ test('cancellation and request deadlines are preserved', async t => {
 });
 
 test('reads and keyed changes retry lost connections, while uploads and exhausted attempts fail once', async t => {
+  const location = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'location', { configurable: true, value: new URL('https://workspace/') });
+  t.after(() => { if (location) Object.defineProperty(globalThis, 'location', location); else Reflect.deleteProperty(globalThis, 'location'); });
   const sent: { method?: string; key: string | null }[] = [];
   let failures = 0;
   t.mock.method(globalThis, 'fetch', async (_url: unknown, init: RequestInit) => {
@@ -41,7 +44,7 @@ test('reads and keyed changes retry lost connections, while uploads and exhauste
   assert.equal(sent.length, 2, 'A read retries after a lost connection');
   sent.length = 0; failures = 1;
   assert.deepEqual(await requestJSON(new URL('https://backend/api/files/action'), { action: 'delete' }), { ok: true });
-  assert.equal(sent.length, 2); assert.ok(sent[0].key); assert.equal(sent[1].key, sent[0].key, 'A retried change repeats its key so the backend replays the first reply');
+  assert.equal(sent.length, 2); assert.ok(sent[0].key); assert.equal(sent[1].key, sent[0].key, 'A retried cross-origin change repeats its key so the backend replays the first reply');
   sent.length = 0; failures = 1;
   await assert.rejects(request('https://backend/api/files/upload', { method: 'POST', body: new Blob(['bytes']) }), /Failed to fetch/);
   assert.deepEqual(sent, [{ method: 'POST', key: null }], 'A streamed upload is never repeated automatically');

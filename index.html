@@ -4,7 +4,7 @@
   <base href="/" data-libertty-base>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0b0f0d"><meta name="description" content="Your terminals, hosts, and SSH keys in one place.">
-  <script>/* Apply the saved theme before first paint, matching src/theme.ts. */try{let t=JSON.parse(localStorage.getItem('libertty.theme')??localStorage.getItem('termai.theme')??'null');if(t==='auto')t=matchMedia('(prefers-color-scheme: light)').matches?'paper':'ink';if(t==='paper'||t==='ink'||t==='1776')document.documentElement.dataset.theme=t}catch(e){}</script>
+  <script>/* Apply the saved theme before first paint, matching src/theme.ts. */try{let t=JSON.parse(localStorage.getItem('libertty.theme')??'"auto"');if(!['forest','paper','ink','1776','auto'].includes(t))t='auto';if(t==='auto')t=matchMedia('(prefers-color-scheme: light)').matches?'paper':'ink';if(t==='paper'||t==='ink'||t==='1776')document.documentElement.dataset.theme=t}catch(e){}</script>
   <link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./icon.svg" type="image/svg+xml">
   <title>libertty</title>
 </head>
@@ -64,7 +64,7 @@
 </div>
 <dialog id="host-dialog"><form id="host-form"><header><h2 id="host-dialog-title">New host</h2><button type="button" data-close="host-dialog" class="icon" aria-label="Close host editor"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
 <label>Name<input id="host-name" maxlength="100" required placeholder="Development server"></label>
-<label>Connection<select id="host-kind"><option value="http">HTTP · direct backend</option><option value="ssh">SSH · through a backend</option><option value="herdr" hidden>Herdr · saved legacy connection</option></select></label>
+<label>Connection<select id="host-kind"><option value="http">HTTP · direct backend</option><option value="ssh">SSH · through a backend</option><option value="herdr" hidden>Herdr</option></select></label>
 <label>Backend<select id="host-backend"></select></label>
 <div id="direct-fields"><label>Backend URL<input id="host-url" type="url" placeholder="https://my-server.tailnet.ts.net/" autocomplete="url"></label><p class="hint">The terminal connects directly to this backend.</p></div>
 <div id="herdr-fields" hidden><label>Herdr session<input id="host-herdr-session" maxlength="64" placeholder="Default session" autocomplete="off"></label><p class="hint">Connect to Herdr running on the selected backend. Leave the session empty for its default session.</p></div>

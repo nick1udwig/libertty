@@ -212,7 +212,7 @@ try {
   assert.equal(await page.locator('#backend-filter').inputValue(), 'browser');
   assert.equal((await vaultData('primary')).keys.length, 0); assert.equal((await vaultData('secondary')).keys.length, 0);
   const records = await page.evaluate(() => new Promise((resolve, reject) => {
-    const open = indexedDB.open('termai-keychain', 1); open.onerror = () => reject(open.error); open.onsuccess = () => { const db = open.result, read = db.transaction('keys').objectStore('keys').getAll(); read.onsuccess = () => { resolve(read.result); db.close(); }; };
+    const open = indexedDB.open('libertty-keychain', 1); open.onerror = () => reject(open.error); open.onsuccess = () => { const db = open.result, read = db.transaction('keys').objectStore('keys').getAll(); read.onsuccess = () => { resolve(read.result); db.close(); }; };
   }));
   assert.equal(records.length, 1); assert.ok(records[0].ciphertext); assert.ok(!JSON.stringify(records).includes('PRIVATE KEY') && !JSON.stringify(records).includes('test-key-passphrase'));
   const backupDownload = page.waitForEvent('download'); await page.locator('#export-key-backup').click();

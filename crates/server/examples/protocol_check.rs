@@ -107,7 +107,7 @@ fn server_samples() -> Vec<ServerMessage> {
             reset: false,
             truncated: false,
             first_seq: 1,
-            last_seq: Some(2),
+            last_seq: 2,
             stream_id: id(),
         },
         ServerMessage::EditResult {

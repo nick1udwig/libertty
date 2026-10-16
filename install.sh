@@ -2,7 +2,7 @@
 # Keep the bootstrap in a function so a truncated curl response cannot run it.
 set -euo pipefail
 libertty_install() {
-  local version= archive= supplied_sha= repository=${LIBERTTY_REPOSITORY:-${TERMAI_REPOSITORY:-nick1udwig/libertty}}
+  local version= archive= supplied_sha= repository=${LIBERTTY_REPOSITORY:-nick1udwig/libertty}
   local argument platform machine asset temporary digest expected
   local arguments=("$@")
   while [[ $# -gt 0 ]]; do

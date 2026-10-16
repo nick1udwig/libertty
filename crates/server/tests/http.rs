@@ -247,12 +247,7 @@ async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
                     .map(|value| value.to_str().unwrap()),
                 protocol
             );
-            // Idle audio is accepted in legacy/raw and negotiated compact modes.
-            let audio = if protocol.is_some() {
-                vec![b'T', b'M', 1, 6, 0, 255]
-            } else {
-                vec![0, 255]
-            };
+            let audio = vec![b'T', b'M', 1, 6, 0, 255];
             socket.send(Message::Binary(audio.into())).await.unwrap();
             let ping = vec![0, 255, 42];
             socket
@@ -333,8 +328,9 @@ async fn a_silent_viewer_neither_pauses_the_shell_nor_stays_attached() {
     let connected = tokio::time::Instant::now();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
-            if let Message::Text(text) = socket.next().await.unwrap().unwrap()
-                && serde_json::from_str::<Value>(&text).unwrap()["state"]["ready"] == true
+            if let Message::Binary(bytes) = socket.next().await.unwrap().unwrap()
+                && bytes[3] == 0
+                && serde_json::from_slice::<Value>(&bytes[4..]).unwrap()["state"]["ready"] == true
             {
                 break;
             }

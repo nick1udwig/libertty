@@ -29,11 +29,11 @@ function space(value: unknown): HerdrSpace | undefined {
 /** Retain bounded navigation metadata without history, credentials or opaque fields. */
 export function herdrCache(value: unknown): HerdrSnapshot | undefined {
   if (!record(value) || !text(value.version, 128) || !sequence(value.protocol) || !Array.isArray(value.agents)
-    || value.agents.length > 256 || value.terminals !== undefined && (!Array.isArray(value.terminals) || value.terminals.length > 256)
-    || value.spaces !== undefined && (!Array.isArray(value.spaces) || value.spaces.length > 256)) return;
-  const agents = value.agents.map(agent), terminals = (value.terminals as unknown[] | undefined)?.map(agent), spaces = (value.spaces as unknown[] | undefined)?.map(space);
-  if (agents.some(value => !value) || terminals?.some(value => !value) || spaces?.some(value => !value)) return;
+    || value.agents.length > 256 || (!Array.isArray(value.terminals) || value.terminals.length > 256)
+    || (!Array.isArray(value.spaces) || value.spaces.length > 256)) return;
+  const agents = value.agents.map(agent), terminals = (value.terminals as unknown[]).map(agent), spaces = (value.spaces as unknown[]).map(space);
+  if (agents.some(value => !value) || terminals.some(value => !value) || spaces.some(value => !value)) return;
   const snapshot: HerdrSnapshot = { version: value.version, protocol: value.protocol, agents: agents as HerdrAgent[],
-    ...(terminals ? { terminals: terminals as HerdrAgent[] } : {}), ...(spaces ? { spaces: spaces as HerdrSpace[] } : {}) };
+    terminals: terminals as HerdrAgent[], spaces: spaces as HerdrSpace[] };
   return encoder.encode(JSON.stringify(snapshot)).byteLength <= 256 * 1024 ? snapshot : undefined;
 }

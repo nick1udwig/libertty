@@ -4,7 +4,6 @@ interface ReconnectingSocketOptions {
   prepare(signal: AbortSignal, token?: string): Promise<URL>;
   available(): boolean;
   protocols?(): string[];
-  heartbeat?(): boolean;
   open(): void;
   message(event: MessageEvent): void;
   close(event?: CloseEvent): boolean;
@@ -102,7 +101,7 @@ export class ReconnectingSocket {
     this.delay = 1000;
     this.lastContact = Date.now(); this.pingAt = undefined; this.stalled = false;
     clearTimeout(this.heartbeat);
-    if (this.options.heartbeat?.() !== false) this.heartbeat = setTimeout(() => this.checkHeartbeat(), 2000);
+    this.heartbeat = setTimeout(() => this.checkHeartbeat(), 2000);
   }
 
   /** Allow a reply the link's measured round trip, and the full maximum while output still arrives ahead of it. */

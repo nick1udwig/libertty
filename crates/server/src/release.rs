@@ -42,7 +42,7 @@ pub fn configuration(file: &Path) -> Result<BTreeMap<String, String>, String> {
             Ok((name.clone(), value.unwrap().to_owned()))
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
-    Ok(crate::environment::normalize(environment))
+    Ok(environment)
 }
 #[cfg(test)]
 mod tests {

@@ -21,13 +21,19 @@ pub async fn wait(
     before: Option<u64>,
     cancel: &CancellationToken,
 ) -> bool {
-    let Some(before) = before else { return true };
+    let before = match before {
+        Some(before) => before,
+        None => match revision(target, pane, cancel).await {
+            Some(before) => before,
+            None => return false,
+        },
+    };
     let work = async {
         loop {
-            if revision(target, pane, cancel)
-                .await
-                .is_none_or(|current| redrawn(before, current))
-            {
+            let Some(current) = revision(target, pane, cancel).await else {
+                return false;
+            };
+            if redrawn(before, current) {
                 return true;
             }
             tokio::select! { biased; _=cancel.cancelled()=>return false, _=tokio::time::sleep(Duration::from_millis(20))=>{} }

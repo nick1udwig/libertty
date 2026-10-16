@@ -1,4 +1,3 @@
-import './brand-storage.ts';
 import { requestJSON } from './api.ts';
 import { backendAccess, forgetBackendAccess, rememberBackendAccess } from './backend-access.ts';
 import { BrowserVault } from './browser-vault.ts';
@@ -19,7 +18,7 @@ import type { HerdrView } from './herdr-view.ts';
 import { validCapture, validPath, validSession } from './persistence.ts';
 import { selectedFileReader } from './plugin-file.ts';
 import { type PluginPackage } from './plugin-package.ts';
-import { PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
+import { BUILTIN_VERSION, PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
 import { createWorkspaceConnections } from './workspace-connections.ts';
 import { createWorkspaceLibrary } from './workspace-library.ts';
 import { createWorkspaceNavigation } from './workspace-navigation.ts';
@@ -416,6 +415,8 @@ async function pendingSource(backendUrl: string, session: string) {
   );
   if (!source) {
     source = {
+      pluginId: 'terminal',
+      pluginVersion: BUILTIN_VERSION,
       id: crypto.randomUUID(),
       name: backend.name,
       backendId: backend.id,

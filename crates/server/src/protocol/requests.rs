@@ -49,10 +49,6 @@ pub struct HerdrReading {
 }
 #[derive(Default, Deserialize)]
 pub struct HerdrTicket {
-    #[serde(default, rename = "historyDelta")]
-    pub history_delta: bool,
-    #[serde(default, rename = "frameAck")]
-    pub frame_ack: bool,
     #[serde(default)]
     pub mobile: bool,
     pub cols: Option<u16>,

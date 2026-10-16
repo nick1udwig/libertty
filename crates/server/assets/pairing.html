@@ -17,16 +17,15 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } 
 <p id="login-error" role="alert"></p><button type="submit">Connect</button></form></main>
 <script>
 const storageKey = 'libertty.access:' + new URL('__LIBERTTY_PUBLIC_BASE__', location.href).href;
-const legacyStorageKey = 'termai.access:' + new URL('__LIBERTTY_PUBLIC_BASE__', location.href).href;
 async function pair(token, credential) {
   const response = await fetch('__LIBERTTY_PUBLIC_BASE__api/connect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: 'Bearer ' + credential } : {}) },
     body: JSON.stringify({ token, noSession: true }) });
   const result = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && credential) try { for (const key of [storageKey, legacyStorageKey]) if (localStorage.getItem(key) === credential) localStorage.removeItem(key); } catch {}
+    if (response.status === 401 && credential) try { if (localStorage.getItem(storageKey) === credential) localStorage.removeItem(storageKey); } catch {}
     throw new Error(result.error || 'Pairing failed.');
   }
-  try { localStorage.setItem(storageKey, result.accessToken); localStorage.removeItem(legacyStorageKey); } catch {}
+  try { localStorage.setItem(storageKey, result.accessToken); } catch {}
   document.getElementById('token').value = ''; location.reload();
 }
 document.getElementById('login-form').addEventListener('submit', async event => {
@@ -37,7 +36,7 @@ document.getElementById('login-form').addEventListener('submit', async event => 
   } catch (error) { document.getElementById('login-error').textContent = error.message; button.disabled = false; }
 });
 try {
-  const credential = localStorage.getItem(storageKey) ?? localStorage.getItem(legacyStorageKey);
+  const credential = localStorage.getItem(storageKey);
   if (credential) pair(undefined, credential).catch(error => { document.getElementById('login-error').textContent = error.message; });
 } catch {}
 </script></body></html>

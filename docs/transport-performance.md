@@ -38,13 +38,12 @@ The selected methods below follow these measurements for small messages, bulk te
 
 ## Selected implementation
 
-Production sockets advertise versioned binary, constrained gzip and fast-link gzip capabilities in authenticated connect and ticket replies.
-New clients offer only advertised protocols and fall back to legacy JSON with older backends.
+Production sockets use versioned binary, constrained gzip and fast-link gzip protocols.
+Clients select a protocol from the current backend contract, and sockets without an explicit subprotocol use raw binary envelopes.
 Without browser decompression support, raw binary remains available.
 Input, acknowledgements and geometry use compact binary fields, terminal output retains its sequence, and Herdr frames carry their original ANSI bytes directly.
 The backend decodes Herdr's base64 once per frame and encodes terminal output and frames from typed messages, so neither passes through an intermediate JSON value or a second base64 round trip.
 Decoding remains ordered across asynchronous decompression and discards results from replaced sockets.
-Connect and ticket replies advertise application heartbeat support independently of the encoding.
 Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply.
 The reply deadline is two seconds or the smoothed round-trip time plus four deviations, whichever is longer, up to eight seconds.
 While messages are still arriving, a reply that may be queued behind them gets the full eight seconds.
@@ -58,7 +57,7 @@ Audio retains its existing Opus bytes inside a distinct four-byte envelope and i
 Herdr viewers opt into sequenced frames in their ticket request and acknowledge parsed frames through the existing acknowledgement control.
 Each viewer has two frames in flight and one pending ANSI update, with ordered deltas merged until they exceed the last full screen size.
 Oversized pending updates are discarded and replaced by a fresh full screen when acknowledgement credit returns, preserving the current geometry.
-Legacy viewers retain unsequenced frames, and sequenced binary frames use envelope kind 7.
+Sequenced binary frames use envelope kind 7.
 Numbered keys use envelope kind 8, which carries the key number before its UTF-8 text.
 Each compressed message uses gzip level 1 with an independent dictionary and must save at least one eighth of the original representation.
 Constrained links compress messages from 2 KiB, while ordinary links compress only messages from 128 KiB.
@@ -164,7 +163,8 @@ The barrier waits for a complete matching grid and subsequent PTY output, reques
 An unchanged revision accepts an already matching grid without waiting for a resize that did not occur.
 Rapid switches preserve an unfinished redraw check, while newer geometry and parked views cancel superseded checks.
 Revision probes are sequential, cancellable and spaced by 20 ms rather than delaying every reveal by a fixed interval.
-Herdr does not expose an application-level redraw-completion acknowledgement, so static applications have a two-second fallback and older Herdr versions without the revision API retain a compatibility fallback.
+Herdr does not expose an application-level redraw-completion acknowledgement, so static applications have a two-second fallback.
+The terminal-content revision API is required.
 The revision is obtained through the read-only `pane.copy_motion` operation rather than `pane.read`, whose current exported revision does not track terminal content.
 
 Mobile space switches retain up to four authenticated terminal iframes in least-recently-used order.
@@ -212,7 +212,6 @@ The parent rejects acknowledgements for superseded selections or earlier dimensi
 Rapid selections can cancel a pending switch without exposing its unfinished pane.
 If returning to the displayed pane requires different dimensions, a separate iframe prepares the new grid while the old iframe remains frozen until the handoff completes.
 Old iframes are retired after the swap, and leaving or disposing the view also cleans up a temporarily retained iframe.
-Legacy backends keep the previous iframe frozen during the handoff without requiring backend parking support.
 Once a mobile pane has passed its paint barrier, keyboard resizes retain that view and its focused input while awaiting the new geometry and redraw.
 The mobile paint certificate resets on reconnects and desktop layouts, so an initial desktop grid still waits behind the loading gate.
 
@@ -228,12 +227,11 @@ Gzip level 1 would reduce that sample to 139,544 bytes, but each message falls b
 A common-prefix estimate used 131,917 bytes before delta metadata, which justified implementing per-view edits.
 The sample report is saved in `.test-artifacts/herdr-history-measurement.json`.
 
-Viewers opt into history deltas through their ticket request and receive a versioned full baseline first.
+Viewers receive a versioned full baseline followed by history deltas.
 Subsequent edits preserve a UTF-16 prefix and suffix and can discard leading complete lines as the 1,000-line window rolls forward.
 Each viewer compares against its own last delivered text, so a coalesced shared poll or a newly joined viewer cannot inherit another viewer's delta base.
 Missing bases request one fresh baseline, and short unrelated replacements use a full message.
 Matching live native screens retain the latest history text and defer its terminal parser until fallback, reflow or growing scrollback requires it.
-Legacy clients continue to receive complete history messages.
 
 ## Predicted prompt echo
 
@@ -277,11 +275,11 @@ Terminals and the Herdr view share this lifecycle, which also reconnects on retu
 ## Request retries
 
 Reads retry up to twice after a lost connection or a proxy failure, pausing half a second and then one second.
-Same-origin changes with a JSON body carry a random `Idempotency-Key`, so they retry the same way.
+Changes with a JSON body carry a random `Idempotency-Key`, so they retry the same way.
 The backend runs a keyed request to completion even if the browser abandons it, and replays its reply to retries with the same key for ten minutes.
 A retry that arrives while the first attempt is still running waits for that attempt's reply instead of starting another.
 A request that timed out is retried only once, because it may still be running on a slow link.
-Streamed uploads are never repeated automatically, and cross-origin changes carry no key because an older backend would reject the header during CORS preflight.
+Streamed uploads are never repeated automatically.
 A download that fails or receives nothing for twenty seconds requests the rest of the file with an open-ended byte range, retrying up to five times.
 The backend refuses a resume once the file's size or modification time differs from when the link was issued.
 Uploads from the file browser carry an upload id, so an attempt that fails asks how many bytes arrived and sends only the rest, up to six attempts.

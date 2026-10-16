@@ -24,7 +24,7 @@ The test requirements below apply to other requests and when tests are explicitl
 Run `npm run ci:quick`, `cargo fmt --all -- --check` and `npm run contracts:vocabulary -- --check` before creating a commit or merging.
 For changes to application code, version metadata, dependencies, contracts, build scripts or workflows, also run `npm run verify:local` before creating a commit or merging.
 Use the Node version pinned in `build/release-config.json` and install dependencies with `npm ci` before full validation.
-The full script checks Rust lints and tests, builds the application, runs JavaScript and installer tests, verifies saved-data compatibility and executes every browser and native Herdr harness once.
+The full script checks Rust lints and tests, builds the application, runs JavaScript and installer tests, and executes every browser and native Herdr harness once.
 Install Chromium with `npx --no-install playwright-core install --with-deps chromium` when a browser is unavailable, and provide `CHROME_PATH` and `CHROMIUM` for a custom executable.
 Linux validation also needs `openssh-server`, Bash completion and a usable SSH daemon runtime directory.
 The browser script downloads and checksum-verifies the pinned Herdr binary into `.test-artifacts/bin`.

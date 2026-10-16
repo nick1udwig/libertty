@@ -32,8 +32,14 @@
       }
     },
     "encodings": {
-      "text": "UTF-8 JSON",
-      "binary": "framed Opus dictation audio"
+      "text": "UTF-8 JSON client controls",
+      "binary": "versioned envelopes for controls, Opus audio and sequenced terminal output",
+      "subprotocols": [
+        "libertty.binary.v1",
+        "libertty.gzip.v1",
+        "libertty.gzip-fast.v1"
+      ],
+      "default": "libertty.binary.v1"
     },
     "unknownTag": "ignore",
     "malformedJSON": {
@@ -248,8 +254,14 @@
     },
     "maxConnections": 64,
     "encodings": {
-      "text": "UTF-8 JSON",
-      "frameBytes": "base64"
+      "text": "UTF-8 JSON client controls",
+      "binary": "versioned envelopes with sequenced ANSI frames and versioned history",
+      "subprotocols": [
+        "libertty.binary.v1",
+        "libertty.gzip.v1",
+        "libertty.gzip-fast.v1"
+      ],
+      "default": "libertty.binary.v1"
     },
     "resize": {
       "type": "integer",

@@ -84,6 +84,7 @@ export async function herdrFixture() {
           reply({ ok: true });
         }
         else if (request.method === 'fixture.terminal.release') { actions.push(request); reply({ ok: true }); socket.end(); }
+        else if (request.method === 'pane.copy_motion') reply({ content_revision: frameSequence * 4, cursor: { row: 0, col: 0 } });
         else if (request.method === 'fixture.terminal.scroll') { actions.push(request); reply({ ok: true }); }
         else if (request.method === 'server.agent_manifests') reply({ manifests: [{ agent: 'codex' }, { agent: 'claude' }, { agent: 'pi' }] });
         else if (request.method === 'workspace.create') {

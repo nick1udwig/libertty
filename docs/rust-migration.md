@@ -65,7 +65,6 @@ npm run test:contracts
 npm run contracts:vocabulary -- --check
 npm run test:contracts
 npm run test:rust
-npm run test:rust-state
 npm run build
 npm test
 cargo build --locked -p libertty-server --bin libertty

@@ -257,7 +257,7 @@ impl Target {
             session: session(Some(&json!(session_name)))?,
             socket_path: None,
             binary: "herdr".into(),
-            env: crate::environment::vars().collect(),
+            env: std::env::vars().collect(),
             remote: None,
             repairs: Default::default(),
             shared: Default::default(),

@@ -37,7 +37,7 @@ pub(super) async fn api_connect(
     let owner = owner.unwrap();
     let sid = session_id_text(input.session.as_deref())?;
     let result = if input.no_session {
-        json!({"accessToken":owner,"heartbeat":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
+        json!({"accessToken":owner})
     } else {
         if sid != "default"
             && !app
@@ -51,7 +51,7 @@ pub(super) async fn api_connect(
                 "This terminal has ended. Open its saved host to reconnect.".into(),
             ));
         }
-        json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state(),"accessToken":owner,"heartbeat":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]})
+        json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state(),"accessToken":owner})
     };
     let secure = if req
         .headers()
@@ -88,7 +88,7 @@ pub(super) async fn api_dictation(
     _ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    return ok(dictation::detect(&crate::environment::vars().collect()).await);
+    return ok(dictation::detect(&std::env::vars().collect()).await);
 }
 
 pub(super) async fn api_ping(
@@ -186,7 +186,7 @@ pub(super) async fn api_ticket(
             until: Instant::now() + Duration::from_secs(15),
         },
     );
-    ok(json!({"ticket":ticket,"heartbeat":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}))
+    ok(json!({"ticket":ticket}))
 }
 
 pub(super) async fn api_dictation_install(
@@ -196,7 +196,7 @@ pub(super) async fn api_dictation_install(
 ) -> Result<Response<Body>, Failure> {
     let session = ctx.session;
     let input: crate::protocol::InputStamp = typed_body(&mut req, 16384).await?;
-    let command = dictation::install_command(&crate::environment::vars().collect())
+    let command = dictation::install_command(&std::env::vars().collect())
         .await
         .map_err(fail)?;
     if !session.paste(&command, input.prompt, input.revision, true, None) {

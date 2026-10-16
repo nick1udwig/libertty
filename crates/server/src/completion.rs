@@ -225,7 +225,7 @@ impl CompletionProvider {
         if !valid_completion_words(words) {
             return Ok(vec![]);
         }
-        let bash = local_bash(&crate::environment::vars().collect())?;
+        let bash = local_bash(&std::env::vars().collect())?;
         let framework = prepared_framework(env).await;
         let result = pool
             .run(cancel, async {
@@ -321,7 +321,7 @@ pub async fn shell_complete(
     if !valid_completion_words(words) {
         return Ok(vec![]);
     }
-    let bash = local_bash(&crate::environment::vars().collect())?;
+    let bash = local_bash(&std::env::vars().collect())?;
     let mut env = env.clone();
     env.extend([
         ("BASH_ENV".into(), "/dev/null".into()),

@@ -1,19 +1,5 @@
 # Install and set up libertty
 
-## Upgrading from Termai
-
-The installer reads an existing `~/.config/termai/config.json` and writes the renamed configuration to `~/.config/libertty/config.json`.
-It preserves the configured data directory, pairing token, port, mount path and other settings.
-New installations use `~/.local/share/libertty`, while existing Termai data stays in its original directory.
-Installer-managed systemd services and macOS LaunchAgents are renamed to `libertty.service` and `com.libertty.server` respectively, with rollback if startup fails.
-An existing installer-managed `termai` launcher becomes an alias for the new `libertty` launcher.
-Source-managed services require their executable path to be updated to `target/release/libertty`.
-
-Keep the same browser origin and mount path to retain saved hosts, tabs, settings and pairing credentials.
-libertty migrates browser settings on first load, retains the existing encrypted key database and accepts Termai encrypted key backups.
-Existing plugins can continue using `window.termai`, while new plugins use `window.libertty`.
-The backend accepts `TERMAI_*` environment variables as aliases, with `LIBERTTY_*` values taking precedence.
-
 ## Install a release
 
 The release installer bundles the native Rust executable, built frontend and a Node runtime for setup tools, so you do not need npm or a compiler on the server.

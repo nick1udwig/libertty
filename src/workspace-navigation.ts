@@ -648,7 +648,6 @@ export function createWorkspaceNavigation(options: Options) {
       pluginId: files ? 'files' : 'terminal',
       pluginVersion: '1',
       ownsSession: true,
-      mode: files ? 'files' : undefined,
       id: crypto.randomUUID(),
       backendId: backend.id,
       session,

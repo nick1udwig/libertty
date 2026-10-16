@@ -5,8 +5,7 @@ export class BrowserVault {
   private open() {
     return this.database ||= new Promise<IDBDatabase>((resolve, reject) => {
       let blocked = false;
-      // Keep the durable database name so existing encrypted keys remain available.
-      const request = indexedDB.open('termai-keychain', 1);
+      const request = indexedDB.open('libertty-keychain', 1);
       request.onupgradeneeded = () => request.result.createObjectStore('keys', { keyPath: 'id' });
       request.onsuccess = () => { if (blocked) { request.result.close(); return; } request.result.onversionchange = () => { request.result.close(); this.database = undefined; }; resolve(request.result); };
       request.onerror = () => { this.database = undefined; reject(new Error('Browser key storage is unavailable.')); };

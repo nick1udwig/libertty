@@ -134,8 +134,7 @@ pub enum ServerMessage {
         reset: bool,
         truncated: bool,
         first_seq: u64,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        last_seq: Option<u64>,
+        last_seq: u64,
         stream_id: String,
     },
     EditResult {

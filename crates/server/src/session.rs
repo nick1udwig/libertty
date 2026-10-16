@@ -63,7 +63,7 @@ pub enum Transport {
     Close(u16, String),
 }
 impl Transport {
-    /// The JSON form a legacy client receives.
+    /// The logical JSON form used by diagnostics and tests.
     pub fn value(&self) -> Option<Value> {
         match self {
             Self::Server(message) => Some(message.value()),
@@ -349,7 +349,7 @@ impl Inner {
             reset: true,
             truncated: false,
             first_seq: self.replay.first_seq(),
-            last_seq: Some(self.replay.last_seq()),
+            last_seq: self.replay.last_seq(),
         });
         self.send_snapshot();
     }
@@ -395,7 +395,7 @@ impl Session {
         services: HostServices,
         remote: Option<Arc<crate::ssh::SSHHost>>,
     ) -> Result<Arc<Self>, String> {
-        let env: BTreeMap<_, _> = crate::environment::vars().collect();
+        let env: BTreeMap<_, _> = std::env::vars().collect();
         let nonce = storage::random_hex(12);
         let remote_channel = if let Some(remote) = &remote
             && !files_only
@@ -670,7 +670,7 @@ impl Session {
             reset: replay.reset || replay.snapshot,
             truncated: replay.truncated && !replay.snapshot,
             first_seq: replay.first_seq,
-            last_seq: Some(replay.last_seq),
+            last_seq: replay.last_seq,
         });
         if let Some(client) = client {
             // Only the browser that numbered the delivered keys may rely on that count.

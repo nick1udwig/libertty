@@ -24,7 +24,7 @@ try {
     localStorage.setItem('reopen.fixture', '1');
     localStorage.setItem('libertty.herdrStrip', JSON.stringify('agents'));
     localStorage.setItem('libertty.hosts', JSON.stringify([{ id: 'local', name: 'This machine', kind: 'http', backendId: 'primary' }, { id: 'herdr', name: 'Herdr', kind: 'herdr', backendId: 'primary', herdrSourceHostId: 'local', herdrSource: '11111111-1111-4111-8111-111111111111' }]));
-    localStorage.setItem('libertty.tabs', JSON.stringify([{ id: 'saved-herdr', session: '11111111-1111-4111-8111-111111111111', name: 'Herdr', backendId: 'primary', hostId: 'herdr', mode: 'herdr', pluginId: 'herdr', ownsSession: true, herdrSource: '11111111-1111-4111-8111-111111111111' }]));
+    localStorage.setItem('libertty.tabs', JSON.stringify([{ id: 'saved-herdr', session: '11111111-1111-4111-8111-111111111111', name: 'Herdr', backendId: 'primary', hostId: 'herdr', pluginId: 'herdr', pluginVersion: '1', ownsSession: true, herdrSource: '11111111-1111-4111-8111-111111111111' }]));
     localStorage.setItem('libertty.activeTab', JSON.stringify('saved-herdr'));
   }, { base, owner });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));

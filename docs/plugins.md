@@ -129,7 +129,6 @@ Built-ins and external packages implement the registry's `TabPlugin` contract in
 Mounted views supply `setVisible` and `dispose`, with optional focus, settings and selection methods.
 Built-ins keep their existing trusted views and terminal frames.
 The workspace performs common mounting, restoration, switching and disposal.
-Legacy terminal/file/Herdr modes and saved Reading Mode tabs migrate to plugin IDs.
 Reading Mode uses the same tab storage and view lifecycle as the other plugins, preserving file previews, Markdown links and captured command output.
 Its tabs borrow the source terminal's session, so closing a reader releases its captured output and view resources while keeping the terminal running.
 
@@ -139,7 +138,7 @@ Its tabs borrow the source terminal's session, so closing a reader releases its 
 It also opens Herdr directly over SSH and closes an independent terminal while Herdr remains usable.
 A mobile screenshot is saved to `.test-artifacts/plugins-mobile.png`.
 
-The unit suite covers registry migration, version selection, manifest validation and denied bridge operations.
+The unit suite covers version selection, manifest validation and denied bridge operations.
 The production build and unit suite pass (207 tests, one skip), as do the workspace, Herdr, Reading Mode and terminal-gesture browser checks.
 Cross-browser sandbox support still needs verification.
 

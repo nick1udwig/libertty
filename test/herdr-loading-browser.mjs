@@ -30,7 +30,7 @@ try {
       // Folded status lanes would hide the idle tabs this test switches between.
       localStorage.setItem('libertty.herdrStripOrder', JSON.stringify('manual'));
       localStorage.setItem('libertty.hosts', JSON.stringify([{id:'herdr',name:'Herdr',kind:'herdr',backendId:'primary'}]));
-      localStorage.setItem('libertty.tabs', JSON.stringify([first,second].map((id,i)=>({id,session:'default',name:'Herdr '+(i+1),mode:'herdr',backendId:'primary',hostId:'herdr'}))));
+      localStorage.setItem('libertty.tabs', JSON.stringify([first,second].map((id,i)=>({id,session:'default',name:'Herdr '+(i+1),pluginId:'herdr',pluginVersion:'1',backendId:'primary',hostId:'herdr'}))));
       localStorage.setItem('libertty.activeTab', JSON.stringify(first));
       localStorage.setItem('libertty.shortcuts', JSON.stringify([{label:'Stop',kind:'keys',value:'Escape'},{label:'Ctrl',kind:'keys',value:'Ctrl'},{label:'Status',kind:'command',value:'pwd'}]));
       window.__holdRendered = []; window.__holdAllRendered = true; window.__visibleScreens = [];

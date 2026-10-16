@@ -27,15 +27,6 @@ const server = spawn(path.join(root, 'target/debug/libertty'), [], { cwd: root, 
 const serverExited = once(server, 'exit');
 let logs = '', browser;
 server.stdout.on('data', data => logs += data); server.stderr.on('data', data => logs += data);
-async function saveLegacyReading(page, retainPluginTab = false) {
-  await page.evaluate(retain => {
-    const tabs = JSON.parse(localStorage.getItem('libertty.tabs')), active = JSON.parse(localStorage.getItem('libertty.activeTab'));
-    const tab = tabs.find(tab => tab.id === active);
-    localStorage.setItem('libertty.readingTabs', JSON.stringify([{ id: tab.id, name: tab.name, backendId: tab.backendId, session: tab.session,
-      path: tab.readPath, capture: tab.readCapture, exitCode: tab.readExitCode, sourceTabId: tab.parentTabId, lastUsed: tab.lastUsed }]));
-    if (!retain) localStorage.setItem('libertty.tabs', JSON.stringify(tabs.filter(tab => tab.id !== active)));
-  }, retainPluginTab);
-}
 try {
   for (let i = 0; i < 200; i++) { try { if ((await fetch(base + '/')).ok) break; } catch {} if (server.exitCode !== null) throw new Error(logs); await delay(50); }
   browser = await launchBrowser({ });
@@ -76,12 +67,10 @@ try {
   const reader = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))));
   assert.equal(reader.pluginId, 'reading'); assert.equal(reader.pluginVersion, '1'); assert.equal(reader.ownsSession, false);
   assert.equal(await page.locator('#' + await page.locator('[role=tab][aria-selected=true]').getAttribute('aria-controls')).count(), 1);
-  await saveLegacyReading(page);
   await page.reload();
   await page.locator('.reading-view .reading-text').waitFor();
   assert.equal(await page.locator('.reading-text').textContent(), 'A quiet place to read.\nSecond line.\n');
-  assert.equal(await page.evaluate(() => localStorage.getItem('libertty.readingTabs')), null, 'Legacy storage is cleared after migration');
-  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'reading')), reader, 'Migration preserves the selected reader and its source');
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'reading')), reader, 'Reload preserves the selected reader and its source');
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
   await frame.waitForFunction(() => window.__shellState?.ready);
@@ -132,7 +121,6 @@ try {
     const beforeReload = await page.locator('[role=tab]').count();
     const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).readCapture);
     assert.match(capture, /^[a-f0-9]{32}$/);
-    if (input === 'git diff | look at') await saveLegacyReading(page, true);
     await page.reload();
     await page.locator('.reading-view:not([hidden]) .reading-text').waitFor();
     assert.equal(await page.locator('.reading-view:not([hidden]) .reading-text').textContent(), text);
