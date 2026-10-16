@@ -301,6 +301,81 @@ async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
     }
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_silent_viewer_is_detached_instead_of_pausing_the_shell() {
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
+    let backend = Backend::start("server");
+    let origin = format!("http://127.0.0.1:{}", backend.port);
+    let token = backend.pair();
+    let state = || {
+        let response = backend.api(
+            "POST",
+            "/api/connect",
+            Some(&token),
+            Some(json!({"session":"default"})),
+        );
+        assert_eq!(response.status, 200);
+        response.json()["state"].clone()
+    };
+    state();
+    let ticket = backend.api("POST", "/api/ticket", Some(&token), Some(json!({})));
+    let url = format!(
+        "ws://127.0.0.1:{}/terminal/ws?ticket={}&after=0",
+        backend.port,
+        ticket.json()["ticket"].as_str().unwrap()
+    );
+    let mut request = url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("origin", origin.parse().unwrap());
+    let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Message::Text(text) = socket.next().await.unwrap().unwrap()
+                && serde_json::from_str::<Value>(&text).unwrap()["state"]["ready"] == true
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("shell prompt");
+    let prompt = state()["prompt"].as_u64().unwrap();
+    // Far more output than one acknowledgement window, then a computed marker.
+    socket
+        .send(Message::Text(
+            json!({"type":"input","data":"seq 1 100000; echo $((6*7))-done\r"})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    // Stop reading and acknowledging, like a phone that lost its network without closing.
+    let deadline = Instant::now() + Duration::from_secs(25);
+    loop {
+        let current = state();
+        if current["ready"] == true && current["prompt"].as_u64().unwrap() > prompt {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the shell stayed paused behind a silent viewer: {current}"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match socket.next().await {
+                None | Some(Err(_)) | Some(Ok(Message::Close(_))) => break,
+                Some(Ok(_)) => {}
+            }
+        }
+    })
+    .await;
+    assert!(closed.is_ok(), "the silent viewer's socket stayed open");
+}
+
 #[test]
 fn mounted_apis_accept_prefix_preserving_and_prefix_stripping_proxies() {
     let backend = Backend::start("server");

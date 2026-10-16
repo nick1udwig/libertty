@@ -48,6 +48,9 @@ Two seconds after the last confirmed reply, browsers ping the terminal or metada
 Live output and repeated state updates do not reset that deadline, so a working downlink cannot conceal a failed return path.
 A replacement handshake keeps the previous socket alive and the last painted screen visible until takeover, and user activity bypasses reconnect backoff.
 Older servers without the heartbeat capability retain their existing reconnect behavior.
+The backend also pings native terminal sockets every five seconds and detaches a viewer that sends nothing for two intervals.
+A phone that loses its network without closing the socket therefore cannot hold the shell's acknowledgement window closed and pause its program.
+Any client message counts as a reply, so queued audio ahead of a protocol pong does not disconnect dictation.
 Audio retains its existing Opus bytes inside a distinct four-byte envelope and is never compressed.
 Herdr viewers opt into sequenced frames in their ticket request and acknowledge parsed frames through the existing acknowledgement control.
 Each viewer has two frames in flight and one pending ANSI update, with ordered deltas merged until they exceed the last full screen size.
