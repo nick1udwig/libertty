@@ -32,7 +32,17 @@ export async function installLossyLink(context) {
       pause(ms) { this.stalls++; this.until = performance.now() + ms; } };
     window.WebSocket = class extends Native {
       set onmessage(handler) {
-        let arrival = 0;
+        // One timer drains an ordered queue; separate timers for one release time can fire out of order.
+        let arrival = 0, timer;
+        const queue = [];
+        const deliver = () => {
+          timer = undefined;
+          while (queue.length && queue[0].due <= performance.now()) {
+            const { event } = queue.shift();
+            if (this.readyState === Native.OPEN) handler.call(this, event);
+          }
+          if (queue.length) timer = setTimeout(deliver, queue[0].due - performance.now());
+        };
         super.onmessage = event => {
           const now = performance.now();
           let due = Math.max(arrival, now);
@@ -42,8 +52,9 @@ export async function installLossyLink(context) {
             if (profile.messages % 11 === 0) { due += 200; profile.losses++; }
           }
           arrival = due;
-          if (due <= now) handler.call(this, event);
-          else setTimeout(() => { if (this.readyState === Native.OPEN) handler.call(this, event); }, due - now);
+          if (due <= now && !queue.length) { handler.call(this, event); return; }
+          queue.push({ due, event });
+          timer ??= setTimeout(deliver, queue[0].due - now);
         };
       }
     };
