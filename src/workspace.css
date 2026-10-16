@@ -73,6 +73,8 @@ dialog .primary[type=submit]{width:100%;margin-top:8px}dialog .actions .primary{
 
 .plugin-entry{border:1px solid var(--line);background:var(--surface);border-radius:var(--r-lg);padding:14px;margin:12px 0}.plugin-entry strong{display:block}.plugin-entry .actions{flex-wrap:wrap}.plugin-entry .toggle{margin:10px 0!important}.plugin-entry p{overflow-wrap:anywhere}
 #workspace-shortcuts{flex:none;background:var(--surface);padding:4px 8px}
+/* 1776 draws a red, white and red stripe where the terminal meets the bars below it. */
+:root[data-theme="1776"] :is(#workspace-navigation,.bottom-nav){border-top:3px solid var(--accent);border-image:linear-gradient(var(--accent) 0 1px,var(--text) 1px 2px,var(--accent) 2px 3px) 3 0 0 0}
 #workspace-navigation{flex:none;min-width:0;background:var(--surface)}
 #workspace-navigation.herdr-navigation,#workspace-navigation.herdr-navigation #tabs,#workspace-navigation.herdr-navigation .herdr-agent-strip{touch-action:pan-x}
 #terminal-tabs-drawer{height:44px;overflow:hidden;transition:height .2s ease}
