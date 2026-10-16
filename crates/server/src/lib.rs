@@ -1,4 +1,4 @@
-pub mod alternatives;
+pub use libertty_engine::alternatives;
 pub mod assets;
 pub mod catalog;
 pub mod completion;
