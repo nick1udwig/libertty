@@ -41,6 +41,8 @@ pub(super) struct Replay {
     /// Output arrived faster than lossless streaming could deliver since the last snapshot.
     stale: bool,
     blocked: Option<Instant>,
+    /// The last sequence of a catch-up replay, which may use a snapshot's worth of credit because input waits for it.
+    catch_up: u64,
 }
 impl Default for Replay {
     fn default() -> Self {
@@ -63,6 +65,7 @@ impl Replay {
             resync: None,
             stale: false,
             blocked: None,
+            catch_up: 0,
         }
     }
     pub fn record(&mut self, data: Arc<str>, attached: bool) {
@@ -92,6 +95,7 @@ impl Replay {
             .filter(|output| output.seq > after)
             .cloned()
             .collect();
+        self.catch_up = self.pending.back().map_or(0, |output| output.seq);
         let lost = if after == 0 {
             self.truncated
         } else {
@@ -127,6 +131,7 @@ impl Replay {
         self.resync = None;
         self.stale = false;
         self.blocked = None;
+        self.catch_up = 0;
     }
     /// Account for a snapshot of everything through the latest sequence, and stream nothing until it is acknowledged.
     pub fn snapshot_sent(&mut self, bytes: usize) -> u64 {
@@ -138,6 +143,7 @@ impl Replay {
         self.resync = Some(self.seq);
         self.stale = false;
         self.blocked = None;
+        self.catch_up = 0;
         self.seq
     }
     pub fn last_seq(&self) -> u64 {
@@ -158,12 +164,17 @@ impl Replay {
         }
         now.duration_since(*self.blocked.get_or_insert(now)) >= RESYNC
     }
+    /// Catch-up replay is bounded by the snapshot threshold, so it leaves in one round trip.
+    fn window(&self) -> usize {
+        if self.catch_up > 0 { SNAPSHOT } else { WINDOW }
+    }
     pub fn next(&mut self) -> Option<Output> {
-        if self.outstanding_bytes >= WINDOW {
+        let window = self.window();
+        if self.outstanding_bytes >= window {
             return None;
         }
         let mut output = self.pending.pop_front()?;
-        let limit = BATCH.min(WINDOW - self.outstanding_bytes);
+        let limit = BATCH.min(window - self.outstanding_bytes);
         if self
             .pending
             .front()
@@ -194,19 +205,24 @@ impl Replay {
         while self.outstanding.front().is_some_and(|(at, _)| *at <= seq) {
             self.outstanding_bytes -= self.outstanding.pop_front().unwrap().1;
         }
+        if seq >= self.catch_up {
+            self.catch_up = 0;
+        }
         if let Some(snapshot) = self.resync.filter(|snapshot| seq >= *snapshot) {
             // Resume lossless streaming from the acknowledged picture.
             self.resync = None;
             self.stale = self.resume(snapshot);
             if self.stale {
                 self.pending.clear();
+                self.catch_up = 0;
             }
         }
         true
     }
     /// The shell pauses only while a viewer keeps up with lossless delivery.
     pub fn paused(&self) -> bool {
-        self.resync.is_none() && (self.outstanding_bytes >= WINDOW || !self.pending.is_empty())
+        self.resync.is_none()
+            && (self.outstanding_bytes >= self.window() || !self.pending.is_empty())
     }
     #[cfg(test)]
     pub fn outstanding_bytes(&self) -> usize {
@@ -309,6 +325,32 @@ mod tests {
         }
         assert_eq!(suffix, chunks[first.seq as usize..].concat());
         assert!(replay.pending_empty());
+    }
+    #[test]
+    fn catch_up_replay_leaves_in_one_round_trip_and_live_output_uses_the_normal_window() {
+        let mut replay = Replay::default();
+        for _ in 0..50 {
+            replay.record("x".repeat(4096).into(), false);
+        }
+        assert!(!replay.attach(0, false).snapshot);
+        let (mut sent, mut last) = (0, 0);
+        while let Some(output) = replay.next() {
+            (sent, last) = (sent + output.bytes, output.seq);
+        }
+        assert_eq!(
+            sent,
+            50 * 4096,
+            "the whole catch-up leaves before any acknowledgement"
+        );
+        assert!(replay.acknowledge(last));
+        for _ in 0..50 {
+            replay.record("x".repeat(4096).into(), true);
+        }
+        sent = 0;
+        while let Some(output) = replay.next() {
+            sent += output.bytes;
+        }
+        assert_eq!(sent, WINDOW, "live output keeps the normal window");
     }
     #[test]
     fn large_or_lost_history_selects_a_snapshot_and_snapshots_suspend_streaming() {

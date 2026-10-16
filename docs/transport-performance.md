@@ -280,6 +280,7 @@ Replay history retains the original chunks so reconnecting at an earlier cursor 
 A replacement socket resumes after the last output the browser received, including output still waiting to paint, so held output is never sent twice.
 Each socket acknowledges only sequences it delivered, so painting output from an earlier socket cannot leave the replacement's window unacknowledged.
 Reloads and reconnects missing more than 256 KiB, or output no longer in history, receive one snapshot of the backend's terminal model instead of the raw replay.
+A smaller catch-up replay may use 256 KiB of credit until it is acknowledged, so it arrives in one round trip while input waits for it.
 A viewer whose window stays closed for five seconds is resynchronized with a snapshot, so a slow phone no longer pauses the shell's programs.
 Live output is sent immediately without a batching timer, and an existing oversized chunk remains whole.
 
