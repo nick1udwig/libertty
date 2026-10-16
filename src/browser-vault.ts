@@ -1,15 +1,16 @@
 import { decryptBrowserKey, encryptBrowserKey, generateBrowserKey, parseKeyBackup, publicInfo, type EncryptedBrowserKey, type KeyBackup } from './browser-key.ts';
-/** Canonical browser keys. Only encrypted records are written to IndexedDB. */
+/** Canonical browser keys, stored only as encrypted records in IndexedDB. */
 export class BrowserVault {
   private database?: Promise<IDBDatabase>;
   private open() {
     return this.database ||= new Promise<IDBDatabase>((resolve, reject) => {
       let blocked = false;
+      // Keep the durable database name so existing encrypted keys remain available.
       const request = indexedDB.open('termai-keychain', 1);
       request.onupgradeneeded = () => request.result.createObjectStore('keys', { keyPath: 'id' });
       request.onsuccess = () => { if (blocked) { request.result.close(); return; } request.result.onversionchange = () => { request.result.close(); this.database = undefined; }; resolve(request.result); };
       request.onerror = () => { this.database = undefined; reject(new Error('Browser key storage is unavailable.')); };
-      request.onblocked = () => { blocked = true; this.database = undefined; reject(new Error('Close other termai windows and try again.')); };
+      request.onblocked = () => { blocked = true; this.database = undefined; reject(new Error('Close other libertty windows and try again.')); };
     });
   }
   private async request<T>(mode: IDBTransactionMode, operation: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {

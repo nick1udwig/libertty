@@ -1,18 +1,18 @@
 # Runtime plugin experiment
 
-Termai's host menu gets its connection actions from a plugin registry.
+Libertty's host menu gets its connection actions from a plugin registry.
 Terminal, SFTP / Files, Herdr and Reading Mode are included.
-Browser plugins can add a connection action and a tab at runtime by loading a package in Settings, without rebuilding Termai or restarting its server.
+Browser plugins can add a connection action and a tab at runtime by loading a package in Settings, without rebuilding Libertty or restarting its server.
 Reading Mode opens through terminal reading phrases such as `look at README.md` or `git diff | look at`, rather than a host-menu connection action.
 
 This experiment supports browser views with permission to read one user-selected text file and save their own view state.
-Pairing, SSH authentication, routing, credentials and resource cleanup stay in Termai.
+Pairing, SSH authentication, routing, credentials and resource cleanup stay in Libertty.
 New machine-side protocols still need a backend provider; packages cannot install server code.
 
 ## Try the log viewer
 
-1. Build and start Termai normally with `npm run build` and `npm start`.
-2. Open **Settings → Plugins → Load plugin package** and select [`examples/plugins/example.log-viewer.termai-plugin.json`](../examples/plugins/example.log-viewer.termai-plugin.json).
+1. Build and start Libertty normally with `npm run build` and `npm start`.
+2. Open **Settings → Plugins → Load plugin package** and select [`examples/plugins/example.log-viewer.libertty-plugin.json`](../examples/plugins/example.log-viewer.libertty-plugin.json).
 3. Open a saved HTTP or SSH host's menu and select **Connect Log viewer**.
 4. Choose a UTF-8 text file on that host.
    Relative paths resolve against the connection's starting directory.
@@ -70,33 +70,34 @@ Package the sample, or another directory containing `manifest.json` and `view.ht
 
 ```sh
 node examples/plugins/package.mjs
-node examples/plugins/package.mjs /path/to/my-plugin /tmp/my-plugin.termai-plugin.json
+node examples/plugins/package.mjs /path/to/my-plugin /tmp/my-plugin.libertty-plugin.json
 ```
 
-Building a plugin is independent of Termai's Vite build.
+Building a plugin is independent of Libertty's Vite build.
 Bundle any libraries into the HTML or inline JavaScript yourself; the frame does not fetch scripts, styles or fonts from external URLs.
 
 ## Browser API
 
-Termai injects `window.termai` into the isolated frame.
-Wait for `termai.ready` before using its connection:
+Libertty injects `window.libertty` into the isolated frame.
+Wait for `libertty.ready` before using its connection:
 
 ```js
-const { name, state } = await termai.ready;
-const { path, text, truncated } = await termai.request('file.read');
-await termai.request('state.save', { filter: 'warning' });
-const unsubscribe = termai.onVisibility(visible => {
-  // Start or pause polling here. Also check termai.visible on startup.
+const { name, state } = await libertty.ready;
+const { path, text, truncated } = await libertty.request('file.read');
+await libertty.request('state.save', { filter: 'warning' });
+const unsubscribe = libertty.onVisibility(visible => {
+  // Start or pause polling here.
+  // Also check libertty.visible on startup.
 });
 ```
 
 `file.read` accepts no arguments.
 Its optional `version` identifies the validated snapshot, and `unchanged: true` lets a view skip repeated filtering or rendering.
 The returned `text` is always complete even when the transport uses an append delta.
-Pause work when `termai.visible` is false and reuse derived display state while a result is unchanged.
+Pause work when `libertty.visible` is false and reuse derived display state while a result is unchanged.
 The host bridge chooses the backend, session and selected path; a plugin cannot widen its scope by passing another path or session.
 `state.save` accepts JSON up to 16 KB and stores it only on this tab.
-Read the restored value from `termai.ready`.
+Read the restored value from `libertty.ready`.
 `name` is the tab's display name, and visibility includes the selected tab, workspace page and document visibility.
 Requests time out after 15 seconds; at most four are handled concurrently per view.
 Other operations are rejected.

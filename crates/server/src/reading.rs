@@ -2,9 +2,9 @@ use crate::{
     files::{self, Error, Result},
     storage,
 };
+use libertty_engine::{truncate_utf16, utf16_len};
 use serde::Serialize;
 use std::collections::VecDeque;
-use termai_engine::{truncate_utf16, utf16_len};
 use tokio::io::AsyncReadExt;
 pub const MAX_READING_BYTES: usize = 20 * 1024 * 1024;
 pub fn mime(file: &str, data: &[u8]) -> &'static str {

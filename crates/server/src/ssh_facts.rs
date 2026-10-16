@@ -3,13 +3,7 @@ use crate::{
     probes::{ABORTED, SharedTask},
     ssh::{SSHHost, bounded},
 };
-use russh_sftp::{client::RawSftpSession, protocol::StatusCode};
-use serde_json::{Value, json};
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
-use termai_engine::{
+use libertty_engine::{
     command_policy::subcommands_for,
     help::{
         commands_from_help, commands_from_manual, flags_from_help, has_command_slot,
@@ -19,6 +13,12 @@ use termai_engine::{
     repair::{shell_quote, tokens},
     types::{Catalog, CommandMetadata, DirectoryEntry, DirectorySnapshot, FileInfo, Help},
     validation::Environment,
+};
+use russh_sftp::{client::RawSftpSession, protocol::StatusCode};
+use serde_json::{Value, json};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -315,7 +315,7 @@ impl SSHHost {
                     ("ENV".into(), "/dev/null".into()),
                     ("GIT_OPTIONAL_LOCKS".into(), "0".into()),
                     (
-                        "TERMAI_COMPLETIONS_FILE".into(),
+                        "LIBERTTY_COMPLETIONS_FILE".into(),
                         path::join(&[&self.directory(), "completions"]),
                     ),
                 ]);
@@ -331,7 +331,7 @@ impl SSHHost {
                     .collect::<Vec<_>>()
                     .join(" ");
                 let command = format!(
-                    "cd {} && env {assignments} bash --noprofile --norc -c {} termai-completion {args}",
+                    "cd {} && env {assignments} bash --noprofile --norc -c {} libertty-completion {args}",
                     shell_quote(&catalog.cwd),
                     shell_quote(COMPLETION_SCRIPT)
                 );
@@ -353,7 +353,7 @@ impl SSHHost {
             }
             "describe" => {
                 let args = tokens(text("command")?);
-                let script = termai_engine::command_policy::script_operand(
+                let script = libertty_engine::command_policy::script_operand(
                     &args.iter().map(|w| &w.value).collect::<Vec<_>>(),
                 );
                 if args.len() < 2

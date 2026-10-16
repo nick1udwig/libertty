@@ -1,5 +1,5 @@
+use libertty_server::herdr_reading::{Opened, open};
 use std::sync::atomic::Ordering;
-use termai_server::herdr_reading::{Opened, open};
 use tokio_util::sync::CancellationToken;
 #[path = "support/herdr.rs"]
 mod support;

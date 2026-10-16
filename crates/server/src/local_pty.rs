@@ -4,12 +4,12 @@ use crate::{
     shell::local_bash,
     storage,
 };
+use libertty_engine::{path, validation::Environment};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::{
     io::{Read, Write},
     sync::{Arc, Condvar, Mutex},
 };
-use termai_engine::{path, validation::Environment};
 use tokio::sync::mpsc;
 pub(crate) struct LocalPty {
     master: Mutex<Box<dyn MasterPty + Send>>,
@@ -59,19 +59,19 @@ impl LocalPty {
         for (key, value) in [
             ("TERM", "xterm-256color".into()),
             ("COLORTERM", "truecolor".into()),
-            ("TERMAI_TRANSFER_DIR", directory.to_owned()),
-            ("TERMAI_CAPTURE_SSH", "1".into()),
-            ("TERMAI_READING_DIR", directory.to_owned()),
-            ("TERMAI_NONCE", nonce.to_owned()),
-            ("TERMAI_HISTORY_SOURCE", history_source),
+            ("LIBERTTY_TRANSFER_DIR", directory.to_owned()),
+            ("LIBERTTY_CAPTURE_SSH", "1".into()),
+            ("LIBERTTY_READING_DIR", directory.to_owned()),
+            ("LIBERTTY_NONCE", nonce.to_owned()),
+            ("LIBERTTY_HISTORY_SOURCE", history_source),
         ] {
             command.env(key, value);
         }
         for (key, name) in [
-            ("TERMAI_ENV_FILE", "environment"),
-            ("TERMAI_COMMANDS_FILE", "commands"),
-            ("TERMAI_FUNCTIONS_FILE", "functions"),
-            ("TERMAI_COMPLETIONS_FILE", "completions"),
+            ("LIBERTTY_ENV_FILE", "environment"),
+            ("LIBERTTY_COMMANDS_FILE", "commands"),
+            ("LIBERTTY_FUNCTIONS_FILE", "functions"),
+            ("LIBERTTY_COMPLETIONS_FILE", "completions"),
         ] {
             command.env(key, path::join(&[directory, name]));
         }

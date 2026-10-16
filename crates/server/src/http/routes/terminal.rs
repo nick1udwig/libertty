@@ -1,5 +1,5 @@
 use super::*;
-use termai_engine::truncate_utf16;
+use libertty_engine::truncate_utf16;
 
 pub(super) async fn healthz(
     app: &Arc<App>,
@@ -7,7 +7,7 @@ pub(super) async fn healthz(
 ) -> Result<Response<Body>, Failure> {
     Ok(json_response(
         StatusCode::OK,
-        json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"commit":app.config.release.as_ref().and_then(|v| v["commit"].as_str()).or(option_env!("TERMAI_COMMIT")),"platform":if cfg!(target_os="macos"){"darwin"}else{std::env::consts::OS},"arch":if cfg!(target_arch="x86_64"){"x64"}else{std::env::consts::ARCH},"runtime":"rust","packaged":app.config.release.is_some() || option_env!("TERMAI_COMMIT").is_some()}),
+        json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"commit":app.config.release.as_ref().and_then(|v| v["commit"].as_str()).or(option_env!("LIBERTTY_COMMIT")),"platform":if cfg!(target_os="macos"){"darwin"}else{std::env::consts::OS},"arch":if cfg!(target_arch="x86_64"){"x64"}else{std::env::consts::ARCH},"runtime":"rust","packaged":app.config.release.is_some() || option_env!("LIBERTTY_COMMIT").is_some()}),
     ))
 }
 
@@ -21,7 +21,7 @@ pub(super) async fn api_connect(
         if !token_matches(&app.token, input.token.as_deref().unwrap_or("")) {
             return Err((
                 StatusCode::UNAUTHORIZED,
-                "Enter the pairing token shown by your termai server.".into(),
+                "Enter the pairing token shown by your libertty server.".into(),
             ));
         }
         let mut registry = app.owners.lock().unwrap();
@@ -67,7 +67,7 @@ pub(super) async fn api_connect(
     response.headers_mut().insert(
         "set-cookie",
         HeaderValue::from_str(&format!(
-            "termai={owner}; Path={}; HttpOnly; SameSite=Strict; Max-Age=31536000{secure}",
+            "libertty={owner}; Path={}; HttpOnly; SameSite=Strict; Max-Age=31536000{secure}",
             app.config.public_base
         ))
         .map_err(|_| fail("Invalid pairing credential."))?,
@@ -88,7 +88,7 @@ pub(super) async fn api_dictation(
     _ctx: OwnerContext,
     _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    return ok(dictation::detect(&std::env::vars().collect()).await);
+    return ok(dictation::detect(&crate::environment::vars().collect()).await);
 }
 
 pub(super) async fn api_ping(
@@ -196,7 +196,7 @@ pub(super) async fn api_dictation_install(
 ) -> Result<Response<Body>, Failure> {
     let session = ctx.session;
     let input: crate::protocol::InputStamp = typed_body(&mut req, 16384).await?;
-    let command = dictation::install_command(&std::env::vars().collect())
+    let command = dictation::install_command(&crate::environment::vars().collect())
         .await
         .map_err(fail)?;
     if !session.paste(&command, input.prompt, input.revision, true, None) {

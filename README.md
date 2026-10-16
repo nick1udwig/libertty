@@ -1,9 +1,13 @@
-# termai
+# libertty
+
+Previously named Termai, Libertty keeps existing pairing data, SSH keys, hosts and browser settings when upgraded at the same URL.
+Use the `libertty` executable and `LIBERTTY_*` settings for new installations.
+Existing `TERMAI_*` settings remain accepted, with `LIBERTTY_*` values taking precedence.
 
 A webterm designed for modern mobile.
 
 Run the server on your Linux machine, connect from your phone over Tailscale, and dictate commands.
-termai repairs dictation using your shell’s commands, files and history, with the original text available as an alternative.
+libertty repairs dictation using your shell’s commands, files and history, with the original text available as an alternative.
 
 <p>
   <img src="docs/images/example-cd.png" width="250" alt="Mobile terminal with alternatives correcting dictation to valid cd command.">
@@ -11,10 +15,10 @@ termai repairs dictation using your shell’s commands, files and history, with 
   <img src="docs/images/example-herdr.png" width="250" alt="Mobile terminal herdr integration.">
 </p>
 
-termai integrates with [voxtype-mobile](https://github.com/nick1udwig/voxtype-mobile) if you don't have a dictation service.
+libertty integrates with [voxtype-mobile](https://github.com/nick1udwig/voxtype-mobile) if you don't have a dictation service.
 Dictation runs alongside your server to maximize privacy and minimize latency.
 
-termai integrates with [herdr](https://github.com/herdrdev/herdr) to provide a first-class agent experience on mobile.
+libertty integrates with [herdr](https://github.com/herdrdev/herdr) to provide a first-class agent experience on mobile.
 Manage multiple agents via dictation.
 Notifications when work is done.
 Beautiful and fast.
@@ -24,7 +28,7 @@ Beautiful and fast.
 After the first stable release has finished building, install the server and optionally set up Herdr, Voxtype Mobile and private Tailscale access with:
 
 ```sh
-curl -fsSL https://github.com/nick1udwig/termai/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/nick1udwig/libertty/releases/latest/download/install.sh | bash
 ```
 
 The installer bundles the native Rust server and its setup runtime, and asks before installing a user service or optional companions.
@@ -49,7 +53,7 @@ Every browser must pair, including on localhost.
 Anyone with the token and network access can run commands as your host user.
 
 The shell starts in the checkout directory.
-Set `TERMAI_CWD=/path/to/project` to change it.
+Set `LIBERTTY_CWD=/path/to/project` to change it.
 For development, use `npm run dev`.
 Vite runs as a loopback frontend tool behind the Rust server's pairing gate, including authenticated hot reload.
 Rust is the only backend, while Node supports frontend builds, installation tools and test fixtures.
@@ -60,32 +64,32 @@ Sign in to Tailscale on your host and phone using the same tailnet.
 Replace the hostname below with your host’s full Tailscale DNS name:
 
 ```sh
-HOST=127.0.0.1 PORT=7321 TERMAI_ALLOWED_HOSTS=my-machine.tail1234.ts.net TERMAI_BASE_PATH=/termai npm start
+HOST=127.0.0.1 PORT=7321 LIBERTTY_ALLOWED_HOSTS=my-machine.tail1234.ts.net LIBERTTY_BASE_PATH=/libertty npm start
 ```
 
 In another terminal:
 
 ```sh
-tailscale serve --bg --set-path=/termai http://127.0.0.1:7321
+tailscale serve --bg --set-path=/libertty http://127.0.0.1:7321
 ```
 
-Follow any prompt to enable HTTPS, then open **https://my-machine.tail1234.ts.net/termai** on your phone and pair.
+Follow any prompt to enable HTTPS, then open **https://my-machine.tail1234.ts.net/libertty** on your phone and pair.
 You can add it to your home screen.
-Keep termai running; Tailscale Serve does not start it for you.
+Keep libertty running; Tailscale Serve does not start it for you.
 
 ## Use it
 
 - **Dictate commands** with your keyboard’s dictation or the built-in Voxtype Mobile integration.
   Review command alternatives before sending.
 - **Open hosts** with **+**.
-  Connect directly to termai backends or use SSH through a backend.
+  Connect directly to libertty backends or use SSH through a backend.
   Manage SSH keys in **Vault → Keychain**.
 - **View Herdr sessions** with **Connect Herdr** in a host's menu, or by typing `herdr` in a local or SSH terminal.
 - **Read files and output** with `look at README.md` or `git diff | look at`.
 - **Transfer files** with `upload`, `download foo.py`, or **Connect SFTP / Files** in a host’s menu.
 - **Customize** font size, shortcuts and input preferences in **Settings**.
 - **Load plugins** in **Settings → Plugins** to add connection actions at runtime.
-  Try the included [log viewer package](examples/plugins/example.log-viewer.termai-plugin.json).
+  Try the included [log viewer package](examples/plugins/example.log-viewer.libertty-plugin.json).
 
 ## Documentation
 

@@ -1,7 +1,7 @@
+use libertty_server::vault::{KeyReference, Vault, inspect_private_key};
 use rand::rngs::OsRng;
 use ssh_key::{Algorithm, LineEnding, PrivateKey};
 use std::{fs, os::unix::fs::PermissionsExt, sync::Arc};
-use termai_server::vault::{KeyReference, Vault, inspect_private_key};
 fn raw_key() -> String {
     PrivateKey::random(&mut OsRng, Algorithm::Ed25519)
         .unwrap()

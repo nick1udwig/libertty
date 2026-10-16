@@ -1,4 +1,4 @@
-use termai_engine::utf16_len;
+use libertty_engine::utf16_len;
 mod idempotency;
 mod routes;
 mod socket;
@@ -50,7 +50,7 @@ pub struct Config {
 impl Config {
     pub fn from_env() -> Result<Self, String> {
         let setting = |name: &str, fallback: &str| {
-            std::env::var(name)
+            crate::environment::var(name)
                 .ok()
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| fallback.into())
@@ -63,7 +63,7 @@ impl Config {
             .ok_or("PORT must be between 1 and 65535.")?;
         let base_path = format!(
             "/{}",
-            setting("TERMAI_BASE_PATH", "")
+            setting("LIBERTTY_BASE_PATH", "")
                 .split('/')
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>()
@@ -75,7 +75,7 @@ impl Config {
                     .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
             })
         {
-            return Err("Invalid TERMAI_BASE_PATH.".into());
+            return Err("Invalid LIBERTTY_BASE_PATH.".into());
         }
         let public_base = if base_path == "/" {
             "/".into()
@@ -91,7 +91,7 @@ impl Config {
                 .collect::<HashSet<_>>()
         };
         let allowed_hosts = set(
-            "TERMAI_ALLOWED_HOSTS",
+            "LIBERTTY_ALLOWED_HOSTS",
             if loopback {
                 "localhost,127.0.0.1,[::1]"
             } else {
@@ -99,16 +99,16 @@ impl Config {
             },
         );
         if !loopback && allowed_hosts.is_empty() {
-            return Err("Set TERMAI_ALLOWED_HOSTS to the hostname(s) used by your phone.".into());
+            return Err("Set LIBERTTY_ALLOWED_HOSTS to the hostname(s) used by your phone.".into());
         }
         let home = setting("HOME", ".");
         let data_directory = PathBuf::from(setting(
-            "TERMAI_DATA_DIR",
-            &format!("{home}/.local/share/termai"),
+            "LIBERTTY_DATA_DIR",
+            &crate::environment::data_directory(&home).to_string_lossy(),
         ));
         let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
         let packaged = crate::release::packaged_root().map(|root| root.join("dist"));
-        let dist = std::env::var_os("TERMAI_DIST_DIR")
+        let dist = crate::environment::var_os("LIBERTTY_DIST_DIR")
             .map(PathBuf::from)
             .or(packaged)
             .unwrap_or_else(|| source_root.join("dist"));
@@ -120,10 +120,10 @@ impl Config {
             data_directory,
             dist,
             allowed_hosts,
-            allowed_origins: set("TERMAI_ALLOWED_ORIGINS", ""),
+            allowed_origins: set("LIBERTTY_ALLOWED_ORIGINS", ""),
             release: crate::release::metadata(),
             dev_frontend: if setting("NODE_ENV", "production") == "development" {
-                std::env::var("TERMAI_DEV_FRONTEND")
+                crate::environment::var("LIBERTTY_DEV_FRONTEND")
                     .ok()
                     .map(|v| crate::dev::origin(&v))
                     .transpose()?
@@ -265,13 +265,13 @@ impl App {
     pub async fn new(config: Config) -> Result<Arc<Self>, String> {
         let token = pairing_token(
             &config.data_directory,
-            std::env::var("TERMAI_TOKEN").ok().as_deref(),
+            crate::environment::var("LIBERTTY_TOKEN").ok().as_deref(),
         )
         .map_err(|e| e.to_string())?;
         let owners = Pairings::open(&config.data_directory, &token).map_err(|e| e.to_string())?;
         let owners = Arc::new(Mutex::new(owners));
         let registry = owners.clone();
-        let contact = std::env::var("TERMAI_PUSH_CONTACT")
+        let contact = crate::environment::var("LIBERTTY_PUSH_CONTACT")
             .ok()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| {
@@ -295,7 +295,10 @@ impl App {
         let services = HostServices::new();
         let commands = services
             .catalog
-            .executable_names(&std::env::vars().collect(), &CancellationToken::new())
+            .executable_names(
+                &crate::environment::vars().collect(),
+                &CancellationToken::new(),
+            )
             .await?;
         Ok(Arc::new(Self {
             vault: Arc::new(Vault::new(&config.data_directory)),
@@ -360,8 +363,13 @@ impl App {
             .get("cookie")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| {
-                s.split(';')
-                    .find_map(|s| s.trim_start().strip_prefix("termai=").filter(|s| valid(s)))
+                s.split(';').find_map(|s| {
+                    let cookie = s.trim_start();
+                    cookie
+                        .strip_prefix("libertty=")
+                        .or_else(|| cookie.strip_prefix("termai="))
+                        .filter(|s| valid(s))
+                })
             });
         bearer
             .or(cookie)
@@ -425,7 +433,7 @@ impl App {
             return Ok(terminal.session.clone());
         }
         drop(registry);
-        let cwd = std::env::var("TERMAI_CWD")
+        let cwd = crate::environment::var("LIBERTTY_CWD")
             .ok()
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| {
@@ -549,7 +557,7 @@ impl App {
         let name = name
             .filter(|n| !n.is_empty())
             .map(str::to_owned)
-            .unwrap_or_else(|| termai_engine::path::basename(&file));
+            .unwrap_or_else(|| libertty_engine::path::basename(&file));
         let mut downloads = self.downloads.lock().unwrap();
         downloads.retain(|_, d| {
             d.until >= Instant::now()
@@ -778,7 +786,7 @@ async fn security(State(app): State<Arc<App>>, req: Request<Body>, next: Next) -
             ("access-control-allow-credentials", "true"),
             (
                 "access-control-allow-headers",
-                "Content-Type, Authorization, If-None-Match, X-Termai-Link, Idempotency-Key, Range",
+                "Content-Type, Authorization, If-None-Match, X-Libertty-Link, Idempotency-Key, Range",
             ),
             ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS"),
             ("access-control-allow-private-network", "true"),
@@ -848,7 +856,7 @@ async fn compression(req: Request<Body>, next: Next) -> Response<Body> {
     );
     let constrained = req
         .headers()
-        .get("x-termai-link")
+        .get("x-libertty-link")
         .is_some_and(|value| value == "constrained");
     let head = *req.method() == Method::HEAD;
     let response = next.run(req).await;
@@ -892,7 +900,7 @@ async fn compression(req: Request<Body>, next: Next) -> Response<Body> {
         );
         parts.headers.append(
             "vary",
-            HeaderValue::from_static("Accept-Encoding, X-Termai-Link"),
+            HeaderValue::from_static("Accept-Encoding, X-Libertty-Link"),
         );
         Response::from_parts(parts, Body::from(compressed))
     } else {
@@ -1182,7 +1190,7 @@ pub async fn run() -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     println!(
-        "termai → http://{}:{}{} (Rust, Ghostty)",
+        "libertty → http://{}:{}{} (Rust, Ghostty)",
         app.config.host, app.config.port, app.config.public_base
     );
     println!("Pairing token: {}", app.token);

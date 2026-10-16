@@ -4,9 +4,9 @@ use flate2::{Compression, write::GzEncoder};
 use serde_json::{Value, json};
 use std::io::Write;
 
-pub const BINARY: &str = "termai.binary.v1";
-pub const GZIP: &str = "termai.gzip.v1";
-pub const GZIP_FAST: &str = "termai.gzip-fast.v1";
+pub const BINARY: &str = "libertty.binary.v1";
+pub const GZIP: &str = "libertty.gzip.v1";
+pub const GZIP_FAST: &str = "libertty.gzip-fast.v1";
 pub const MAX_DECODED: usize = 2 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {

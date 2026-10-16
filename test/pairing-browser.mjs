@@ -7,11 +7,11 @@ import http from 'node:http';
 import { WebSocket } from 'ws';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-const directory = await mkdtemp('/tmp/termai-dev-pairing-');
+const directory = await mkdtemp('/tmp/libertty-dev-pairing-');
 const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
 const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
 const origin = `http://127.0.0.1:${port}`; const base = origin + '/audit/';
-const server = spawn(process.execPath, ['scripts/dev.mjs'], { cwd: path.resolve(import.meta.dirname, '..'), env: { ...process.env, NODE_ENV: 'development', HOST: '127.0.0.1', PORT: String(port), HOME: directory, TERMAI_CWD: directory, TERMAI_NO_RC: '1', TERMAI_TOKEN: 'dev-test-pairing-token-123456789', TERMAI_DATA_DIR: directory, TERMAI_BASE_PATH: '/audit', TERMAI_ALLOWED_HOSTS: '127.0.0.1', CARGO_HOME: process.env.CARGO_HOME || path.join(process.env.HOME, '.cargo'), RUSTUP_HOME: process.env.RUSTUP_HOME || path.join(process.env.HOME, '.rustup') }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.execPath, ['scripts/dev.mjs'], { cwd: path.resolve(import.meta.dirname, '..'), env: { ...process.env, NODE_ENV: 'development', HOST: '127.0.0.1', PORT: String(port), HOME: directory, LIBERTTY_CWD: directory, LIBERTTY_NO_RC: '1', LIBERTTY_TOKEN: 'dev-test-pairing-token-123456789', LIBERTTY_DATA_DIR: directory, LIBERTTY_BASE_PATH: '/audit', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', CARGO_HOME: process.env.CARGO_HOME || path.join(process.env.HOME, '.cargo'), RUSTUP_HOME: process.env.RUSTUP_HOME || path.join(process.env.HOME, '.rustup') }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', d => logs += d); server.stderr.on('data', d => logs += d); const exited = once(server, 'exit'); let browser;
 try {
   for (let i = 0; !logs.includes('Pairing token:'); i++) { if (i > 1200 || server.exitCode !== null) throw Error('Startup failed: ' + logs); await new Promise(r => setTimeout(r, 50)); }
@@ -51,13 +51,19 @@ try {
   assert.deepEqual(errors, []);
   assert.ok(hmr.some(m => m.includes('connected.')), 'authenticated Vite HMR should connect');
   const saved = await page.context().storageState();
-  assert.equal(await deniedUpgrade({ Origin: 'https://untrusted.invalid', Cookie: 'termai=' + saved.cookies.find(cookie => cookie.name === 'termai').value }), 403, 'paired Vite upgrades require an allowed origin');
-  assert.ok(saved.cookies.find(cookie => cookie.name === 'termai').expires > Date.now() / 1000, 'pairing cookie must survive browser shutdown');
+  const legacyCookie = saved.cookies.find(cookie => cookie.name === 'libertty');
+  assert.equal((await fetch(base + '@vite/client', { headers: { Cookie: 'termai=' + legacyCookie.value } })).status, 200, 'legacy pairing cookies must unlock protected development assets');
+  assert.equal(await deniedUpgrade({ Origin: 'https://untrusted.invalid', Cookie: 'libertty=' + saved.cookies.find(cookie => cookie.name === 'libertty').value }), 403, 'paired Vite upgrades require an allowed origin');
+  assert.ok(saved.cookies.find(cookie => cookie.name === 'libertty').expires > Date.now() / 1000, 'pairing cookie must survive browser shutdown');
   saved.cookies = [];
+  for (const entry of saved.origins) for (const item of entry.localStorage) if (item.name.startsWith('libertty.')) item.name = item.name.replace(/^libertty\./, 'termai.');
+  saved.origins[0].localStorage.push({ name: 'termai.theme', value: '"paper"' });
   const reopened = await browser.newContext({ storageState: saved }), reopenedPage = await reopened.newPage();
   await reopenedPage.goto(base); await reopenedPage.locator('#terminal-stack iframe').waitFor();
   const reopenedFrame = await (await reopenedPage.locator('#terminal-stack iframe').elementHandle()).contentFrame();
   await reopenedFrame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected');
+  assert.equal(await reopenedPage.evaluate(() => localStorage.getItem('libertty.theme')), '"paper"');
+  assert.equal(await reopenedPage.evaluate(() => localStorage.getItem('termai.theme')), null);
   await reopened.close();
   console.log('PASS ' + ('Rust') + ' development browser: mounted pairing gate, protected development assets, incorrect-token rejection, connected terminal, remembered pairing without cookies, authenticated Vite HMR');
 } finally { await browser?.close(); server.kill('SIGTERM'); await exited; await rm(directory, { recursive: true, force: true }); }

@@ -7,7 +7,7 @@ Crash probes were run against disposable servers, never against the running user
 
 1.
   **Development file disclosure and conditional authentication bypass.** Before the fix, Vite served backend source and files inside the checkout without pairing.
-  Placing `TERMAI_DATA_DIR` inside the checkout made its `pairing-token` readable through both a normal file URL and `/@fs/...?raw` requests.
+  Placing `LIBERTTY_DATA_DIR` inside the checkout made its `pairing-token` readable through both a normal file URL and `/@fs/...?raw` requests.
   That token could then grant terminal access.
   Vite's rejected filesystem requests also revealed absolute paths.
   Production did not expose these files in the tested configuration.

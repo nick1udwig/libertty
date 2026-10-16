@@ -17,7 +17,7 @@ export class DictationView {
   private fullHeight = 0;
   private lastWidth = 0;
   constructor() {
-    this.button.className = 'dictation-mic'; this.button.id = 'termai-dictation'; this.button.type = 'button'; this.button.hidden = true;
+    this.button.className = 'dictation-mic'; this.button.id = 'libertty-dictation'; this.button.type = 'button'; this.button.hidden = true;
     this.button.innerHTML = '<span class="dictation-microphone-icon"></span><svg class="dictation-check" viewBox="0 0 48 48"><path d="M17.5 24 22 28.5 31 19.5"/></svg><svg class="dictation-dots" viewBox="0 0 48 48"><circle cx="17" cy="24" r="1.6"/><circle cx="24" cy="24" r="1.6"/><circle cx="31" cy="24" r="1.6"/></svg>';
     for (const icon of this.button.children) icon.setAttribute('aria-hidden', 'true');
     this.cancel.className = 'dictation-cancel'; this.cancel.type = 'button';
@@ -30,7 +30,7 @@ export class DictationView {
     this.label.hidden = true; this.activity.append(this.label);
     this.panel.append(this.cancel, this.activity); document.body.append(this.panel, this.button);
     try {
-      const value = JSON.parse(localStorage.getItem('termai.micPositionFraction') || 'null');
+      const value = JSON.parse(localStorage.getItem('libertty.micPositionFraction') || 'null');
       if (Array.isArray(value) && value.length === 2 && value.every(v => typeof v === 'number' && Number.isFinite(v))) this.fraction = value.map(v => Math.max(0, Math.min(1, v)));
     } catch {}
     window.visualViewport?.addEventListener('resize', () => this.layout());
@@ -57,14 +57,14 @@ export class DictationView {
   remember() {
     const { width } = this.bounds();
     this.fraction = [(this.button.offsetLeft - 12) / Math.max(1, width - 72), (this.button.offsetTop - 12) / Math.max(1, this.fullHeight - 72)];
-    try { localStorage.setItem('termai.micPositionFraction', JSON.stringify(this.fraction)); } catch {}
+    try { localStorage.setItem('libertty.micPositionFraction', JSON.stringify(this.fraction)); } catch {}
   }
   update(phase: string, visible: boolean, paused = false) {
     const expanded = phase !== 'idle'; this.waiting = phase === 'finishing' || phase === 'retry';
     this.button.hidden = !visible; this.panel.hidden = !visible || !expanded;
     this.button.classList.toggle('recording', expanded); this.button.classList.toggle('waiting', this.waiting);
     this.button.classList.toggle('paused', paused);
-    this.button.setAttribute('aria-label', 'Termai dictation microphone');
+    this.button.setAttribute('aria-label', 'Libertty dictation microphone');
     this.button.setAttribute('aria-description', paused ? 'Audio capture paused. Unlock or return to resume, or cancel dictation.' : !expanded ? 'Dictate: hold and release, or tap to start and stop. Drag to move.' : phase === 'retry' ? 'Retry retained dictation at the current prompt, or drag to move.' : this.waiting ? 'Transcribing. Drag to move.' : 'Stop dictation. Drag to move.');
     this.button.setAttribute('aria-pressed', String(expanded));
     this.activity.setAttribute('aria-label', paused ? 'Audio capture paused' : this.waiting ? 'Transcribing' : 'Microphone activity');

@@ -1,8 +1,8 @@
+use libertty_server::{catalog::CatalogHost, directories::Directories, probes::ProbePool};
 use std::{
     collections::BTreeMap,
     os::unix::fs::{PermissionsExt, symlink},
 };
-use termai_server::{catalog::CatalogHost, directories::Directories, probes::ProbePool};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]

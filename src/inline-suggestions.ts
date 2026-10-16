@@ -62,21 +62,21 @@ export class InlineSuggestions {
     this.pendingPresentation = new TerminalPresentation(document.getElementById('terminal-viewport')!, () => {
       this.pendingCursor = undefined; this.render();
     }, false);
-    try { this.phrases = readingPhrases(JSON.parse(localStorage.getItem('termai.readingPhrases') || 'null')); } catch {}
+    try { this.phrases = readingPhrases(JSON.parse(localStorage.getItem('libertty.readingPhrases') || 'null')); } catch {}
     const setting = document.getElementById('auto-alternatives') as HTMLInputElement;
-    try { this.autoOpen = localStorage.getItem('termai.autoAlternatives') !== 'false' && localStorage.getItem('termai.justRun') !== 'true'; } catch {}
+    try { this.autoOpen = localStorage.getItem('libertty.autoAlternatives') !== 'false' && localStorage.getItem('libertty.justRun') !== 'true'; } catch {}
     setting.checked = this.autoOpen;
     setting.onchange = () => {
       this.autoOpen = setting.checked;
-      try { localStorage.setItem('termai.autoAlternatives', String(this.autoOpen)); localStorage.removeItem('termai.justRun'); } catch {}
+      try { localStorage.setItem('libertty.autoAlternatives', String(this.autoOpen)); localStorage.removeItem('libertty.justRun'); } catch {}
       this.open = this.autoOpen; this.render();
     };
     const tapSetting = document.getElementById('tap-alternate-send') as HTMLInputElement;
-    try { this.tapToSend = localStorage.getItem('termai.tapAlternateSend') !== 'false'; } catch {}
+    try { this.tapToSend = localStorage.getItem('libertty.tapAlternateSend') !== 'false'; } catch {}
     tapSetting.checked = this.tapToSend;
     tapSetting.onchange = () => {
       this.tapToSend = tapSetting.checked;
-      try { localStorage.setItem('termai.tapAlternateSend', String(this.tapToSend)); } catch {}
+      try { localStorage.setItem('libertty.tapAlternateSend', String(this.tapToSend)); } catch {}
     };
     document.addEventListener('pointerdown', event => {
       if (!this.menu.contains(event.target as Node) && !this.toggle.contains(event.target as Node)) this.collapse();

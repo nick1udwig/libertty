@@ -1,7 +1,7 @@
 /** A negotiated envelope keeps binary terminal traffic out of JSON/base64. */
-export const BINARY_PROTOCOL = 'termai.binary.v1';
-export const GZIP_PROTOCOL = 'termai.gzip.v1';
-export const GZIP_FAST_PROTOCOL = 'termai.gzip-fast.v1';
+export const BINARY_PROTOCOL = 'libertty.binary.v1';
+export const GZIP_PROTOCOL = 'libertty.gzip.v1';
+export const GZIP_FAST_PROTOCOL = 'libertty.gzip-fast.v1';
 const maximum = 64 * 1024 * 1024;
 const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', { fatal: true });
 export interface Link { effectiveType?: string; downlink?: number; rtt?: number }

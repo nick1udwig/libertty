@@ -95,8 +95,8 @@ export function saveWorkspace(workspace: WorkspaceState, notice: (message: strin
       tabs: workspace.tabs,
       activeTab: workspace.active,
     }))
-      localStorage.setItem('termai.' + key, JSON.stringify(value));
-    localStorage.removeItem('termai.readingTabs');
+      localStorage.setItem('libertty.' + key, JSON.stringify(value));
+    localStorage.removeItem('libertty.readingTabs');
   } catch {
     notice('Browser storage is unavailable. Connections will last for this page only.');
   }

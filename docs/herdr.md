@@ -1,6 +1,6 @@
 # Herdr connection
 
-Type `herdr` in a Termai terminal on a local or SSH machine to save and open its Herdr host automatically.
+Type `herdr` in a Libertty terminal on a local or SSH machine to save and open its Herdr host automatically.
 Named sessions support `herdr --session NAME` and `herdr session attach NAME`.
 Command capture reads the final Readline buffer, so history, completion and pasted commands work too.
 Help, API commands, shell operators, aliases and functions retain their normal shell behavior.
@@ -91,11 +91,11 @@ Rename uses the same `pane.rename` action as Herdr's desktop Rename pane menu.
 Printable labels can contain spaces and capital letters (up to 100 characters).
 Desktop changes propagate through snapshots; mobile changes update that shared label.
 Agent API addresses remain independent.
-Top-level Termai tab names are local workspace labels.
+Top-level Libertty tab names are local workspace labels.
 
 Settings → **Herdr strip shows** switches between **Spaces** (default) and **Agents**, preserving an explicit mode choice.
 Settings → **Herdr strip order** defaults to **Status lanes**, which group chips by urgency with the idle lane folded; **Manual** keeps your dragged order.
-The space or agent strip sits at the bottom of the terminal view, above Termai’s terminal tabs and configurable shortcut buttons.
+The space or agent strip sits at the bottom of the terminal view, above Libertty’s terminal tabs and configurable shortcut buttons.
 Hold menus open upward so their actions remain visible above the controls.
 **+** creates a new space with a shell in the selected terminal’s working directory, without a popover or form.
 Creating from Agents switches the view to Spaces so the new space is visible.
@@ -125,9 +125,9 @@ The dialogs show progress and errors, prevent repeated submissions, and preserve
 Closing a linked worktree's space also offers Delete checkout, which removes the checkout folder and closes its Herdr workspace while preserving the Git branch.
 If deletion reports that `--force` is required, the dialog shows a Force delete button that discards modified and untracked files in that checkout.
 Local and SSH connections route these actions through their selected Herdr server and session, with update guidance if its API is unavailable.
-Split checks that the Termai backend supports the action before submitting it, so an older running backend reports the version mismatch.
-After rebuilding the interface and backend, restart the Termai service to activate the backend changes.
-Use `npm run build:release` when the service runs `target/release/termai`, so both the optimized backend and the interface are rebuilt together.
+Split checks that the Libertty backend supports the action before submitting it, so an older running backend reports the version mismatch.
+After rebuilding the interface and backend, restart the Libertty service to activate the backend changes.
+Use `npm run build:release` when the service runs `target/release/libertty`, so both the optimized backend and the interface are rebuilt together.
 Hold, then drag onto the left or right edge of another chip to reorder; drop on its middle to stack the chips.
 A repository chip moves all of its checkouts together.
 The count button expands or collapses a stack.
@@ -179,7 +179,7 @@ Clients cannot provide arbitrary socket paths or shell commands to this gateway.
 
 ## Sounds and validation
 
-Settings → Background notifications offers an Enable button for each backend when termai is open as an installed PWA over HTTPS.
+Settings → Background notifications offers an Enable button for each backend when libertty is open as an installed PWA over HTTPS.
 Permission is requested only on that tap.
 Focused workspaces play the official Herdr sounds even when another top-level tab is selected; unfocused devices receive a visible Web Push alert.
 Alerts show up to 280 characters from the agent’s latest response first, followed by its working directory, without a status prefix.
@@ -193,7 +193,7 @@ See https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/.
 
 The backend watches agent transitions independently of browser WebSockets, so alerts can arrive when the PWA is suspended or closed.
 Each backend owns a separate notification worker scope and persistent VAPID key.
-Pairing digests, push subscriptions, watch descriptors and status checkpoints live in private files under TERMAI_DATA_DIR; terminal output and SSH secrets are not stored there.
+Pairing digests, push subscriptions, watch descriptors and status checkpoints live in private files under LIBERTTY_DATA_DIR; terminal output and SSH secrets are not stored there.
 Rotating the pairing token revokes notification ownership.
 Local watches resume after backend restart.
 SSH watches survive browser closure, but after backend restart their source host must reconnect.
@@ -203,7 +203,7 @@ Tapping an alert opens the corresponding connection and agent, including when th
 
 Delivery needs outbound HTTPS to the browser's push service.
 The server accepts Apple, Google, Mozilla and Windows push endpoints, with bounded watches, bounded pending delivery, expired-device cleanup and transient-error retries.
-An optional TERMAI_PUSH_CONTACT sets the VAPID contact URI; by default it uses the configured public backend host.
+An optional LIBERTTY_PUSH_CONTACT sets the VAPID contact URI; by default it uses the configured public backend host.
 First snapshots and reconnects do not replay old alerts.
 
 Settings → Herdr terminal layout defaults to Reflow text for desktop web viewers.
@@ -214,12 +214,12 @@ Each viewer owns its font size and terminal scrollback position; an app’s inte
 There is no application-specific layout adapter.
 
 src/assets/herdr/done.mp3 and request.mp3 are unchanged copies from https://github.com/herdrdev/herdr/tree/2563803dca97c040beaf3dc3acdcb5a3221b4238/assets/sounds.
-The upstream AGPL-3.0 license is distributed as public/HERDR-SOUNDS-LICENSE.txt; public/THIRD-PARTY-NOTICES.txt identifies these assets separately from Termai.
+The upstream AGPL-3.0 license is distributed as public/HERDR-SOUNDS-LICENSE.txt; public/THIRD-PARTY-NOTICES.txt identifies these assets separately from Libertty.
 
 Run npm run build, npm test, npm run test:herdr, npm run test:herdr-resize, npm run test:herdr-scroll, npm run test:herdr-spaces, npm run test:workspace, npm run test:gestures and npm run test:touch.
 Fixture tests use disposable socket, dictation and SSH servers and cover shared mobile controllers, multiple viewers, resize bounds, stale/disconnected views, desktop observation, release, raw input, dictation, touch scrolling/copy, shared labels, menus, ordering, persistence, server pane/space closing, creation, status/sounds, PWA notifications, authentication and ticket scope.
 The native resize browser test needs an installed Herdr CLI (HERDR_BINARY overrides /usr/bin/herdr).
-It creates an isolated Herdr desktop, responsive terminal application and Termai backend with disposable HOME and sockets; it verifies native redraw, border and cursor alignment, keyboard geometry, desktop observation and restoration.
+It creates an isolated Herdr desktop, responsive terminal application and Libertty backend with disposable HOME and sockets; it verifies native redraw, border and cursor alignment, keyboard geometry, desktop observation and restoration.
 It never touches user agents.
 The native scroll browser test also needs Herdr and uses an isolated fullscreen app with zero terminal scrollback.
 It verifies multi-line touch wheel delivery in both directions, local selection/copy, plain and OSC-8 links and suppressed keyboard focus.

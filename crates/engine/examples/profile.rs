@@ -1,10 +1,10 @@
 //! Profile pure engine stages using the architecture benchmark's synthetic catalog.
-use std::{hint::black_box, time::Instant};
-use termai_engine::{
+use libertty_engine::{
     history::history_candidates,
     repair::{command_names, repair},
     types::{Catalog, CommandMetadata},
 };
+use std::{hint::black_box, time::Instant};
 
 fn measure<T>(mut operation: impl FnMut() -> T) -> f64 {
     black_box(operation());
@@ -18,7 +18,7 @@ fn measure<T>(mut operation: impl FnMut() -> T) -> f64 {
     samples[50]
 }
 fn main() {
-    termai_engine::initialize();
+    libertty_engine::initialize();
     let catalog = Catalog {
         cwd: "/fixture".into(),
         commands: ["git", "ls", "cd", "cat", "echo", "python3", "orchard"]

@@ -73,7 +73,7 @@ export function createWorkspaceSettings(options: Options) {
   }
   function preferencesChanged(key: string, value: unknown) {
     try {
-      localStorage.setItem('termai.' + key, JSON.stringify(value));
+      localStorage.setItem('libertty.' + key, JSON.stringify(value));
     } catch {
       notice('Browser storage is unavailable. Settings could not be saved.');
       return;
@@ -112,7 +112,7 @@ export function createWorkspaceSettings(options: Options) {
       : '';
   }
   function savePlugins(entries: InstalledPlugin[]) {
-    localStorage.setItem('termai.plugins', JSON.stringify(entries));
+    localStorage.setItem('libertty.plugins', JSON.stringify(entries));
     installedPlugins = entries;
   }
   function refreshPluginTabs(id: string) {
@@ -219,7 +219,7 @@ export function createWorkspaceSettings(options: Options) {
   applyTheme();
   watchSystemTheme(() => applyTheme());
   window.addEventListener('storage', (event) => {
-    if (event.key === null || event.key === 'termai.theme') applyTheme();
+    if (event.key === null || event.key === 'libertty.theme') applyTheme();
   });
   select('herdr-strip').onchange = () =>
     preferencesChanged('herdrStrip', select('herdr-strip').value);
@@ -241,7 +241,7 @@ export function createWorkspaceSettings(options: Options) {
   };
   input('auto-alternatives').onchange = () => {
     try {
-      localStorage.removeItem('termai.justRun');
+      localStorage.removeItem('libertty.justRun');
     } catch {}
     preferencesChanged('autoAlternatives', input('auto-alternatives').checked);
   };

@@ -1,9 +1,9 @@
-use serde_json::{Value, json};
-use std::{os::unix::fs::PermissionsExt, time::Duration};
-use termai_server::{
+use libertty_server::{
     herdr::Target,
     herdr_terminal_stream::{Hub, Size},
 };
+use serde_json::{Value, json};
+use std::{os::unix::fs::PermissionsExt, time::Duration};
 use tokio::sync::mpsc;
 
 #[tokio::test]

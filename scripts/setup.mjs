@@ -8,7 +8,19 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { integrations, findExecutable } from './setup-integrations.mjs';
 
-const marker = '# Managed by the Termai installer';
+const marker = '# Managed by the Libertty installer';
+const legacyMarker = '# Managed by the Termai installer';
+const managed = text => text?.includes(marker) || text?.includes(legacyMarker);
+function renamedEnvironment(environment) {
+  const result = { ...environment };
+  for (const [name, value] of Object.entries(environment)) {
+    if (!name.startsWith('TERMAI_')) continue;
+    const current = 'LIBERTTY_' + name.slice('TERMAI_'.length);
+    if (!(current in result)) result[current] = value;
+    delete result[name];
+  }
+  return result;
+}
 export const shellQuote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 export function parseOptions(args) {
   const result = {};
@@ -62,31 +74,36 @@ export async function install(options, dependencies = {}) {
   const bundle = dependencies.bundle || path.resolve(import.meta.dirname, '..');
   const configHome = installationPath(dependencies.configHome || process.env.XDG_CONFIG_HOME || path.join(home, '.config'));
   const dataHome = installationPath(dependencies.dataHome || process.env.XDG_DATA_HOME || path.join(home, '.local/share'));
-  const prefix = installationPath(path.resolve(options.prefix || path.join(dataHome, 'termai')));
-  const configFile = path.join(configHome, 'termai/config.json');
+  const prefix = installationPath(path.resolve(options.prefix || path.join(dataHome, 'libertty')));
+  const configFile = path.join(configHome, 'libertty/config.json');
+  const legacyConfigFile = path.join(configHome, 'termai/config.json');
   const launch = path.join(prefix, 'launch');
-  const unit = platform === 'linux' ? path.join(configHome, 'systemd/user/termai.service') : path.join(home, 'Library/LaunchAgents/com.termai.server.plist');
+  const unit = platform === 'linux' ? path.join(configHome, 'systemd/user/libertty.service') : path.join(home, 'Library/LaunchAgents/com.libertty.server.plist');
+  const legacyUnit = platform === 'linux' ? path.join(configHome, 'systemd/user/termai.service') : path.join(home, 'Library/LaunchAgents/com.termai.server.plist');
   const metadata = JSON.parse(await readFile(path.join(bundle, 'release.json'), 'utf8'));
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(metadata.version) || metadata.tag !== 'v' + metadata.version || !/^[a-f0-9]{40}$/.test(metadata.commit)) throw new Error('Invalid release metadata.');
   if (metadata.platform !== platform + '-' + (dependencies.arch || process.arch)) throw new Error('This release does not match the host platform.');
   if (metadata.backend !== undefined && !['node', 'rust'].includes(metadata.backend)) throw new Error('Unsupported release backend.');
   const previous = await read(configFile);
-  if (previous && JSON.parse(previous).managedBy !== 'termai') throw new Error('Existing config.json is not managed by Termai; review it before installing.');
-  const env = { HOST: '127.0.0.1', PORT: '7321', TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_HOSTS: 'localhost,127.0.0.1', TERMAI_DATA_DIR: path.join(dataHome, 'termai'), TERMAI_CWD: home, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome, PATH: [path.join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].join(':'), ...(previous ? JSON.parse(previous).env : {}) };
+  const legacyConfig = previous ? undefined : await read(legacyConfigFile);
+  const saved = previous || legacyConfig;
+  if (saved && !['libertty', 'termai'].includes(JSON.parse(saved).managedBy)) throw new Error('Existing config.json is not managed by Libertty; review it before installing.');
+  const defaultData = !await exists(path.join(dataHome, 'libertty')) && await exists(path.join(dataHome, 'termai')) ? path.join(dataHome, 'termai') : path.join(dataHome, 'libertty');
+  const env = { HOST: '127.0.0.1', PORT: '7321', LIBERTTY_BASE_PATH: '/t', LIBERTTY_ALLOWED_HOSTS: 'localhost,127.0.0.1', LIBERTTY_DATA_DIR: defaultData, LIBERTTY_CWD: home, XDG_CONFIG_HOME: configHome, XDG_DATA_HOME: dataHome, PATH: [path.join(home, '.local/bin'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].join(':'), ...renamedEnvironment(saved ? JSON.parse(saved).env : {}) };
   if (options.port) env.PORT = options.port;
-  if (options['base-path']) env.TERMAI_BASE_PATH = options['base-path'];
-  let bash = env.TERMAI_BASH || process.env.TERMAI_BASH || (platform === 'darwin' ? '/opt/homebrew/bin/bash' : '/bin/bash');
+  if (options['base-path']) env.LIBERTTY_BASE_PATH = options['base-path'];
+  let bash = env.LIBERTTY_BASH || process.env.LIBERTTY_BASH || process.env.TERMAI_BASH || (platform === 'darwin' ? '/opt/homebrew/bin/bash' : '/bin/bash');
   const modern = candidate => run(candidate, ['-c', '(( BASH_VERSINFO[0] > 4 || BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 ))'], { optional: true, capture: true }).ok;
   if (!modern(bash) && platform === 'darwin') {
-    if (!await ask('Install modern Bash with Homebrew?')) throw new Error('Termai needs Bash 4.4 or newer.');
+    if (!await ask('Install modern Bash with Homebrew?')) throw new Error('Libertty needs Bash 4.4 or newer.');
     run('brew', ['install', 'bash'], { timeout: 600000 });
     bash = run('brew', ['--prefix', 'bash'], { capture: true }).stdout.trim() + '/bin/bash';
   }
-  if (!modern(bash)) throw new Error('Install Bash 4.4 or newer and set TERMAI_BASH to its absolute path.');
-  env.TERMAI_BASH = bash;
+  if (!modern(bash)) throw new Error('Install Bash 4.4 or newer and set LIBERTTY_BASH to its absolute path.');
+  env.LIBERTTY_BASH = bash;
   const pythonReady = () => run('python3', ['-c', 'import sys; assert sys.version_info >= (3,8)'], { optional: true, capture: true, env }).ok;
   if (!pythonReady()) {
-    if (!await ask('Install Python 3 for Termai shell integration?')) throw new Error('Termai needs Python 3.8 or newer.');
+    if (!await ask('Install Python 3 for Libertty shell integration?')) throw new Error('Libertty needs Python 3.8 or newer.');
     const find = name => findExecutable(name, env);
     if (platform === 'darwin') run('brew', ['install', 'python'], { timeout: 600000 });
     else if (await find('apt-get')) run('sudo', [await find('apt-get'), 'install', '-y', 'python3'], { timeout: 600000 });
@@ -96,20 +113,25 @@ export async function install(options, dependencies = {}) {
     if (!pythonReady()) throw new Error('Python 3.8 or newer is still unavailable on the configured PATH.');
   }
   const userManager = platform === 'linux' ? run('systemctl', ['--user', 'show-environment'], { optional: true, capture: true }).ok : platform === 'darwin';
-  const service = !options['no-service'] && userManager && await ask(platform === 'linux' ? 'Install and start Termai as a systemd user service?' : 'Install and start Termai as a login LaunchAgent?');
+  const service = !options['no-service'] && userManager && await ask(platform === 'linux' ? 'Install and start Libertty as a systemd user service?' : 'Install and start Libertty as a login LaunchAgent?');
   if (!userManager && !options['no-service']) console.log('No systemd user manager is available; the launcher will be installed for manual use.');
   const oldUnit = await read(unit);
-  if (service && oldUnit && !oldUnit.includes(marker)) throw new Error('Existing Termai service is not installer-managed; use --no-service or migrate it explicitly.');
+  const oldLegacyUnit = await read(legacyUnit);
+  if (service && ((oldUnit && !managed(oldUnit)) || (oldLegacyUnit && !managed(oldLegacyUnit)))) throw new Error('Existing terminal service is not installer-managed; use --no-service or migrate it explicitly.');
   const oldLauncher = await read(launch);
-  if (oldLauncher && !oldLauncher.includes(marker)) throw new Error('Existing launch file is not installer-managed.');
-  const userBin = path.join(home, '.local/bin/termai'), oldUserBin = await read(userBin);
-  if (oldUserBin && !oldUserBin.includes(marker)) throw new Error('Existing ~/.local/bin/termai is not installer-managed.');
+  if (oldLauncher && !managed(oldLauncher)) throw new Error('Existing launch file is not installer-managed.');
+  const userBin = path.join(home, '.local/bin/libertty'), oldUserBin = await read(userBin);
+  const legacyUserBin = path.join(home, '.local/bin/termai'), oldLegacyUserBin = await read(legacyUserBin);
+  if (oldUserBin && !managed(oldUserBin)) throw new Error('Existing ~/.local/bin/libertty is not installer-managed.');
   const current = path.join(prefix, 'current'), oldCurrent = await readlink(current).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
   const releaseDir = path.join(prefix, 'releases', metadata.tag + '-' + metadata.platform + '-' + metadata.commit.slice(0, 12));
   const oldRecord = await read(path.join(prefix, 'install.json'));
-  const active = service && (platform === 'linux' ? run('systemctl', ['--user', 'is-active', '--quiet', 'termai.service'], { optional: true, capture: true }).ok : run('launchctl', ['print', 'gui/' + process.getuid() + '/com.termai.server'], { optional: true, capture: true }).ok);
-  const enabled = service && platform === 'linux' && run('systemctl', ['--user', 'is-enabled', '--quiet', 'termai.service'], { optional: true, capture: true }).ok;
-  if (active && !await ask('Restart Termai to apply this release (ends live terminal connections)?')) throw new Error('Installation cancelled before changing the running service.');
+  const active = service && (platform === 'linux' ? run('systemctl', ['--user', 'is-active', '--quiet', 'libertty.service'], { optional: true, capture: true }).ok : run('launchctl', ['print', 'gui/' + process.getuid() + '/com.libertty.server'], { optional: true, capture: true }).ok);
+  const enabled = service && platform === 'linux' && run('systemctl', ['--user', 'is-enabled', '--quiet', 'libertty.service'], { optional: true, capture: true }).ok;
+  const migrateService = service && !!oldLegacyUnit;
+  const legacyActive = migrateService && (platform === 'linux' ? run('systemctl', ['--user', 'is-active', '--quiet', 'termai.service'], { optional: true, capture: true }).ok : run('launchctl', ['print', 'gui/' + process.getuid() + '/com.termai.server'], { optional: true, capture: true }).ok);
+  const legacyEnabled = migrateService && platform === 'linux' && run('systemctl', ['--user', 'is-enabled', '--quiet', 'termai.service'], { optional: true, capture: true }).ok;
+  if ((active || legacyActive) && !await ask('Restart Libertty to apply this release (ends live terminal connections)?')) throw new Error('Installation cancelled before changing the running service.');
   await mkdir(path.dirname(releaseDir), { recursive: true, mode: 0o700 });
   if (!await exists(releaseDir)) {
     const staging = releaseDir + '.new-' + process.pid;
@@ -118,47 +140,62 @@ export async function install(options, dependencies = {}) {
   }
   const label = 'gui/' + (process.getuid?.() ?? 0);
   const restore = async (file, value, mode) => { if (value === undefined) await rm(file, { force: true }); else await atomic(file, value, mode); };
-  const config = { managedBy: 'termai', env, version: metadata.version, commit: metadata.commit };
+  const config = { managedBy: 'libertty', env, version: metadata.version, commit: metadata.commit };
   try {
+    if (migrateService) {
+      if (platform === 'linux') run('systemctl', ['--user', 'disable', '--now', 'termai.service']);
+      else if (legacyActive) run('launchctl', ['bootout', label + '/com.termai.server']);
+      await rm(legacyUnit);
+    }
     await rm(current + '.new', { force: true }); await symlink(releaseDir, current + '.new'); await rename(current + '.new', current);
     await atomic(configFile, JSON.stringify(config, null, 2) + '\n');
-    const command = metadata.backend === 'rust' ? shellQuote(path.join(current, 'bin/termai-backend')) : shellQuote(path.join(current, 'bin/node')) + ' ' + shellQuote(path.join(current, 'scripts/launch.mjs'));
+    const command = metadata.backend === 'rust' ? shellQuote(path.join(current, 'bin/libertty-backend')) : shellQuote(path.join(current, 'bin/node')) + ' ' + shellQuote(path.join(current, 'scripts/launch.mjs'));
     await atomic(launch, '#!/bin/sh\n' + marker + '\nexec ' + command + ' --config ' + shellQuote(configFile) + ' "$@"\n', 0o755);
     await atomic(userBin, '#!/bin/sh\n' + marker + '\nexec ' + shellQuote(launch) + ' "$@"\n', 0o755);
+    if (managed(oldLegacyUserBin)) await atomic(legacyUserBin, '#!/bin/sh\n' + marker + '\nexec ' + shellQuote(launch) + ' "$@"\n', 0o755);
     if (service) {
       if (platform === 'linux') {
-        await atomic(unit, marker + '\n[Unit]\nDescription=Termai terminal workspace\nAfter=network.target\n\n[Service]\nType=simple\nExecStart="' + launch + '"\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n');
-        run('systemctl', ['--user', 'daemon-reload']); run('systemctl', ['--user', 'enable', 'termai.service']); run('systemctl', ['--user', 'restart', 'termai.service']);
+        await atomic(unit, marker + '\n[Unit]\nDescription=Libertty terminal workspace\nAfter=network.target\n\n[Service]\nType=simple\nExecStart="' + launch + '"\nRestart=on-failure\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n');
+        run('systemctl', ['--user', 'daemon-reload']); run('systemctl', ['--user', 'enable', 'libertty.service']); run('systemctl', ['--user', 'restart', 'libertty.service']);
       } else {
         const xml = value => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-        await atomic(unit, `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${marker} -->\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>com.termai.server</string><key>ProgramArguments</key><array><string>${xml(launch)}</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(path.join(prefix, 'server.log'))}</string><key>StandardErrorPath</key><string>${xml(path.join(prefix, 'server.log'))}</string></dict></plist>\n`);
-        run('launchctl', ['bootout', label + '/com.termai.server'], { optional: true }); run('launchctl', ['bootstrap', label, unit]);
+        await atomic(unit, `<?xml version="1.0" encoding="UTF-8"?>\n<!-- ${marker} -->\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>com.libertty.server</string><key>ProgramArguments</key><array><string>${xml(launch)}</string></array><key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>StandardOutPath</key><string>${xml(path.join(prefix, 'server.log'))}</string><key>StandardErrorPath</key><string>${xml(path.join(prefix, 'server.log'))}</string></dict></plist>\n`);
+        run('launchctl', ['bootout', label + '/com.libertty.server'], { optional: true }); run('launchctl', ['bootstrap', label, unit]);
       }
       const probe = dependencies.health || (async () => {
         for (let i = 0; i < 60; i++) {
           try {
-            const response = await fetch(`http://127.0.0.1:${env.PORT}${env.TERMAI_BASE_PATH === '/' ? '' : env.TERMAI_BASE_PATH}/healthz`, { signal: AbortSignal.timeout(1500) });
+            const response = await fetch(`http://127.0.0.1:${env.PORT}${env.LIBERTTY_BASE_PATH === '/' ? '' : env.LIBERTTY_BASE_PATH}/healthz`, { signal: AbortSignal.timeout(1500) });
             const value = await response.json(); if (response.ok && value.ok && value.commit === metadata.commit && value.version === metadata.version) return;
           } catch {}
           await new Promise(resolve => setTimeout(resolve, 250));
         }
-        throw new Error('Termai did not become ready on its configured port.');
+        throw new Error('Libertty did not become ready on its configured port.');
       });
       await probe();
     }
-    await atomic(path.join(prefix, 'install.json'), JSON.stringify({ managedBy: 'termai', releaseDir, configFile, unit: service ? unit : null, metadata }, null, 2) + '\n');
+    await atomic(path.join(prefix, 'install.json'), JSON.stringify({ managedBy: 'libertty', releaseDir, configFile, unit: service ? unit : null, metadata }, null, 2) + '\n');
   } catch (error) {
-    if (service) run(platform === 'linux' ? 'systemctl' : 'launchctl', platform === 'linux' ? ['--user', 'stop', 'termai.service'] : ['bootout', label + '/com.termai.server'], { optional: true });
+    if (service) run(platform === 'linux' ? 'systemctl' : 'launchctl', platform === 'linux' ? ['--user', 'stop', 'libertty.service'] : ['bootout', label + '/com.libertty.server'], { optional: true });
     await rm(current, { force: true }); if (oldCurrent) await symlink(oldCurrent, current);
     await restore(configFile, previous); await restore(launch, oldLauncher, 0o755); await restore(userBin, oldUserBin, 0o755);
+    if (managed(oldLegacyUserBin)) await restore(legacyUserBin, oldLegacyUserBin, 0o755);
     await restore(path.join(prefix, 'install.json'), oldRecord);
     if (service) {
       await restore(unit, oldUnit);
       if (platform === 'linux') {
         run('systemctl', ['--user', 'daemon-reload'], { optional: true });
-        if (!enabled) run('systemctl', ['--user', 'disable', 'termai.service'], { optional: true });
-        if (active) run('systemctl', ['--user', 'restart', 'termai.service'], { optional: true });
+        if (!enabled) run('systemctl', ['--user', 'disable', 'libertty.service'], { optional: true });
+        if (active) run('systemctl', ['--user', 'restart', 'libertty.service'], { optional: true });
       } else if (active) run('launchctl', ['bootstrap', label, unit], { optional: true });
+    }
+    if (migrateService) {
+      await restore(legacyUnit, oldLegacyUnit);
+      if (platform === 'linux') {
+        run('systemctl', ['--user', 'daemon-reload'], { optional: true });
+        if (legacyEnabled) run('systemctl', ['--user', 'enable', 'termai.service'], { optional: true });
+        if (legacyActive) run('systemctl', ['--user', 'restart', 'termai.service'], { optional: true });
+      } else if (legacyActive) run('launchctl', ['bootstrap', label, legacyUnit], { optional: true });
     }
     throw new Error(error.message + '\nPrevious release, configuration and service restored.');
   }
@@ -176,14 +213,14 @@ export async function main(args) {
   const companions = await integrations(installed);
   companions.failures.push(...failures);
   await atomic(path.join(installed.prefix, 'setup-status.json'), JSON.stringify(companions, null, 2) + '\n');
-  console.log(`Termai ${installed.metadata.version} installed.\nLauncher: ${path.join(installed.home, '.local/bin/termai')}`);
+  console.log(`Libertty ${installed.metadata.version} installed.\nLauncher: ${path.join(installed.home, '.local/bin/libertty')}`);
   console.log(installed.service ? 'Open ' + companions.url : 'Start the server with the launcher above, then open ' + companions.url);
-  const tokenFile = path.join(installed.config.env.TERMAI_DATA_DIR, 'pairing-token');
+  const tokenFile = path.join(installed.config.env.LIBERTTY_DATA_DIR, 'pairing-token');
   const token = await read(tokenFile);
   if (token?.trim() && installed.service) console.log('Pairing token: ' + token.trim());
   else console.log('Pairing token file: ' + tokenFile);
   console.log(`Herdr: ${companions.herdr}; Voxtype Mobile: ${companions.voxtype}; Tailscale: ${companions.tailscale}.`);
-  if (companions.failures.length) { console.error('Termai is installed; optional setup needs attention.\n' + companions.failures.join('\n')); process.exitCode = 2; }
+  if (companions.failures.length) { console.error('Libertty is installed; optional setup needs attention.\n' + companions.failures.join('\n')); process.exitCode = 2; }
 }
 // macOS temporary paths commonly traverse /var -> /private/var.
 const entrypoint = process.argv[1] && await realpath(process.argv[1]).catch(() => undefined);

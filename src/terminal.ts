@@ -1,3 +1,4 @@
+import './brand-storage.ts';
 import { requestJSON } from './api.ts';
 import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
 import { fileClient, saveDownload } from './file-client.ts';
@@ -77,11 +78,12 @@ let disconnectedContext: InputContext | undefined;
 let connectionEpoch = 0, synchronizedConnection = false;
 let shortcuts: Shortcut[] = structuredClone(defaults);
 try {
-  const saved = localStorage.getItem('termai.shortcuts');
+  const saved = localStorage.getItem('libertty.shortcuts');
   if (saved) shortcuts = validateShortcuts(JSON.parse(saved));
 } catch { /* Use defaults when storage is unavailable or stale. */ }
 function persist(key: string, value: unknown) {
-  try { localStorage.setItem('termai.' + key, JSON.stringify(value)); } catch { toast('Browser storage is unavailable. Settings will last for this page only.'); }
+  try { localStorage.setItem('libertty.' + key, JSON.stringify(value)); } catch { toast('Browser storage is unavailable. ' +
+    'Settings will last for this page only.'); }
 }
 const transfersSeen = new Set<string>();
 let ctrl = false;
@@ -126,7 +128,7 @@ async function api<T>(url: string, data?: unknown, signal?: AbortSignal): Promis
 function send(message: ClientMessage): boolean {
   if (['paste', 'replace', 'command', 'dictation-paste', 'input-line', 'repair'].includes(message.type)) echo.cancel();
   if ((message.type === 'dictation' && message.action === 'start') || message.type === 'dictation-paste') {
-    try { message.readingPhrases = readingPhrases(JSON.parse(localStorage.getItem('termai.readingPhrases') || 'null')); } catch { message.readingPhrases = ['look at']; }
+    try { message.readingPhrases = readingPhrases(JSON.parse(localStorage.getItem('libertty.readingPhrases') || 'null')); } catch { message.readingPhrases = ['look at']; }
   }
   if (transport.socket?.readyState !== WebSocket.OPEN) return false;
   transport.socket.send(encodeWire(message, transport.socket.protocol)); return true;
@@ -137,7 +139,7 @@ function applyTerminalTheme() { if (applyTheme() !== terminalTheme) location.rel
 watchSystemTheme(applyTerminalTheme);
 const fontSizeInput = $<HTMLInputElement>('font-size');
 try {
-  const saved = JSON.parse(localStorage.getItem('termai.fontSizePt') || 'null');
+  const saved = JSON.parse(localStorage.getItem('libertty.fontSizePt') || 'null');
   if (typeof saved === 'number') fontSizeInput.value = String(saved);
 } catch { /* Use the default when storage is unavailable or stale. */ }
 if (!fontSizeInput.checkValidity()) fontSizeInput.value = fontSizeInput.defaultValue;
@@ -204,7 +206,7 @@ function mobileTerminal() { return !!herdrTerminal && mobileViewport.matches; }
 function refreshHerdrFrame() {
   if (herdrReady && transport.socket?.readyState === WebSocket.OPEN && projection?.requestFrame()) send({ type: 'herdr-frame-request' });
 }
-function fullWidth() { try { return !!herdrTerminal && !mobileTerminal() && JSON.parse(localStorage.getItem('termai.herdrLayout') || 'null') === 'full-width'; } catch { return false; } }
+function fullWidth() { try { return !!herdrTerminal && !mobileTerminal() && JSON.parse(localStorage.getItem('libertty.herdrLayout') || 'null') === 'full-width'; } catch { return false; } }
 // Keep output outside UI state. Ghostty parses synchronously; its callback is an rAF.
 function drain() {
   frameQueued = false;
@@ -332,7 +334,7 @@ const dictation = new DictationControl({ api, send, state: () => state, context:
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
   const workspace = new URL('.', document.baseURI);
-  sessionStorage.setItem('termai.pendingReading:' + workspace.pathname, JSON.stringify({ ...request, session, backendUrl: baseURL.href, ...(herdrTerminal ? { herdrTerminal, herdrSession: params.get('herdrSession') || '', herdrSource: params.get('herdrSource') || '' } : {}) }));
+  sessionStorage.setItem('libertty.pendingReading:' + workspace.pathname, JSON.stringify({ ...request, session, backendUrl: baseURL.href, ...(herdrTerminal ? { herdrTerminal, herdrSession: params.get('herdrSession') || '', herdrSource: params.get('herdrSource') || '' } : {}) }));
   location.assign(workspace.href);
 }
 term.onData(rawInput);
@@ -385,18 +387,18 @@ renderShortcuts();
 function applySettings() {
   try {
     applyTerminalTheme();
-    const font = JSON.parse(localStorage.getItem('termai.fontSizePt') || '10');
+    const font = JSON.parse(localStorage.getItem('libertty.fontSizePt') || '10');
     if (typeof font === 'number') { fontSizeInput.value = String(font); fontSizeInput.dispatchEvent(new Event('input')); }
-    for (const [id, value] of [['auto-alternatives', localStorage.getItem('termai.autoAlternatives') !== 'false' && localStorage.getItem('termai.justRun') !== 'true'], ['tap-alternate-send', localStorage.getItem('termai.tapAlternateSend') !== 'false']] as const) {
+    for (const [id, value] of [['auto-alternatives', localStorage.getItem('libertty.autoAlternatives') !== 'false' && localStorage.getItem('libertty.justRun') !== 'true'], ['tap-alternate-send', localStorage.getItem('libertty.tapAlternateSend') !== 'false']] as const) {
       const setting = $<HTMLInputElement>(id); if (setting.checked !== value) { setting.checked = value; setting.dispatchEvent(new Event('change')); }
     }
-    const next = validateShortcuts(JSON.parse(localStorage.getItem('termai.shortcuts') || JSON.stringify(defaults)));
+    const next = validateShortcuts(JSON.parse(localStorage.getItem('libertty.shortcuts') || JSON.stringify(defaults)));
     if (JSON.stringify(next) !== JSON.stringify(shortcuts)) { shortcuts = next; setCtrl(false); renderShortcuts(); }
-    inline.setReadingPhrases(JSON.parse(localStorage.getItem('termai.readingPhrases') || 'null'));
+    inline.setReadingPhrases(JSON.parse(localStorage.getItem('libertty.readingPhrases') || 'null'));
     sizeTerminal();
   } catch { /* Keep valid settings if stored data is unavailable or malformed. */ }
 }
-window.addEventListener('storage', event => { if (event.key === null || ['termai.herdrLayout', 'termai.fontSizePt', 'termai.autoAlternatives', 'termai.tapAlternateSend', 'termai.shortcuts', 'termai.readingPhrases', 'termai.justRun', 'termai.theme'].includes(event.key)) applySettings(); });
+window.addEventListener('storage', event => { if (event.key === null || ['libertty.herdrLayout', 'libertty.fontSizePt', 'libertty.autoAlternatives', 'libertty.tapAlternateSend', 'libertty.shortcuts', 'libertty.readingPhrases', 'libertty.justRun', 'libertty.theme'].includes(event.key)) applySettings(); });
 function copyTerminalText(text: string) {
   // Clipboard access needs a focused document. Focus the frame itself without
   // enabling its textarea or opening the software keyboard after a gesture.
@@ -562,7 +564,7 @@ function socketMessage(event: MessageEvent) {
     else if (message.type === 'herdr-command') {
       const workspace = new URL('.', document.baseURI);
       try {
-        sessionStorage.setItem('termai.pendingHerdr:' + workspace.pathname, JSON.stringify({ id: message.id, session, backendUrl: baseURL.href }));
+        sessionStorage.setItem('libertty.pendingHerdr:' + workspace.pathname, JSON.stringify({ id: message.id, session, backendUrl: baseURL.href }));
         location.assign(workspace.href);
       } catch {
         void api('/api/herdr/captured', { id: message.id, action: 'native' }).then(() => api('/api/herdr/captured', { id: message.id, action: 'ack' })).catch(error => toast(error.message));

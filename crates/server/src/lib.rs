@@ -7,6 +7,7 @@ mod dev;
 pub mod dictation;
 pub mod directories;
 pub mod engine;
+pub mod environment;
 pub mod facts;
 pub mod files;
 pub mod filesystem;

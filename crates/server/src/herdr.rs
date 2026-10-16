@@ -1,4 +1,6 @@
 use crate::{reading, storage};
+use libertty_engine::utf16_len;
+use libertty_engine::{repair::shell_quote, validation::Environment};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -7,8 +9,6 @@ use std::{
     sync::{Arc, LazyLock},
     time::Duration,
 };
-use termai_engine::utf16_len;
-use termai_engine::{repair::shell_quote, validation::Environment};
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite},
     net::UnixStream,
@@ -235,7 +235,7 @@ impl Target {
         } else {
             Default::default()
         };
-        let catalog = termai_engine::types::Catalog {
+        let catalog = libertty_engine::types::Catalog {
             cwd: shell.cwd.clone(),
             commands: commands.into(),
             paths,
@@ -257,7 +257,7 @@ impl Target {
             session: session(Some(&json!(session_name)))?,
             socket_path: None,
             binary: "herdr".into(),
-            env: std::env::vars().collect(),
+            env: crate::environment::vars().collect(),
             remote: None,
             repairs: Default::default(),
             shared: Default::default(),
@@ -696,7 +696,7 @@ impl Target {
         Ok(env
             .iter()
             .filter(|(key, _)| {
-                !key.starts_with("TERMAI_")
+                !key.starts_with("LIBERTTY_")
                     && !key.is_empty()
                     && !key.as_bytes()[0].is_ascii_digit()
                     && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
@@ -908,7 +908,7 @@ mod repair_cache_tests {
     async fn learned_metadata_survives_requests_but_not_terminal_or_shell_changes() {
         let services = crate::host::HostServices::new();
         let cache = RepairSessions::default();
-        let catalog = termai_engine::types::Catalog {
+        let catalog = libertty_engine::types::Catalog {
             cwd: "/fixture".into(),
             commands: vec!["fixture".into()].into(),
             ..Default::default()
@@ -922,7 +922,7 @@ mod repair_cache_tests {
             help,
         );
         let cancel = CancellationToken::new();
-        engine.invoke(termai_engine::Request { operation: "seedMetadata".into(), args: vec![json!(catalog), json!(environment), json!({"flags":{"fixture":[{"name":"--learned","takesValue":false}]},"subcommands":{}})] }, &host, &cancel).await.unwrap();
+        engine.invoke(libertty_engine::Request { operation: "seedMetadata".into(), args: vec![json!(catalog), json!(environment), json!({"flags":{"fixture":[{"name":"--learned","takesValue":false}]},"subcommands":{}})] }, &host, &cancel).await.unwrap();
         for (terminal, identity, expected) in [
             ("one", "shell-a", true),
             ("two", "shell-a", false),
@@ -934,7 +934,7 @@ mod repair_cache_tests {
                 .unwrap();
             let metadata = engine
                 .invoke(
-                    termai_engine::Request {
+                    libertty_engine::Request {
                         operation: "cachedMetadata".into(),
                         args: vec![json!(catalog), json!(environment)],
                     },

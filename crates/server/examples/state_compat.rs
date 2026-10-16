@@ -1,10 +1,10 @@
 // Exercised only with synthetic fixtures in an isolated temporary directory.
-use serde_json::{Value, json};
-use std::{fs, path::PathBuf};
-use termai_server::{
+use libertty_server::{
     pairing::Pairings,
     vault::{Vault, inspect_private_key},
 };
+use serde_json::{Value, json};
+use std::{fs, path::PathBuf};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let directory = PathBuf::from(
         std::env::args()

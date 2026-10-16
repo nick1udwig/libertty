@@ -7,7 +7,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let raw = serde_json::from_str(&input)?;
     println!(
         "{}",
-        serde_json::to_value(termai_server::herdr::normalize(&raw)?)?
+        serde_json::to_value(libertty_server::herdr::normalize(&raw)?)?
     );
     Ok(())
 }

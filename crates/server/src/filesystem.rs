@@ -154,7 +154,7 @@ impl FileSystem {
                     let symlink = info.is_symlink();
                     let directory = if symlink {
                         self.metadata(
-                            &termai_engine::path::join(&[directory, &item.filename]),
+                            &libertty_engine::path::join(&[directory, &item.filename]),
                             true,
                         )
                         .await

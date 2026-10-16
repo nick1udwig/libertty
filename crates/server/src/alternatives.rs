@@ -1,11 +1,11 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use termai_engine::utf16_len;
-use termai_engine::{
+use libertty_engine::utf16_len;
+use libertty_engine::{
     shell_structure::{Separator, command_list},
     types::Candidate,
     validation::simple_words,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -39,7 +39,7 @@ impl Intent {
                     .collect()
             })
             .unwrap_or_else(|| vec!["look at".into()]);
-        let expanded = termai_engine::speech::expand_symbols(text, true);
+        let expanded = libertty_engine::speech::expand_symbols(text, true);
         let expanded = expanded.trim_end_matches(['.', '!', '?']);
         if let Some(list) = command_list(expanded)
             && list.separators.last() == Some(&Separator::Pipe)
@@ -135,7 +135,7 @@ pub async fn prepare<'a>(
                 let words = simple_words(&candidate.command).unwrap();
                 format!(
                     "{phrase} {}",
-                    termai_engine::repair::shell_quote(&words[1].value)
+                    libertty_engine::repair::shell_quote(&words[1].value)
                 )
             }
         };

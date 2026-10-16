@@ -6,7 +6,7 @@ import { rustExample } from './rust-example.ts';
 
 interface Target { session: string; socketPath: string }
 
-/** Raw RPC driver for disposable external Herdr servers, without a Termai backend. */
+/** Raw RPC driver for disposable external Herdr servers, without a Libertty backend. */
 export function herdrRequest(target: Target, method: string, params: object = {}): Promise<any> {
   return new Promise((resolve, reject) => {
     const socket = connect(target.socketPath), id = randomUUID();

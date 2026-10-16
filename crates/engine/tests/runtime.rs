@@ -1,8 +1,8 @@
-use serde_json::{Value, json};
-use termai_engine::{
+use libertty_engine::{
     Request,
     runtime::{Reply, Runtime, Step},
 };
+use serde_json::{Value, json};
 
 #[test]
 fn failed_candidate_facts_leave_independently_validated_alternatives_available() {
@@ -27,7 +27,7 @@ fn failed_candidate_facts_leave_independently_validated_alternatives_available()
                 .operations
                 .into_iter()
                 .map(|operation| {
-                    use termai_engine::{host::HostOperation, runtime::HostResult};
+                    use libertty_engine::{host::HostOperation, runtime::HostResult};
                     match operation {
                         HostOperation::Syntax { command } if command == "cat my-notes" => {
                             HostResult::Error {
@@ -111,7 +111,7 @@ fn independent_operand_validation_uses_one_callback_wave() {
     assert_eq!(
         operations
             .iter()
-            .filter(|op| matches!(op, termai_engine::host::HostOperation::Stat { .. }))
+            .filter(|op| matches!(op, libertty_engine::host::HostOperation::Stat { .. }))
             .count(),
         3
     );
@@ -123,8 +123,8 @@ fn independent_operand_validation_uses_one_callback_wave() {
                 .operations
                 .iter()
                 .map(|op| match op {
-                    termai_engine::host::HostOperation::Syntax { .. } => json!(true),
-                    termai_engine::host::HostOperation::Stat { executable, .. } => {
+                    libertty_engine::host::HostOperation::Syntax { .. } => json!(true),
+                    libertty_engine::host::HostOperation::Stat { executable, .. } => {
                         assert!(!executable);
                         json!({"file":true,"directory":false,"executable":false})
                     }
@@ -140,7 +140,7 @@ fn independent_operand_validation_uses_one_callback_wave() {
 }
 #[test]
 fn prepared_contexts_preserve_pending_snapshots_reject_stale_ids_and_reset() {
-    use termai_engine::types::Catalog;
+    use libertty_engine::types::Catalog;
     fn complete(runtime: &mut Runtime, mut step: Step) -> Value {
         for now in 1..50 {
             match step {
@@ -236,7 +236,7 @@ fn prepared_contexts_preserve_pending_snapshots_reject_stale_ids_and_reset() {
 
 #[test]
 fn fused_directory_import_and_resume_matches_separate_calls_and_rejects_partial_imports() {
-    use termai_engine::runtime::{DirectoryPin, message};
+    use libertty_engine::runtime::{DirectoryPin, message};
     let request: Request = serde_json::from_value(json!({"operation":"repairDirectory","args":["cd work space",{"cwd":"/fixture","commands":["cd"],"paths":[],"history":[]},""]})).unwrap();
     let mut fused = Runtime::default();
     let mut separate = Runtime::default();
@@ -301,7 +301,7 @@ fn values(callback: u32, exists: bool) -> Reply {
 }
 #[test]
 fn directory_pins_survive_eviction_but_reject_stale_and_cross_request_references() {
-    use termai_engine::{
+    use libertty_engine::{
         runtime::{DirectoryPin, DirectoryReference, HostResult},
         types::{DirectoryEntry, SharedList},
     };

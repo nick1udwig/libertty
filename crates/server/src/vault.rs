@@ -4,6 +4,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
 };
 use base64::{Engine, engine::general_purpose::STANDARD};
+use libertty_engine::{truncate_utf16, utf16_len};
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -15,7 +16,6 @@ use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
-use termai_engine::{truncate_utf16, utf16_len};
 use zeroize::Zeroizing;
 
 fn error(message: &str) -> io::Error {

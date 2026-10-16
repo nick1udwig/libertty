@@ -2,7 +2,7 @@ interface Backend { id: string; name: string }
 type API = <T>(id: string, name: string, data?: unknown) => Promise<T>;
 const installed = () => matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
 const decodeKey = (value: string) => Uint8Array.from(atob(value.replaceAll('-', '+').replaceAll('_', '/')), c => c.charCodeAt(0));
-const storageKey = (id: string) => 'termai.notifications.' + id;
+const storageKey = (id: string) => 'libertty.notifications.' + id;
 
 /** Permission is requested only from the enable button in the installed PWA. */
 export class HerdrNotifications {
@@ -46,7 +46,7 @@ export class HerdrNotifications {
   }
   async enable(id: string) {
     if (!this.supported) throw new Error('This browser does not support background notifications.');
-    if (!installed()) throw new Error('Open the installed termai app to enable notifications.');
+    if (!installed()) throw new Error('Open the installed libertty app to enable notifications.');
     // Keep the permission call directly within the button's user gesture.
     if (await Notification.requestPermission() !== 'granted') throw new Error('Allow notifications in the app or device settings, then try again.');
     await this.subscribe(id);
@@ -73,7 +73,10 @@ export class HerdrNotifications {
   render(element: HTMLElement, backends: Backend[], notice: (message: string) => void) {
     element.replaceChildren();
     const hint = document.createElement('p'); hint.className = 'hint';
-    hint.textContent = !this.supported ? 'Background notifications need HTTPS and a browser with Web Push.' : !installed() ? 'Install termai and open it from your home screen to enable background alerts.' : 'When termai is in the background, alert when agents finish or need attention. Vibration follows your device settings.';
+    hint.textContent = !this.supported ? 'Background notifications need HTTPS and a browser with Web Push.'
+      : !installed() ? 'Install libertty and open it from your home screen to enable background alerts.'
+      : 'When libertty is in the background, alert when agents finish or need attention. ' +
+        'Vibration follows your device settings.';
     element.append(hint);
     if (!this.supported) return;
     for (const backend of backends) {

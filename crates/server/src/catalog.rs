@@ -2,15 +2,15 @@ use crate::{
     directories::{Directories, executable},
     probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe},
 };
+use libertty_engine::{
+    path,
+    repair::tokens,
+    types::{Flag, SharedList},
+};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
     time::Duration,
-};
-use termai_engine::{
-    path,
-    repair::tokens,
-    types::{Flag, SharedList},
 };
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -170,7 +170,7 @@ impl CatalogHost {
             return Err(ABORTED.into());
         }
         let words = tokens(command);
-        let script = termai_engine::command_policy::script_operand(
+        let script = libertty_engine::command_policy::script_operand(
             &words.iter().map(|w| &w.value).collect::<Vec<_>>(),
         );
         if !words
@@ -219,7 +219,7 @@ impl CatalogHost {
                                 .map_err(|e| e.to_string())?
                                 .to_string_lossy()
                                 .into_owned(),
-                            env: std::env::vars().collect(),
+                            env: crate::environment::vars().collect(),
                             timeout: Duration::from_millis(1500),
                             max_buffer: 128 * 1024,
                         };

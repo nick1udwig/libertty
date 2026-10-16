@@ -5,6 +5,6 @@ import { execFileSync } from 'node:child_process';
 export function rustExample(name: 'engine_host' | 'herdr_snapshot' | 'protocol_check'): string {
   const root = new URL('../../',import.meta.url).pathname;
   const binary = root+'target/debug/examples/'+name;
-  if (!existsSync(binary)) execFileSync('cargo',['build','--locked','-p','termai-server','--example',name],{cwd:root,stdio:'inherit'});
+  if (!existsSync(binary)) execFileSync('cargo',['build','--locked','-p','libertty-server','--example',name],{cwd:root,stdio:'inherit'});
   return binary;
 }

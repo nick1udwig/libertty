@@ -97,7 +97,7 @@ try {
         for (const name of cases) {
           for (let i = 0; i <= samples; i++) {
             const id = profile.name + '/' + variant + '/' + name + '/' + i;
-            const result = await new Promise(resolve => { next = { resolve, start: performance.now() }; socket.send(encodeWire({ type: 'input', data: JSON.stringify({ id, case: name, variant }) }, ['binary', 'gzip', 'gzip-fast'].includes(variant) ? 'termai.binary.v1' : '')); });
+            const result = await new Promise(resolve => { next = { resolve, start: performance.now() }; socket.send(encodeWire({ type: 'input', data: JSON.stringify({ id, case: name, variant }) }, ['binary', 'gzip', 'gzip-fast'].includes(variant) ? 'libertty.binary.v1' : '')); });
             let metrics; for (let attempt = 0; attempt < 20; attempt++) { metrics = await (await fetch('/stats/' + id)).json(); if (metrics) break; await new Promise(resolve => setTimeout(resolve, 5)); }
             measured.push({ case: name, cold: i === 0, ...result, ...metrics });
           }

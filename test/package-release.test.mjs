@@ -13,11 +13,11 @@ const commit = directory => {
   git(directory, '-c', 'user.name=CI Fixture', '-c', 'user.email=ci@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture');
 };
 async function fixture(t) {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'termai-package-'));
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'libertty-package-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   git(directory, 'init', '-q');
   await writeFile(path.join(directory, '.gitignore'), 'dist/\ntarget/\n.test-artifacts/\nnode_modules/\nrelease/\n.release-companions/\n');
-  for (const file of ['dist/index.html', 'target/release/termai']) {
+  for (const file of ['dist/index.html', 'target/release/libertty']) {
     await mkdir(path.dirname(path.join(directory, file)), { recursive: true });
     await writeFile(path.join(directory, file), file, { mode: 0o755 });
   }
@@ -52,12 +52,12 @@ test('release packaging builds once and retains metadata, checksums, permissions
   await writeFile(path.join(commands, 'cargo'), '#!/bin/sh\necho built >> .test-artifacts/builds\n', { mode: 0o755 });
   await writeFile(path.join(commands, 'rustc'), '#!/bin/sh\necho rustc-fixture\n', { mode: 0o755 });
   const env = { ...process.env, PATH: commands + path.delimiter + process.env.PATH, VOXTYPE_MOBILE_CHECKOUT: companion };
-  delete env.TERMAI_RELEASE_ALLOW_DIRTY;
+  delete env.LIBERTTY_RELEASE_ALLOW_DIRTY;
   delete env.RELEASE_TAG;
   const packageBuild = () => execFileSync(process.execPath, ['scripts/package-release.mjs'], { cwd: directory, env, stdio: ['ignore', 'pipe', 'pipe'] });
   packageBuild();
   assert.equal(await readFile(path.join(directory, '.test-artifacts/builds'), 'utf8'), 'built\n');
-  const name = 'termai-v0.2.0-' + process.platform + '-' + process.arch + '.tar.gz';
+  const name = 'libertty-v0.2.0-' + process.platform + '-' + process.arch + '.tar.gz';
   const archive = path.join(directory, 'release', name), extracted = path.join(directory, '.test-artifacts/extracted');
   await mkdir(extracted);
   execFileSync('tar', ['-xzpf', archive, '-C', extracted]);
@@ -65,8 +65,8 @@ test('release packaging builds once and retains metadata, checksums, permissions
   assert.equal(metadata.commit, revision);
   assert.equal(metadata.dirty, false);
   assert.equal(metadata.rust, 'rustc-fixture');
-  assert.equal(await readFile(path.join(extracted, 'bin/termai-backend'), 'utf8'), 'target/release/termai');
-  assert.equal((await stat(path.join(extracted, 'bin/termai-backend'))).mode & 0o111, 0o111);
+  assert.equal(await readFile(path.join(extracted, 'bin/libertty-backend'), 'utf8'), 'target/release/libertty');
+  assert.equal((await stat(path.join(extracted, 'bin/libertty-backend'))).mode & 0o111, 0o111);
   if (process.platform === 'linux') {
     const source = JSON.parse(await readFile(path.join(extracted, 'companions/voxtype-mobile/source.json'), 'utf8'));
     assert.deepEqual(source, pins.voxtypeMobile);

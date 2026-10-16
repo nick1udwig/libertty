@@ -186,7 +186,7 @@ impl Running {
                 "env {} {}",
                 target.assignments(true)?,
                 args.iter()
-                    .map(|arg| termai_engine::repair::shell_quote(arg))
+                    .map(|arg| libertty_engine::repair::shell_quote(arg))
                     .collect::<Vec<_>>()
                     .join(" ")
             );

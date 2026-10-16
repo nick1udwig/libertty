@@ -14,25 +14,25 @@ const port = listener.address().port; await new Promise(resolve => listener.clos
 const base = 'http://127.0.0.1:' + port, first = 'loading-first', second = 'loading-second';
 fixture.setScreen(0, 'SCREEN_ALPHA\nAlready ready\n'); fixture.setScreen(1, 'SCREEN_BETA\nNewly loaded\n');
 const backend = startBackend({
-  cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV:'production', HOST:'127.0.0.1', PORT:String(port), TERMAI_ALLOWED_HOSTS:'127.0.0.1', TERMAI_ALLOWED_ORIGINS:base, TERMAI_DATA_DIR:fixture.directory+'/termai', TERMAI_TOKEN:'', TERMAI_NO_RC:'1', TERMAI_CWD:fixture.directory, HOME:fixture.directory, PATH:fixture.directory+':'+process.env.PATH, HERDR_SOCKET_PATH:fixture.socketPath },
+  cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_ENV:'production', HOST:'127.0.0.1', PORT:String(port), LIBERTTY_ALLOWED_HOSTS:'127.0.0.1', LIBERTTY_ALLOWED_ORIGINS:base, LIBERTTY_DATA_DIR:fixture.directory+'/libertty', LIBERTTY_TOKEN:'', LIBERTTY_NO_RC:'1', LIBERTTY_CWD:fixture.directory, HOME:fixture.directory, PATH:fixture.directory+':'+process.env.PATH, HERDR_SOCKET_PATH:fixture.socketPath },
 });
 const exited = once(backend, 'exit'); let browser, logs = '';
 backend.stdout.on('data', bytes => logs += bytes); backend.stderr.on('data', bytes => logs += bytes);
 try {
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'backend');
-  const token = (await readFile(fixture.directory+'/termai/pairing-token', 'utf8')).trim();
+  const token = (await readFile(fixture.directory+'/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({args:['--use-gl=angle','--use-angle=gl']});
   const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
   await installWireObserver(context);
   await context.addInitScript(({first,second}) => {
     if (window === parent) {
-      localStorage.setItem('termai.herdrStrip', JSON.stringify('agents'));
+      localStorage.setItem('libertty.herdrStrip', JSON.stringify('agents'));
       // Folded status lanes would hide the idle tabs this test switches between.
-      localStorage.setItem('termai.herdrStripOrder', JSON.stringify('manual'));
-      localStorage.setItem('termai.hosts', JSON.stringify([{id:'herdr',name:'Herdr',kind:'herdr',backendId:'primary'}]));
-      localStorage.setItem('termai.tabs', JSON.stringify([first,second].map((id,i)=>({id,session:'default',name:'Herdr '+(i+1),mode:'herdr',backendId:'primary',hostId:'herdr'}))));
-      localStorage.setItem('termai.activeTab', JSON.stringify(first));
-      localStorage.setItem('termai.shortcuts', JSON.stringify([{label:'Stop',kind:'keys',value:'Escape'},{label:'Ctrl',kind:'keys',value:'Ctrl'},{label:'Status',kind:'command',value:'pwd'}]));
+      localStorage.setItem('libertty.herdrStripOrder', JSON.stringify('manual'));
+      localStorage.setItem('libertty.hosts', JSON.stringify([{id:'herdr',name:'Herdr',kind:'herdr',backendId:'primary'}]));
+      localStorage.setItem('libertty.tabs', JSON.stringify([first,second].map((id,i)=>({id,session:'default',name:'Herdr '+(i+1),mode:'herdr',backendId:'primary',hostId:'herdr'}))));
+      localStorage.setItem('libertty.activeTab', JSON.stringify(first));
+      localStorage.setItem('libertty.shortcuts', JSON.stringify([{label:'Stop',kind:'keys',value:'Escape'},{label:'Ctrl',kind:'keys',value:'Ctrl'},{label:'Status',kind:'command',value:'pwd'}]));
       window.__holdRendered = []; window.__holdAllRendered = true; window.__visibleScreens = [];
       window.__holdShortcuts = []; window.__holdAllShortcuts = true; window.__bottomLayouts = [];
       window.__bottomLayout = () => {

@@ -1,4 +1,8 @@
 use crate::probes::ABORTED;
+use libertty_engine::{
+    path,
+    types::{DirectoryEntry, DirectoryLookup, DirectorySnapshot, FileInfo},
+};
 use std::{
     collections::{HashMap, VecDeque},
     ffi::CString,
@@ -8,10 +12,6 @@ use std::{
         Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
-};
-use termai_engine::{
-    path,
-    types::{DirectoryEntry, DirectoryLookup, DirectorySnapshot, FileInfo},
 };
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -264,7 +264,7 @@ impl Directories {
         dir: &str,
         limit: usize,
         cancel: &CancellationToken,
-    ) -> Result<termai_engine::types::SharedList<DirectoryEntry>, String> {
+    ) -> Result<libertty_engine::types::SharedList<DirectoryEntry>, String> {
         Ok(self.snapshot(dir, limit, cancel).await?.entries)
     }
     pub async fn path_spelling(

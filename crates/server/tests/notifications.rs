@@ -1,6 +1,7 @@
 #[path = "support/herdr.rs"]
 mod support;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use libertty_server::notifications::{self, DeliveryError, Notifications, Push, Sender};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use serde_json::{Value, json};
 use std::{
@@ -11,7 +12,6 @@ use std::{
     time::Duration,
 };
 use support::Fixture;
-use termai_server::notifications::{self, DeliveryError, Notifications, Push, Sender};
 
 fn subscription() -> Value {
     let key = p256::SecretKey::random(&mut rand::rngs::OsRng);
@@ -77,7 +77,7 @@ fn only_browser_services_with_valid_encryption_keys_are_accepted_and_delivery_is
     invalid["keys"]["p256dh"] = json!(URL_SAFE_NO_PAD.encode(point));
     assert!(notifications::subscription(&invalid).is_err());
     let directory = tempfile::tempdir().unwrap();
-    let push = Push::open(directory.path(), "https://example.com/termai").unwrap();
+    let push = Push::open(directory.path(), "https://example.com/libertty").unwrap();
     let text = "Private agent response";
     let message = push.message(&input, text).unwrap();
     assert_eq!(message.ttl, 3600);
@@ -98,7 +98,7 @@ fn only_browser_services_with_valid_encryption_keys_are_accepted_and_delivery_is
             .any(|v| v == text.as_bytes())
     );
     assert_eq!(
-        Push::open(directory.path(), "https://example.com/termai")
+        Push::open(directory.path(), "https://example.com/libertty")
             .unwrap()
             .public,
         push.public
@@ -136,7 +136,7 @@ async fn alerts_preserve_ownership_focus_acknowledgements_previews_and_restart_w
         &directory,
         check.clone(),
         Some(send.clone()),
-        "https://example.com/termai",
+        "https://example.com/libertty",
     )
     .unwrap();
     let device = json!(manager.subscribe(&owner, &subscription()).unwrap());
@@ -201,8 +201,13 @@ async fn alerts_preserve_ownership_focus_acknowledgements_previews_and_restart_w
     saved["devices"][0]["futureDevice"] = json!({"retained":true});
     saved["devices"][0]["views"][0]["futureView"] = json!(["retained"]);
     std::fs::write(directory.join("herdr-push.json"), saved.to_string()).unwrap();
-    manager =
-        Notifications::open(&directory, check, Some(send), "https://example.com/termai").unwrap();
+    manager = Notifications::open(
+        &directory,
+        check,
+        Some(send),
+        "https://example.com/libertty",
+    )
+    .unwrap();
     let mut updated = subscription();
     updated["keys"]["auth"] = json!("BQUFBQUFBQUFBQUFBQUFBQ");
     manager.subscribe(&owner, &updated).unwrap();
@@ -253,7 +258,7 @@ async fn expired_devices_and_revoked_pairings_stop_deliveries_and_recycled_panes
         &directory,
         Arc::new(move |hash: &str| owner_valid.load(Ordering::SeqCst) && hash == owner_hash),
         Some(send),
-        "https://example.com/termai",
+        "https://example.com/libertty",
     )
     .unwrap();
     let device = json!(manager.subscribe(&owner, &subscription()).unwrap());

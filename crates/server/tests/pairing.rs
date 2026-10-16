@@ -1,5 +1,5 @@
+use libertty_server::pairing::{Pairings, pairing_token, token_matches};
 use std::{fs, os::unix::fs::PermissionsExt};
-use termai_server::pairing::{Pairings, pairing_token, token_matches};
 
 #[test]
 fn private_tokens_are_reused_and_invalid_configuration_fails_closed() {
@@ -85,7 +85,7 @@ fn credentials_survive_restarts_and_rotation_irrevocably_revokes_them() {
 
 #[test]
 fn reference_pairings_and_limit_are_compatible() {
-    use termai_server::pairing::digest;
+    use libertty_server::pairing::digest;
     let directory = tempfile::tempdir().unwrap();
     let code = "synthetic-reference-pairing-code";
     let credential = "1".repeat(64);

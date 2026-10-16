@@ -6,7 +6,7 @@ import { build } from 'vite';
 import { compressedAssets } from '../build/assets.ts';
 
 test('compressed production chunks contain finalized dynamic-import preload code', async () => {
-  const directory = await mkdtemp('/tmp/termai-bundle-');
+  const directory = await mkdtemp('/tmp/libertty-bundle-');
   try {
     await writeFile(directory + '/index.html', '<script type="module" src="./main.js"></script>');
     await writeFile(directory + '/main.js', 'document.onclick = () => import("./lazy.js").then(m => m.run());\n' + 'console.log("bundle padding");\n'.repeat(100));

@@ -4,10 +4,10 @@ use crate::{
     filesystem::FileSystem,
     reading::MAX_READING_BYTES,
 };
+use libertty_engine::utf16_len;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::VecDeque, os::unix::fs::MetadataExt, sync::Arc};
-use termai_engine::utf16_len;
 use tokio::io::AsyncReadExt;
 use tokio_util::sync::CancellationToken;
 
@@ -73,9 +73,9 @@ impl Cache {
         if let Some(remote) = &fs.remote {
             let command = format!(
                 "python3 -I -c {} {} {}",
-                termai_engine::repair::shell_quote(REMOTE),
-                termai_engine::repair::shell_quote(&path),
-                termai_engine::repair::shell_quote(known.unwrap_or(""))
+                libertty_engine::repair::shell_quote(REMOTE),
+                libertty_engine::repair::shell_quote(&path),
+                libertty_engine::repair::shell_quote(known.unwrap_or(""))
             );
             // Older hosts without Python retain the SFTP implementation.
             let probe = async {

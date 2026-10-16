@@ -154,7 +154,13 @@ pub(crate) fn recording<T: RecordingTarget>(
     let ready = emit.clone();
     let status = Arc::new(move |state: &str, message: Option<String>| emit(state, message, None));
     let ready = Arc::new(move |checkpoint| ready("ready", None, Some(checkpoint)));
-    Recording::start_resumable(std::env::vars().collect(), session, result, status, ready)
+    Recording::start_resumable(
+        crate::environment::vars().collect(),
+        session,
+        result,
+        status,
+        ready,
+    )
 }
 
 #[cfg(test)]

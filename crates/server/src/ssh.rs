@@ -5,6 +5,8 @@ use crate::{
     system_ssh::{self, Method, System},
     vault::{KeyInfo, Vault, fingerprint, inspect_private_key},
 };
+use libertty_engine::utf16_len;
+use libertty_engine::{path, repair::shell_quote, validation::Environment};
 use russh::{
     Channel, ChannelMsg, ChannelStream, ChannelWriteHalf, Disconnect, Sig, client,
     keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate, agent::client::AgentClient},
@@ -22,8 +24,6 @@ use std::{
     },
     time::Duration,
 };
-use termai_engine::utf16_len;
-use termai_engine::{path, repair::shell_quote, validation::Environment};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 use zeroize::Zeroizing;
@@ -133,7 +133,7 @@ pub struct SSHHost {
         std::collections::VecDeque<(
             String,
             std::time::Instant,
-            crate::probes::SharedTask<termai_engine::types::Help>,
+            crate::probes::SharedTask<libertty_engine::types::Help>,
         )>,
     >,
     pub(crate) syntax_cache: Mutex<std::collections::VecDeque<(String, bool)>>,
@@ -598,12 +598,12 @@ impl SSHHost {
         cancel: &CancellationToken,
     ) -> Result<RemoteChannel, String> {
         let output = self
-            .exec("umask 077; mktemp -d /tmp/termai.XXXXXXXX", cancel)
+            .exec("umask 077; mktemp -d /tmp/libertty.XXXXXXXX", cancel)
             .await?;
         let directory = output.stdout.trim().to_owned();
         if output.code != 0
             || !directory
-                .strip_prefix("/tmp/termai.")
+                .strip_prefix("/tmp/libertty.")
                 .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric()))
         {
             return Err("Cannot create a private SSH shell context.".into());
@@ -629,22 +629,22 @@ impl SSHHost {
         })
         .await?;
         let mut variables = Environment::from([
-            ("TERMAI_TRANSFER_DIR".into(), directory.clone()),
-            ("TERMAI_READING_DIR".into(), directory.clone()),
-            ("TERMAI_CAPTURE_SSH".into(), "0".into()),
-            ("TERMAI_NONCE".into(), nonce.into()),
+            ("LIBERTTY_TRANSFER_DIR".into(), directory.clone()),
+            ("LIBERTTY_READING_DIR".into(), directory.clone()),
+            ("LIBERTTY_CAPTURE_SSH".into(), "0".into()),
+            ("LIBERTTY_NONCE".into(), nonce.into()),
             (
-                "TERMAI_HISTORY_SOURCE".into(),
+                "LIBERTTY_HISTORY_SOURCE".into(),
                 self.history_source.lock().unwrap().clone(),
             ),
             ("TERM".into(), "xterm-256color".into()),
             ("COLORTERM".into(), "truecolor".into()),
         ]);
         for (key, file) in [
-            ("TERMAI_ENV_FILE", "environment"),
-            ("TERMAI_COMMANDS_FILE", "commands"),
-            ("TERMAI_FUNCTIONS_FILE", "functions"),
-            ("TERMAI_COMPLETIONS_FILE", "completions"),
+            ("LIBERTTY_ENV_FILE", "environment"),
+            ("LIBERTTY_COMMANDS_FILE", "commands"),
+            ("LIBERTTY_FUNCTIONS_FILE", "functions"),
+            ("LIBERTTY_COMPLETIONS_FILE", "completions"),
         ] {
             variables.insert(key.into(), path::join(&[&directory, file]));
         }

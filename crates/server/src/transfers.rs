@@ -63,7 +63,7 @@ impl Transfers {
             Event::TransferDownload { path } => ("download", path, None, false),
             Event::TransferCapture { file, name } => (
                 "download",
-                termai_engine::path::join(&[directory, &file]),
+                libertty_engine::path::join(&[directory, &file]),
                 Some(name),
                 true,
             ),
@@ -72,7 +72,7 @@ impl Transfers {
         let request = Request {
             id: storage::random_hex(16),
             action: action.into(),
-            name: name.unwrap_or_else(|| termai_engine::path::basename(&path)),
+            name: name.unwrap_or_else(|| libertty_engine::path::basename(&path)),
             path,
         };
         self.entries.push_back(Entry {

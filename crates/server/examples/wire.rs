@@ -1,7 +1,7 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
+use libertty_server::wire::{self, Mode};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
-use termai_server::wire::{self, Mode};
 fn main() {
     let mut output = io::stdout().lock();
     for line in io::stdin().lock().lines() {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://termai.local/contracts/migration-v1",
-  "title": "Termai migration contracts",
+  "$id": "https://libertty.local/contracts/migration-v1",
+  "title": "Libertty migration contracts",
   "description": "Reference wire types; optional fields are omitted, and explicit null is accepted only where declared.",
   "$defs": {
     "EngineMode": {

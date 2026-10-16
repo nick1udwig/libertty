@@ -8,7 +8,7 @@ import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 
 const fixturePort3174 = await freePort();
 
-const root = new URL('../', import.meta.url).pathname, dir = await realpath(await mkdtemp('/tmp/termai-herdr-spaces-'));
+const root = new URL('../', import.meta.url).pathname, dir = await realpath(await mkdtemp('/tmp/libertty-herdr-spaces-'));
 const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:' + fixturePort3174;
 const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 let herdr, desktop, backend, browser;
@@ -33,21 +33,21 @@ try {
   const beta = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/beta project', label: 'Beta', focus: false })).workspace.workspace_id;
   // The desktop can create its initial workspace before either fixture request.
   for (const space of startupSpaces) await herdrRequest(target, 'workspace.close', { workspace_id: space.id, close_group: false });
-  backend = spawn(process.env.TEST_EXECUTABLE || root + 'target/debug/termai', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3174), TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
+  backend = spawn(process.env.TEST_EXECUTABLE || root + 'target/debug/libertty', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3174), LIBERTTY_BASE_PATH: '/', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base, LIBERTTY_DATA_DIR: dir + '/libertty', LIBERTTY_TOKEN: '', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: dir }, stdio: 'ignore' });
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
-  const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
+  const token = (await readFile(dir + '/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.addInitScript(() => {
-    localStorage.setItem('termai.voxtype:' + location.origin + '/', 'dismissed');
-    if (!localStorage.getItem('termai.tabs')) {
+    localStorage.setItem('libertty.voxtype:' + location.origin + '/', 'dismissed');
+    if (!localStorage.getItem('libertty.tabs')) {
       const id = crypto.randomUUID();
-      localStorage.setItem('termai.hosts', JSON.stringify([{ id: 'herdr-native', name: 'Herdr', kind: 'herdr', backendId: 'primary' }]));
-      localStorage.setItem('termai.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', mode: 'herdr', backendId: 'primary', hostId: 'herdr-native' }]));
-      localStorage.setItem('termai.activeTab', JSON.stringify(id));
+      localStorage.setItem('libertty.hosts', JSON.stringify([{ id: 'herdr-native', name: 'Herdr', kind: 'herdr', backendId: 'primary' }]));
+      localStorage.setItem('libertty.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', mode: 'herdr', backendId: 'primary', hostId: 'herdr-native' }]));
+      localStorage.setItem('libertty.activeTab', JSON.stringify(id));
     }
     // Reordering and stacking need the manual order, because status lanes pause dragging.
-    if (!localStorage.getItem('termai.herdrStripOrder')) localStorage.setItem('termai.herdrStripOrder', JSON.stringify('manual'));
+    if (!localStorage.getItem('libertty.herdrStripOrder')) localStorage.setItem('libertty.herdrStripOrder', JSON.stringify('manual'));
     document.addEventListener('pointerdown', event => { window.__touchSource = event.target.closest('.herdr-agent-tab')?.dataset.terminal || event.target.id; }, true);
   });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -104,11 +104,11 @@ try {
   assert.equal(rows.terminals, rows.herdr, 'The terminal row opens directly above Herdr');
   assert.equal(await toggle.getAttribute('aria-label'), 'Hide terminal tabs');
   await assertDrawer();
-  await page.screenshot({ path: '/tmp/termai-herdr-tabs-expanded.png' });
+  await page.screenshot({ path: '/tmp/libertty-herdr-tabs-expanded.png' });
   await sampleDrawer(); await toggle.click();
   await wait(async () => await page.locator('#terminal-tabs-drawer').evaluate(el => el.getBoundingClientRect().height) === 0, 'terminal row tucked behind Herdr');
   await assertDrawer();
-  await page.screenshot({ path: '/tmp/termai-herdr-tabs-collapsed.png' });
+  await page.screenshot({ path: '/tmp/libertty-herdr-tabs-collapsed.png' });
   const drawerHeight = () => page.locator('#terminal-tabs-drawer').evaluate(el => el.getBoundingClientRect().height);
   const selectedBeforeSwipe = await page.locator('.herdr-agent-strip:visible [aria-selected=true]').getAttribute('data-terminal');
   const swipeTab = tab(selectedBeforeSwipe === chip(beta) ? alpha : beta);
@@ -131,7 +131,7 @@ try {
       assert.equal(current.headerTop, current.drawerTop, 'The terminal row emerges directly from the clipping edge without a second translation');
       assert.equal(current.terminal, before.terminal, 'Dragging never resizes the live terminal');
     }
-    if (!expanded) await page.screenshot({ path: '/tmp/termai-herdr-tabs-dragging.png' });
+    if (!expanded) await page.screenshot({ path: '/tmp/libertty-herdr-tabs-dragging.png' });
     await touch(cancel ? 'touchCancel' : 'touchEnd');
     await wait(async () => await drawerHeight() === (expanded ? 44 : 0), 'short or cancelled drag restores its starting state');
     await wait(async () => await page.locator('.herdr-navigation-resizing').count() === 0, 'drag releases its terminal geometry hold');
@@ -221,7 +221,7 @@ try {
   await drag(alpha, beta, .5);
   await page.locator('.herdr-space-stack').waitFor();
   assert.deepEqual(await page.locator('.herdr-space-stack .herdr-agent-tab').evaluateAll(tabs => tabs.map(tab => tab.dataset.terminal)), [chip(beta), chip(alpha)]);
-  await page.screenshot({ path: '/tmp/termai-herdr-spaces.png' });
+  await page.screenshot({ path: '/tmp/libertty-herdr-spaces.png' });
   await page.getByRole('button', { name: 'Collapse space stack', exact: true }).click(); assert.equal(await tab(alpha).isVisible(), false);
   await page.reload(); await tab(beta).waitFor(); assert.equal(await tab(alpha).isVisible(), false, 'Stack and collapsed state survive reload');
   await page.getByRole('button', { name: 'Expand space stack', exact: true }).click(); await tab(alpha).waitFor();
@@ -488,7 +488,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS: Herdr and terminal-strip swipes reveal/hide tabs without accidental clicks or intermediate terminal resizes; real Herdr worktrees group under their repository chip, whose attached tree renames, splits, closes, creates and opens checkouts and panes while preserving selection, rejecting duplicate submissions and keeping reorder/stacks.');
 } catch (error) {
-  await browser?.contexts()[0]?.pages()[0]?.screenshot({ path: '/tmp/termai-herdr-spaces-failure.png' }).catch(() => {}); throw error;
+  await browser?.contexts()[0]?.pages()[0]?.screenshot({ path: '/tmp/libertty-herdr-spaces-failure.png' }).catch(() => {}); throw error;
 } finally {
   await browser?.close(); if (backend) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
   const stopped = herdr && herdr.exitCode === null && herdr.signalCode === null ? once(herdr, 'exit') : null;

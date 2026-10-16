@@ -26,7 +26,7 @@ try {
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
   await context.addInitScript(({ base, owner }) => {
-    localStorage.setItem('termai.access:' + base, owner);
+    localStorage.setItem('libertty.access:' + base, owner);
     const Original = WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'state') window.__state = m.state; if (m.type === 'transfer') window.__transfer = m.request; if (m.type === 'output') window.__output = (window.__output || '') + m.data; }); } };
   }, { base, owner });
   const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(String(error)));

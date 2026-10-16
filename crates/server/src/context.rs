@@ -1,9 +1,9 @@
+use libertty_engine::path;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
     time::SystemTime,
 };
-use termai_engine::path;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FileStamp {
     inode: u64,
@@ -82,7 +82,7 @@ impl Cache {
             ShellContext {
                 commands: Arc::default(),
                 functions: Arc::default(),
-                environment: Arc::new(std::env::vars().collect()),
+                environment: Arc::new(crate::environment::vars().collect()),
             }
         } else {
             let State {
@@ -110,7 +110,7 @@ impl Cache {
                     .collect()),
                 cached(path::join(&[dir, "environment"]), environment, |raw| {
                     if raw.is_empty() {
-                        std::env::vars().collect()
+                        crate::environment::vars().collect()
                     } else {
                         raw.split('\0')
                             .filter_map(|s| s.split_once('='))

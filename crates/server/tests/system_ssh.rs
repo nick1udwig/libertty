@@ -1,6 +1,6 @@
+use libertty_server::{system_ssh, vault};
 use serde_json::json;
 use std::os::unix::fs::PermissionsExt;
-use termai_server::{system_ssh, vault};
 use tokio_util::sync::CancellationToken;
 
 #[test]

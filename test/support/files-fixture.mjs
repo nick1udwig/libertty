@@ -13,7 +13,7 @@ export async function filesFixture({ sourceFile = false, locale = false } = {}) 
   const port = await freePort(),
     secondPort = await freePort(),
     sshPort = await freePort();
-  const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-files-'));
+  const fixture = await mkdtemp(path.join(os.tmpdir(), 'libertty-files-'));
   const origin = `http://127.0.0.1:${port}`,
     base = origin + '/t/';
   const second = `http://127.0.0.1:${secondPort}/t/`;
@@ -80,17 +80,17 @@ export async function filesFixture({ sourceFile = false, locale = false } = {}) 
       [port, 'local'],
       [secondPort, 'secondary'],
     ].map(([port, directory]) =>
-      start(root + '/target/debug/termai', [], {
+      start(root + '/target/debug/libertty', [], {
         NODE_ENV: 'production',
         HOST: '127.0.0.1',
         PORT: String(port),
-        TERMAI_BASE_PATH: '/t',
-        TERMAI_ALLOWED_ORIGINS: origin,
-        TERMAI_TOKEN: token,
-        TERMAI_NO_RC: '1',
-        TERMAI_CWD: fixture + '/' + directory,
+        LIBERTTY_BASE_PATH: '/t',
+        LIBERTTY_ALLOWED_ORIGINS: origin,
+        LIBERTTY_TOKEN: token,
+        LIBERTTY_NO_RC: '1',
+        LIBERTTY_CWD: fixture + '/' + directory,
         HOME: fixture + '/' + directory,
-        TERMAI_DATA_DIR: fixture + '/data-' + directory,
+        LIBERTTY_DATA_DIR: fixture + '/data-' + directory,
       }),
     );
     await Promise.all([waitForBackend(base, backends[0]), waitForBackend(second, backends[1])]);

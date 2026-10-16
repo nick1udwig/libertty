@@ -1,8 +1,8 @@
 //! Validated client messages shared by native terminals and Herdr viewers.
 use crate::alternatives::Intent;
+use libertty_engine::utf16_len;
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use serde_json::Value;
-use termai_engine::utf16_len;
 
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]

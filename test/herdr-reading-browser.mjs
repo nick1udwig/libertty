@@ -11,7 +11,7 @@ import ssh2 from 'ssh2';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 
-const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-reading-');
+const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/libertty-herdr-reading-');
 const target = { session: '', socketPath: dir + '/herdr.sock' }, port = await freePort(), sshPort = await freePort();
 const base = 'http://127.0.0.1:' + port + '/reading-test/', origin = new URL(base).origin;
 const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
@@ -28,23 +28,23 @@ try {
   start(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server']);
   await until(async () => { try { await herdrRequest(target, 'session.snapshot'); return true; } catch { return false; } }, 'Herdr server');
   const { root_pane: pane } = await herdrRequest(target, 'workspace.create', { cwd: dir + '/work tree', label: 'Reading', focus: false });
-  start(root + 'target/debug/termai', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/reading-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_CWD: dir, TERMAI_NO_RC: '1' } });
-  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'Termai backend');
+  start(root + 'target/debug/libertty', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), LIBERTTY_BASE_PATH: '/reading-test', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: origin, LIBERTTY_DATA_DIR: dir + '/libertty', LIBERTTY_TOKEN: '', LIBERTTY_CWD: dir, LIBERTTY_NO_RC: '1' } });
+  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'Libertty backend');
   for (const path of ['reading', 'reading/file?path=/tmp/file', 'reading/capture?id=' + 'a'.repeat(32)]) {
     const response = await fetch(base + 'api/herdr/' + path, { ...(path === 'reading' ? { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: '{}' } : {}) });
     assert.equal(response.status, 401);
   }
-  const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
+  const token = (await readFile(dir + '/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser(); const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await installWireObserver(context);
   await context.addInitScript(() => {
     const Original = WebSocket;
     window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'state') window.__state = message.state; }); } };
-    if (!localStorage.getItem('termai.tabs')) {
+    if (!localStorage.getItem('libertty.tabs')) {
       const id = crypto.randomUUID();
-      localStorage.setItem('termai.hosts', JSON.stringify([{ id: 'herdr-reader', name: 'Herdr', kind: 'herdr', backendId: 'primary' }]));
-      localStorage.setItem('termai.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', pluginId: 'herdr', herdrSession: '', backendId: 'primary', hostId: 'herdr-reader' }]));
-      localStorage.setItem('termai.activeTab', JSON.stringify(id));
+      localStorage.setItem('libertty.hosts', JSON.stringify([{ id: 'herdr-reader', name: 'Herdr', kind: 'herdr', backendId: 'primary' }]));
+      localStorage.setItem('libertty.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', pluginId: 'herdr', herdrSession: '', backendId: 'primary', hostId: 'herdr-reader' }]));
+      localStorage.setItem('libertty.activeTab', JSON.stringify(id));
     }
   });
   const page = await context.newPage(), errors = []; page.setDefaultTimeout(15000); page.on('pageerror', error => errors.push(error.message));
@@ -56,14 +56,14 @@ try {
   const type = async command => { const frame = await terminal(); await frame.locator('#terminal textarea').focus(); await page.keyboard.type(command); await page.keyboard.press('Enter'); };
   const closeReader = async () => { await showTerminalTabs(page); await page.locator('#tabs [role=tab][aria-selected=true] .tab-close').click(); await terminal(); };
   await type('look at README.md'); await page.locator('.reading-markdown h1').filter({ hasText: 'Herdr reader' }).waitFor();
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'reading').readHerdrTerminal), pane.terminal_id);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'reading').readHerdrTerminal), pane.terminal_id);
   await page.locator('.reading-markdown a').click(); await page.locator('.reading-text').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
   await page.reload(); await page.locator('.reading-text').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
   await closeReader();
   if (await page.locator('.reading-view:visible').count()) await closeReader();
   for (const command of ['look at printf prefix-output', 'printf pipe-output | look at']) {
     await type(command); await page.locator('.reading-text').filter({ hasText: command.includes('prefix') ? 'prefix-output' : 'pipe-output' }).waitFor();
-    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).readCapture);
+    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).readCapture);
     const foreign = await (await fetch(base + 'api/connect', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ token, noSession: true }) })).json();
     assert.equal((await fetch(base + 'api/herdr/reading/capture?id=' + capture, { headers: { Authorization: 'Bearer ' + foreign.accessToken } })).status, 404, 'Captured output belongs to its paired viewer');
     await page.reload(); await page.locator('.reading-text').waitFor(); await closeReader();
@@ -83,13 +83,13 @@ try {
     };
     const source = await request('sessions', { name: 'SSH reader', files: true, ssh: input });
     await request('herdr/connect', { source: source.id });
-    const id = crypto.randomUUID(), tabs = JSON.parse(localStorage.getItem('termai.tabs'));
+    const id = crypto.randomUUID(), tabs = JSON.parse(localStorage.getItem('libertty.tabs'));
     tabs.push({ id, session: source.id, name: 'SSH Herdr', pluginId: 'herdr', herdrSession: '', herdrSource: source.id, backendId: 'primary' });
-    localStorage.setItem('termai.tabs', JSON.stringify(tabs)); localStorage.setItem('termai.activeTab', JSON.stringify(id)); return source.id;
+    localStorage.setItem('libertty.tabs', JSON.stringify(tabs)); localStorage.setItem('libertty.activeTab', JSON.stringify(id)); return source.id;
   }, { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, privateKey: identity.private, passphrase: 'fixture-passphrase', trust: fingerprint(ssh2.utils.parseKey(hostKey.private).getPublicSSH()) });
   await page.reload(); await terminal(); await type('look at note.txt');
   await page.locator('.reading-text').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).herdrSource), remote);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).herdrSource), remote);
   await closeReader(); await type("look at sh -c 'printf x >> once; printf remote-output'");
   await page.locator('.reading-text').filter({ hasText: 'remote-output' }).waitFor();
   assert.equal(await readFile(dir + '/work tree/once', 'utf8'), 'x');

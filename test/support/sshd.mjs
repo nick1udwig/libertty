@@ -5,14 +5,14 @@ import os from 'node:os';
 
 export function sshdPath() {
   const executable =
-    process.env.TERMAI_TEST_SSHD || ['/usr/bin/sshd', '/usr/sbin/sshd'].find(existsSync);
+    process.env.LIBERTTY_TEST_SSHD || ['/usr/bin/sshd', '/usr/sbin/sshd'].find(existsSync);
   if (!executable || !existsSync(executable))
-    throw new Error('Install OpenSSH server or set TERMAI_TEST_SSHD to its executable.');
+    throw new Error('Install OpenSSH server or set LIBERTTY_TEST_SSHD to its executable.');
   return executable;
 }
 
 export function sshFixturePath(prefix) {
-  return [prefix, process.env.TERMAI_BASH && dirname(process.env.TERMAI_BASH), '/usr/bin', '/bin']
+  return [prefix, process.env.LIBERTTY_BASH && dirname(process.env.LIBERTTY_BASH), '/usr/bin', '/bin']
     .filter(Boolean)
     .join(':');
 }

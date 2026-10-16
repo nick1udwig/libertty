@@ -11,7 +11,7 @@ import { resumableVoxtype } from './support/voxtype-daemon.mjs';
 import { getPacketInfo } from 'libopus-wasm';
 const fixturePort3176 = await freePort();
 const root = path.resolve(import.meta.dirname, '..');
-const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-dictation-browser-'));
+const fixture = await mkdtemp(path.join(os.tmpdir(), 'libertty-dictation-browser-'));
 await mkdir(path.join(fixture, 'source/scripts'), { recursive: true });
 await writeFile(path.join(fixture, 'history'), 'git init\n');
 await writeFile(path.join(fixture, 'source/scripts/install'), 'touch ' + path.join(fixture, 'installed'));
@@ -53,7 +53,7 @@ const voice = resumableVoxtype(daemon, {
   checkPacket: async packet => { const info = await getPacketInfo(packet, { sampleRate: 16000 }); assert.equal(info.channels, 1); assert.equal(info.durationMs, 20); },
 });
 const port = Number(process.env.TEST_PORT || fixturePort3176), base = `http://127.0.0.1:${port}`;
-const server = spawn(path.join(root,'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: 'feature-test-pairing-token-123456789', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_VOXTYPE_SOURCE: path.join(fixture, 'source'), TERMAI_VOXTYPE_TOKEN_FILE: path.join(fixture, 'token'), TERMAI_VOXTYPE_URL: `ws://127.0.0.1:${daemon.address().port}/v1/dictate` }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(path.join(root,'target/debug/libertty'), [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), LIBERTTY_TOKEN: 'feature-test-pairing-token-123456789', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture, LIBERTTY_HISTORY_FILE: path.join(fixture, 'history'), LIBERTTY_VOXTYPE_SOURCE: path.join(fixture, 'source'), LIBERTTY_VOXTYPE_TOKEN_FILE: path.join(fixture, 'token'), LIBERTTY_VOXTYPE_URL: `ws://127.0.0.1:${daemon.address().port}/v1/dictate` }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 let browser;
 try {
@@ -144,12 +144,12 @@ try {
   await writeFile(path.join(fixture, 'token'), 'secret'.repeat(8), { mode: 0o600 });
   // A token/binary and the legacy saved 'installed' flag do not prove API support.
   capabilities = false;
-  await page.evaluate(base => localStorage.setItem('termai.voxtype:' + base + '/', 'installed'), base);
+  await page.evaluate(base => localStorage.setItem('libertty.voxtype:' + base + '/', 'installed'), base);
   await page.reload();
   await page.locator('#dictation-install').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#dictation-install h2').textContent(), 'Enable Voxtype dictation');
   assert.match(await page.locator('#dictation-install [data-explanation]').textContent(), /unavailable|updat/);
-  assert.equal(await page.locator('#termai-dictation').isVisible(), false);
+  assert.equal(await page.locator('#libertty-dictation').isVisible(), false);
   await page.locator('[data-install]').click();
   await page.locator('#dictation-install').waitFor({ state: 'hidden' });
   await page.waitForFunction(() => window.__out.includes('/scripts/install'));
@@ -162,13 +162,13 @@ try {
   await page.reload(); await page.waitForFunction(() => window.__state?.ready);
   await page.waitForTimeout(300); assert.equal(await page.locator('#dictation-install').isVisible(), false);
   capabilities = true;
-  await page.reload(); await page.locator('#termai-dictation').waitFor({ state: 'visible' });
-  assert.equal(await page.evaluate(base => localStorage.getItem('termai.voxtype:' + base + '/'), base), 'dismissed');
+  await page.reload(); await page.locator('#libertty-dictation').waitFor({ state: 'visible' });
+  assert.equal(await page.evaluate(base => localStorage.getItem('libertty.voxtype:' + base + '/'), base), 'dismissed');
   // A healthy daemon suppresses the offer even without a stored preference.
-  await page.evaluate(base => localStorage.removeItem('termai.voxtype:' + base + '/'), base);
-  await page.reload(); await page.locator('#termai-dictation').waitFor({ state: 'visible' });
+  await page.evaluate(base => localStorage.removeItem('libertty.voxtype:' + base + '/'), base);
+  await page.reload(); await page.locator('#libertty-dictation').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#dictation-install').isVisible(), false);
-  const mic = page.locator('#termai-dictation'), micPosition = await mic.boundingBox();
+  const mic = page.locator('#libertty-dictation'), micPosition = await mic.boundingBox();
   assert.equal(await mic.evaluate(el => getComputedStyle(el).borderRadius), '14px');
   assert.equal(await mic.locator('.dictation-microphone-icon').isVisible(), true);
   assert.equal(await mic.textContent(), '');
@@ -199,14 +199,14 @@ try {
   assert.equal((await page.locator('.dictation-cancel').boundingBox()).width, 48);
   assert.equal((await page.locator('.dictation-activity').boundingBox()).width, 92);
   await page.waitForTimeout(350);
-  await page.screenshot({ path: '/tmp/termai-voxtype-web-recording.png' });
+  await page.screenshot({ path: '/tmp/libertty-voxtype-web-recording.png' });
   const bytesBeforeLock = audioBytes;
   const cancelsBeforeLock = await page.evaluate(() => window.__sent.filter(m => m.type === 'dictation' && m.action === 'cancel').length);
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     document.dispatchEvent(new Event('visibilitychange'));
     void window.__wakeLocks.at(-1).release();
-    document.querySelector('#termai-dictation').dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
+    document.querySelector('#libertty-dictation').dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
   });
   await page.mouse.up();
   await waitForAudioAfter(bytesBeforeLock);
@@ -219,7 +219,7 @@ try {
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await page.waitForFunction(() => window.__wakeLocks.length === 2 && !window.__wakeLocks.at(-1).released);
-  await page.locator('#termai-dictation').click();
+  await page.locator('#libertty-dictation').click();
   await page.getByText('Transcribing…', { exact: true }).waitFor({ state: 'visible' });
   await page.locator('#alternatives-toggle.loading .spinner').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#alternatives-menu').isVisible(), false, 'Transcription waits at the entry without opening a partial menu');
@@ -237,7 +237,7 @@ try {
   assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Finish releases wake locks before transcription');
   assert.equal(await mic.locator('.dictation-dots').isVisible(), true);
   assert.equal(await page.getByLabel('Cancel dictation', { exact: true }).isVisible(), true);
-  await page.screenshot({ path: '/tmp/termai-voxtype-web-transcribing.png' });
+  await page.screenshot({ path: '/tmp/libertty-voxtype-web-transcribing.png' });
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'done'));
   assert.ok(audioBytes > 0);
   assert.deepEqual(await page.evaluate(() => window.__captureConstraints.audio), { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true });
@@ -255,7 +255,7 @@ try {
   assert.equal(await page.evaluate(() => window.__sent.some(m => m.type === 'replace' && m.text === 'Get in it.' || m.type === 'input' && m.data.includes('Get in it.'))), false, 'Transcript must not be sent back for duplicate insertion');
   assert.equal(await page.evaluate(() => window.__sent.some(message => ['repair', 'replace'].includes(message.type))), false, 'Backend dictation must repair and apply without a browser relay');
   assert.ok(await page.evaluate(() => window.__messages.some(message => message.type === 'repair-result' && message.source === 'dictation' && message.accepted)));
-  await page.screenshot({ path: '/tmp/termai-voxtype-web-alternatives.png' });
+  await page.screenshot({ path: '/tmp/libertty-voxtype-web-alternatives.png' });
   const terminalInput = page.locator('#terminal textarea');
   const keyboardOpen = () => terminalInput.evaluate(element => element === document.activeElement && !element.readOnly);
   assert.equal(await keyboardOpen(), false, 'Microphone alternatives leave the keyboard closed');
@@ -291,7 +291,7 @@ try {
   await mic.press('Enter');
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await page.getByLabel('Cancel dictation', { exact: true }).click();
-  assert.equal(await page.locator('#termai-dictation').getAttribute('aria-pressed'), 'false');
+  assert.equal(await page.locator('#libertty-dictation').getAttribute('aria-pressed'), 'false');
   assert.equal(await page.evaluate(() => window.__wakeLocks.every(lock => lock.released)), true, 'Cancellation releases wake locks');
   for (const stall of ['once', 'always']) {
     const previous = audioBytes;
@@ -304,7 +304,7 @@ try {
       assert.equal(await mic.getAttribute('aria-pressed'), 'true', 'A stalled capture is recovered without another tap');
       await page.getByLabel('Cancel dictation', { exact: true }).click();
     } else {
-      await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+      await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
       assert.match(await page.locator('#toast').textContent(), /Microphone audio did not start or resume/);
       assert.equal(audioBytes, previous, 'A permanently stalled microphone never pretends to send audio');
     }
@@ -316,13 +316,13 @@ try {
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await page.waitForFunction(() => window.__captureProcessor?.context === window.__captureContext);
   await page.evaluate(() => window.__captureProcessor.dispatchEvent(new Event('processorerror')));
-  await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+  await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
   assert.match(await page.locator('#toast').textContent(), /audio processing stopped/);
   for (const interruption of ['suspend', 'ended', 'pagehide', 'denied', 'permission', 'disconnect']) {
     await page.evaluate(kind => { window.__messages = []; window.__denyWakeLock = kind === 'denied'; window.__denyMicrophone = kind === 'permission'; }, interruption);
     await mic.press('Enter');
     if (interruption === 'permission') {
-      await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+      await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
     } else {
       await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
       if (interruption === 'suspend') {
@@ -334,10 +334,10 @@ try {
         await page.getByLabel('Cancel dictation', { exact: true }).click();
       } else if (interruption === 'ended') {
         await page.evaluate(() => window.__captureStream.getAudioTracks()[0].dispatchEvent(new Event('ended')));
-        await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+        await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
       } else if (interruption === 'pagehide') {
         await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
-        await page.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+        await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
       } else if (interruption === 'disconnect') {
         recordingSocket.close();
         await page.getByText('Tap to retry', { exact: true }).waitFor();
@@ -352,7 +352,7 @@ try {
   await mic.press('Enter');
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo preserved');
-  await page.locator('#termai-dictation').click();
+  await page.locator('#libertty-dictation').click();
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'error' && m.message.includes('terminal changed')));
   assert.equal(await page.evaluate(() => window.__messages.some(m => m.type === 'pasted')), false);
   await page.getByText('Tap to retry', { exact: true }).waitFor(); await page.getByLabel('Cancel dictation', { exact: true }).click();
@@ -476,7 +476,7 @@ try {
   if (await outer.locator('#backend-login').isVisible()) { await outer.locator('#backend-token').fill('feature-test-pairing-token-123456789'); await outer.locator('#backend-login-form button[type=submit]').click(); }
   await outer.locator('#terminal-stack > iframe').waitFor();
   const embedded = await (await outer.locator('#terminal-stack > iframe').elementHandle()).contentFrame();
-  const embeddedMic = embedded.locator('#termai-dictation'); await embeddedMic.waitFor({ state: 'visible' });
+  const embeddedMic = embedded.locator('#libertty-dictation'); await embeddedMic.waitFor({ state: 'visible' });
   const bytesBeforeEmbedded = audioBytes;
   await embeddedMic.press('Enter'); await embedded.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await waitForAudioAfter(bytesBeforeEmbedded);
@@ -489,7 +489,7 @@ try {
   await embedded.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
   await outer.waitForFunction(() => window.__wakeLocks.length === 2 && !window.__wakeLocks.at(-1).released);
   await outer.locator('#terminal-back').click();
-  await embedded.waitForFunction(() => document.querySelector('#termai-dictation').getAttribute('aria-pressed') === 'false');
+  await embedded.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
   await outer.waitForFunction(() => window.__wakeLocks.every(lock => lock.released));
   await outer.close();
   assert.deepEqual(errors, []);

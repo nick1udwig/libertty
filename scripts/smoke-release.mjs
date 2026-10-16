@@ -8,16 +8,16 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 
-const directory = await mkdtemp(path.join(os.tmpdir(), 'termai-smoke-'));
+const directory = await mkdtemp(path.join(os.tmpdir(), 'libertty-smoke-'));
 let backend;
 try {
   execFileSync('tar', ['-xzf', path.resolve(process.argv[2]), '-C', directory]);
   const version = JSON.parse(await readFile(path.join(directory, 'release.json'), 'utf8'));
-  assert.ok(execFileSync(path.join(directory, 'bin/termai'), ['--version'], { encoding: 'utf8' }).includes(version.version));
+  assert.ok(execFileSync(path.join(directory, 'bin/libertty'), ['--version'], { encoding: 'utf8' }).includes(version.version));
   const listener = net.createServer().listen(0, '127.0.0.1'); await once(listener, 'listening');
   const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
   const base = `http://127.0.0.1:${port}/smoke/`;
-  backend = spawn(path.join(directory, 'bin/termai'), [], { env: { ...process.env, HOME: directory, PORT: String(port), HOST: '127.0.0.1', TERMAI_BASE_PATH: '/smoke', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_DATA_DIR: directory + '/data', TERMAI_NO_RC: '1' }, stdio: 'ignore' });
+  backend = spawn(path.join(directory, 'bin/libertty'), [], { env: { ...process.env, HOME: directory, PORT: String(port), HOST: '127.0.0.1', LIBERTTY_BASE_PATH: '/smoke', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_DATA_DIR: directory + '/data', LIBERTTY_NO_RC: '1' }, stdio: 'ignore' });
   const exited = once(backend, 'exit');
   for (let i = 0; i < 100; i++) {
     try { if ((await fetch(base + 'healthz')).ok) break; } catch {}

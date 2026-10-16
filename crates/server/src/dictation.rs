@@ -1,5 +1,7 @@
 use crate::storage;
 use futures::{SinkExt, StreamExt};
+use libertty_engine::repair::shell_quote_literal;
+use libertty_engine::utf16_len;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -10,8 +12,6 @@ use std::{
     },
     time::Duration,
 };
-use termai_engine::repair::shell_quote_literal;
-use termai_engine::utf16_len;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{
     connect_async_with_config,
@@ -94,7 +94,7 @@ fn directory(env: &BTreeMap<String, String>) -> String {
 }
 async fn configuration(env: &BTreeMap<String, String>) -> Result<(url::Url, String), String> {
     let file = env
-        .get("TERMAI_VOXTYPE_TOKEN_FILE")
+        .get("LIBERTTY_VOXTYPE_TOKEN_FILE")
         .filter(|v| !v.is_empty())
         .cloned()
         .unwrap_or_else(|| format!("{}/token", directory(env)));
@@ -112,7 +112,7 @@ async fn configuration(env: &BTreeMap<String, String>) -> Result<(url::Url, Stri
         return Err("Invalid Voxtype token.".into());
     }
     let url = url::Url::parse(
-        env.get("TERMAI_VOXTYPE_URL")
+        env.get("LIBERTTY_VOXTYPE_URL")
             .filter(|v| !v.is_empty())
             .map(String::as_str)
             .unwrap_or("ws://127.0.0.1:8765/v1/dictate"),
@@ -186,7 +186,7 @@ async fn connect(
 }
 pub async fn detect(env: &BTreeMap<String, String>) -> Value {
     let file = env
-        .get("TERMAI_VOXTYPE_TOKEN_FILE")
+        .get("LIBERTTY_VOXTYPE_TOKEN_FILE")
         .filter(|v| !v.is_empty())
         .cloned()
         .unwrap_or_else(|| format!("{}/token", directory(env)));
@@ -227,7 +227,7 @@ pub async fn detect(env: &BTreeMap<String, String>) -> Value {
 }
 pub async fn install_command(env: &BTreeMap<String, String>) -> Result<String, String> {
     let local = env
-        .get("TERMAI_VOXTYPE_SOURCE")
+        .get("LIBERTTY_VOXTYPE_SOURCE")
         .filter(|v| !v.is_empty())
         .cloned()
         .unwrap_or_else(|| {
@@ -240,7 +240,7 @@ pub async fn install_command(env: &BTreeMap<String, String>) -> Result<String, S
     if tokio::fs::metadata(&script).await.is_ok() {
         return Ok(format!("bash {}", shell_quote_literal(&script)));
     }
-    let address=env.get("TERMAI_VOXTYPE_INSTALL_URL").filter(|v|!v.is_empty()).ok_or("Set TERMAI_VOXTYPE_INSTALL_URL to the published voxtype-mobile install script, or TERMAI_VOXTYPE_SOURCE to its checkout.")?;
+    let address=env.get("LIBERTTY_VOXTYPE_INSTALL_URL").filter(|v|!v.is_empty()).ok_or("Set LIBERTTY_VOXTYPE_INSTALL_URL to the published voxtype-mobile install script, or LIBERTTY_VOXTYPE_SOURCE to its checkout.")?;
     let url = url::Url::parse(address).map_err(|e| e.to_string())?;
     if url.scheme() != "https" {
         return Err("The installer URL must use HTTPS.".into());
@@ -251,7 +251,7 @@ pub async fn install_command(env: &BTreeMap<String, String>) -> Result<String, S
         .filter(|p| !p.is_empty())
         .collect::<Vec<_>>();
     let repository = env
-        .get("TERMAI_VOXTYPE_REPO")
+        .get("LIBERTTY_VOXTYPE_REPO")
         .filter(|v| !v.is_empty())
         .cloned()
         .or_else(|| {
@@ -261,9 +261,9 @@ pub async fn install_command(env: &BTreeMap<String, String>) -> Result<String, S
                 None
             }
         })
-        .ok_or("Set TERMAI_VOXTYPE_REPO to the repository used by the downloaded installer.")?;
+        .ok_or("Set LIBERTTY_VOXTYPE_REPO to the repository used by the downloaded installer.")?;
     Ok(format!(
-        "(termai_voxtype_installer=$(mktemp) && trap 'rm -f \"$termai_voxtype_installer\"' EXIT && curl -fsSL {} -o \"$termai_voxtype_installer\" && VOXTYPE_MOBILE_REPO={} bash \"$termai_voxtype_installer\")",
+        "(libertty_voxtype_installer=$(mktemp) && trap 'rm -f \"$libertty_voxtype_installer\"' EXIT && curl -fsSL {} -o \"$libertty_voxtype_installer\" && VOXTYPE_MOBILE_REPO={} bash \"$libertty_voxtype_installer\")",
         shell_quote_literal(url.as_str()),
         shell_quote_literal(&repository)
     ))
@@ -470,10 +470,16 @@ async fn run(
                     if matches!(message,Message::Pong(_)){continue}
                     let event: Value=serde_json::from_slice(&message.into_data()).map_err(|_|"Invalid Voxtype response.")?;
                     if event["type"]=="ready"&&!ready {
-                        if event["protocol"].as_f64()!=Some(2.0)||event["sample_rate"].as_f64()!=Some(16000.0)||event["channels"].as_f64()!=Some(1.0)||event["format"]!="opus"||event["audio_encoding"]!="opus_v1"||event["framing"]!="sequence_opus_v1"||event["resume"]!=true{return Err("Unsupported Voxtype audio format. Update Termai and Voxtype together.".into())}
+                        if event["protocol"].as_f64()!=Some(2.0)||event["sample_rate"].as_f64()!=Some(16000.0)||event["channels"].as_f64()!=Some(1.0)||event["format"]!="opus"||event["audio_encoding"]!="opus_v1"||event["framing"]!="sequence_opus_v1"||event["resume"]!=true{return Err(concat!(
+                            "Unsupported Voxtype audio format. ",
+                            "Update Libertty and Voxtype together."
+                        ).into())}
                         let accepted = crate::protocol::unsigned(&event["accepted_frames"]).filter(|frames| *frames <= MAX_OPUS_FRAMES).ok_or("Invalid Voxtype audio checkpoint.")?;
                         let finished = event["finished"].as_bool().ok_or("Invalid Voxtype audio checkpoint.")?;
-                        if resume.ready.is_none() && (accepted != 0 || finished) { return Err("Unsupported Voxtype audio format. Update Termai and Voxtype together.".into()); }
+                        if resume.ready.is_none() && (accepted != 0 || finished) { return Err(concat!(
+                            "Unsupported Voxtype audio format. ",
+                            "Update Libertty and Voxtype together."
+                        ).into()); }
                         frames = accepted; accepted_frames = accepted; finishing = finished; audio_final = finished;
                         max_samples=(event["max_seconds"].as_f64().filter(|n|*n!=0.0).unwrap_or(300.0).clamp(1.0,300.0)*16000.0) as u32;
                         max_bytes=event["max_encoded_bytes"].as_f64().filter(|n|*n!=0.0).unwrap_or(MAX_OPUS_BYTES as f64).clamp(17.0,MAX_OPUS_BYTES as f64) as usize;

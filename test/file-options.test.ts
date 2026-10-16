@@ -8,7 +8,7 @@ const entries = [
   { name: 'docs', directory: true, symlink: false, mode: 0o755, modified: 0, size: 0 },
 ];
 test('breadcrumbs show two locations with nearest older ancestors first', () => {
-  assert.deepEqual(fileBreadcrumbs('/home/nick/Work/git/termai'), { visible: [{ name: 'git', path: '/home/nick/Work/git' }, { name: 'termai', path: '/home/nick/Work/git/termai' }], ancestors: [{ name: 'Work', path: '/home/nick/Work' }, { name: 'nick', path: '/home/nick' }, { name: 'home', path: '/home' }, { name: '/', path: '/' }] });
+  assert.deepEqual(fileBreadcrumbs('/home/nick/Work/git/libertty'), { visible: [{ name: 'git', path: '/home/nick/Work/git' }, { name: 'libertty', path: '/home/nick/Work/git/libertty' }], ancestors: [{ name: 'Work', path: '/home/nick/Work' }, { name: 'nick', path: '/home/nick' }, { name: 'home', path: '/home' }, { name: '/', path: '/' }] });
   assert.deepEqual(fileBreadcrumbs('/').visible, [{ name: '/', path: '/' }]); assert.equal(fileBreadcrumbs('/home').ancestors.length, 0);
 });
 test('sort direction, kind, filtering and hidden-file preferences keep folders first', () => {

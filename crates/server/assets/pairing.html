@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pair with termai</title>
+<title>Pair with libertty</title>
 <style>
 :root { color-scheme: dark; --bg: #0b0f0d; --overlay: #1e2622; --line-strong: #34403a; --text: #e4ebe6; --text-2: #b4c0b9; --muted: #8a9790; --accent: #a8f0a0; --accent-hover: #c2f6bb; --accent-ink: #0f220e; --accent-line: #a8f0a06b; --danger: #f09a9a; }
 * { box-sizing: border-box; }
@@ -11,21 +11,22 @@ label, input, button { display: block; width: 100%; } label { color: var(--text-
 input { margin: 6px 0 14px; padding: 12px; font-family: inherit; font-size: 16px; color: var(--text); background: var(--bg); border: 1px solid var(--line-strong); border-radius: 10px; outline: none; } input:focus { border-color: var(--accent-line); }
 button { min-height: 44px; padding: 0 18px; font-family: inherit; font-size: 14px; font-weight: 600; color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 10px; cursor: pointer; } button:hover:enabled { background: var(--accent-hover); } button:disabled { opacity: .45; cursor: wait; }
 button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } #login-error { color: var(--danger); margin: 0 0 12px; } #login-error:empty { display: none; }
-</style></head><body><main><h1>Pair with termai</h1>
+</style></head><body><main><h1>Pair with libertty</h1>
 <p>Enter the pairing token shown in the server’s startup output. Pairing is required even on this machine.</p>
 <form id="login-form"><label for="token">Pairing token</label><input id="token" type="password" autocomplete="current-password" required autofocus>
 <p id="login-error" role="alert"></p><button type="submit">Connect</button></form></main>
 <script>
-const storageKey = 'termai.access:' + new URL('__TERMAI_PUBLIC_BASE__', location.href).href;
+const storageKey = 'libertty.access:' + new URL('__LIBERTTY_PUBLIC_BASE__', location.href).href;
+const legacyStorageKey = 'termai.access:' + new URL('__LIBERTTY_PUBLIC_BASE__', location.href).href;
 async function pair(token, credential) {
-  const response = await fetch('__TERMAI_PUBLIC_BASE__api/connect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: 'Bearer ' + credential } : {}) },
+  const response = await fetch('__LIBERTTY_PUBLIC_BASE__api/connect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(credential ? { Authorization: 'Bearer ' + credential } : {}) },
     body: JSON.stringify({ token, noSession: true }) });
   const result = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && credential) try { if (localStorage.getItem(storageKey) === credential) localStorage.removeItem(storageKey); } catch {}
+    if (response.status === 401 && credential) try { for (const key of [storageKey, legacyStorageKey]) if (localStorage.getItem(key) === credential) localStorage.removeItem(key); } catch {}
     throw new Error(result.error || 'Pairing failed.');
   }
-  try { localStorage.setItem(storageKey, result.accessToken); } catch {}
+  try { localStorage.setItem(storageKey, result.accessToken); localStorage.removeItem(legacyStorageKey); } catch {}
   document.getElementById('token').value = ''; location.reload();
 }
 document.getElementById('login-form').addEventListener('submit', async event => {
@@ -36,7 +37,7 @@ document.getElementById('login-form').addEventListener('submit', async event => 
   } catch (error) { document.getElementById('login-error').textContent = error.message; button.disabled = false; }
 });
 try {
-  const credential = localStorage.getItem(storageKey);
+  const credential = localStorage.getItem(storageKey) ?? localStorage.getItem(legacyStorageKey);
   if (credential) pair(undefined, credential).catch(error => { document.getElementById('login-error').textContent = error.message; });
 } catch {}
 </script></body></html>

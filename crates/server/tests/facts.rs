@@ -1,6 +1,6 @@
+use libertty_engine::types::Catalog;
+use libertty_server::facts::context_key;
 use std::collections::BTreeMap;
-use termai_engine::types::Catalog;
-use termai_server::facts::context_key;
 
 #[test]
 fn context_identity_tracks_prompt_cwd_and_environment() {

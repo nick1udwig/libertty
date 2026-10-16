@@ -11,10 +11,10 @@ export async function findExecutable(name, env) {
   for (const candidate of candidates) { try { await access(candidate, constants.X_OK); return candidate; } catch {} }
 }
 export async function voxtypeAvailable(env) {
-  const file = env.TERMAI_VOXTYPE_TOKEN_FILE || path.join(env.XDG_DATA_HOME, 'voxtype-mobile/token');
+  const file = env.LIBERTTY_VOXTYPE_TOKEN_FILE || path.join(env.XDG_DATA_HOME, 'voxtype-mobile/token');
   const token = (await read(file))?.trim();
   if (!token || token.length < 32 || /[\r\n]/.test(token) || (await stat(file)).mode & 0o077) return false;
-  const url = new URL(env.TERMAI_VOXTYPE_URL || 'ws://127.0.0.1:8765/v1/dictate');
+  const url = new URL(env.LIBERTTY_VOXTYPE_URL || 'ws://127.0.0.1:8765/v1/dictate');
   if (url.protocol !== 'ws:' || !['127.0.0.1', '[::1]', 'localhost'].includes(url.hostname) || url.username || url.password || url.search || url.hash) return false;
   url.pathname = url.pathname.replace(/\/dictate$/, '/capabilities');
   return new Promise(resolve => {
@@ -47,7 +47,7 @@ export async function integrations(installed, dependencies = {}) {
   const find = dependencies.findExecutable || (name => findExecutable(name, env));
   const download = dependencies.fetch || fetch;
   const probe = dependencies.voxtypeAvailable || (() => voxtypeAvailable(env));
-  const results = { herdr: 'skipped', voxtype: 'skipped', tailscale: 'skipped', url: `http://127.0.0.1:${env.PORT}${env.TERMAI_BASE_PATH === '/' ? '/' : env.TERMAI_BASE_PATH + '/'}`, failures: [] };
+  const results = { herdr: 'skipped', voxtype: 'skipped', tailscale: 'skipped', url: `http://127.0.0.1:${env.PORT}${env.LIBERTTY_BASE_PATH === '/' ? '/' : env.LIBERTTY_BASE_PATH + '/'}`, failures: [] };
   const releaseConfig = JSON.parse(await readFile(path.join(installed.releaseDir, 'build/release-config.json'), 'utf8'));
   const attempt = async (name, work) => {
     try { await work(); } catch (error) { results[name] = 'failed'; results.failures.push(name + ': ' + error.message); console.error(name + ': ' + error.message); }
@@ -73,7 +73,7 @@ export async function integrations(installed, dependencies = {}) {
     });
     await attempt('voxtype', async () => {
       if (await probe()) { results.voxtype = 'ready'; return; }
-      if (platform !== 'linux') { results.voxtype = 'unsupported'; console.log('Voxtype Mobile automatic setup currently supports Linux; Termai and Herdr can run on macOS.'); return; }
+      if (platform !== 'linux') { results.voxtype = 'unsupported'; console.log('Voxtype Mobile automatic setup currently supports Linux; Libertty and Herdr can run on macOS.'); return; }
       if (!await ask('Install or upgrade Voxtype Mobile, start its user service, and download its speech model (about 1 GB)?')) return;
       const companion = path.join(installed.releaseDir, 'companions/voxtype-mobile');
       try { await access(path.join(companion, 'daemon'), constants.X_OK); }
@@ -94,7 +94,7 @@ export async function integrations(installed, dependencies = {}) {
         python = await find('python3');
         if (!compatiblePython() || !codec()) throw new Error('Python 3.11+, Opus and ALSA are still required; on older distributions upgrade Python before retrying.');
       }
-      run(env.TERMAI_BASH, [path.join(companion, 'scripts/install-daemon'), path.join(companion, 'daemon')], { timeout: 1800000, env: { ...env, HOME: home } });
+      run(env.LIBERTTY_BASH, [path.join(companion, 'scripts/install-daemon'), path.join(companion, 'daemon')], { timeout: 1800000, env: { ...env, HOME: home } });
       if (!await probe()) throw new Error('The compatible dictation API is not ready; check voxtype.service.');
       results.voxtype = 'ready';
     });
@@ -114,7 +114,7 @@ export async function integrations(installed, dependencies = {}) {
       }
       executable = await find('tailscale'); if (!executable) throw new Error('Tailscale CLI was not found after installation.');
     }
-    if (!await ask('Connect Tailscale and expose Termai privately over HTTPS at ' + env.TERMAI_BASE_PATH + (platform === 'linux' ? ' (uses sudo for setup commands)?' : '?'))) return;
+    if (!await ask('Connect Tailscale and expose Libertty privately over HTTPS at ' + env.LIBERTTY_BASE_PATH + (platform === 'linux' ? ' (uses sudo for setup commands)?' : '?'))) return;
     let elevated = false;
     const ts = (args, settings = {}) => run(elevated ? 'sudo' : executable, elevated ? [executable, ...args] : args, settings);
     let status = ts(['status', '--json'], { capture: true, optional: true });
@@ -137,29 +137,29 @@ export async function integrations(installed, dependencies = {}) {
     const hostname = state.Self?.DNSName?.replace(/\.$/, '');
     if (!hostname || !/^[a-zA-Z0-9.-]+\.ts\.net$/.test(hostname)) throw new Error('Tailscale did not provide a valid tailnet DNS name.');
     const serve = JSON.parse(ts(['serve', 'status', '--json'], { capture: true }).stdout || '{}');
-    if (serve.AllowFunnel?.[hostname + ':443']) throw new Error('This HTTPS listener has Funnel enabled; review public exposure before adding Termai.');
+    if (serve.AllowFunnel?.[hostname + ':443']) throw new Error('This HTTPS listener has Funnel enabled; review public exposure before adding Libertty.');
     const upstream = 'http://127.0.0.1:' + env.PORT;
-    const route = tailscaleRoute(serve, hostname, env.TERMAI_BASE_PATH, upstream);
-    const hosts = new Set(env.TERMAI_ALLOWED_HOSTS.split(',').filter(Boolean));
+    const route = tailscaleRoute(serve, hostname, env.LIBERTTY_BASE_PATH, upstream);
+    const hosts = new Set(env.LIBERTTY_ALLOWED_HOSTS.split(',').filter(Boolean));
     const changed = !hosts.has(hostname); hosts.add(hostname);
     const previous = await readFile(installed.configFile, 'utf8');
-    const oldHosts = env.TERMAI_ALLOWED_HOSTS;
+    const oldHosts = env.LIBERTTY_ALLOWED_HOSTS;
     const restart = () => {
       if (!installed.service) return;
-      if (platform === 'linux') run('systemctl', ['--user', 'restart', 'termai.service']);
-      else run('launchctl', ['kickstart', '-k', 'gui/' + process.getuid() + '/com.termai.server']);
+      if (platform === 'linux') run('systemctl', ['--user', 'restart', 'libertty.service']);
+      else run('launchctl', ['kickstart', '-k', 'gui/' + process.getuid() + '/com.libertty.server']);
     };
     try {
       if (changed) {
-        env.TERMAI_ALLOWED_HOSTS = [...hosts].join(',');
+        env.LIBERTTY_ALLOWED_HOSTS = [...hosts].join(',');
         const temporary = installed.configFile + '.new-' + process.pid;
         await writeFile(temporary, JSON.stringify(config, null, 2) + '\n', { mode: 0o600 }); await rename(temporary, installed.configFile);
         restart();
       }
-      if (route === 'new') ts(['serve', '--bg', '--https=443', '--set-path=' + env.TERMAI_BASE_PATH, upstream], { timeout: 300000 });
+      if (route === 'new') ts(['serve', '--bg', '--https=443', '--set-path=' + env.LIBERTTY_BASE_PATH, upstream], { timeout: 300000 });
       const final = JSON.parse(ts(['serve', 'status', '--json'], { capture: true }).stdout || '{}');
-      if (tailscaleRoute(final, hostname, env.TERMAI_BASE_PATH, upstream) !== 'existing') throw new Error('Tailscale did not retain the requested route.');
-      const url = 'https://' + hostname + (env.TERMAI_BASE_PATH === '/' ? '/' : env.TERMAI_BASE_PATH + '/');
+      if (tailscaleRoute(final, hostname, env.LIBERTTY_BASE_PATH, upstream) !== 'existing') throw new Error('Tailscale did not retain the requested route.');
+      const url = 'https://' + hostname + (env.LIBERTTY_BASE_PATH === '/' ? '/' : env.LIBERTTY_BASE_PATH + '/');
       if (installed.service) {
         let ready = false;
         for (let i = 0; i < 8; i++) {
@@ -170,32 +170,32 @@ export async function integrations(installed, dependencies = {}) {
           } catch {}
           await new Promise(resolve => setTimeout(resolve, 250));
         }
-        if (!ready) throw new Error('Termai did not respond through private HTTPS; check Tailscale DNS and HTTPS permissions.');
+        if (!ready) throw new Error('Libertty did not respond through private HTTPS; check Tailscale DNS and HTTPS permissions.');
       }
       results.tailscale = 'ready'; results.url = url;
     } catch (error) {
       if (route === 'new') {
         try {
           const current = JSON.parse(ts(['serve', 'status', '--json'], { capture: true }).stdout || '{}');
-          if (tailscaleRoute(current, hostname, env.TERMAI_BASE_PATH, upstream) === 'existing') ts(['serve', '--https=443', '--set-path=' + env.TERMAI_BASE_PATH, 'off']);
+          if (tailscaleRoute(current, hostname, env.LIBERTTY_BASE_PATH, upstream) === 'existing') ts(['serve', '--https=443', '--set-path=' + env.LIBERTTY_BASE_PATH, 'off']);
         } catch (cleanup) { results.failures.push('Tailscale route cleanup: ' + cleanup.message); }
       }
       if (changed) {
-        env.TERMAI_ALLOWED_HOSTS = oldHosts;
+        env.LIBERTTY_ALLOWED_HOSTS = oldHosts;
         await writeFile(installed.configFile, previous, { mode: 0o600 });
-        try { restart(); } catch (cleanup) { results.failures.push('Termai restart after restoring hosts: ' + cleanup.message); }
+        try { restart(); } catch (cleanup) { results.failures.push('Libertty restart after restoring hosts: ' + cleanup.message); }
       }
       throw error;
     }
     if (results.voxtype === 'ready' && await ask('Also expose Voxtype Mobile at /voxtype for the Android app?')) await attempt('voxtypeRoute', async () => {
-      const voiceUrl = new URL(env.TERMAI_VOXTYPE_URL || 'ws://127.0.0.1:8765/v1/dictate');
+      const voiceUrl = new URL(env.LIBERTTY_VOXTYPE_URL || 'ws://127.0.0.1:8765/v1/dictate');
       const voiceUpstream = 'http://' + voiceUrl.host;
       const final = JSON.parse(ts(['serve', 'status', '--json'], { capture: true }).stdout || '{}');
       if (tailscaleRoute(final, hostname, '/voxtype', voiceUpstream) === 'new') ts(['serve', '--bg', '--https=443', '--set-path=/voxtype', voiceUpstream], { timeout: 300000 });
       const voiceFinal = JSON.parse(ts(['serve', 'status', '--json'], { capture: true }).stdout || '{}');
       if (tailscaleRoute(voiceFinal, hostname, '/voxtype', voiceUpstream) !== 'existing') throw new Error('Voxtype route was not retained.');
       console.log('Android dictation address: wss://' + hostname + '/voxtype/v1/dictate');
-      console.log('Android dictation token file: ' + (env.TERMAI_VOXTYPE_TOKEN_FILE || path.join(env.XDG_DATA_HOME, 'voxtype-mobile/token')));
+      console.log('Android dictation token file: ' + (env.LIBERTTY_VOXTYPE_TOKEN_FILE || path.join(env.XDG_DATA_HOME, 'voxtype-mobile/token')));
       results.voxtypeRoute = 'ready';
     });
   });

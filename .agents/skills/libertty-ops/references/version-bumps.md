@@ -13,7 +13,7 @@ old_version=$(node -p "require('./package.json').version")
 git grep -nF -- "$old_version" -- . ':!archive/**'
 ```
 
-This search includes lockfile dependency versions that may coincidentally match Termai's version, so inspect each match rather than replacing every occurrence.
+This search includes lockfile dependency versions that may coincidentally match Libertty's version, so inspect each match rather than replacing every occurrence.
 Archived migration snapshots and third-party dependency versions are not application version fields.
 The active fields and examples to update are:
 
@@ -22,12 +22,12 @@ The active fields and examples to update are:
 | `package.json` | Top-level `version` |
 | `package-lock.json` | Top-level `version` and `packages[""].version` |
 | `Cargo.toml` | `[workspace.package].version` |
-| `Cargo.lock` | `version` in the `termai-engine` and `termai-server` package blocks |
+| `Cargo.lock` | `version` in the `libertty-engine` and `libertty-server` package blocks |
 | `docs/setup.md` | Explicit installer version and local archive example |
 | `docs/releases.md` | Local archive verification example |
 
 Both crate manifests inherit `version.workspace = true`, so they do not need separate version literals.
-`build/release-config.json` pins Node, Herdr, and Voxtype Mobile rather than Termai's application version.
+`build/release-config.json` pins Node, Herdr, and Voxtype Mobile rather than Libertty's application version.
 Release tags must match `v` plus the version in `package.json`.
 Archive names and generated `release.json` metadata derive from `package.json`.
 The Rust executable's `--version` and `/healthz` response derive from Cargo's package version.
@@ -47,7 +47,7 @@ Inspect the npm and Cargo fields with:
 ```sh
 npm pkg get version
 node -p "JSON.stringify({lockfile: require('./package-lock.json').version, rootPackage: require('./package-lock.json').packages[''].version})"
-rg -n -A 2 '^\[workspace\.package\]$|^name = "termai-(engine|server)"$' Cargo.toml Cargo.lock
+rg -n -A 2 '^\[workspace\.package\]$|^name = "libertty-(engine|server)"$' Cargo.toml Cargo.lock
 cargo metadata --locked --offline --no-deps --format-version 1
 git grep -nF -- "$old_version" -- . ':!archive/**'
 git diff --check

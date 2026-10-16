@@ -32,7 +32,7 @@ Decoded message size remains bounded, and compression uses independent messages 
 Idle metadata and unchanged plugin replies should contain no repeated full body after initialization.
 Authentication, owner scoping, SSH host pins, plugin capabilities, replay, Unicode and ANSI bytes are correctness gates for every selected method.
 
-Run `cargo build --release --locked -p termai-server --example wire` and `node test/transport-benchmark.mjs` to reproduce the transport comparisons.
+Run `cargo build --release --locked -p libertty-server --example wire` and `node test/transport-benchmark.mjs` to reproduce the transport comparisons.
 The comparison includes ordinary JSON, WebSocket per-message deflate, compressed JSON envelopes, raw binary envelopes and selectively compressed binary envelopes.
 The selected methods below follow these measurements for small messages, bulk text, ANSI frames and incompressible data.
 
@@ -130,13 +130,13 @@ The browser experiment paints a DOM representation rather than the Ghostty GPU s
 Physical mobile devices, macOS ARM, TLS record overhead and server-wide CPU profiles remain outside this local experiment.
 Those deployment measurements should supplement these reproducible gates before changing thresholds for a specific environment.
 
-Reproduce the encrypted-hop comparisons with `cargo test -p termai-server --test ssh transport_ssh_benchmark -- --ignored --nocapture`.
+Reproduce the encrypted-hop comparisons with `cargo test -p libertty-server --test ssh transport_ssh_benchmark -- --ignored --nocapture`.
 Use `WIRE_VARIANTS`, `WIRE_PROFILES`, `WIRE_SAMPLES` and `WIRE_OUTPUT` to retain separate browser verification runs.
 Generate fresh selected-profile reports before running `node test/transport-budgets.mjs` to check typing, bulk-transfer and incompressible-traffic budgets.
 The budget check reads `.test-artifacts` by default, or an alternative directory supplied through `WIRE_RESULTS_DIR`.
 
 ```sh
-cargo build --locked --release -p termai-server --example wire
+cargo build --locked --release -p libertty-server --example wire
 WIRE_PROFILES=fast WIRE_VARIANTS=json,gzip-fast WIRE_OUTPUT=transport-selected-fast-final.json node test/transport-benchmark.mjs
 WIRE_PROFILES=mobile WIRE_VARIANTS=json,gzip WIRE_OUTPUT=transport-selected-constrained.json node test/transport-benchmark.mjs
 node test/transport-budgets.mjs

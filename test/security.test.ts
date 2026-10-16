@@ -19,10 +19,10 @@ for (const mode of ['production', 'development']) {
     const sentinel = 'PRIVATE-ENVIRONMENT-SENTINEL';
     await writeFile(path.join(directory, 'private.txt'), sentinel);
     const development = mode === 'development';
-    const child = spawn(development ? process.execPath : path.join(root,'target/debug/termai'), development ? ['scripts/dev.mjs'] : [], { cwd: root, env: {
+    const child = spawn(development ? process.execPath : path.join(root,'target/debug/libertty'), development ? ['scripts/dev.mjs'] : [], { cwd: root, env: {
       ...process.env, NODE_ENV: mode, HOST: '127.0.0.1', PORT: String(port), HOME: directory,
-      TERMAI_TOKEN: '', TERMAI_DATA_DIR: directory, TERMAI_BASE_PATH: '/audit',
-      TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: '', TERMAI_ENGINE: 'server',
+      LIBERTTY_TOKEN: '', LIBERTTY_DATA_DIR: directory, LIBERTTY_BASE_PATH: '/audit',
+      LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: '', LIBERTTY_ENGINE: 'server',
       CARGO_HOME: process.env.CARGO_HOME || path.join(process.env.HOME!,'.cargo'),
       RUSTUP_HOME: process.env.RUSTUP_HOME || path.join(process.env.HOME!,'.rustup'),
     }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -45,7 +45,7 @@ for (const mode of ['production', 'development']) {
       for (const method of ['GET', 'POST', 'PUT', 'DELETE', 'HEAD']) {
         for (const endpoint of endpoints) {
           const response = await fetch(base + '/api/' + endpoint, { method,
-            headers: { Origin: origin, 'Content-Type': 'application/json', Authorization: 'Bearer ' + fake, Cookie: 'termai=' + fake,
+            headers: { Origin: origin, 'Content-Type': 'application/json', Authorization: 'Bearer ' + fake, Cookie: 'libertty=' + fake,
               'X-Forwarded-For': '127.0.0.1', 'X-Forwarded-Host': 'localhost' },
             ...(['GET', 'HEAD'].includes(method) ? {} : { body: JSON.stringify({ token: fake, noSession: true, action: 'export', kind: 'context', host: '127.0.0.1', port: 22 }) }),
           });

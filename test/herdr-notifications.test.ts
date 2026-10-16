@@ -8,7 +8,7 @@ import { HerdrNotifications as BrowserNotifications } from '../src/herdr-notific
 test('the push worker displays the directory and full response preview while retaining click routing', async () => {
   const handlers = new Map<string, (event: any) => void>(), shown: any[] = [];
   runInNewContext(await readFile(new URL('../public/push-sw.js', import.meta.url), 'utf8'), { URL, self: {
-    location: { href: 'https://termai.example/t/push-sw.js' },
+    location: { href: 'https://libertty.example/t/push-sw.js' },
     addEventListener: (type: string, handler: (event: any) => void) => handlers.set(type, handler),
     registration: { async showNotification(title: string, options: unknown) { shown.push({ title, options }); } },
   } });

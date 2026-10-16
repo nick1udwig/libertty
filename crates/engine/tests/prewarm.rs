@@ -1,8 +1,8 @@
-use serde_json::{Value, json};
-use termai_engine::{
+use libertty_engine::{
     Request,
     runtime::{Runtime, Step, message},
 };
+use serde_json::{Value, json};
 #[test]
 fn prewarm_targets_expire_and_remain_scoped_to_their_context_without_host_effects() {
     let mut runtime = Runtime::default();
@@ -61,5 +61,5 @@ fn integral_json_numbers_accept_decimal_notation_and_reject_fractional_identifie
         json!({"operation":"matches","args":[[{"value":"g","quoted":false}],0.0,["git"],3.0]}),
     )
     .unwrap();
-    assert!(termai_engine::dispatch(&request).is_ok());
+    assert!(libertty_engine::dispatch(&request).is_ok());
 }

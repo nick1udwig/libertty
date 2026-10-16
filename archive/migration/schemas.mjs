@@ -135,8 +135,8 @@ for (const variant of definitions.Fact.anyOf) {
 }
 definitions.HerdrClientMessage = JSON.parse(JSON.stringify(definitions.ClientMessage));
 for (const variant of definitions.HerdrClientMessage.anyOf) if (variant.properties.type.const === 'resize') for (const name of ['cols', 'rows']) Object.assign(variant.properties[name], { minimum: 1, maximum: 1000 });
-const output = { $schema: 'https://json-schema.org/draft/2020-12/schema', $id: 'https://termai.local/contracts/migration-v1',
-  title: 'Termai migration contracts', description: 'Reference wire types; optional fields are omitted, and explicit null is accepted only where declared.', $defs: definitions };
+const output = { $schema: 'https://json-schema.org/draft/2020-12/schema', $id: 'https://libertty.local/contracts/migration-v1',
+  title: 'Libertty migration contracts', description: 'Reference wire types; optional fields are omitted, and explicit null is accepted only where declared.', $defs: definitions };
 await mkdir(path.join(root, 'contracts'), { recursive: true });
 const content = JSON.stringify(output, null, 2) + '\n';
 if (process.argv.includes('--check')) {

@@ -170,7 +170,7 @@ export class ReconnectingSocket {
           this.lastMessage = Date.now();
           this.options.message(new MessageEvent('message', { data: value }));
         };
-        if (!socket.protocol?.startsWith('termai.')) { deliver(event.data); return; }
+        if (!socket.protocol?.startsWith('libertty.')) { deliver(event.data); return; }
         decoded = decoded.then(async () => {
           const value = await decodeWire(event.data);
           deliver(value);

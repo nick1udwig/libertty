@@ -1,8 +1,8 @@
 use crate::{herdr::Target, reading::MAX_READING_BYTES};
 use base64::{Engine, engine::general_purpose::STANDARD};
+use libertty_engine::{repair::shell_quote, utf16_len};
 use russh::ChannelMsg;
 use std::{sync::Arc, time::Duration};
-use termai_engine::{repair::shell_quote, utf16_len};
 use tokio_util::sync::CancellationToken;
 
 const READER: &str = r#"
@@ -80,7 +80,7 @@ pub async fn open(
     let args = [
         "-lc".into(),
         READER.into(),
-        "termai-reading".into(),
+        "libertty-reading".into(),
         shell.cwd,
         command.into(),
     ];

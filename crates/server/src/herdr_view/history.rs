@@ -1,6 +1,6 @@
 use crate::protocol::ServerMessage;
+use libertty_engine::utf16_len;
 use std::sync::Arc;
-use termai_engine::utf16_len;
 
 #[derive(Default)]
 pub(super) struct History {

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Keep the bootstrap in a function so a truncated curl response cannot run it.
 set -euo pipefail
-termai_install() {
-  local version= archive= supplied_sha= repository=${TERMAI_REPOSITORY:-nick1udwig/termai}
+libertty_install() {
+  local version= archive= supplied_sha= repository=${LIBERTTY_REPOSITORY:-${TERMAI_REPOSITORY:-nick1udwig/libertty}}
   local argument platform machine asset temporary digest expected
   local arguments=("$@")
   while [[ $# -gt 0 ]]; do
@@ -29,10 +29,10 @@ termai_install() {
       return 1
     fi
   fi
-  [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo 'Invalid TERMAI_REPOSITORY.' >&2; return 1; }
+  [[ "$repository" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo 'Invalid LIBERTTY_REPOSITORY.' >&2; return 1; }
   command -v tar >/dev/null || { echo 'Install tar first.' >&2; return 1; }
   if ! command -v sha256sum >/dev/null && ! command -v shasum >/dev/null; then echo 'Install sha256sum or shasum first.' >&2; return 1; fi
-  temporary=$(mktemp -d "${TMPDIR:-/tmp}/termai-install.XXXXXXXX")
+  temporary=$(mktemp -d "${TMPDIR:-/tmp}/libertty-install.XXXXXXXX")
   trap "$(printf 'rm -rf -- %q' "$temporary")" EXIT
   if [[ -z "$archive" ]]; then
     command -v curl >/dev/null || { echo 'Install curl first.' >&2; return 1; }
@@ -40,9 +40,9 @@ termai_install() {
       version=$(curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 10 --max-time 30 "https://api.github.com/repos/$repository/releases/latest" | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)
     fi
     [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || { echo 'No valid published release found; use --version vX.Y.Z for a prerelease.' >&2; return 1; }
-    asset="termai-$version-$platform-$machine.tar.gz"
+    asset="libertty-$version-$platform-$machine.tar.gz"
     archive=$temporary/$asset
-    echo "Downloading Termai $version for $platform-$machine…"
+    echo "Downloading Libertty $version for $platform-$machine…"
     curl --proto '=https' --tlsv1.2 -fsSL --retry 2 --connect-timeout 10 --max-time 600 "https://github.com/$repository/releases/download/$version/$asset" -o "$archive"
     curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 10 --max-time 30 "https://github.com/$repository/releases/download/$version/$asset.sha256" -o "$temporary/checksum"
     expected=$(awk -v asset="$asset" '$2 == asset {print $1}' "$temporary/checksum")
@@ -57,6 +57,6 @@ termai_install() {
   mkdir "$temporary/app"
   tar -xzf "$archive" -C "$temporary/app"
   [[ -x "$temporary/app/bin/node" && -f "$temporary/app/scripts/setup.mjs" ]] || { echo 'Incomplete release archive.' >&2; return 1; }
-  TERMAI_ARCHIVE_SHA256=$expected "$temporary/app/bin/node" "$temporary/app/scripts/setup.mjs" "${arguments[@]}"
+  LIBERTTY_ARCHIVE_SHA256=$expected "$temporary/app/bin/node" "$temporary/app/scripts/setup.mjs" "${arguments[@]}"
 }
-termai_install "$@"
+libertty_install "$@"

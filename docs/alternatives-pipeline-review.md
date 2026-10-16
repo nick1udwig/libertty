@@ -293,7 +293,7 @@ The four frontend test files for dictation alternatives, inline suggestions, com
 The additional production-engine probes reproduced the gaps above without changing implementation or test files.
 Network savings remain estimates from dependency structure until the proposed end-to-end measurements are run.
 
-The probes can be reproduced through `target/debug/examples/engine_host`, built with `cargo build --locked -p termai-server --example engine_host`.
+The probes can be reproduced through `target/debug/examples/engine_host`, built with `cargo build --locked -p libertty-server --example engine_host`.
 It accepts one JSON request per line using `{"operation":"suggestWithStage","args":[text,catalog,environment]}`, where the catalog supplies `cwd`, `commands`, `paths`, and `history`.
 For the history example, create both named files, supply both in `paths`, and compare an empty history with `["cat my-notes"]`.
 For the pruning example, supply all four catalog spellings but create only `not.es`.

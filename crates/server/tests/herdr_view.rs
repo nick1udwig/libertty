@@ -1,12 +1,12 @@
-use serde_json::{Value, json};
-use std::{os::unix::fs::PermissionsExt, sync::atomic::Ordering, time::Duration};
-use termai_server::{
+use libertty_server::{
     herdr_history,
     herdr_terminal_stream::{Hub, Size},
     herdr_view::{Ledgers, View, Viewer},
     session::Transport,
     viewer_queue,
 };
+use serde_json::{Value, json};
+use std::{os::unix::fs::PermissionsExt, sync::atomic::Ordering, time::Duration};
 use tokio_util::sync::CancellationToken;
 #[path = "support/herdr.rs"]
 mod support;
@@ -70,7 +70,7 @@ async fn history_errors_reconcile_closed_moved_and_replaced_panes_before_reporti
         target.binary = "/bin/false".into();
         let (metadata, mut snapshots) = tokio::sync::mpsc::channel(16);
         let cancel = CancellationToken::new();
-        let task = tokio::spawn(termai_server::herdr::metadata(
+        let task = tokio::spawn(libertty_server::herdr::metadata(
             target.clone(),
             metadata,
             cancel.clone(),
@@ -315,7 +315,7 @@ async fn typing_reuses_pane_validation_until_herdr_reports_a_change() {
     }
     assert_eq!(count("pane.get"), 2);
     let (metadata, mut snapshots) = tokio::sync::mpsc::channel(16);
-    let task = tokio::spawn(termai_server::herdr::metadata(
+    let task = tokio::spawn(libertty_server::herdr::metadata(
         target.clone(),
         metadata,
         cancel.clone(),

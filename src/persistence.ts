@@ -1,4 +1,4 @@
-export function saved<T>(key: string, fallback: T): T { try { const value = JSON.parse(localStorage.getItem('termai.' + key) || 'null'); return value === null || (Array.isArray(fallback) ? !Array.isArray(value) : typeof value !== typeof fallback) ? fallback : value; } catch { return fallback; } }
+export function saved<T>(key: string, fallback: T): T { try { const value = JSON.parse(localStorage.getItem('libertty.' + key) || 'null'); return value === null || (Array.isArray(fallback) ? !Array.isArray(value) : typeof value !== typeof fallback) ? fallback : value; } catch { return fallback; } }
 export function validSession(value: unknown): value is string {
   return value === 'default' || (typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value));
 }

@@ -9,17 +9,17 @@ import { randomUUID } from 'node:crypto';
 import { WebSocket } from 'ws';
 
 const root = new URL('../', import.meta.url).pathname;
-const fixture = await mkdtemp(join(tmpdir(), 'termai-repair-network-'));
+const fixture = await mkdtemp(join(tmpdir(), 'libertty-repair-network-'));
 const port = Number(process.env.TEST_PORT || 3167), base = `http://127.0.0.1:${port}`;
 const token = 'network-fixture-pairing-token-123456789';
 await mkdir(join(fixture, 'docs'));
 await writeFile(join(fixture, 'docs', 'my-notes.txt'), 'notes');
 await writeFile(join(fixture, 'tool.py'), "import argparse\np=argparse.ArgumentParser()\np.add_argument('--output')\np.add_argument('--force', action='store_true')\n");
 await writeFile(join(fixture, 'history'), 'git init\n');
-const server = spawn(join(root, 'target/debug/termai'), [], { cwd: root, env: {
-  ...process.env, HOME: fixture, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: token,
-  TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_DATA_DIR: join(fixture, 'data'),
-  TERMAI_HISTORY_FILE: join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: join(fixture, 'missing-history'),
+const server = spawn(join(root, 'target/debug/libertty'), [], { cwd: root, env: {
+  ...process.env, HOME: fixture, HOST: '127.0.0.1', PORT: String(port), LIBERTTY_TOKEN: token,
+  LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture, LIBERTTY_DATA_DIR: join(fixture, 'data'),
+  LIBERTTY_HISTORY_FILE: join(fixture, 'history'), LIBERTTY_ETERNAL_HISTORY_FILE: join(fixture, 'missing-history'),
 }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = '', socket;
 server.stdout.on('data', chunk => logs += chunk); server.stderr.on('data', chunk => logs += chunk);

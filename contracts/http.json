@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "basePath": "All paths are relative to TERMAI_BASE_PATH.",
+  "basePath": "All paths are relative to LIBERTTY_BASE_PATH.",
   "schemas": "./schemas.json",
   "unknownFields": "ignore",
   "errors": {

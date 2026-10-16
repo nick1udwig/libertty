@@ -7,13 +7,13 @@ import path from 'node:path';
 import { publishRelease } from '../scripts/publish-release.mjs';
 
 async function fixture(t, tag = 'v0.2.3') {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'termai-publish-'));
+  const root = await mkdtemp(path.join(os.tmpdir(), 'libertty-publish-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const directory = path.join(root, 'release'), installer = path.join(root, 'install.sh');
   await mkdir(directory);
   await writeFile(installer, '#!/bin/sh\necho install\n');
   for (const target of ['linux-x64', 'linux-arm64', 'darwin-arm64']) {
-    const file = `termai-${tag}-${target}.tar.gz`, bytes = Buffer.from(target);
+    const file = `libertty-${tag}-${target}.tar.gz`, bytes = Buffer.from(target);
     await writeFile(path.join(directory, file), bytes);
     await writeFile(path.join(directory, file + '.sha256'), createHash('sha256').update(bytes).digest('hex') + '  ' + file + '\n');
   }
@@ -70,7 +70,7 @@ test('retry uploads into an existing draft and publishes prereleases without mar
 
 test('missing archives or mismatched checksums cannot create a release', async t => {
   const f = await fixture(t);
-  const archive = path.join(f.directory, `termai-${f.tag}-linux-x64.tar.gz`);
+  const archive = path.join(f.directory, `libertty-${f.tag}-linux-x64.tar.gz`);
   await writeFile(archive + '.sha256', 'bad checksum');
   await assert.rejects(publishRelease(f), /checksum mismatch/);
   await rm(archive);

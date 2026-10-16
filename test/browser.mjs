@@ -11,7 +11,7 @@ import { WebSocket } from 'ws';
 
 const fixturePort3123 = await freePort();
 const root = path.resolve(import.meta.dirname, '..');
-const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-browser-'));
+const fixture = await mkdtemp(path.join(os.tmpdir(), 'libertty-browser-'));
 await mkdir(path.join(fixture, 'subfolder'));
 await mkdir(path.join(fixture, 'ops'));
 await writeFile(path.join(fixture, 'SKILL.md'), '# Skill');
@@ -35,7 +35,7 @@ const origin = `http://127.0.0.1:${port}`;
 const mount = process.env.TEST_BASE_PATH || '';
 const base = origin + mount;
 const pairingToken = 'test-local-pairing-token-123456789';
-const server = spawn(process.env.TEST_EXECUTABLE || path.join(root, 'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', TERMAI_BASE_PATH: mount, HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: pairingToken, TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_HISTORY_FILE: path.join(fixture, 'history'), TERMAI_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(process.env.TEST_EXECUTABLE || path.join(root, 'target/debug/libertty'), [], { cwd: root, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', LIBERTTY_BASE_PATH: mount, HOST: '127.0.0.1', PORT: String(port), LIBERTTY_TOKEN: pairingToken, LIBERTTY_ALLOWED_HOSTS: '127.0.0.1,localhost', PATH: path.join(fixture, 'bin') + path.delimiter + process.env.PATH, LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture, LIBERTTY_HISTORY_FILE: path.join(fixture, 'history'), LIBERTTY_ETERNAL_HISTORY_FILE: path.join(fixture, 'eternal-history') }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 let browser;
 async function focusTerminal(page) { await page.locator('#terminal textarea').evaluate(el => el.focus()); }
@@ -114,7 +114,7 @@ try {
   await page.waitForFunction(original => window.__terminalSize.cols < original.cols && window.__terminalSize.rows < original.rows, originalSize);
   for (const invalid of ['', '5', '25', '10.25']) {
     await fontSize.fill(invalid);
-    assert.equal(await page.evaluate(() => localStorage.getItem('termai.fontSizePt')), '20');
+    assert.equal(await page.evaluate(() => localStorage.getItem('libertty.fontSizePt')), '20');
   }
   await fontSize.blur();
   assert.equal(await fontSize.inputValue(), '20');
@@ -123,7 +123,7 @@ try {
   assert.equal(await fontSize.inputValue(), '20');
   await fontSize.fill('10');
   await page.waitForFunction(original => window.__terminalSize.cols === original.cols && window.__terminalSize.rows === original.rows, originalSize);
-  await page.evaluate(() => localStorage.setItem('termai.fontSizePt', '999'));
+  await page.evaluate(() => localStorage.setItem('libertty.fontSizePt', '999'));
   await page.reload(); await ready(page);
   await page.locator('#menu-button').click();
   assert.equal(await fontSize.inputValue(), '10');
@@ -445,7 +445,7 @@ try {
   assert.deepEqual(errors, []);
   // Live shell completion definitions supply both Git refs and generic names.
   const gitCompletion = [
-    process.env.TERMAI_GIT_COMPLETIONS_FILE,
+    process.env.LIBERTTY_GIT_COMPLETIONS_FILE,
     '/usr/share/bash-completion/completions/git',
     '/opt/homebrew/opt/git/etc/bash_completion.d/git-completion.bash',
     '/usr/local/opt/git/etc/bash_completion.d/git-completion.bash',

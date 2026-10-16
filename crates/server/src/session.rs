@@ -1,4 +1,4 @@
-use termai_engine::utf16_len;
+use libertty_engine::utf16_len;
 mod handoffs;
 #[path = "session/history.rs"]
 mod history_cache;
@@ -21,6 +21,7 @@ use crate::{
 };
 use handoffs::{Handoffs, Kind as CaptureKind};
 use history_cache::History;
+use libertty_engine::{Request, path, types::Catalog};
 use output::Replay;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -32,7 +33,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use termai_engine::{Request, path, types::Catalog};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -157,7 +157,7 @@ pub struct Session {
     services: HostServices,
     help: HelpProvider,
     engine: NativeEngine,
-    base_commands: termai_engine::types::SharedList<String>,
+    base_commands: libertty_engine::types::SharedList<String>,
     lifetime: CancellationToken,
     prewarming: AtomicBool,
     shell_context: context::Cache,
@@ -395,7 +395,7 @@ impl Session {
         services: HostServices,
         remote: Option<Arc<crate::ssh::SSHHost>>,
     ) -> Result<Arc<Self>, String> {
-        let env: BTreeMap<_, _> = std::env::vars().collect();
+        let env: BTreeMap<_, _> = crate::environment::vars().collect();
         let nonce = storage::random_hex(12);
         let remote_channel = if let Some(remote) = &remote
             && !files_only
@@ -419,7 +419,7 @@ impl Session {
             remote.directory()
         } else {
             std::env::temp_dir()
-                .join(format!("termai-{}", storage::random_hex(12)))
+                .join(format!("libertty-{}", storage::random_hex(12)))
                 .to_string_lossy()
                 .into_owned()
         };

@@ -32,7 +32,7 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
     const handlers: Record<string, (event: any) => void> = {};
     const pending: Promise<unknown>[] = [];
     const files = ['', 'terminal.html', 'icon.svg', 'manifest.webmanifest', `assets/${version}.js`, `assets/${version}.wasm`];
-    runInNewContext(template.replace('__TERMAI_BUILD__', version).replace(/\/\*__TERMAI_ASSETS__\*\/\s*\[[^\]]*\]/, JSON.stringify(files)), {
+    runInNewContext(template.replace('__LIBERTTY_BUILD__', version).replace(/\/\*__LIBERTTY_ASSETS__\*\/\s*\[[^\]]*\]/, JSON.stringify(files)), {
       URL, Response, caches, fetch,
       self: { registration: { scope: 'https://example.com/t/' }, clients: { claim: async () => {} }, addEventListener: (name: string, handler: typeof handlers[string]) => handlers[name] = handler },
     });
@@ -47,17 +47,19 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
       async settle() { await Promise.all(pending.splice(0)); },
     };
   }
+  await caches.open('libertty-shell:/other/:keep');
+  await caches.open('termai-shell:/t/:legacy');
   await caches.open('termai-shell:/other/:keep');
   const first = worker('one');
   await first.dispatch('install'); await first.dispatch('activate');
-  assert.equal(storage.get('termai-shell:/t/:one')!.size, 6);
+  assert.equal(storage.get('libertty-shell:/t/:one')!.size, 6);
   const before = requests;
   assert.equal((await first.dispatch('fetch', 'https://example.com/t/assets/one.wasm'))?.status, 200);
   assert.equal(requests, before);
   await first.dispatch('fetch', 'https://example.com/t/?one', 'navigate');
   await first.dispatch('fetch', 'https://example.com/t/?two', 'navigate');
   await first.dispatch('fetch', 'https://example.com/t/assets/unlisted.js');
-  assert.equal(storage.get('termai-shell:/t/:one')!.size, 6);
+  assert.equal(storage.get('libertty-shell:/t/:one')!.size, 6);
   assert.equal(await first.dispatch('fetch', 'https://example.com/t/api/ping'), undefined);
   await first.dispatch('fetch', 'https://example.com/t/terminal.html?session=example', 'navigate');
   offline = true;
@@ -80,5 +82,5 @@ test('app-shell caches are complete, bounded, offline-capable and retired per in
   offline = true;
   assert.equal((await first.dispatch('fetch', 'https://example.com/t/assets/two.js'))?.status, 200);
   await second.dispatch('activate');
-  assert.deepEqual(await caches.keys(), ['termai-shell:/other/:keep', 'termai-shell:/t/:two']);
+  assert.deepEqual(await caches.keys(), ['libertty-shell:/other/:keep', 'termai-shell:/other/:keep', 'libertty-shell:/t/:two']);
 });

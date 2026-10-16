@@ -1,18 +1,18 @@
-use serde_json::{Value, json};
-use std::{
-    collections::BTreeMap,
-    os::unix::fs::{PermissionsExt, symlink},
-    sync::Arc,
-    time::Duration,
-};
-use termai_engine::{Request, types::Catalog};
-use termai_server::{
+use libertty_engine::{Request, types::Catalog};
+use libertty_server::{
     completion::shell_complete,
     engine::NativeEngine,
     help::HelpProvider,
     host::{HostServices, NativeHost},
     probes::{ProbeOptions, ProbePool, SharedTask, probe},
     syntax::Syntax,
+};
+use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    os::unix::fs::{PermissionsExt, symlink},
+    sync::Arc,
+    time::Duration,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -33,7 +33,7 @@ fn executable(file: &std::path::Path, content: &str) {
 
 #[tokio::test]
 async fn fact_deadlines_preserve_fast_results_when_an_optional_probe_is_slow() {
-    use termai_engine::host::HostOperation;
+    use libertty_engine::host::HostOperation;
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();
     executable(
@@ -343,7 +343,7 @@ async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
             assert_eq!(result[0]["command"], expected, "{result}");
         }
     }
-    let candidate = termai_engine::types::Candidate {
+    let candidate = libertty_engine::types::Candidate {
         command: "unknown | cat".into(),
         score: 90.0,
         changes: vec![],
@@ -519,7 +519,7 @@ async fn spelled_cd_uses_directory_discovery_without_catalog_paths() {
             .suggest(&phrase, &host, &CancellationToken::new())
             .await
             .unwrap();
-        let candidates: Vec<termai_engine::types::Candidate> =
+        let candidates: Vec<libertty_engine::types::Candidate> =
             serde_json::from_value(candidates).unwrap();
         assert!(
             candidates
@@ -539,7 +539,7 @@ async fn spelled_cd_uses_directory_discovery_without_catalog_paths() {
 async fn copy_destinations_resolve_spoken_components_against_existing_directories() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();
-    std::fs::create_dir_all(root.path().join(".herdr/worktrees/termai/latency")).unwrap();
+    std::fs::create_dir_all(root.path().join(".herdr/worktrees/libertty/latency")).unwrap();
     std::fs::create_dir_all(root.path().join(".hermes/worktrees")).unwrap();
     std::fs::write(root.path().join("latency.md"), "notes").unwrap();
     std::fs::write(root.path().join("other notes.md"), "more notes").unwrap();
@@ -560,32 +560,32 @@ async fn copy_destinations_resolve_spoken_components_against_existing_directorie
     let engine = NativeEngine::new().unwrap();
     for (input, expected) in [
         (
-            "cp latency.md ~/.herder/work trees/term AI/latency",
-            "cp latency.md ~/.herdr/worktrees/termai/latency/",
+            "cp latency.md ~/.herder/work trees/liber tty/latency",
+            "cp latency.md ~/.herdr/worktrees/libertty/latency/",
         ),
         (
-            "cp latency.md ~/.herder/work trees/term AI/latency/",
-            "cp latency.md ~/.herdr/worktrees/termai/latency/",
+            "cp latency.md ~/.herder/work trees/liber tty/latency/",
+            "cp latency.md ~/.herdr/worktrees/libertty/latency/",
         ),
         (
-            "cp latency dot md tilde slash dot herder slash work trees slash term AI slash latency slash",
-            "cp latency.md ~/.herdr/worktrees/termai/latency/",
+            "cp latency dot md tilde slash dot herder slash work trees slash liber tty slash latency slash",
+            "cp latency.md ~/.herdr/worktrees/libertty/latency/",
         ),
         (
-            "cp latency.md 'other notes.md' ~/.herder/work trees/term AI/latency/",
-            "cp latency.md 'other notes.md' ~/.herdr/worktrees/termai/latency/",
+            "cp latency.md 'other notes.md' ~/.herder/work trees/liber tty/latency/",
+            "cp latency.md 'other notes.md' ~/.herdr/worktrees/libertty/latency/",
         ),
         (
-            "cp -- latency.md ~/.herder/work trees/term AI/latency/",
-            "cp -- latency.md ~/.herdr/worktrees/termai/latency/",
+            "cp -- latency.md ~/.herder/work trees/liber tty/latency/",
+            "cp -- latency.md ~/.herdr/worktrees/libertty/latency/",
         ),
         (
-            "cp -v latency.md ~/.herder/work trees/term AI/latency/",
-            "cp -v latency.md ~/.herdr/worktrees/termai/latency/",
+            "cp -v latency.md ~/.herder/work trees/liber tty/latency/",
+            "cp -v latency.md ~/.herdr/worktrees/libertty/latency/",
         ),
         (
-            "cp latency.md -v ~/.herder/work trees/term AI/latency/",
-            "cp latency.md -v ~/.herdr/worktrees/termai/latency/",
+            "cp latency.md -v ~/.herder/work trees/liber tty/latency/",
+            "cp latency.md -v ~/.herdr/worktrees/libertty/latency/",
         ),
     ] {
         let candidates = engine
@@ -611,7 +611,7 @@ async fn copy_destinations_resolve_spoken_components_against_existing_directorie
 async fn copy_destinations_preserve_literal_paths_and_exact_spelling() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();
-    std::fs::create_dir_all(root.path().join(".herdr/worktrees/termai/latency")).unwrap();
+    std::fs::create_dir_all(root.path().join(".herdr/worktrees/libertty/latency")).unwrap();
     std::fs::write(root.path().join("latency.md"), "notes").unwrap();
     let services = HostServices::new();
     let host = NativeHost::new(
@@ -625,12 +625,12 @@ async fn copy_destinations_preserve_literal_paths_and_exact_spelling() {
     );
     let engine = NativeEngine::new().unwrap();
     for input in [
-        "cp latency.md ~/.herder/work trees/term AI/missing/",
-        "cp latency.md '~/.herder/work trees/term AI/latency/'",
-        "cp -T latency.md ~/.herder/work trees/term AI/latency/",
-        "cp latency.md -T ~/.herder/work trees/term AI/latency/",
-        "cp latency.md -t ~/.herder/work trees/term AI/latency/",
-        "cp latency.md ~/.herder/work trees/term AI/latency/*",
+        "cp latency.md ~/.herder/work trees/liber tty/missing/",
+        "cp latency.md '~/.herder/work trees/liber tty/latency/'",
+        "cp -T latency.md ~/.herder/work trees/liber tty/latency/",
+        "cp latency.md -T ~/.herder/work trees/liber tty/latency/",
+        "cp latency.md -t ~/.herder/work trees/liber tty/latency/",
+        "cp latency.md ~/.herder/work trees/liber tty/latency/*",
     ] {
         let candidates = engine
             .suggest(input, &host, &CancellationToken::new())
@@ -645,20 +645,20 @@ async fn copy_destinations_preserve_literal_paths_and_exact_spelling() {
             "{input}: {candidates}"
         );
     }
-    std::fs::create_dir_all(root.path().join(".herder/work trees/term AI/latency")).unwrap();
+    std::fs::create_dir_all(root.path().join(".herder/work trees/liber tty/latency")).unwrap();
     let candidates = engine
         .suggest(
-            "cp latency.md ~/.herder/work trees/term AI/latency/",
+            "cp latency.md ~/.herder/work trees/liber tty/latency/",
             &host,
             &CancellationToken::new(),
         )
         .await
         .unwrap();
     let repaired =
-        termai_engine::validation::simple_words(candidates[0]["command"].as_str().unwrap())
+        libertty_engine::validation::simple_words(candidates[0]["command"].as_str().unwrap())
             .unwrap();
     assert_eq!(repaired.len(), 3, "{candidates}");
-    assert_eq!(repaired[2].value, "~/.herder/work trees/term AI/latency/");
+    assert_eq!(repaired[2].value, "~/.herder/work trees/liber tty/latency/");
     assert!(repaired[2].home);
 }
 
@@ -715,7 +715,7 @@ async fn directory_facts_preserve_hidden_names_symlinks_bounds_and_fresh_version
     let host = NativeHost::new(services, catalog(cwd, &["cd"]), BTreeMap::new(), help);
     let lookup = json!({"kind":"lookup","path":format!("{cwd}/missing")});
     let wire = host.fact(&lookup, &cancel).await.unwrap();
-    let termai_engine::host::FactValue::Lookup(typed) =
+    let libertty_engine::host::FactValue::Lookup(typed) =
         host.engine_fact(&lookup, &cancel).await.unwrap()
     else {
         panic!("Expected a typed directory lookup");
@@ -729,7 +729,7 @@ async fn directory_facts_preserve_hidden_names_symlinks_bounds_and_fresh_version
             .entries
             .shares_storage(&first.entries)
     );
-    let termai_engine::host::FactValue::Entries(typed_entries) = host
+    let libertty_engine::host::FactValue::Entries(typed_entries) = host
         .engine_fact(&json!({"kind":"entries","path":cwd,"limit":10000}), &cancel)
         .await
         .unwrap()
@@ -883,7 +883,7 @@ async fn native_help_coalesces_verified_routes_and_invalidates_context_and_execu
     );
     let mut volatile = env.clone();
     volatile.insert("PWD".into(), "changed".into());
-    volatile.insert("TERMAI_SECRET".into(), "synthetic".into());
+    volatile.insert("LIBERTTY_SECRET".into(), "synthetic".into());
     help.read("orchard", &[], &catalog, &volatile, &cancel)
         .await
         .unwrap();
@@ -927,7 +927,7 @@ async fn native_completion_and_suggestions_preserve_ambiguity_quotes_and_operand
         ("PATH".into(), format!("{cwd}:/usr/bin:/bin")),
         ("HOME".into(), cwd.into()),
         (
-            "TERMAI_COMPLETIONS_FILE".into(),
+            "LIBERTTY_COMPLETIONS_FILE".into(),
             definitions.to_string_lossy().into_owned(),
         ),
     ]);
@@ -1147,7 +1147,7 @@ async fn native_executor_keeps_short_requests_responsive_and_reset_cancels_pendi
         engine.reset().unwrap();
     };
     let (slow, _) = tokio::join!(slow, reset);
-    assert_eq!(slow.unwrap_err(), termai_server::probes::ABORTED);
+    assert_eq!(slow.unwrap_err(), libertty_server::probes::ABORTED);
     assert!(
         engine
             .invoke(

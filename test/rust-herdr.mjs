@@ -25,14 +25,14 @@ daemon.on('connection', (socket, request) => {
 const origin = 'http://127.0.0.1:' + (process.env.TEST_PORT || '3169');
 const mount = '/terminal', base = origin + mount;
 const root = new URL('../', import.meta.url).pathname;
-const backend = spawn(root + 'target/debug/termai', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
-  ...process.env, HOST: '127.0.0.1', PORT: new URL(origin).port, TERMAI_BASE_PATH: mount,
-  TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin,
-  TERMAI_DATA_DIR: fixture.directory + '/termai', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory,
-  HOME: fixture.directory, PATH: fixture.directory + ':' + process.env.PATH, TERMAI_TOKEN: '',
-  HERDR_SOCKET_PATH: fixture.socketPath, TERMAI_PUSH_CONTACT: 'https://example.com/termai',
-  TERMAI_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token',
-  TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate',
+const backend = spawn(root + 'target/debug/libertty', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
+  ...process.env, HOST: '127.0.0.1', PORT: new URL(origin).port, LIBERTTY_BASE_PATH: mount,
+  LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: origin,
+  LIBERTTY_DATA_DIR: fixture.directory + '/libertty', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture.directory,
+  HOME: fixture.directory, PATH: fixture.directory + ':' + process.env.PATH, LIBERTTY_TOKEN: '',
+  HERDR_SOCKET_PATH: fixture.socketPath, LIBERTTY_PUSH_CONTACT: 'https://example.com/libertty',
+  LIBERTTY_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token',
+  LIBERTTY_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate',
 } });
 let logs = '';
 backend.stdout.on('data', data => logs += data);
@@ -83,7 +83,7 @@ try {
   for (const path of ['herdr/snapshot', 'herdr/action', 'herdr/ticket', 'herdr/captured', 'notifications/key', 'notifications/subscribe', 'notifications/unsubscribe', 'notifications/unwatch', 'herdr/notifications']) {
     assert.equal((await request(path, {}, undefined)).status, 401);
   }
-  const token = (await readFile(fixture.directory + '/termai/pairing-token', 'utf8')).trim();
+  const token = (await readFile(fixture.directory + '/libertty/pairing-token', 'utf8')).trim();
   owner = (await request('connect', { noSession: true, token }, undefined)).value.accessToken;
   assert.equal((await request('herdr/snapshot?herdrSession=../../escape')).status, 400);
   assert.equal((await request('herdr/action', { action: 'rename', terminalId: 'missing', name: 'x' })).status, 400);

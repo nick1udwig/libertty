@@ -10,7 +10,7 @@ import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 import { shellQuote } from '../src/shell-words.ts';
 import { installWireObserver } from './wire-observer.mjs';
 
-const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-flash-');
+const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/libertty-herdr-flash-');
 const target = { session:'', socketPath:dir+'/herdr.sock' };
 const env = { ...process.env, HOME:dir, XDG_CONFIG_HOME:dir+'/config', XDG_DATA_HOME:dir+'/data', XDG_STATE_HOME:dir+'/state', HERDR_SOCKET_PATH:target.socketPath, HERDR_SESSION:'', HERDR_ENV:'', SHELL:'/bin/bash', TERM:'xterm-256color' };
 let herdr, desktop, backend, browser;
@@ -36,17 +36,17 @@ try {
     await wait(async()=> (await herdrRequest(target,'pane.read',{pane_id:terminal.paneId,source:'recent_unwrapped',lines:1000,format:'ansi',strip_ansi:false})).read.text.includes('FLASH_'+name+':DESKTOP'),'desktop TUI '+name);
     spaces.push({name,workspace,terminal});
   }
-  backend=spawn(root+'target/debug/termai',[],{cwd:root,env:{...env,NODE_ENV:'production',HOST:'127.0.0.1',PORT:String(port),TERMAI_ALLOWED_HOSTS:'127.0.0.1',TERMAI_ALLOWED_ORIGINS:base,TERMAI_DATA_DIR:dir+'/termai',TERMAI_TOKEN:'',TERMAI_NO_RC:'1',TERMAI_CWD:dir},stdio:'ignore'});
+  backend=spawn(root+'target/debug/libertty',[],{cwd:root,env:{...env,NODE_ENV:'production',HOST:'127.0.0.1',PORT:String(port),LIBERTTY_ALLOWED_HOSTS:'127.0.0.1',LIBERTTY_ALLOWED_ORIGINS:base,LIBERTTY_DATA_DIR:dir+'/libertty',LIBERTTY_TOKEN:'',LIBERTTY_NO_RC:'1',LIBERTTY_CWD:dir},stdio:'ignore'});
   await wait(async()=>{try{return(await fetch(base)).ok;}catch{return false;}},'backend');
   if(process.env.TEST_REDRAW_TRACE) console.log('Native revision probe:', await herdrRequest(target,'pane.copy_motion',{pane_id:spaces[0].terminal.paneId,motion:'line_end',cursor:{row:0,col:0}}).catch(error=>error.message));
-  const token=(await readFile(dir+'/termai/pairing-token','utf8')).trim();
+  const token=(await readFile(dir+'/libertty/pairing-token','utf8')).trim();
   browser=await launchBrowser({args:['--use-gl=angle','--use-angle=gl']});
   const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
   await installWireObserver(context);
   await context.route('**/assets/terminal-*.js',async route=>{const response=await route.fetch(),source=await response.text();const body=source.replace(/new ([\w$]+)\(\{ghostty:/,'window.__terminal=new $1({ghostty:');assert.notEqual(body,source);await route.fulfill({response,body});});
   await context.addInitScript(()=>{
     // Folded status lanes would hide the idle spaces this test switches between.
-    if(window===parent&&!localStorage.getItem('termai.tabs')) {localStorage.setItem('termai.herdrStripOrder',JSON.stringify('manual'));const id=crypto.randomUUID();localStorage.setItem('termai.hosts',JSON.stringify([{id:'herdr-native',name:'Herdr',kind:'herdr',backendId:'primary'}]));localStorage.setItem('termai.tabs',JSON.stringify([{id,session:'default',name:'Herdr',mode:'herdr',backendId:'primary',hostId:'herdr-native'}]));localStorage.setItem('termai.activeTab',JSON.stringify(id));}
+    if(window===parent&&!localStorage.getItem('libertty.tabs')) {localStorage.setItem('libertty.herdrStripOrder',JSON.stringify('manual'));const id=crypto.randomUUID();localStorage.setItem('libertty.hosts',JSON.stringify([{id:'herdr-native',name:'Herdr',kind:'herdr',backendId:'primary'}]));localStorage.setItem('libertty.tabs',JSON.stringify([{id,session:'default',name:'Herdr',mode:'herdr',backendId:'primary',hostId:'herdr-native'}]));localStorage.setItem('libertty.activeTab',JSON.stringify(id));}
     if(window===parent) {
       window.__flashPaints=[];const previous=new WeakMap();
       const inspect=()=>{

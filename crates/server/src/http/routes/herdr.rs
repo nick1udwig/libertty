@@ -109,7 +109,8 @@ pub(super) async fn api_herdr_captured(
         return Err(fail("This connection has closed."));
     }
     let local = source.remote.is_none()
-        && socket_path == herdr::socket(&session, &std::env::vars().collect()).map_err(fail)?;
+        && socket_path
+            == herdr::socket(&session, &crate::environment::vars().collect()).map_err(fail)?;
     let result = json!({"herdrSession":session,"herdrSource":if local{""}else{&sid},"name":if target.session.is_empty(){"Herdr".into()}else{format!("Herdr · {}",target.session)},"remote":source.remote.is_some()});
     app.herdr_targets
         .lock()

@@ -10,7 +10,7 @@ import { installWireObserver } from './wire-observer.mjs';
 
 const fixturePort3191 = await freePort();
 
-const root = new URL('../', import.meta.url).pathname, directory = await realpath(await mkdtemp('/tmp/termai-herdr-dictation-'));
+const root = new URL('../', import.meta.url).pathname, directory = await realpath(await mkdtemp('/tmp/libertty-herdr-dictation-'));
 const target = { session: '', socketPath: directory + '/herdr.sock' }, base = 'http://127.0.0.1:' + fixturePort3191 + '/';
 const env = { ...process.env, HOME: directory, XDG_CONFIG_HOME: directory + '/config', XDG_DATA_HOME: directory + '/data', XDG_STATE_HOME: directory + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 const daemon = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(daemon, 'listening');
@@ -28,9 +28,9 @@ try {
   const pane = created.root_pane;
   assert.ok(pane?.terminal_id, JSON.stringify(created));
   await until(async () => { const reply = await herdrRequest(target, 'pane.process_info', { pane_id: pane.pane_id }); return reply.process_info.shell_pid === reply.process_info.foreground_process_group_id; }, 'shell at prompt');
-  backend = startBackend({ cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3191), TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_DATA_DIR: directory + '/termai', TERMAI_NO_RC: '1', TERMAI_CWD: directory, TERMAI_VOXTYPE_TOKEN_FILE: directory + '/token', TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate' }, stdio: 'ignore' });
-  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'Termai backend');
-  const token = (await readFile(directory + '/termai/pairing-token', 'utf8')).trim();
+  backend = startBackend({ cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3191), LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_DATA_DIR: directory + '/libertty', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: directory, LIBERTTY_VOXTYPE_TOKEN_FILE: directory + '/token', LIBERTTY_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate' }, stdio: 'ignore' });
+  await until(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'Libertty backend');
+  const token = (await readFile(directory + '/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await installWireObserver(context);
@@ -42,7 +42,7 @@ try {
   await page.goto(base + 'terminal.html?herdrTerminal=' + pane.terminal_id);
   await page.locator('#token').fill(token); await page.locator('#login-form button').click();
   await page.waitForFunction(() => window.__state?.ready);
-  const mic = page.locator('#termai-dictation'); await mic.waitFor();
+  const mic = page.locator('#libertty-dictation'); await mic.waitFor();
   async function dictate(text, reconnect = false) {
     transcript = text;
     await page.evaluate(() => window.__messages = []);
