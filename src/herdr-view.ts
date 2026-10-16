@@ -129,7 +129,14 @@ export class HerdrView {
     backdrop.onpointerdown = event => { event.stopPropagation(); dismissMenu = true; };
     backdrop.onpointercancel = () => { dismissMenu = false; };
     // The release that opens a hold menu can click the newly visible backdrop.
-    backdrop.onclick = () => { if (dismissMenu) this.closeMenu(); dismissMenu = false; };
+    backdrop.onclick = event => {
+      if (!dismissMenu) return;
+      dismissMenu = false;
+      // While a tree is open, tapping another chip moves the tree to that chip instead of only dismissing it.
+      const chip = this.tree && document.elementsFromPoint(event.clientX, event.clientY).find(element => element.matches('.herdr-agent-tab') && this.strip.contains(element)) as HTMLElement | undefined;
+      const repo = chip && chip.dataset.terminal !== this.tree!.repo && this.entries().find(item => item.terminalId === chip.dataset.terminal)?.repo;
+      if (chip && repo) this.openTree(chip, repo); else this.closeMenu();
+    };
     this.element.append(this.screen, this.menu, backdrop);
     const viewed = () => { if (this.visible && this.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     const messages = (event: MessageEvent) => {

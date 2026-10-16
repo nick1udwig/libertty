@@ -118,7 +118,8 @@ Enter or the check button saves a rename, and Escape cancels it.
 **New worktree** and **Open worktree…** start from the root checkout just as on desktop, and are unavailable while only worktrees are open.
 New worktree creates a branch from `HEAD` in Herdr’s configured worktree directory, while Open worktree lists existing usable checkouts.
 Split offers Right and Down, and the tree immediately includes the new pane; desktop and mobile see the same worktrees and splits.
-Tap outside the tree, press Escape or swipe it down by its grab bar to dismiss it.
+While a tree is open, tapping another chip opens that chip's tree without changing the selection.
+Tap elsewhere, press Escape or swipe the tree down by its grab bar to dismiss it.
 The dialogs show progress and errors, prevent repeated submissions, and preserve selection on cancellation or failure.
 Closing a linked worktree's space also offers Delete checkout, which removes the checkout folder and closes its Herdr workspace while preserving the Git branch.
 If deletion reports that `--force` is required, the dialog shows a Force delete button that discards modified and untracked files in that checkout.

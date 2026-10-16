@@ -269,11 +269,18 @@ try {
   };
   const terminalBounds = await page.locator('.herdr-terminal:visible').boundingBox();
   await dismissMenu(terminalBounds.x + terminalBounds.width / 2, terminalBounds.y + 20);
-  for (const target of [() => bounds(alpha), () => bounds(beta), () => toggle.boundingBox()]) {
+  for (const target of [() => bounds(beta), () => toggle.boundingBox()]) {
     await hold(beta);
     const rect = await target(); await dismissMenu(rect.x + rect.width / 2, rect.y + rect.height / 2);
     assert.equal(await selected(), chip(beta), 'The dismissing tap does not activate another control');
   }
+  // Tapping another chip while a tree is open moves the tree to that chip without selecting it.
+  await hold(beta); const alphaRect = await bounds(alpha);
+  await touch('touchStart', alphaRect.x + alphaRect.width / 2, alphaRect.y + alphaRect.height / 2); await touch('touchEnd');
+  await wait(async () => await tab(alpha).evaluate(el => el.classList.contains('herdr-tree-anchor')), 'the tree moves to the tapped chip');
+  assert.equal(await tree.count(), 1); assert.equal(await tab(beta).evaluate(el => el.classList.contains('herdr-tree-anchor')), false);
+  assert.equal(await selected(), chip(beta), 'Moving the tree keeps the selection');
+  await page.keyboard.press('Escape');
   await hold(beta); await page.keyboard.press('Escape');
   assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Escape also removes the dismissal layer');
   const swipeTree = async distance => {
