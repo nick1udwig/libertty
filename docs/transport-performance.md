@@ -272,6 +272,7 @@ A failed direct terminal handshake falls back to authorization so expired cookie
 Cross-origin native terminals retain their authorization and single-use ticket flow.
 Terminal and Herdr metadata sockets stay connected for twenty seconds after the document becomes hidden, retaining the mobile PTY size and live picture during short app switches.
 After the grace expires, Herdr releases mobile geometry and idle terminals disconnect, while active dictation may retain its audio transport.
+Terminals and the Herdr view share this lifecycle, which also reconnects on returning online and when a page is restored from the back-forward cache.
 
 ## Request retries
 

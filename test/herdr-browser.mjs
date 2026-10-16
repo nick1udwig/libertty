@@ -160,7 +160,11 @@ try {
   // The snapshot cache has its own key and is written when the page hides, not on every snapshot.
   const caches = () => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('termai.herdr.')).map(key => [key, localStorage.getItem(key)]));
   await page.evaluate(() => {
-    for (const state of ['hidden', 'visible']) { Object.defineProperty(document, 'visibilityState', { configurable: true, value: state }); document.dispatchEvent(new Event('visibilitychange')); }
+    for (const state of ['hidden', 'visible']) {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: state }); Object.defineProperty(document, 'hidden', { configurable: true, value: state === 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+    delete document.visibilityState; delete document.hidden;
   });
   const stored = await caches(), snapshot = stored.find(([key]) => key.endsWith('.snapshot'));
   assert.ok(snapshot && JSON.parse(snapshot[1]).agents.length, 'Hiding the page writes the snapshot cache');

@@ -11,6 +11,15 @@ interface ReconnectingSocketOptions {
   error(error: unknown, token?: string): boolean;
   stalled?(seconds: number): void;
 }
+/** How a connection follows the page into and out of the background. */
+export interface BackgroundOptions {
+  /** How long a hidden page keeps its connection. */
+  grace: number;
+  hidden?(): void;
+  /** The grace expired; returning false keeps the connection, for example while dictating. */
+  expired?(): boolean | void;
+  shown?(): void;
+}
 
 /** Own one connection attempt, including authorization and the initial state. */
 export class ReconnectingSocket {
@@ -28,6 +37,8 @@ export class ReconnectingSocket {
   private lastMessage = 0;
   private rtt?: { smoothed: number; variance: number };
   private stalled = false;
+  private background?: ReturnType<typeof setTimeout>;
+  private expired = false;
   private options: ReconnectingSocketOptions;
 
   constructor(options: ReconnectingSocketOptions) { this.options = options; }
@@ -58,6 +69,29 @@ export class ReconnectingSocket {
   }
 
   get healthy() { return !this.stalled && this.socket?.readyState === WebSocket.OPEN; }
+  /** The page has stayed hidden past its background grace. */
+  get backgroundExpired() { return this.expired; }
+
+  /** Suspend after the background grace and resume when the page is shown, restored or back online; the result stops following. */
+  follow(background: BackgroundOptions) {
+    const visibility = () => {
+      clearTimeout(this.background);
+      if (document.hidden) {
+        this.expired = false; background.hidden?.();
+        this.background = setTimeout(() => { this.expired = true; if (background.expired?.() !== false) this.suspend(); }, background.grace);
+      } else { this.expired = false; void this.resume(!this.healthy); background.shown?.(); }
+    };
+    // Every load fires pageshow, but only a page restored from the back-forward cache needs a fresh connection.
+    const restored = (event: PageTransitionEvent) => { if (event.persisted) visibility(); };
+    const online = () => void this.resume(true), offline = () => this.suspend();
+    document.addEventListener('visibilitychange', visibility); window.addEventListener('pageshow', restored);
+    window.addEventListener('online', online); window.addEventListener('offline', offline);
+    return () => {
+      clearTimeout(this.background);
+      document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pageshow', restored);
+      window.removeEventListener('online', online); window.removeEventListener('offline', offline);
+    };
+  }
 
   ready() {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;

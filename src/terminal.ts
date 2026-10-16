@@ -40,9 +40,8 @@ let offeredWire: string[] | undefined;
 let supportsHeartbeat = false, supportsInputContexts = false;
 let accessToken: string | undefined = backendAccess(baseURL.href);
 let authorized = false, directAttempt = false;
-let hiddenExpired = false, hiddenTimer: ReturnType<typeof setTimeout> | undefined;
 const backgroundGrace = 20000;
-const keepingGeometry = () => !document.hidden || !hiddenExpired;
+const keepingGeometry = () => !document.hidden || !transport.backgroundExpired;
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
 function herdrEndpoint(name: string) {
   const url = new URL(name, baseURL);
@@ -635,21 +634,12 @@ function connectionError(error: any, token?: string) {
 const connect = (token?: string) => transport.connect(token);
 document.addEventListener('pointerdown', () => transport.activity(), { passive: true });
 $('login-form').onsubmit = e => { e.preventDefault(); void connect($<HTMLInputElement>('token').value); };
-document.addEventListener('visibilitychange', () => {
-  clearTimeout(hiddenTimer);
-  if (document.hidden) {
-    echo.cancel();
-    hiddenExpired = false;
-    hiddenTimer = setTimeout(() => {
-      hiddenExpired = true;
-      if (herdrTerminal) send({ type: 'resize', cols: term.cols, rows: term.rows, mobile: false });
-      if (!dictation.active) { inline.suspend(); transport.suspend(); }
-    }, backgroundGrace);
-  }
-  else { hiddenExpired = false; void transport.resume(!transport.healthy); sizeTerminal(); revealReplay(); }
-});
-window.addEventListener('online', () => void transport.resume(true));
-window.addEventListener('offline', () => transport.suspend());
+transport.follow({ grace: backgroundGrace, hidden: () => echo.cancel(), shown: () => { sizeTerminal(); revealReplay(); },
+  expired: () => {
+    if (herdrTerminal) send({ type: 'resize', cols: term.cols, rows: term.rows, mobile: false });
+    if (dictation.active) return false;
+    inline.suspend();
+  } });
 
 function execute(command: string) {
   if (presentation.pending || capturedConnection || !state.ready && !herdrReady || state.exited || pendingCommand || transport.socket?.readyState !== WebSocket.OPEN) { toast('Wait for terminal input before running a command.'); return; }
