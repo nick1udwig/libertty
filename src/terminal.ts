@@ -33,6 +33,8 @@ const herdrTerminal = params.get('herdrTerminal');
 let herdrReady = false;
 let herdrLayoutPending = false, herdrLayoutMatched = false, herdrLayoutFrame = 0, herdrMobileRendered = false;
 let herdrBarrier = false, herdrBarrierReady = true, herdrParkable = false, herdrParked = false, herdrPreserve = false;
+// A parked Herdr pane that loses its connection waits until it is shown, so the visible pane reconnects alone.
+let herdrDormant = false;
 let herdrPresentation = '';
 let offeredWire: string[] | undefined;
 let supportsHeartbeat = false, supportsInputContexts = false;
@@ -52,7 +54,7 @@ function notify(type: string, data: object = {}) { if (embedded) parent.postMess
 if (embedded) document.documentElement.classList.add('embedded-terminal');
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const transport = new ReconnectingSocket({
-  available: () => (keepingGeometry() || dictation.active) && (herdrTerminal ? tabVisible : tabVisible || !tabExpired || dictation.active) && navigator.onLine,
+  available: () => (keepingGeometry() || dictation.active) && (herdrTerminal ? tabVisible && !(herdrParked && herdrDormant) : tabVisible || !tabExpired || dictation.active) && navigator.onLine,
   protocols: () => wireProtocols(offeredWire),
   heartbeat: () => supportsHeartbeat,
   stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
@@ -615,6 +617,7 @@ function socketMessage(event: MessageEvent) {
 }
 function socketClosed(event?: CloseEvent) {
   if (directAttempt && !replayState) authorized = false;
+  herdrDormant = herdrParked;
   disconnectedContext = inputContext() || disconnectedContext;
   dictation.connected(false); synchronizedConnection = false;
   echo.reset();
@@ -731,6 +734,8 @@ if (embedded) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;
       herdrParked = parked; dictation.visibility(!parked && tabVisible);
+      // The tab-visibility message that follows an unpark reconnects a dormant pane.
+      if (!parked) herdrDormant = false;
       if (herdrParkable) send({ type:'herdr-active', active:!parked });
       if (!parked) {
         const cols = term.cols, rows = term.rows; sizeTerminal();

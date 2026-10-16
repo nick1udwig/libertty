@@ -169,12 +169,13 @@ The revision is obtained through the read-only `pane.copy_motion` operation rath
 
 Mobile space switches retain up to four authenticated terminal iframes in least-recently-used order.
 Parked views keep their native mobile geometry while consuming and discarding stream frames on the backend, and they pause browser output and shared history polling.
+A parked view that loses its connection, for example while the app is in the background, stays disconnected until it is shown again, so the visible pane reconnects without competing handshakes.
 The initial warm-switch optimization showed its last certified mobile image immediately while reacquiring controller priority and fresh state.
 The loading handoff described below now retains the currently displayed view until the selected pane has a fresh certified paint.
 Uncertified incoming frames cannot overwrite that retained image.
 Cold views and changed dimensions stay hidden until the new layout barrier completes.
 Eviction, removal, disposal, leaving the top-level Herdr tab and changing to a desktop layout release the relevant mobile controllers.
-Returning to the top-level tab opens fresh connections and waits for mobile sizing again.
+Returning to the top-level tab opens a fresh connection for the shown pane and waits for mobile sizing again, while parked panes reconnect once they are shown.
 Older backends without the advertised parking capability retain the single-iframe lifecycle.
 
 The expanded real-Herdr regression captures Chromium's composited PNG frames and checks for the fixture's red desktop pixels in addition to inspecting every visible terminal buffer.
