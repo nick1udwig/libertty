@@ -21,7 +21,6 @@ import { TerminalHistory } from './terminal-history.ts';
 import { TerminalProjection } from './terminal-projection.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
 import { DictationControl } from './dictation.ts';
-import { SuggestionClient } from './suggestion-client.ts';
 import { InlineSuggestions } from './inline-suggestions.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { defaults, keySequence, validateShortcuts, type Shortcut } from './shortcuts.ts';
@@ -298,7 +297,6 @@ function replaceLine(text: string): Promise<boolean> {
     state.inputRevision++; term.scrollToBottom();
   });
 }
-const suggestions = new SuggestionClient(baseURL.href, session, () => accessToken);
 const inline = new InlineSuggestions(term, { state: () => state, replace: replaceLine,
   repair: (text, intent, signal) => {
     if (capturedConnection || !state.ready || state.exited || transport.socket?.readyState !== WebSocket.OPEN) return Promise.reject(new Error('Terminal input changed.'));
@@ -319,10 +317,7 @@ const inline = new InlineSuggestions(term, { state: () => state, replace: replac
       if (!send({ type: 'input-line', id, prompt, revision })) { inputLines.get(id)?.(); inputLines.delete(id); }
     });
   },
-  suggest: async (text, signal) => {
-    if (!herdrTerminal) return suggestions.suggest(text, signal);
-    return requestJSON(herdrEndpoint('api/herdr/suggest'), { text }, { token: () => accessToken, signal });
-  }, raw: rawInput, execute });
+  raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, context: inputContext, key: baseURL.href,
   audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data, transport.socket.protocol)); return true; },
   prepare: () => inline.prepareExternalPaste(), waiting: active => { dictationWaiting = active; inline.dictationPending(active); updateRun(); }, notice: toast, focus: () => term.focus() });
@@ -611,7 +606,7 @@ function socketClosed(event?: CloseEvent) {
   echo.reset();
   presentation.freeze(); replayState = false;
   herdrReady = false;
-  if (event?.code === 4001 || state.exited) inline.disconnect(); else inline.suspend(); suggestions.disconnect();
+  if (event?.code === 4001 || state.exited) inline.disconnect(); else inline.suspend();
   for (const resolve of edits.values()) resolve(false); edits.clear();
   for (const resolve of inputLines.values()) resolve(); inputLines.clear();
   for (const resolve of repairs.values()) resolve({ accepted: false, candidates: [], original: '', selected: '', prompt: state.prompt, revision: state.inputRevision }); repairs.clear();
@@ -693,7 +688,7 @@ $('new-shell').onclick = async () => {
   if (herdrTerminal) return;
   if (!state.exited && !confirm('End the current session and start a new shell? Running programs in this session will stop.')) return;
   try {
-    inline.disconnect(); suggestions.disconnect();
+    inline.disconnect();
     transport.suspend();
     await api('/api/new', {}); after = received = 0; streamId = ''; queue.clear(); unsentInput.clear(); disconnectedContext = undefined; pendingCommand = undefined;
     $<HTMLDialogElement>('options-dialog').close(); await connect();

@@ -1,4 +1,3 @@
-import { shellQuote } from './shell-words.ts';
 import { simpleWords } from './shell-words.ts';
 import { expandSymbols } from './speech-symbols.ts';
 
@@ -55,14 +54,4 @@ export function readingPipeline(text: string, phrases: string[], spoken = false)
   const phrase = phrases.find(phrase => phrase.toLowerCase() === suffix.toLowerCase());
   const command = source.slice(0, pipe).trim();
   if (phrase && command) return { command, phrase: suffix };
-}
-
-/** Translate the reading operand into a known file-taking command for the shared
- * history, path repair, discovery and validation pipeline. No shell command runs. */
-export function readingSuggestionInput(request: { path: string; operand?: string }): string { return 'cat ' + (request.operand || request.path); }
-
-export function readingSuggestionChoice(command: string, phrase: string): string | undefined {
-  const words = simpleWords(command);
-  if (words?.length !== 2 || words[0].value !== 'cat') return undefined;
-  return phrase + ' ' + shellQuote(words[1].value);
 }

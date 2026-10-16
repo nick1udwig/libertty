@@ -909,32 +909,6 @@
     },
     {
       "method": "POST",
-      "path": "/api/herdr/suggest",
-      "authentication": "paired-client",
-      "origin": "required",
-      "request": {
-        "$ref": "#/$defs/SuggestRequest"
-      },
-      "response": {
-        "$ref": "#/$defs/HerdrSuggestReply"
-      },
-      "requestEncoding": "application/json",
-      "responseEncoding": "application/json",
-      "bodyLimitUTF16": 16384,
-      "error": {
-        "$ref": "#/$defs/Error"
-      },
-      "statuses": [
-        200,
-        400,
-        401,
-        403,
-        404
-      ],
-      "timeoutMs": 5000
-    },
-    {
-      "method": "POST",
       "path": "/api/herdr/action",
       "authentication": "paired-client",
       "origin": "required",

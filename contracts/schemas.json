@@ -5937,22 +5937,6 @@
       ],
       "additionalProperties": true
     },
-    "HerdrSuggestReply": {
-      "type": "object",
-      "properties": {
-        "candidates": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Candidate"
-          },
-          "maxItems": 4
-        }
-      },
-      "required": [
-        "candidates"
-      ],
-      "additionalProperties": true
-    },
     "DictationStatus": {
       "type": "object",
       "properties": {

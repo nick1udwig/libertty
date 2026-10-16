@@ -1,17 +1,16 @@
 import { uploadIcon, downloadIcon } from './icons.ts';
 import { transferAction, downloadPipeline } from './transfer-command.ts';
 import type { Terminal } from 'ghostty-web';
-import type { Candidate, ShellState, RepairIntent, RepairResult } from './protocol.ts';
+import type { ShellState, RepairIntent, RepairResult } from './protocol.ts';
 import { InputLine } from './input-line.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
 import { cursorSteps } from './touch-cursor.ts';
-import { defaultReadingPhrases, readingPath, readingPhrases, readingPipeline, readingRequest, readingSuggestionChoice, readingSuggestionInput } from './reading-request.ts';
+import { defaultReadingPhrases, readingPath, readingPhrases, readingPipeline, readingRequest } from './reading-request.ts';
 interface Host {
   state(): ShellState;
   replace(text: string): Promise<boolean>;
   readLine?(): Promise<{ text: string; cursor: number } | undefined>;
-  suggest(text: string, signal: AbortSignal): Promise<{ candidates: Candidate[] }>;
-  repair?(text: string, intent: RepairIntent, signal: AbortSignal): Promise<RepairResult>;
+  repair(text: string, intent: RepairIntent, signal: AbortSignal): Promise<RepairResult>;
   raw(data: string): void;
   execute(text: string): void;
   dictate?(text: string, applied: boolean, replace: boolean): void;
@@ -374,40 +373,13 @@ export class InlineSuggestions {
     this.holdInput();
     this.line.reset(this.literal); this.status.textContent = 'Finding alternatives'; this.render();
     try {
-      if (this.host.repair) {
-        const intent: RepairIntent = pipeline ? { kind: 'reading-pipeline', ...pipeline } : reading ? { kind: 'reading-file', phrase: reading.phrase, operand: reading.operand } : { kind: 'shell' };
-        this.application = this.host.repair(this.literal, intent, this.controller.signal);
-        const result = await this.application;
-        if (request !== this.generation || prompt !== this.host.state().prompt || !this.host.state().ready) return;
-        this.application = undefined;
-        if (!result.accepted) { if (result.error) throw new Error(result.error); this.disconnect(); return; }
-        this.backendResult(result);
-        return;
-      }
-      const suggestion = this.host.suggest(pipeline ? pipeline.command : reading ? readingSuggestionInput(reading) : this.literal, this.controller.signal).then(result => ({ result }), error => ({ error }));
-      const outcome = await suggestion;
-      if ('error' in outcome) throw outcome.error;
-      const result = outcome.result;
+      const intent: RepairIntent = pipeline ? { kind: 'reading-pipeline', ...pipeline } : reading ? { kind: 'reading-file', phrase: reading.phrase, operand: reading.operand } : { kind: 'shell' };
+      this.application = this.host.repair(this.literal, intent, this.controller.signal);
+      const result = await this.application;
       if (request !== this.generation || prompt !== this.host.state().prompt || !this.host.state().ready) return;
-      let parsed = result.candidates.filter(candidate => !candidate.literal)
-        .map(candidate => pipeline ? candidate.command + ' | ' + pipeline.phrase : reading ? readingSuggestionChoice(candidate.command, reading.phrase) : candidate.command)
-        .filter((choice): choice is string => !!choice);
-      if (reading && !pipeline && !parsed.length) {
-        const commands = await this.host.suggest(reading.operand, this.controller.signal);
-        if (request !== this.generation || prompt !== this.host.state().prompt || !this.host.state().ready) return;
-        parsed = commands.candidates.filter(candidate => !candidate.literal).map(candidate => reading.phrase + ' ' + candidate.command);
-      }
-      this.choices = [...new Set(parsed.filter(choice => choice !== this.literal))].slice(0, 3);
-      const top = reading || pipeline ? this.choices[0] || this.literal : parsed[0] || this.literal;
-      const replacement = this.literalReplacement;
-      if (replacement && !await replacement) { if (request === this.generation) this.disconnect(); return; }
-      if (request !== this.generation) return;
-      this.line.reset(top);
-      if ((!replacement || top !== this.literal) && !await this.host.replace(top)) { if (request === this.generation) this.disconnect(); return; }
-      if (request !== this.generation) return;
-      this.selected = top; this.line.reset(top); this.loading = false;
-      this.pendingPresentation?.reveal();
-      this.status.textContent = 'Alternatives ready'; this.render();
+      this.application = undefined;
+      if (!result.accepted) { if (result.error) throw new Error(result.error); this.disconnect(); return; }
+      this.backendResult(result);
     } catch (error: any) {
       if (request !== this.generation || error.name === 'AbortError') return;
       if (!await (this.literalReplacement || this.host.replace(this.literal))) { if (request === this.generation) this.disconnect(); return; }
