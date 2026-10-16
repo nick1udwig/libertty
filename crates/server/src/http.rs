@@ -1,4 +1,5 @@
 use termai_engine::utf16_len;
+mod idempotency;
 mod routes;
 mod socket;
 use crate::{
@@ -184,6 +185,7 @@ pub struct App {
     ssh_probes: tokio::sync::Semaphore,
     herdr_terminals: herdr_terminal_stream::Hub,
     herdr_inputs: herdr_view::Ledgers,
+    replies: idempotency::Replies,
     herdr_history: crate::herdr_history::Hub,
     notifications: Arc<notifications::Notifications>,
     services: HostServices,
@@ -290,6 +292,7 @@ impl App {
             ssh_probes: tokio::sync::Semaphore::new(4),
             herdr_terminals: herdr_terminal_stream::Hub::default(),
             herdr_inputs: Default::default(),
+            replies: Default::default(),
             herdr_history: crate::herdr_history::Hub::default(),
             notifications,
             services,
@@ -651,6 +654,10 @@ impl App {
                 .fallback_service(api.fallback(static_request).with_state(self.clone()))
         };
         router
+            .layer(middleware::from_fn_with_state(
+                self.clone(),
+                idempotency::idempotent,
+            ))
             .layer(middleware::from_fn(compression))
             .layer(middleware::from_fn_with_state(self.clone(), security))
             .with_state(self.clone())
@@ -701,7 +708,7 @@ async fn security(State(app): State<Arc<App>>, req: Request<Body>, next: Next) -
             ("access-control-allow-credentials", "true"),
             (
                 "access-control-allow-headers",
-                "Content-Type, Authorization, If-None-Match, X-Termai-Link",
+                "Content-Type, Authorization, If-None-Match, X-Termai-Link, Idempotency-Key",
             ),
             ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS"),
             ("access-control-allow-private-network", "true"),

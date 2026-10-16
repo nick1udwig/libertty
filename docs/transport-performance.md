@@ -272,6 +272,15 @@ Cross-origin native terminals retain their authorization and single-use ticket f
 Terminal and Herdr metadata sockets stay connected for twenty seconds after the document becomes hidden, retaining the mobile PTY size and live picture during short app switches.
 After the grace expires, Herdr releases mobile geometry and idle terminals disconnect, while active dictation may retain its audio transport.
 
+## Request retries
+
+Reads retry up to twice after a lost connection or a proxy failure, pausing half a second and then one second.
+Same-origin changes with a JSON body carry a random `Idempotency-Key`, so they retry the same way.
+The backend runs a keyed request to completion even if the browser abandons it, and replays its reply to retries with the same key for ten minutes.
+A retry that arrives while the first attempt is still running waits for that attempt's reply instead of starting another.
+A request that timed out is retried only once, because it may still be running on a slow link.
+Streamed uploads are never repeated automatically, and cross-origin changes carry no key because an older backend would reject the header during CORS preflight.
+
 ## Terminal replay batches
 
 Consecutive queued output chunks share messages of up to 64 KiB within the existing 128 KiB acknowledgement window.

@@ -827,6 +827,94 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
 }
 
 #[test]
+fn retried_changes_with_one_idempotency_key_run_once_and_replay_their_reply() {
+    let backend = Backend::start("client");
+    let owner = backend.pair();
+    let sid = backend
+        .api(
+            "POST",
+            "/api/sessions",
+            Some(&owner),
+            Some(json!({"files":true})),
+        )
+        .json()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let origin = format!("http://127.0.0.1:{}", backend.port);
+    let mkdir = |owner: &str, key: &str| {
+        let bearer = format!("Bearer {owner}");
+        backend.request(
+            "POST",
+            &format!("/api/files/mkdir?session={sid}"),
+            &[
+                ("Origin", &origin),
+                ("Content-Type", "application/json"),
+                ("Authorization", &bearer),
+                ("Idempotency-Key", key),
+            ],
+            json!({"path":".","name":"once"}).to_string().as_bytes(),
+        )
+    };
+    let first = mkdir(&owner, "retry-1");
+    assert_eq!(first.status, 200);
+    // A retry whose first attempt already ran receives the original reply instead of an "already exists" failure.
+    let retry = mkdir(&owner, "retry-1");
+    assert_eq!((retry.status, retry.bytes), (200, first.bytes));
+    assert_eq!(
+        mkdir(&owner, "retry-2").status,
+        409,
+        "a new key is a new request"
+    );
+    let other = backend.pair();
+    assert_ne!(other, owner);
+    assert_eq!(
+        mkdir(&other, "retry-1").status,
+        404,
+        "another owner runs its own request and cannot see this session"
+    );
+    assert!(backend.root.path().join("once").is_dir());
+    // Concurrent attempts share the first one's work, so opening a terminal twice still opens one.
+    let bearer = format!("Bearer {owner}");
+    let open = || {
+        backend
+            .request(
+                "POST",
+                "/api/sessions",
+                &[
+                    ("Origin", &origin),
+                    ("Content-Type", "application/json"),
+                    ("Authorization", &bearer),
+                    ("Idempotency-Key", "open-once"),
+                ],
+                json!({"name":"Once"}).to_string().as_bytes(),
+            )
+            .json()["id"]
+            .clone()
+    };
+    let ids = std::thread::scope(|scope| {
+        let attempts: Vec<_> = (0..2).map(|_| scope.spawn(open)).collect();
+        attempts
+            .into_iter()
+            .map(|attempt| attempt.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert_eq!(ids[0], ids[1]);
+    let sessions = backend
+        .api("GET", "/api/sessions", Some(&owner), None)
+        .json();
+    assert_eq!(
+        sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|session| session["name"] == "Once")
+            .count(),
+        1
+    );
+}
+
+#[test]
 fn conditional_plugin_reads_compression_and_owner_scoping() {
     let backend = Backend::start("client");
     let owner = backend.pair();
