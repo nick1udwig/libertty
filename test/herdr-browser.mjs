@@ -148,6 +148,27 @@ try {
     return bounds;
   };
   await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').waitFor();
+  // A snapshot that changes nothing in the strip keeps its buttons, and a renamed space rebuilds them.
+  const firstSpaceTab = await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').elementHandle();
+  const label = fixture.snapshot.panes[0].label; fixture.rename(0, label + ' renamed'); await delay(800);
+  assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), true, 'An unrelated snapshot keeps the strip');
+  fixture.rename(0, label); fixture.snapshot.workspaces[0].label = 'Libertty renamed'; fixture.pauseEvents(false);
+  await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').filter({ hasText: 'Libertty renamed' }).waitFor();
+  assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), false);
+  fixture.snapshot.workspaces[0].label = 'Libertty'; fixture.pauseEvents(false);
+  await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').filter({ hasText: /^Libertty$/ }).waitFor();
+  // The snapshot cache has its own key and is written when the page hides, not on every snapshot.
+  const caches = () => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('libertty.herdr.')).map(key => [key, localStorage.getItem(key)]));
+  await page.evaluate(() => {
+    for (const state of ['hidden', 'visible']) {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: state }); Object.defineProperty(document, 'hidden', { configurable: true, value: state === 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    }
+    delete document.visibilityState; delete document.hidden;
+  });
+  const stored = await caches(), snapshot = stored.find(([key]) => key.endsWith('.snapshot'));
+  assert.ok(snapshot && JSON.parse(snapshot[1]).agents.length, 'Hiding the page writes the snapshot cache');
+  assert.ok(stored.filter(([key]) => !key.endsWith('.snapshot')).every(([, value]) => !('snapshot' in JSON.parse(value))), 'Preferences no longer carry the snapshot');
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   assert.equal(await page.locator('#herdr-strip').inputValue(), 'spaces', 'New installations default to spaces');
   assert.equal(await page.locator('#herdr-strip-order').inputValue(), 'lanes', 'New installations default to status lanes');

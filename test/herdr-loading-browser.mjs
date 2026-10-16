@@ -52,7 +52,9 @@ try {
       }; requestAnimationFrame(inspect);
       return;
     }
-    window.__blockedRendered = []; window.__blockedShortcuts = [];
+    window.__blockedRendered = []; window.__blockedShortcuts = []; window.__herdrSockets = 0;
+    const Native = WebSocket;
+    window.WebSocket = class extends Native { constructor(...args) { super(...args); if (String(args[0]).includes('/herdr/ws')) window.__herdrSockets++; } };
     window.__postToParent = (message, origin) => {
       const terminal = new URLSearchParams(location.search).get('herdrTerminal');
       if (message.type === 'terminal-rendered' && (parent.__holdAllRendered || parent.__holdRendered?.includes(terminal))) window.__blockedRendered.push(message);
@@ -215,7 +217,21 @@ try {
   const restoredCanvas = await incoming.locator('#terminal canvas').boundingBox();
   await page.touchscreen.tap(restoredCanvas.x+restoredCanvas.width*.5,restoredCanvas.y+restoredCanvas.height*.3);
   assert.equal(await input.evaluate(element => element === document.activeElement && !element.readOnly),true,'A fresh tap reopens Herdr input after dismissal');
+  // A parked pane that loses its connection waits until it is shown, so the visible pane reconnects alone.
+  const agentTab = terminal => page.locator('#herdr-strip-'+second+' .herdr-agent-tab[data-terminal="'+terminal+'"]');
+  const shown = await page.locator('#herdr-'+second+' .herdr-terminal').getAttribute('data-terminal'), other = shown === 'term_0' ? 'term_1' : 'term_0';
+  await agentTab(other).click();
+  await wait(async () => await page.locator('#herdr-'+second+' .herdr-terminal').getAttribute('data-terminal') === other && await page.locator('#herdr-'+second+' .herdr-loading').isHidden(), 'switch to another pane');
+  assert.equal(await pane(second, shown).getAttribute('class'), 'herdr-terminal-cached');
+  const parked = await frame(pane(second, shown)), active = await frame(pane(second, other)), sockets = child => child.evaluate(() => window.__herdrSockets);
+  const parkedSockets = await sockets(parked), activeSockets = await sockets(active);
+  await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-terminals').click();
+  await wait(async () => await sockets(active) > activeSockets && await page.locator('#herdr-'+second+' .herdr-loading').isHidden(), 'the visible pane reconnects');
+  await delay(500);
+  assert.equal(await sockets(parked), parkedSockets, 'A parked pane stays disconnected while it is hidden');
+  await agentTab(shown).click();
+  await wait(async () => await sockets(parked) > parkedSockets && await page.locator('#herdr-'+second+' .herdr-loading').isHidden(), 'the parked pane reconnects once shown');
   assert.deepEqual(errors,[]);
-  console.log('PASS: Herdr handoffs keep configured hotkeys and bottom bars stationary through delayed shortcut/paint messages, route input only to ready panes, reject stale/resized/cancelled switches, and preserve input through keyboard opening.');
+  console.log('PASS: Herdr handoffs keep configured hotkeys and bottom bars stationary through delayed shortcut/paint messages, route input only to ready panes, reject stale/resized/cancelled switches, preserve input through keyboard opening, and reconnect parked panes only once shown.');
 } catch(error) { console.error(logs); throw error; }
 finally { await browser?.close(); backend.kill(); await exited; await fixture.close(); }

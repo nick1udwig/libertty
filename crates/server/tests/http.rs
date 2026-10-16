@@ -751,6 +751,40 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
     );
     assert_eq!(upload.status, 200);
     assert_eq!(upload.json()["bytes"], 5);
+    // A numbered upload keeps its partial file, so a retry continues from the bytes that arrived.
+    let resumable = |id: &str, size: u64, offset: u64, body: &[u8]| {
+        backend.request(
+            "POST",
+            &format!("/api/files/upload?session={sid}&path=.&name=resumed.bin&upload={id}&size={size}&offset={offset}"),
+            &[("Origin", &origin), ("Authorization", &bearer)],
+            body,
+        )
+    };
+    let root = backend.root.path();
+    assert_eq!(resumable("u1", 5, 0, &[1, 2]).json(), json!({"received":2}));
+    assert!(!root.join("resumed.bin").exists() && root.join(".libertty-upload-u1").exists());
+    assert_eq!(
+        resumable("u1", 5, 0, &[]).json(),
+        json!({"received":2}),
+        "an attempt at another offset learns what arrived"
+    );
+    assert_eq!(
+        resumable("u1", 5, 2, &[3, 4, 5]).json(),
+        json!({"name":"resumed.bin","bytes":5})
+    );
+    assert_eq!(
+        std::fs::read(root.join("resumed.bin")).unwrap(),
+        [1, 2, 3, 4, 5]
+    );
+    assert!(!root.join(".libertty-upload-u1").exists());
+    assert_eq!(
+        resumable("u2", 5, 0, &[]).status,
+        409,
+        "uploads never overwrite"
+    );
+    std::fs::remove_file(root.join("resumed.bin")).unwrap();
+    assert_eq!(resumable("u3", 2, 0, &[1, 2, 3]).status, 400);
+    assert!(!root.join("resumed.bin").exists());
     let listing = backend
         .api(
             "GET",

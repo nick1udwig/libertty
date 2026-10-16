@@ -170,6 +170,8 @@ Preloading terminal assets and caching both HTML entry points reduces the new lo
 Cached workspace and terminal documents are served immediately while the service worker revalidates their canonical entries in the background.
 Hashed assets retain immutable caching, and API responses and terminal traffic remain outside the app-shell cache.
 Herdr saves at most 256 KiB of navigation metadata per backend, source and session, allowing the previous space or agent strip to appear before its first live snapshot.
+That cache has its own storage key and is written once the page is idle about five seconds after a change, and whenever the page is hidden, rather than with every snapshot.
+A snapshot that changes nothing the strip shows keeps its existing buttons instead of rebuilding them.
 Cached navigation stays inactive and cannot attach a terminal until the fresh snapshot confirms its identities.
 Each tab also owns its renderer/WASM and, when applicable, worker, so memory and background work grow with open tabs.
 The before/after engine benchmark is not evidence that SSH matches direct-backend latency; remote fact access adds SSH/SFTP network round trips.

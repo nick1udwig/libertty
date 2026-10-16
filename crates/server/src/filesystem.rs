@@ -231,6 +231,18 @@ impl FileSystem {
             Ok(Box::new(file))
         }
     }
+    /// Open an existing file for writing at a byte offset, so a resumed upload continues its partial file.
+    pub async fn open_write_at(&self, file: &str, offset: u64) -> Result<Writer> {
+        if let Some(host) = &self.remote {
+            let mut file = call(host.files.open_with_flags(file, OpenFlags::WRITE)).await?;
+            file.seek(std::io::SeekFrom::Start(offset)).await?;
+            Ok(Box::new(file))
+        } else {
+            let mut file = fs::OpenOptions::new().write(true).open(file).await?;
+            file.seek(std::io::SeekFrom::Start(offset)).await?;
+            Ok(Box::new(file))
+        }
+    }
     pub async fn open_read(&self, file: &str) -> Result<Reader> {
         if let Some(host) = &self.remote {
             Ok(Box::new(call(host.files.open(file)).await?))

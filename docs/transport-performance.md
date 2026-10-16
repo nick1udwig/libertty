@@ -169,12 +169,13 @@ The revision is obtained through the read-only `pane.copy_motion` operation rath
 
 Mobile space switches retain up to four authenticated terminal iframes in least-recently-used order.
 Parked views keep their native mobile geometry while consuming and discarding stream frames on the backend, and they pause browser output and shared history polling.
+A parked view that loses its connection, for example while the app is in the background, stays disconnected until it is shown again, so the visible pane reconnects without competing handshakes.
 The initial warm-switch optimization showed its last certified mobile image immediately while reacquiring controller priority and fresh state.
 The loading handoff described below now retains the currently displayed view until the selected pane has a fresh certified paint.
 Uncertified incoming frames cannot overwrite that retained image.
 Cold views and changed dimensions stay hidden until the new layout barrier completes.
 Eviction, removal, disposal, leaving the top-level Herdr tab and changing to a desktop layout release the relevant mobile controllers.
-Returning to the top-level tab opens fresh connections and waits for mobile sizing again.
+Returning to the top-level tab opens a fresh connection for the shown pane and waits for mobile sizing again, while parked panes reconnect once they are shown.
 Older backends without the advertised parking capability retain the single-iframe lifecycle.
 
 The expanded real-Herdr regression captures Chromium's composited PNG frames and checks for the fixture's red desktop pixels in addition to inspecting every visible terminal buffer.
@@ -271,6 +272,7 @@ A failed direct terminal handshake falls back to authorization so expired cookie
 Cross-origin native terminals retain their authorization and single-use ticket flow.
 Terminal and Herdr metadata sockets stay connected for twenty seconds after the document becomes hidden, retaining the mobile PTY size and live picture during short app switches.
 After the grace expires, Herdr releases mobile geometry and idle terminals disconnect, while active dictation may retain its audio transport.
+Terminals and the Herdr view share this lifecycle, which also reconnects on returning online and when a page is restored from the back-forward cache.
 
 ## Request retries
 
@@ -282,6 +284,8 @@ A request that timed out is retried only once, because it may still be running o
 Streamed uploads are never repeated automatically, and cross-origin changes carry no key because an older backend would reject the header during CORS preflight.
 A download that fails or receives nothing for twenty seconds requests the rest of the file with an open-ended byte range, retrying up to five times.
 The backend refuses a resume once the file's size or modification time differs from when the link was issued.
+Uploads from the file browser carry an upload id, so an attempt that fails asks how many bytes arrived and sends only the rest, up to six attempts.
+A newer attempt for the same upload cancels an older one that a dead link may still hold open.
 
 ## Terminal replay batches
 
