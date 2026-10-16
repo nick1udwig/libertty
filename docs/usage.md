@@ -346,7 +346,8 @@ The directory is retained across reloads.
 
 Transfers stream without loading whole files into browser memory.
 Uploads are limited to 1 GB per file and never overwrite an existing filename; rename the source to keep both.
-Failed uploads remove their partial file.
+An interrupted upload continues from the bytes that arrived when the browser retries it.
+Until then its partial file stays beside the destination as a hidden `.termai-upload-` file, removed after 15 minutes without a retry.
 Downloads use short-lived links, scoped to the authenticated session.
 A link retires once the whole file has been sent.
 An interrupted or stalled download resumes from the bytes already received, unless the file changed meanwhile.

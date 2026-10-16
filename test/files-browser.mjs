@@ -42,6 +42,11 @@ try {
     assert.equal(listing.entries.find(e => e.name === 'linked').directory, true); assert.ok(listing.entries.find(e => e.name === '.hidden'));
     const send = (name, body = bytes) => fetch(base + 'api/files/upload?' + new URLSearchParams({ session: id, path: folder, name }), { method: 'POST', headers: { Origin: origin, Authorization: 'Bearer ' + owner, 'Content-Type': 'application/octet-stream' }, body });
     assert.equal((await send('uploaded.bin')).status, 200); assert.deepEqual(await readFile(folder + '/uploaded.bin'), bytes);
+    // A numbered upload continues its partial file on local and SFTP sessions.
+    const part = (offset, body) => fetch(base + 'api/files/upload?' + new URLSearchParams({ session: id, path: folder, name: 'resumed.bin', upload: 'resume-' + dir, size: String(bytes.length), offset: String(offset) }), { method: 'POST', headers: { Origin: origin, Authorization: 'Bearer ' + owner, 'Content-Type': 'application/octet-stream' }, body });
+    assert.deepEqual(await (await part(0, bytes.subarray(0, 3))).json(), { received: 3 });
+    assert.deepEqual(await (await part(3, bytes.subarray(3))).json(), { name: 'resumed.bin', bytes: bytes.length });
+    assert.deepEqual(await readFile(folder + '/resumed.bin'), bytes);
     assert.equal((await send('../escape')).status, 400); assert.equal((await send('uploaded.bin', 'overwrite')).ok, false); assert.deepEqual(await readFile(folder + '/uploaded.bin'), bytes);
     const ticket = await (await request(base, 'api/files/download?session=' + id, owner, { path: folder + '/uploaded.bin' })).json();
     const download = await fetch(base + 'api/files/download?ticket=' + ticket.ticket); assert.match(download.headers.get('content-disposition'), /attachment/); assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
@@ -198,6 +203,6 @@ try {
   const crossDownload = page.waitForEvent('download'); await view.getByRole('button', { name: 'Download cross-origin.txt', exact: true }).click();
   assert.equal(await readFile(await (await crossDownload).path(), 'utf8'), 'cross origin');
   assert.deepEqual(errors, []);
-  console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, resumed downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, links retired after one complete download, no shell in Files tabs, mobile menu and restored directory');
+  console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, resumed uploads and downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, links retired after one complete download, no shell in Files tabs, mobile menu and restored directory');
 } catch (e) { console.error(system.logs); throw e; }
 finally { await browser?.close(); await system.close(); }

@@ -282,6 +282,8 @@ A request that timed out is retried only once, because it may still be running o
 Streamed uploads are never repeated automatically, and cross-origin changes carry no key because an older backend would reject the header during CORS preflight.
 A download that fails or receives nothing for twenty seconds requests the rest of the file with an open-ended byte range, retrying up to five times.
 The backend refuses a resume once the file's size or modification time differs from when the link was issued.
+Uploads from the file browser carry an upload id, so an attempt that fails asks how many bytes arrived and sends only the rest, up to six attempts.
+A newer attempt for the same upload cancels an older one that a dead link may still hold open.
 
 ## Terminal replay batches
 

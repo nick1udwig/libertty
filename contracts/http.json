@@ -530,7 +530,10 @@
         400,
         401,
         403,
-        404
+        404,
+        409,
+        413,
+        429
       ],
       "query": {
         "type": "object",
@@ -540,6 +543,18 @@
           },
           "name": {
             "type": "string"
+          },
+          "upload": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,64}$"
+          },
+          "size": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "offset": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
           }
         },
         "required": [

@@ -45,6 +45,7 @@ mod storage;
 pub mod syntax;
 pub mod system_ssh;
 pub mod transfers;
+pub mod uploads;
 pub mod vault;
 pub mod viewer_queue;
 pub mod wire;
