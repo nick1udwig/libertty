@@ -9,13 +9,13 @@ import { WebSocketServer } from 'ws';
 import { integrations, voxtypeAvailable } from '../scripts/setup-integrations.mjs';
 
 async function fixture(t, options = {}) {
-  const home = await mkdtemp(path.join(os.tmpdir(), 'termai-integrations-'));
+  const home = await mkdtemp(path.join(os.tmpdir(), 'libertty-integrations-'));
   t.after(() => rm(home, { recursive: true, force: true }));
   const releaseDir = home + '/release'; await mkdir(releaseDir + '/build', { recursive: true });
   const binary = Buffer.from('#!/bin/sh\nexit 0\n');
   await writeFile(releaseDir + '/build/release-config.json', JSON.stringify({ herdr: { version: 'v0.9.3', sha256: { 'linux-x64': createHash('sha256').update(binary).digest('hex') } } }));
   const hostname = 'machine.test.ts.net';
-  const config = { managedBy: 'termai', env: { PORT: '7321', TERMAI_BASE_PATH: '/t', TERMAI_ALLOWED_HOSTS: 'localhost,127.0.0.1', XDG_DATA_HOME: home + '/data', XDG_CONFIG_HOME: home + '/config', TERMAI_BASH: '/bin/bash', PATH: home + '/.local/bin:/usr/bin:/bin' } };
+  const config = { managedBy: 'libertty', env: { PORT: '7321', LIBERTTY_BASE_PATH: '/t', LIBERTTY_ALLOWED_HOSTS: 'localhost,127.0.0.1', XDG_DATA_HOME: home + '/data', XDG_CONFIG_HOME: home + '/config', LIBERTTY_BASH: '/bin/bash', PATH: home + '/.local/bin:/usr/bin:/bin' } };
   const configFile = home + '/config.json'; await writeFile(configFile, JSON.stringify(config));
   const serve = { Web: { [hostname + ':443']: { Handlers: { '/other': { Proxy: 'http://127.0.0.1:9999' } } } } };
   const calls = [];
@@ -105,7 +105,7 @@ test('Tailscale setup preserves other routes, verifies HTTPS, and is idempotent'
   const result = await integrations(f.installed, f.dependencies);
   assert.equal(result.url, 'https://' + f.hostname + '/t/'); assert.equal(result.tailscale, 'ready');
   assert.deepEqual(f.serve.Web[f.hostname + ':443'].Handlers['/other'], { Proxy: 'http://127.0.0.1:9999' });
-  assert.ok(JSON.parse(await readFile(f.configFile, 'utf8')).env.TERMAI_ALLOWED_HOSTS.includes(f.hostname));
+  assert.ok(JSON.parse(await readFile(f.configFile, 'utf8')).env.LIBERTTY_ALLOWED_HOSTS.includes(f.hostname));
   assert.equal(f.calls.filter(call => call.args.includes('restart')).length, 1);
   f.calls.length = 0;
   assert.equal((await integrations(f.installed, f.dependencies)).tailscale, 'ready');
@@ -120,7 +120,7 @@ for (const condition of ['route conflict', 'public Funnel']) test('Tailscale ' +
   assert.equal(result.tailscale, 'failed'); assert.equal(await readFile(f.configFile, 'utf8'), previous);
   assert.deepEqual(f.serve, original); assert.ok(!f.calls.some(call => call.args.includes('--bg') || call.args.includes('restart')));
 });
-test('public Funnel on a separate port does not block the private Termai listener', async t => {
+test('public Funnel on a separate port does not block the private libertty listener', async t => {
   const f = await fixture(t, { 'no-companions': true });
   f.serve.AllowFunnel = { [f.hostname + ':8443']: true };
   assert.equal((await integrations(f.installed, f.dependencies)).tailscale, 'ready');
@@ -136,7 +136,7 @@ test('failed Serve setup restores allowed hosts and removes only its new route',
   };
   const result = await integrations(f.installed, f.dependencies);
   assert.equal(result.tailscale, 'failed'); assert.equal(await readFile(f.configFile, 'utf8'), previous);
-  assert.equal(f.config.env.TERMAI_ALLOWED_HOSTS, 'localhost,127.0.0.1'); assert.deepEqual(f.serve, original);
+  assert.equal(f.config.env.LIBERTTY_ALLOWED_HOSTS, 'localhost,127.0.0.1'); assert.deepEqual(f.serve, original);
   assert.equal(f.calls.filter(call => call.args.includes('restart')).length, 2);
 });
 test('a valid NeedsLogin status with nonzero exit still runs the interactive login flow', async t => {
@@ -149,7 +149,7 @@ test('a valid NeedsLogin status with nonzero exit still runs the interactive log
   };
   assert.equal((await integrations(f.installed, f.dependencies)).tailscale, 'ready'); assert.equal(loggedIn, true);
 });
-test('a conflicting optional Android route does not undo working Termai HTTPS', async t => {
+test('a conflicting optional Android route does not undo working libertty HTTPS', async t => {
   const f = await fixture(t); f.serve.Web[f.hostname + ':443'].Handlers['/voxtype'] = { Proxy: 'http://127.0.0.1:8888' };
   const result = await integrations(f.installed, f.dependencies);
   assert.equal(result.tailscale, 'ready'); assert.equal(result.voxtype, 'ready'); assert.equal(result.voxtypeRoute, 'failed');
@@ -173,8 +173,8 @@ test('dictation detection authenticates the capabilities endpoint and rejects in
     assert.equal(request.url, '/v1/capabilities'); assert.equal(request.headers.authorization, 'Bearer ' + 'a'.repeat(32));
     socket.send(JSON.stringify({ type: 'capabilities', protocol: compatible ? 2 : 1, dictation: true, sample_rate: 16000, channels: 1, format: 'opus', framing: 'sequence_opus_v1', audio_encodings: ['opus_v1'], results: ['final'] }));
   });
-  const env = { ...f.config.env, TERMAI_VOXTYPE_URL: 'ws://127.0.0.1:' + server.address().port + '/v1/dictate' };
+  const env = { ...f.config.env, LIBERTTY_VOXTYPE_URL: 'ws://127.0.0.1:' + server.address().port + '/v1/dictate' };
   assert.equal(await voxtypeAvailable(env), true); compatible = false;
   assert.equal(await voxtypeAvailable(env), false);
-  assert.equal(await voxtypeAvailable({ ...env, TERMAI_VOXTYPE_URL: 'wss://example.com/v1/dictate' }), false);
+  assert.equal(await voxtypeAvailable({ ...env, LIBERTTY_VOXTYPE_URL: 'wss://example.com/v1/dictate' }), false);
 });

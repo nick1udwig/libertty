@@ -1,5 +1,5 @@
 [package]
-name = "termai-engine"
+name = "libertty-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

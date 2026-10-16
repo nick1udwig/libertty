@@ -9,10 +9,10 @@ import assert from 'node:assert/strict';
 const fixturePort3182 = await freePort();
 
 const root = path.resolve(import.meta.dirname, '..');
-const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-gestures-'));
+const fixture = await mkdtemp(path.join(os.tmpdir(), 'libertty-gestures-'));
 const port = Number(process.env.TEST_PORT || fixturePort3182), base = `http://127.0.0.1:${port}`;
 const token = 'gesture-test-pairing-token-123456789';
-const server = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_TOKEN: token, TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_NO_RC: '1', TERMAI_CWD: fixture }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(new URL('../target/debug/libertty', import.meta.url).pathname, [], { cwd: root, env: { ...process.env, HOME: fixture, XDG_DATA_HOME: path.join(fixture, 'data'), NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), LIBERTTY_TOKEN: token, LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = '', browser;
 server.stdout.on('data', b => logs += b); server.stderr.on('data', b => logs += b);
 try {

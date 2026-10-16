@@ -1,8 +1,4 @@
-use rand::rngs::OsRng;
-use serde_json::{Value, json};
-use ssh_key::{Algorithm, LineEnding, PrivateKey};
-use std::{net::SocketAddr, os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
-use termai_server::{
+use libertty_server::{
     files,
     filesystem::FileSystem,
     host::{HostServices, NativeHost},
@@ -10,6 +6,10 @@ use termai_server::{
     ssh::SSHHost,
     vault::{Vault, fingerprint},
 };
+use rand::rngs::OsRng;
+use serde_json::{Value, json};
+use ssh_key::{Algorithm, LineEnding, PrivateKey};
+use std::{net::SocketAddr, os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
 use tokio::{io::AsyncReadExt, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -82,13 +82,13 @@ impl Fixture {
         let port = address.port();
         let config = format!("{root}/sshd_config");
         // The loopback remote must use the same supported Bash as local tests.
-        let bash = termai_server::shell::local_bash(&std::env::vars().collect()).unwrap();
+        let bash = libertty_server::shell::local_bash(&std::env::vars().collect()).unwrap();
         let remote_path = format!(
             "{}:/usr/bin:/bin",
             std::path::Path::new(&bash).parent().unwrap().display()
         );
         tokio::fs::write(&config,format!("Port {port}\nListenAddress 127.0.0.1\nHostKey {root}/host\nPidFile {root}/pid\nAuthorizedKeysFile {root}/authorized\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers {user}\nSetEnv HOME={root}/home PATH={remote_path}\nSubsystem sftp internal-sftp\n")).await.unwrap();
-        let executable = std::env::var("TERMAI_TEST_SSHD").unwrap_or_else(|_| {
+        let executable = std::env::var("LIBERTTY_TEST_SSHD").unwrap_or_else(|_| {
             if std::path::Path::new("/usr/bin/sshd").exists() {
                 "/usr/bin/sshd"
             } else {
@@ -242,7 +242,7 @@ async fn remote_authentication_pins_facts_and_bounded_channels() {
         .unwrap();
     tokio::fs::write(
         &eternal,
-        "x".repeat(termai_server::history::HISTORY_BYTES + 100)
+        "x".repeat(libertty_server::history::HISTORY_BYTES + 100)
             + "\n#123456789\necho eternal 界😀\n private command\n",
     )
     .await
@@ -250,7 +250,8 @@ async fn remote_authentication_pins_facts_and_bounded_channels() {
     assert_eq!(host.history(&cancel).await, ["echo eternal 界😀"]);
     assert_eq!(
         host.history(&cancel).await,
-        termai_server::history::read_history(&eternal, termai_server::history::HISTORY_BYTES).await
+        libertty_server::history::read_history(&eternal, libertty_server::history::HISTORY_BYTES)
+            .await
     );
     tokio::fs::write(&eternal, "echo eternal 界😀\n")
         .await
@@ -323,7 +324,7 @@ async fn remote_authentication_pins_facts_and_bounded_channels() {
     )
     .await
     .unwrap();
-    let catalog = termai_engine::types::Catalog {
+    let catalog = libertty_engine::types::Catalog {
         cwd: fixture.home(),
         commands: vec!["python3".into(), "git".into(), "ls".into()].into(),
         functions: Some(vec![].into()),
@@ -336,7 +337,7 @@ async fn remote_authentication_pins_facts_and_bounded_channels() {
             ("HOME".into(), fixture.home()),
             ("PATH".into(), "/usr/bin:/bin".into()),
         ]),
-        termai_server::help::HelpProvider::new(Default::default()),
+        libertty_server::help::HelpProvider::new(Default::default()),
     );
     native.remote = Some(host.clone());
     assert_eq!(
@@ -619,7 +620,7 @@ async fn compressed_ssh_selected_file_unchanged_and_delta_preserve_remote_bytes(
     let path = format!("{}/plugin.log", fixture.home());
     let text = "remote 界😀\n".repeat(1000);
     tokio::fs::write(&path, &text).await.unwrap();
-    let mut cache = termai_server::plugin_file::Cache::default();
+    let mut cache = libertty_server::plugin_file::Cache::default();
     let first = cache
         .read(&fs, &fixture.home(), &fixture.home(), &path, None, &cancel)
         .await
@@ -756,7 +757,7 @@ async fn transport_ssh_benchmark() {
                     let start = std::time::Instant::now();
                     let mut stream = host
                         .open_stream(
-                            &format!("cat {}", termai_engine::repair::shell_quote(&path)),
+                            &format!("cat {}", libertty_engine::repair::shell_quote(&path)),
                             &cancel,
                         )
                         .await
@@ -772,7 +773,7 @@ async fn transport_ssh_benchmark() {
                 remote: Some(host.clone()),
             };
             let path = format!("{}/wire-text", fixture.home());
-            let mut cache = termai_server::plugin_file::Cache::default();
+            let mut cache = libertty_server::plugin_file::Cache::default();
             let initial = cache
                 .read(&fs, &fixture.home(), &fixture.home(), &path, None, &cancel)
                 .await

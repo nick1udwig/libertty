@@ -20,16 +20,16 @@ async function request(route, data, credential = bearer) { return fetch(base + '
 async function settings() { if (await page.locator('#workspace-navigation').isVisible()) { await showTerminalTabs(page); await page.locator('#terminal-back').click(); } await page.locator('#nav-settings').click(); }
 async function hosts() { if (await page.locator('#nav-terminals').isVisible()) await page.locator('#nav-terminals').click(); await showTerminalTabs(page); await page.locator('#terminal-back').click(); }
 async function action(name, host = 'This machine') { await hosts(); await page.getByRole('button', { name: new RegExp('^Terminals for ' + host + ' ') }).click(); await page.getByRole('menuitem', { name, exact: true }).click(); }
-async function pluginFrame() { const element = await page.locator('#terminal-stack > iframe[sandbox]:visible').elementHandle(); const frame = await element.contentFrame(); await frame.waitForFunction(() => !!window.termai); await frame.evaluate(() => termai.ready); return frame; }
-async function tabClosed(tab) { await page.waitForFunction(id => !JSON.parse(localStorage.getItem('termai.tabs')).some(tab => tab.id === id), tab.id); }
+async function pluginFrame() { const element = await page.locator('#terminal-stack > iframe[sandbox]:visible').elementHandle(); const frame = await element.contentFrame(); await frame.waitForFunction(() => !!window.libertty); await frame.evaluate(() => libertty.ready); return frame; }
+async function tabClosed(tab) { await page.waitForFunction(id => !JSON.parse(localStorage.getItem('libertty.tabs')).some(tab => tab.id === id), tab.id); }
 async function loadPackage(pkg) {
-  await settings(); await page.locator('#plugin-file').setInputFiles({ name: 'plugin.termai-plugin.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(pkg)) });
+  await settings(); await page.locator('#plugin-file').setInputFiles({ name: 'plugin.libertty-plugin.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(pkg)) });
   await until(async () => (await page.locator('#plugin-list').textContent()).includes(pkg.manifest.version), 'plugin installation');
 }
 try {
   await writeFile(fixture.directory + '/app.log', 'info started\nwarning review this\n');
   await mkdir(fixture.directory + '/remote'); await writeFile(fixture.directory + '/remote/app.log', 'remote warning\n');
-  start(root + 'target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '/plugins-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_DATA_DIR: fixture.directory + '/data', TERMAI_TOKEN: 'plugin-test-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory, HOME: fixture.directory, HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH });
+  start(root + 'target/debug/libertty', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), LIBERTTY_BASE_PATH: '/plugins-test', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: origin, LIBERTTY_DATA_DIR: fixture.directory + '/data', LIBERTTY_TOKEN: 'plugin-test-pairing-token-123456789', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture.directory, HOME: fixture.directory, HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH });
   await until(async () => { try { return (await fetch(base + '/')).ok; } catch { return false; } }, 'backend');
   assert.equal((await request('plugins/read?path=app.log', undefined, undefined)).status, 401);
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
@@ -43,17 +43,17 @@ try {
   assert.deepEqual(await page.locator('#host-terminal-menu button').allTextContents(), ['Connect new terminal', 'Connect SFTP / Files', 'Connect Herdr', 'This machine', 'Edit host']);
   await page.getByRole('menuitem', { name: 'Connect SFTP / Files', exact: true }).click();
   await page.locator('.file-browser').waitFor();
-  const filesTab = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'files'));
+  const filesTab = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'files'));
   await page.getByRole('button', { name: 'Close ' + filesTab.name, exact: true }).last().click();
   await tabClosed(filesTab);
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === filesTab.session), 'Files releases its connection');
 
-  const sample = JSON.parse(await readFile(root + 'examples/plugins/example.log-viewer.termai-plugin.json', 'utf8'));
+  const sample = JSON.parse(await readFile(root + 'examples/plugins/example.log-viewer.libertty-plugin.json', 'utf8'));
   await settings(); await page.locator('#plugin-file').setInputFiles({ name: 'unsupported.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ ...sample, manifest: { ...sample.manifest, permissions: ['shell.exec'] } })) });
   await page.locator('#plugin-install-error').filter({ hasText: 'file.read permission' }).waitFor();
   await loadPackage(sample); await action('Connect Log viewer'); await page.locator('#plugin-read-path').fill('app.log'); await page.locator('#plugin-connect-form button[type=submit]').click();
   let frame = await pluginFrame(); await frame.locator('#log').filter({ hasText: 'warning review this' }).waitFor();
-  const logTab = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'example.log-viewer'));
+  const logTab = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'example.log-viewer'));
   assert.equal(logTab.readPath, fixture.directory + '/app.log');
   assert.equal((await request('ticket?session=' + logTab.session, {})).status, 404, 'Plugin connections allocate no PTY');
   const denied = await frame.evaluate(async base => {
@@ -61,13 +61,13 @@ try {
     try { void parent.localStorage; result.parent = 'accessible'; } catch { result.parent = 'blocked'; }
     try { void localStorage.length; result.storage = 'accessible'; } catch { result.storage = 'blocked'; }
     try { await fetch(base + '/api/keychain'); result.fetch = 'accessible'; } catch { result.fetch = 'blocked'; }
-    try { await termai.request('file.read', { path: '/etc/passwd' }); result.path = 'accessible'; } catch { result.path = 'blocked'; }
-    try { await termai.request('shell.exec', { command: 'id' }); result.shell = 'accessible'; } catch { result.shell = 'blocked'; }
-    result.context = Object.keys(await termai.ready).sort(); return result;
+    try { await libertty.request('file.read', { path: '/etc/passwd' }); result.path = 'accessible'; } catch { result.path = 'blocked'; }
+    try { await libertty.request('shell.exec', { command: 'id' }); result.shell = 'accessible'; } catch { result.shell = 'blocked'; }
+    result.context = Object.keys(await libertty.ready).sort(); return result;
   }, base);
   assert.deepEqual(denied, { parent: 'blocked', storage: 'blocked', fetch: 'blocked', path: 'blocked', shell: 'blocked', context: ['name', 'state'] });
   await appendFile(fixture.directory + '/app.log', 'warning updated\n'); await until(async () => (await frame.locator('#log').textContent()).includes('warning updated'), 'live log refresh');
-  await frame.locator('#filter').fill('warning'); await until(async () => await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'example.log-viewer')?.pluginState?.filter === 'warning'), 'plugin state');
+  await frame.locator('#filter').fill('warning'); await until(async () => await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'example.log-viewer')?.pluginState?.filter === 'warning'), 'plugin state');
   let reads = 0; page.on('request', request => { if (request.url().includes('/api/plugins/read')) reads++; });
   await settings(); await delay(250); const hiddenReads = reads; await delay(2200); assert.equal(reads, hiddenReads, 'Hidden plugin views pause their reads');
   await page.locator('#nav-terminals').click(); await page.reload(); frame = await pluginFrame(); assert.equal(await frame.locator('#filter').inputValue(), 'warning');
@@ -80,9 +80,9 @@ try {
   await settings(); await page.getByRole('checkbox', { name: 'Enable Log viewer' }).check(); await page.locator('#nav-terminals').click(); frame = await pluginFrame(); assert.equal(await frame.locator('#filter').inputValue(), 'warning');
   const updated = { ...sample, manifest: { ...sample.manifest, version: '2.0.0' }, view: sample.view.replace('Log viewer</h1>', 'Log viewer v2</h1>') };
   await loadPackage(updated); await page.locator('#nav-terminals').click();
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).pluginVersion), '1.0.0', 'Open tabs keep their package version');
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).pluginVersion), '1.0.0', 'Open tabs keep their package version');
   await action('Connect Log viewer'); await page.locator('#plugin-read-path').fill('app.log'); await page.locator('#plugin-connect-form button[type=submit]').click(); await pluginFrame();
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).pluginVersion), '2.0.0');
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).pluginVersion), '2.0.0');
   await settings(); await page.getByRole('button', { name: 'Remove plugin', exact: true }).click(); await page.locator('#nav-terminals').click(); await page.getByText(/This plugin version is missing or disabled/).filter({ visible: true }).waitFor();
   await page.reload(); await page.getByText(/This plugin version is missing or disabled/).filter({ visible: true }).waitFor();
   await loadPackage(sample); await page.locator('#nav-terminals').click();
@@ -92,7 +92,7 @@ try {
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === logTab.session), 'Plugin tab close releases its session');
 
   await action('Connect Herdr'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
-  const localHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'herdr'));
+  const localHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'herdr'));
   assert.equal(localHerdr.ownsSession, true); assert.equal(localHerdr.herdrSource, localHerdr.session);
   assert.equal((await request('ticket?session=' + localHerdr.session, {})).status, 404);
   await page.reload(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
@@ -109,20 +109,20 @@ try {
   const key = await (await request('keychain', { action: 'create', name: 'Fixture key', privateKey: identity.private, passphrase: 'fixture-secret' })).json();
   assert.ok(key.id);
   await page.evaluate(({ key, sshPort, username }) => {
-    const hosts = JSON.parse(localStorage.getItem('termai.hosts')); hosts.push({ id: 'ssh-plugin', name: 'Remote host', kind: 'ssh', backendId: 'primary', hostname: '127.0.0.1', port: sshPort, username, route: 'fixed', keyFingerprint: key.fingerprint }); localStorage.setItem('termai.hosts', JSON.stringify(hosts));
+    const hosts = JSON.parse(localStorage.getItem('libertty.hosts')); hosts.push({ id: 'ssh-plugin', name: 'Remote host', kind: 'ssh', backendId: 'primary', hostname: '127.0.0.1', port: sshPort, username, route: 'fixed', keyFingerprint: key.fingerprint }); localStorage.setItem('libertty.hosts', JSON.stringify(hosts));
   }, { key, sshPort, username: os.userInfo().username });
   await page.reload(); page.on('dialog', dialog => dialog.accept());
   await action('Connect Log viewer', 'Remote host'); await page.locator('#plugin-read-path').fill(fixture.directory + '/remote/app.log'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('#ssh-secret').fill('fixture-secret'); await page.locator('#ssh-connect').click();
   frame = await pluginFrame(); await frame.locator('#log').filter({ hasText: 'remote warning' }).waitFor();
-  const remoteLog = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'example.log-viewer' && tab.hostId === 'ssh-plugin'));
+  const remoteLog = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'example.log-viewer' && tab.hostId === 'ssh-plugin'));
   await page.getByRole('button', { name: 'Close ' + remoteLog.name, exact: true }).click();
   await tabClosed(remoteLog);
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === remoteLog.session), 'Remote plugin cleanup closes its SSH connection');
   await action('Connect Herdr', 'Remote host'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('#ssh-secret').fill('fixture-secret'); await page.locator('#ssh-connect').click();
   await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
-  const remoteHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'herdr' && tab.hostId === 'ssh-plugin'));
+  const remoteHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'herdr' && tab.hostId === 'ssh-plugin'));
   assert.equal(remoteHerdr.ownsSession, true); assert.equal(remoteHerdr.herdrSource, remoteHerdr.session);
-  const sourceTabs = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).filter(tab => tab.hostId === 'ssh-plugin'));
+  const sourceTabs = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).filter(tab => tab.hostId === 'ssh-plugin'));
   assert.equal(sourceTabs.length, 1, 'Direct SSH Herdr needs no source terminal');
   const other = (await (await request('connect', { noSession: true, token: 'plugin-test-pairing-token-123456789' }, '')).json()).accessToken;
   assert.equal((await request('herdr/ticket?herdrSource=' + remoteHerdr.herdrSource, {}, other)).status, 404);
@@ -141,5 +141,5 @@ try {
   assert.equal((await request('herdr/snapshot')).status, 200, 'Remote connection cleanup leaves agents running');
 
   assert.deepEqual(errors, []); console.log('Plugin browser checks passed: runtime installation, scoped bridge, state/versions, unavailable packages, mobile layout, local and independent SSH Herdr, ownership and cleanup.');
-} catch (error) { console.error(logs); if (page) await page.screenshot({ path: '/tmp/termai-plugin-failure.png' }).catch(() => {}); throw error; }
+} catch (error) { console.error(logs); if (page) await page.screenshot({ path: '/tmp/libertty-plugin-failure.png' }).catch(() => {}); throw error; }
 finally { await browser?.close(); for (const process of processes.reverse()) { const exited = once(process, 'exit'); process.kill('SIGTERM'); await exited; } await fixture.close(); }

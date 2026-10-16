@@ -38,8 +38,8 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
   toolbar.append(selection, crumbs, loading, upload, more, find); element.append(toolbar, search, status, list, picker);
   const error = (reason: unknown) => { if (!disposed) { status.textContent = reason instanceof Error ? reason.message : 'File transfer failed.'; status.classList.add('error'); } };
   let options: FileOptions = { sort: 'name', descending: false, hidden: false };
-  try { const saved = JSON.parse(localStorage.getItem('termai.fileOptions') || 'null'); if (saved && ['name', 'date', 'size', 'kind'].includes(saved.sort)) options = { sort: saved.sort, descending: saved.descending === true, hidden: saved.hidden === true }; } catch {}
-  const saveOptions = () => { try { localStorage.setItem('termai.fileOptions', JSON.stringify(options)); } catch {} render(); };
+  try { const saved = JSON.parse(localStorage.getItem('libertty.fileOptions') || 'null'); if (saved && ['name', 'date', 'size', 'kind'].includes(saved.sort)) options = { sort: saved.sort, descending: saved.descending === true, hidden: saved.hidden === true }; } catch {}
+  const saveOptions = () => { try { localStorage.setItem('libertty.fileOptions', JSON.stringify(options)); } catch {} render(); };
   let menu: HTMLElement | undefined, anchor: HTMLButtonElement | undefined;
   function closeMenu(focus = false) { menu?.remove(); menu = undefined; anchor?.setAttribute('aria-expanded', 'false'); if (focus) anchor?.focus(); anchor = undefined; }
   interface MenuItem { label: string; icon: string; action: () => void; checked?: boolean; detail?: string; separator?: boolean }

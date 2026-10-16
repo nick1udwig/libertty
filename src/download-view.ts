@@ -3,7 +3,7 @@ import { closeIcon } from './icons.ts';
 import './download-view.css';
 import { fetchResumable } from './resumable-download.ts';
 export interface DownloadTicket { ticket: string; name: string; size: number }
-export function showDownloads() { try { return localStorage.getItem('termai.showDownloads') !== 'false'; } catch { return true; } }
+export function showDownloads() { try { return localStorage.getItem('libertty.showDownloads') !== 'false'; } catch { return true; } }
 // Only inert formats are opened in the app's origin. HTML, SVG and executable
 // documents stay plain text or downloads; downloaded scripts must never run here.
 function previewType(name: string) {
@@ -22,7 +22,7 @@ function createPanel() {
   const x = button('', dismiss); x.innerHTML = closeIcon; x.setAttribute('aria-label', 'Close downloads');
   header.append(heading, x);
   const label = document.createElement('label'), never = document.createElement('input'); never.type = 'checkbox'; never.checked = !showDownloads(); label.append(never, document.createTextNode('Don’t show this again')); label.className = 'download-preference';
-  never.onchange = () => { try { localStorage.setItem('termai.showDownloads', JSON.stringify(!never.checked)); } catch { never.checked = false; } };
+  never.onchange = () => { try { localStorage.setItem('libertty.showDownloads', JSON.stringify(!never.checked)); } catch { never.checked = false; } };
   const actions = document.createElement('div'); actions.className = 'download-actions'; actions.append(close);
   modal.append(header, rows, label, actions); document.body.append(modal);
   const show = () => { if (!modal.open) modal.showModal(); };

@@ -2,8 +2,8 @@ use axum::{
     body::to_bytes,
     http::{HeaderMap, Method, StatusCode},
 };
+use libertty_server::assets::{accepted_encodings, serve};
 use std::os::unix::fs::PermissionsExt;
-use termai_server::assets::{accepted_encodings, serve};
 
 #[test]
 fn encoding_negotiation_retains_exclusions_preferences_and_identity_fallback() {
@@ -35,7 +35,7 @@ async fn static_variants_stream_bytes_and_head_avoids_reading_unreadable_files()
     std::fs::write(root.path().join("assets/app.js.gz"), b"gzip variant bytes").unwrap();
     std::fs::write(
         root.path().join("index.html"),
-        "<base href=\"/\" data-termai-base><main>Hi</main>",
+        "<base href=\"/\" data-libertty-base><main>Hi</main>",
     )
     .unwrap();
     let mut headers = HeaderMap::new();

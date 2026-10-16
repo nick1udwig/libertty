@@ -27,8 +27,8 @@ Sessions belong to the authenticated browser owner.
 The primary backend is the one serving the workspace.
 
 Every backend requires a pairing token before issuing browser credentials, including the primary backend and localhost.
-The server prints its token at startup and saves generated tokens in `TERMAI_DATA_DIR/pairing-token` with mode 0600.
-`TERMAI_TOKEN` can override it with at least 24 characters.
+The server prints its token at startup and saves generated tokens in `LIBERTTY_DATA_DIR/pairing-token` with mode 0600.
+`LIBERTTY_TOKEN` can override it with at least 24 characters.
 Pairing survives browser and server restarts.
 The browser saves an issued credential per backend URL in local storage, and the backend saves only credential hashes in `paired-clients.json` (mode 0600).
 The HttpOnly session cookie is persistent and renewed on reconnect.
@@ -37,7 +37,7 @@ Changing the pairing token revokes saved credentials.
 Native sessions use the backend's Rust repair engine.
 SSH sessions use the native repair library on the backend with `SSHHost` supplying SFTP directory data, shell context, syntax checks, verified help routes and static Python inspection.
 Terminal output and fact channels share one SSH connection.
-No termai daemon is installed on the SSH target.
+No libertty daemon is installed on the SSH target.
 SSH needs a POSIX environment with Bash, SFTP, `mktemp` and `base64`.
 Remote Python inspection additionally needs Python 3.
 Keyboard-interactive/MFA, forwarding, agent forwarding and remote Windows shells are not implemented.
@@ -59,7 +59,7 @@ Live terminals survive reloads and disconnects while the backend remains alive; 
 Clearing browser storage loses saved profiles.
 There is no cross-device profile synchronization in this implementation.
 
-The canonical key vault is **This browser**: IndexedDB database `termai-keychain`, object store `keys`.
+The canonical key vault is **This browser**: IndexedDB database `libertty-keychain`, object store `keys`.
 Ed25519 keys are generated with Web Crypto and packaged in OpenSSH format.
 Private material is encrypted with AES-256-GCM, random salt and nonce, and PBKDF2-SHA256 (600,000 iterations).
 Authentication data binds the format, version, public key and fingerprint to the ciphertext.
@@ -82,7 +82,7 @@ Use encrypted-file export/import for another browser without its own backend.
 Existing backend keys can be explicitly restored into the browser.
 There is no automatic migration or synchronization.
 
-Backend copies use `$TERMAI_DATA_DIR/vault.json` (default `~/.local/share/termai/vault.json`), AES-256-GCM and scrypt, with atomic mode-0600 writes in a mode-0700 directory.
+Backend copies use `$LIBERTTY_DATA_DIR/vault.json` (default `~/.local/share/libertty/vault.json`), AES-256-GCM and scrypt, with atomic mode-0600 writes in a mode-0700 directory.
 Exporting a backend copy requires authenticated backend access and its correct key passphrase.
 The backend vault is shared by trusted users of that backend, not isolated per browser owner.
 Run one backend process per data directory.

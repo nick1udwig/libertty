@@ -12,7 +12,7 @@ import { WebSocket } from 'ws';
 const fixturePort3153 = await freePort();
 const fixturePort3154 = await freePort();
 const fixturePort3158 = await freePort();
-const root = path.resolve(import.meta.dirname, '..'), fixture = await mkdtemp('/tmp/termai-workspace-');
+const root = path.resolve(import.meta.dirname, '..'), fixture = await mkdtemp('/tmp/libertty-workspace-');
 const origin = 'http://127.0.0.1:' + fixturePort3153, secondary = 'http://127.0.0.1:' + fixturePort3154, sshPort = fixturePort3158;
 const processes = [], logs = [], errors = [];
 let browser;
@@ -39,7 +39,7 @@ try {
   await sshdConfig(fixture, sshPort);
   start(sshdPath(), ['-D', '-e', '-f', fixture + '/sshd_config']);
   const backendSpecs = [[fixturePort3153, 'primary', ''], [fixturePort3154, 'secondary', 'test-backend-token-123456789']];
-  const startBackend = ([port, name, token]) => start(root + '/target/debug/termai', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), TERMAI_BASE_PATH: '', TERMAI_ALLOWED_HOSTS: '127.0.0.1,localhost', TERMAI_ALLOWED_ORIGINS: origin, TERMAI_TOKEN: token, TERMAI_NO_RC: '1', TERMAI_CWD: fixture, HOME: fixture, TERMAI_DATA_DIR: fixture + '/' + name, TERMAI_HISTORY_FILE: fixture + '/no-history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/no-history' });
+  const startBackend = ([port, name, token]) => start(root + '/target/debug/libertty', [], { NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(port), LIBERTTY_BASE_PATH: '', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1,localhost', LIBERTTY_ALLOWED_ORIGINS: origin, LIBERTTY_TOKEN: token, LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture, HOME: fixture, LIBERTTY_DATA_DIR: fixture + '/' + name, LIBERTTY_HISTORY_FILE: fixture + '/no-history', LIBERTTY_ETERNAL_HISTORY_FILE: fixture + '/no-history' });
   const backends = backendSpecs.map(startBackend);
   await Promise.all([waitForBackend(origin, backends[0]), waitForBackend(secondary, backends[1])]);
   const primaryPairingToken = (await readFile(fixture + '/primary/pairing-token', 'utf8')).trim();
@@ -112,7 +112,7 @@ try {
   await controlModifier.click(); await until(async () => await controlModifier.getAttribute('aria-pressed') === 'true');
   assert.equal(await frame.locator('[data-modifier]').getAttribute('aria-pressed'), 'true', 'Outer modifier state matches active terminal');
   await controlModifier.click(); await until(async () => await controlModifier.getAttribute('aria-pressed') === 'false');
-  await page.screenshot({ path: '/tmp/termai-bottom-controls.png' });
+  await page.screenshot({ path: '/tmp/libertty-bottom-controls.png' });
   await frame.locator('#copy-selection').evaluate(el => el.click());
   await page.getByText('Select terminal text first.', { exact: true }).waitFor({ state: 'visible' });
   assert.equal(await frame.locator('#toast').isVisible(), false, 'Embedded notices must appear only in the workspace');
@@ -223,7 +223,7 @@ try {
   await restorePage.locator('#terminal-back').click(); await restorePage.locator('#page-back').click(); await restorePage.getByRole('button', { name: /Keychain Encrypted/ }).click();
   await other.setOffline(true);
   await restorePage.locator('#library-add').click(); await restorePage.locator('#key-name').fill('Restored browser key'); await restorePage.locator('#key-method').selectOption('import');
-  await restorePage.locator('#key-import-file').setInputFiles({ name: 'backup.termai-key.json', mimeType: 'application/json', buffer: Buffer.from(backup) });
+  await restorePage.locator('#key-import-file').setInputFiles({ name: 'backup.libertty-key.json', mimeType: 'application/json', buffer: Buffer.from(backup) });
   await restorePage.locator('#key-passphrase').fill('test-key-passphrase'); await restorePage.locator('#key-confirm').fill('test-key-passphrase'); await restorePage.locator('#key-form button[type=submit]').click();
   await restorePage.locator('#key-details').waitFor({ state: 'visible' }); assert.equal(await restorePage.locator('#public-key').inputValue(), publicKey);
   assert.match(await restorePage.locator('#key-storage').innerText(), /No device backups/); await other.close();
@@ -331,7 +331,7 @@ try {
   await page.getByRole('button', { name: /Renamed import ED25519/ }).click(); await page.locator('#delete-key').click(); await page.locator('#key-details').waitFor({ state: 'hidden' });
   await page.locator('#nav-terminals').click();
   // A changed pin must fail even if the caller supplies trust for the new key.
-  const backendToken = await page.evaluate(url => localStorage.getItem('termai.access:' + url + '/'), secondary);
+  const backendToken = await page.evaluate(url => localStorage.getItem('libertty.access:' + url + '/'), secondary);
   const remoteKey = (await vaultData('secondary')).keys[0];
   await setFixturePin('SHA256:changed-fixture');
   const changed = await request(secondary, 'sessions', backendToken, { name: 'changed host', ssh: { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, keyId: remoteKey.id, passphrase: 'test-key-passphrase', trust: 'ignored' } });
@@ -363,7 +363,7 @@ try {
   // A fresh browser session has neither sessionStorage nor cookies. Persisted
   // per-backend credentials must recover both local and cross-origin access.
   const stored = await context.storageState(); stored.cookies = [];
-  for (const entry of stored.origins) entry.localStorage = entry.localStorage.filter(item => !['termai.tabs', 'termai.activeTab'].includes(item.name));
+  for (const entry of stored.origins) entry.localStorage = entry.localStorage.filter(item => !['libertty.tabs', 'libertty.activeTab'].includes(item.name));
   const reopened = await browser.newContext({ storageState: stored }), reopenedPage = await reopened.newPage();
   await reopenedPage.goto(origin);
   const reopenedFrame = await (await reopenedPage.locator('#terminal-stack iframe').elementHandle()).contentFrame();
@@ -457,7 +457,7 @@ try {
   frame = await activeFrame(page); assert.equal(await page.locator('#captured-ssh-dialog').isVisible(), false);
   await command(frame, 'printf agent > capture-agent.txt'); assert.equal(await readFile(fixture + '/remote/capture-agent.txt', 'utf8'), 'agent');
   const agentReference = (await vaultData('secondary')).keys.find(key => key.reference?.type === 'agent'); assert.equal(agentReference.reference.path, agentSocket);
-  assert.ok(await page.evaluate(id => JSON.parse(localStorage.getItem('termai.hosts')).some(host => host.backendKeyId === id), agentReference.id));
+  assert.ok(await page.evaluate(id => JSON.parse(localStorage.getItem('libertty.hosts')).some(host => host.backendKeyId === id), agentReference.id));
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   await until(async () => await page.locator('[role=tab]').count() === capturedTabsBefore);
   await page.locator(`[role=tab][aria-controls="${parentId}"]`).click(); frame = await activeFrame(page);
@@ -490,7 +490,7 @@ try {
   await command(frame, 'unset -f ssh');
   // Replacing a referenced file cannot silently authenticate as a different identity.
   await writeFile(fixture + '/locked-key', nestedKey.private);
-  const currentToken = await page.evaluate(url => localStorage.getItem('termai.access:' + url + '/'), secondary);
+  const currentToken = await page.evaluate(url => localStorage.getItem('libertty.access:' + url + '/'), secondary);
   const replaced = await request(secondary, 'sessions', currentToken, { name: 'changed reference', ssh: { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, keyId: lockedReference.id, passphrase: 'existing-pass' } });
   assert.equal(replaced.status, 400); assert.match((await replaced.json()).error, /referenced SSH key has changed/);
   assert.deepEqual(errors, []);

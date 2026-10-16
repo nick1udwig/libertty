@@ -24,7 +24,7 @@ const repeats = Number(process.env.BENCH_REPEATS || 3);
 const cpuRepeats = Number(process.env.BENCH_CPU_REPEATS || 31);
 const coldRepeats = Number(process.env.BENCH_COLD_REPEATS || repeats);
 if (!Number.isInteger(coldRepeats) || coldRepeats < 1) throw new Error('Cold repeats must be a positive integer.');
-const temp = await mkdtemp(path.join(os.tmpdir(), 'termai-architecture-'));
+const temp = await mkdtemp(path.join(os.tmpdir(), 'libertty-architecture-'));
 const cwd = path.join(temp, 'fixture');
 const delay = (ms: number) => ms ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve();
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
@@ -41,7 +41,7 @@ const rows: { variant: string; case: string; rtt: number; coldMs: number; warmMs
 const measurements = new WeakMap<object, { cold: number; warm: LatencyStatistics }>();
 let comparisons = 0;
 const rustPeers: (Awaited<ReturnType<typeof rustArchitectureAdapter>> | undefined)[] = [];
-const built = spawnSync('cargo', ['build', '--locked', '--offline', ...(benchmarkProfile === 'release' ? ['--release'] : []), '-p', 'termai-server', '--example', 'engine_host'], { cwd: new URL('../', import.meta.url), stdio: 'inherit' });
+const built = spawnSync('cargo', ['build', '--locked', '--offline', ...(benchmarkProfile === 'release' ? ['--release'] : []), '-p', 'libertty-server', '--example', 'engine_host'], { cwd: new URL('../', import.meta.url), stdio: 'inherit' });
 if (built.status !== 0) throw new Error('Build the benchmark host before measuring its current implementation.');
 try {
   await mkdir(cwd);

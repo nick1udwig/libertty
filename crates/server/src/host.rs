@@ -6,9 +6,9 @@ use crate::{
     probes::{ABORTED, ProbePool},
     syntax::Syntax,
 };
+use libertty_engine::types::Catalog;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
-use termai_engine::types::Catalog;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
@@ -55,7 +55,7 @@ impl NativeHost {
         &self,
         path: &str,
         limit: usize,
-        snapshot: &termai_engine::types::DirectorySnapshot,
+        snapshot: &libertty_engine::types::DirectorySnapshot,
     ) {
         if let Some(versions) = &self.verification {
             versions
@@ -84,15 +84,15 @@ impl NativeHost {
     }
     fn remember_lookup(
         &self,
-        operation: &termai_engine::host::HostOperation,
-        value: &termai_engine::host::FactValue,
+        operation: &libertty_engine::host::HostOperation,
+        value: &libertty_engine::host::FactValue,
     ) {
-        use termai_engine::host::{FactValue, HostOperation};
+        use libertty_engine::host::{FactValue, HostOperation};
         if let HostOperation::Lookup { path } = operation {
             let listing = match value {
                 FactValue::Lookup(value) => value.listing.clone(),
                 FactValue::Json(value) => serde_json::from_value::<
-                    termai_engine::types::DirectoryLookup,
+                    libertty_engine::types::DirectoryLookup,
                 >(value.as_ref().clone())
                 .ok()
                 .and_then(|value| value.listing),
@@ -112,18 +112,18 @@ impl NativeHost {
     }
     pub async fn engine_operations(
         &self,
-        operations: &[termai_engine::host::HostOperation],
+        operations: &[libertty_engine::host::HostOperation],
         cancel: &CancellationToken,
-    ) -> Vec<Result<termai_engine::host::FactValue, String>> {
+    ) -> Vec<Result<libertty_engine::host::FactValue, String>> {
         self.engine_operations_until(operations, cancel, None).await
     }
     pub async fn engine_operations_until(
         &self,
-        operations: &[termai_engine::host::HostOperation],
+        operations: &[libertty_engine::host::HostOperation],
         cancel: &CancellationToken,
         deadline: Option<tokio::time::Instant>,
-    ) -> Vec<Result<termai_engine::host::FactValue, String>> {
-        use termai_engine::host::{FactValue, HostOperation};
+    ) -> Vec<Result<libertty_engine::host::FactValue, String>> {
+        use libertty_engine::host::{FactValue, HostOperation};
         async fn bounded<T>(
             deadline: Option<tokio::time::Instant>,
             work: impl std::future::Future<Output = Result<T, String>>,
@@ -195,7 +195,7 @@ impl NativeHost {
         &self,
         operation: &Value,
         cancel: &CancellationToken,
-    ) -> Result<termai_engine::host::FactValue, String> {
+    ) -> Result<libertty_engine::host::FactValue, String> {
         self.engine_operation(
             &serde::Deserialize::deserialize(operation).map_err(|e| e.to_string())?,
             cancel,
@@ -204,10 +204,10 @@ impl NativeHost {
     }
     pub async fn engine_operation(
         &self,
-        operation: &termai_engine::host::HostOperation,
+        operation: &libertty_engine::host::HostOperation,
         cancel: &CancellationToken,
-    ) -> Result<termai_engine::host::FactValue, String> {
-        use termai_engine::host::{FactValue, HostOperation};
+    ) -> Result<libertty_engine::host::FactValue, String> {
+        use libertty_engine::host::{FactValue, HostOperation};
         if let HostOperation::Scoped { cwd, operation } = operation {
             let mut scoped = self.clone();
             scoped.catalog.cwd = cwd.clone();
@@ -434,7 +434,7 @@ impl NativeHost {
         directory: &str,
         limit: usize,
         cancel: &CancellationToken,
-    ) -> Result<termai_engine::types::DirectorySnapshot, String> {
+    ) -> Result<libertty_engine::types::DirectorySnapshot, String> {
         if let Some(remote) = &self.remote {
             remote.snapshot(directory, limit, cancel).await
         } else {
@@ -450,7 +450,7 @@ impl NativeHost {
         route: &[String],
         verified: bool,
         cancel: &CancellationToken,
-    ) -> Result<termai_engine::types::Help, String> {
+    ) -> Result<libertty_engine::types::Help, String> {
         if let Some(remote) = &self.remote {
             remote
                 .read_help(

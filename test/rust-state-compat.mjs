@@ -31,12 +31,12 @@ const token = randomBytes(32).toString('hex'), credential = randomBytes(32).toSt
 const fixture = { synthetic: true, vault: { cases, data: { keys: records, futureField: 'retained',
   knownHosts: [{ host: 'fixture.example', port: 22, fingerprint: 'SHA256:synthetic-host-pin', futureHostField: { retained: true } }] } },
   pairing: { token, credential, data: { version: 1, tokenHash: digest(token), credentials: [digest(credential)] } } };
-const directory = await mkdtemp(path.join(os.tmpdir(), 'termai-state-compat-'));
+const directory = await mkdtemp(path.join(os.tmpdir(), 'libertty-state-compat-'));
 try {
   await writeFile(path.join(directory, 'fixture.json'), JSON.stringify(fixture), { mode: 0o600 });
   await writeFile(path.join(directory, 'vault.json'), JSON.stringify(fixture.vault.data), { mode: 0o600 });
   await writeFile(path.join(directory, 'paired-clients.json'), JSON.stringify(fixture.pairing.data), { mode: 0o600 });
-  const child = spawn('cargo', ['run', '--locked', '--package', 'termai-server', '--example', 'state_compat', '--', directory], { cwd: root, stdio: 'inherit' });
+  const child = spawn('cargo', ['run', '--locked', '--package', 'libertty-server', '--example', 'state_compat', '--', directory], { cwd: root, stdio: 'inherit' });
   await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('Rust persisted-state compatibility failed: ' + code))); });
   const result = JSON.parse(await readFile(path.join(directory, 'rust-results.json'), 'utf8'));
   const vault = JSON.parse(await readFile(path.join(directory,'vault.json'),'utf8'));

@@ -1,11 +1,11 @@
 use axum::body::Body;
+use libertty_server::{files, markers::Event, reading, transfers::Transfers};
 use serde_json::json;
 use std::os::unix::fs::{PermissionsExt, symlink};
-use termai_server::{files, markers::Event, reading, transfers::Transfers};
 
 #[tokio::test]
 async fn images_get_unique_private_paths_and_enforce_type_and_size_limits() {
-    let fs = termai_server::filesystem::FileSystem::default();
+    let fs = libertty_server::filesystem::FileSystem::default();
     let bytes = b"\x89PNG\r\n\x1a\nfixture";
     let mut paths = vec![];
     for _ in 0..2 {
@@ -13,7 +13,7 @@ async fn images_get_unique_private_paths_and_enforce_type_and_size_limits() {
             .await
             .unwrap();
         let path = result["path"].as_str().unwrap().to_owned();
-        assert!(path.starts_with("/tmp/termai-image-") && path.ends_with(".png"));
+        assert!(path.starts_with("/tmp/libertty-image-") && path.ends_with(".png"));
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         assert_eq!(
             std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
@@ -164,7 +164,7 @@ async fn edits_reject_stale_binary_symlink_and_oversized_inputs_and_preserve_mod
         !e.unwrap()
             .file_name()
             .to_string_lossy()
-            .starts_with(".termai-edit-")
+            .starts_with(".libertty-edit-")
     }));
 }
 #[tokio::test]

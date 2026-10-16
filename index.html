@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <base href="/" data-termai-base>
+  <base href="/" data-libertty-base>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0b0f0d"><meta name="description" content="Your terminals, hosts, and SSH keys in one place.">
-  <script>/* Apply the saved theme before first paint, matching src/theme.ts. */try{let t=JSON.parse(localStorage.getItem('termai.theme')||'null');if(t==='auto')t=matchMedia('(prefers-color-scheme: light)').matches?'paper':'ink';if(t==='paper'||t==='ink')document.documentElement.dataset.theme=t}catch(e){}</script>
+  <script>/* Apply the saved theme before first paint, matching src/theme.ts. */try{let t=JSON.parse(localStorage.getItem('libertty.theme')??localStorage.getItem('termai.theme')??'null');if(t==='auto')t=matchMedia('(prefers-color-scheme: light)').matches?'paper':'ink';if(t==='paper'||t==='ink')document.documentElement.dataset.theme=t}catch(e){}</script>
   <link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./icon.svg" type="image/svg+xml">
-  <title>termai</title>
+  <title>libertty</title>
 </head>
 <body>
 <div id="workspace-app">
@@ -70,7 +70,8 @@
 <div id="herdr-fields" hidden><label>Herdr session<input id="host-herdr-session" maxlength="64" placeholder="Default session" autocomplete="off"></label><p class="hint">Connect to Herdr running on the selected backend. Leave the session empty for its default session.</p></div>
 <div id="ssh-fields" hidden><label>Hostname or IP<input id="host-address" placeholder="192.168.1.10" autocomplete="off"></label><div class="field-pair"><label>Username<input id="host-user" autocomplete="username"></label><label>Port<input id="host-port" type="number" min="1" max="65535" value="22"></label></div><label>Route<select id="host-route"><option value="auto">Fastest available backend</option><option value="fixed">Selected backend only</option></select></label><p class="hint">Browser keys can use any connected backend. Automatic routing measures the available routes.</p></div>
 <p class="form-error" id="host-error" role="alert"></p><div class="actions"><button id="delete-host" class="danger" type="button" hidden>Delete host</button><button class="primary" type="submit">Save host</button></div></form></dialog>
-<dialog id="backend-dialog"><form id="backend-form"><header><h2>Add backend</h2><button type="button" data-close="backend-dialog" class="icon" aria-label="Close backend editor"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><label>Name<input id="backend-name" required maxlength="100"></label><label>URL<input id="backend-url" type="url" required placeholder="https://server.tailnet.ts.net/"></label><p class="hint">Use a reachable termai backend. Other backends must allow this frontend’s origin.</p><p class="form-error" id="backend-error" role="alert"></p><button class="primary" type="submit">Save backend</button></form></dialog>
+<dialog id="backend-dialog"><form id="backend-form"><header><h2>Add backend</h2><button type="button" data-close="backend-dialog" class="icon" aria-label="Close backend editor"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><label>Name<input id="backend-name" required maxlength="100"></label><label>URL<input id="backend-url" type="url" required placeholder="https://server.tailnet.ts.net/"></label><p class="hint">Use a reachable libertty backend.
+Other backends must allow this frontend’s origin.</p><p class="form-error" id="backend-error" role="alert"></p><button class="primary" type="submit">Save backend</button></form></dialog>
 <dialog id="plugin-connect-dialog"><form id="plugin-connect-form"><header><h2 id="plugin-connect-title">Connect plugin</h2><button type="button" data-close="plugin-connect-dialog" class="icon" aria-label="Cancel connection"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><p id="plugin-connect-host"></p>
   <div id="plugin-read-fields"><label>File path<input id="plugin-read-path" maxlength="4096" placeholder="/var/log/app.log" autocomplete="off"></label><p class="hint">This plugin can read this file and save its own view preferences. Choose a UTF-8 text file, up to 20 MB.</p></div>
   <div id="plugin-herdr-fields" hidden><label>Herdr session<input id="plugin-herdr-session" maxlength="64" placeholder="Default session" autocomplete="off"></label><p class="hint">Connect to Herdr on this host. An absent server starts automatically. Closing the connection keeps agents running.</p></div>

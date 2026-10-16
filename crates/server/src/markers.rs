@@ -3,8 +3,8 @@ use base64::{
     Engine,
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig, general_purpose::STANDARD},
 };
+use libertty_engine::utf16_len;
 use serde::Serialize;
-use termai_engine::utf16_len;
 
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -78,7 +78,7 @@ impl Markers {
     pub fn new(nonce: &str) -> Self {
         Self {
             pending: String::new(),
-            prefix: format!("\x1b]777;termai;{nonce};"),
+            prefix: format!("\x1b]777;libertty;{nonce};"),
         }
     }
     pub fn feed(&mut self, data: &str) -> (String, Vec<Event>) {
@@ -211,7 +211,7 @@ fn parse(record: &[&str]) -> Option<Event> {
 }
 pub fn marker(nonce: &str, kind: &str, payload: &str) -> String {
     format!(
-        "\x1b]777;termai;{nonce};{kind};{}\x07",
+        "\x1b]777;libertty;{nonce};{kind};{}\x07",
         STANDARD.encode(payload)
     )
 }

@@ -48,7 +48,7 @@ fn context(catalog: &Catalog, env: &Environment) -> String {
         .iter()
         .filter(|(key, _)| {
             !test!(
-                r###"^(?:_|PWD|OLDPWD|SHLVL|LINES|COLUMNS|TERMAI_.*)$"###,
+                r###"^(?:_|PWD|OLDPWD|SHLVL|LINES|COLUMNS|LIBERTTY_.*|TERMAI_.*)$"###,
                 key
             )
         })

@@ -1,5 +1,5 @@
+use libertty_server::{filesystem::FileSystem, plugin_file::Cache};
 use serde_json::json;
-use termai_server::{filesystem::FileSystem, plugin_file::Cache};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]

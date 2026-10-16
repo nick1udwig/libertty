@@ -5,7 +5,7 @@
 <pre id="log" aria-label="Log contents"></pre>
 <script>
 (async () => {
-  const context = await termai.ready;
+  const context = await libertty.ready;
   const filter = document.querySelector('#filter'), follow = document.querySelector('#follow'), log = document.querySelector('#log'), status = document.querySelector('#status'), refresh = document.querySelector('#refresh');
   document.querySelector('h1').textContent = context.name;
   filter.value = typeof context.state?.filter === 'string' ? context.state.filter : '';
@@ -14,22 +14,22 @@
   const render = () => {
     const term = filter.value.toLowerCase(), lines = text.split('\n').filter(line => !term || line.toLowerCase().includes(term));
     log.textContent = lines.slice(-2000).join('\n');
-    status.textContent = (truncated || lines.length > 2000 ? 'Showing the latest portion · ' : '') + (termai.visible ? 'Updated ' + new Date().toLocaleTimeString() : 'Paused while hidden');
+    status.textContent = (truncated || lines.length > 2000 ? 'Showing the latest portion · ' : '') + (libertty.visible ? 'Updated ' + new Date().toLocaleTimeString() : 'Paused while hidden');
     if (follow.checked) log.scrollTop = log.scrollHeight;
   };
-  const save = () => termai.request('state.save', { filter: filter.value, follow: follow.checked }).catch(error => status.textContent = error.message);
+  const save = () => libertty.request('state.save', { filter: filter.value, follow: follow.checked }).catch(error => status.textContent = error.message);
   async function read() {
-    if (busy || !termai.visible) return;
+    if (busy || !libertty.visible) return;
     busy = true; refresh.disabled = true;
-    try { const result = await termai.request('file.read'); if (result.unchanged) return; text = result.text; truncated = result.truncated; document.querySelector('#path').textContent = result.path; render(); }
+    try { const result = await libertty.request('file.read'); if (result.unchanged) return; text = result.text; truncated = result.truncated; document.querySelector('#path').textContent = result.path; render(); }
     catch (error) { status.textContent = error.message; }
     finally { busy = false; refresh.disabled = false; }
   }
-  function schedule() { clearInterval(timer); if (termai.visible && follow.checked) timer = setInterval(read, 2000); }
+  function schedule() { clearInterval(timer); if (libertty.visible && follow.checked) timer = setInterval(read, 2000); }
   document.querySelector('form').onsubmit = event => { event.preventDefault(); read(); };
   filter.oninput = () => { render(); save(); };
   follow.onchange = () => { save(); schedule(); if (follow.checked) read(); };
-  termai.onVisibility(visible => { schedule(); if (visible) read(); else status.textContent = 'Paused while hidden'; });
+  libertty.onVisibility(visible => { schedule(); if (visible) read(); else status.textContent = 'Paused while hidden'; });
   schedule(); read();
 })();
 </script>

@@ -1,4 +1,4 @@
-Third-party notices for termai
+Third-party notices for libertty
 
 These components retain their own copyrights and licenses, reproduced below.
 Keep this file with distributions of the bundled JavaScript and WebAssembly.

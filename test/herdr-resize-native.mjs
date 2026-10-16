@@ -12,7 +12,7 @@ import { shellQuote } from '../src/shell-words.ts';
 const fixturePort3172 = await freePort();
 
 // A real Herdr desktop and responsive PTY app, in an entirely disposable HOME.
-const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/termai-herdr-resize-');
+const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/libertty-herdr-resize-');
 const target = { session: '', socketPath: dir + '/herdr.sock' };
 const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 const geometry = async () => { try { return JSON.parse(await readFile(dir + '/geometry.json', 'utf8')); } catch { return {}; } };
@@ -39,9 +39,9 @@ try {
   await wait(async () => (await geometry()).cols > 80, 'desktop application geometry');
   const original = await geometry();
   const base = 'http://127.0.0.1:' + fixturePort3172;
-  backend = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3172), TERMAI_BASE_PATH: '/', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base, TERMAI_DATA_DIR: dir + '/termai', TERMAI_TOKEN: '', TERMAI_NO_RC: '1', TERMAI_CWD: dir }, stdio: 'ignore' });
-  await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated Termai backend');
-  const token = (await readFile(dir + '/termai/pairing-token', 'utf8')).trim();
+  backend = spawn(new URL('../target/debug/libertty', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3172), LIBERTTY_BASE_PATH: '/', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base, LIBERTTY_DATA_DIR: dir + '/libertty', LIBERTTY_TOKEN: '', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: dir }, stdio: 'ignore' });
+  await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated libertty backend');
+  const token = (await readFile(dir + '/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await installBackgroundGrace(context);

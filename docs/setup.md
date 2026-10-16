@@ -1,10 +1,26 @@
-# Install and set up Termai
+# Install and set up libertty
+
+## Upgrading from Termai
+
+The installer reads an existing `~/.config/termai/config.json` and writes the renamed configuration to `~/.config/libertty/config.json`.
+It preserves the configured data directory, pairing token, port, mount path and other settings.
+New installations use `~/.local/share/libertty`, while existing Termai data stays in its original directory.
+Installer-managed systemd services and macOS LaunchAgents are renamed to `libertty.service` and `com.libertty.server` respectively, with rollback if startup fails.
+An existing installer-managed `termai` launcher becomes an alias for the new `libertty` launcher.
+Source-managed services require their executable path to be updated to `target/release/libertty`.
+
+Keep the same browser origin and mount path to retain saved hosts, tabs, settings and pairing credentials.
+libertty migrates browser settings on first load, retains the existing encrypted key database and accepts Termai encrypted key backups.
+Existing plugins can continue using `window.termai`, while new plugins use `window.libertty`.
+The backend accepts `TERMAI_*` environment variables as aliases, with `LIBERTTY_*` values taking precedence.
+
+## Install a release
 
 The release installer bundles the native Rust executable, built frontend and a Node runtime for setup tools, so you do not need npm or a compiler on the server.
 The command below becomes available after the first release built by the [release workflow](../.github/workflows/release.yml) has finished publishing its assets.
 
 ```sh
-curl -fsSL https://github.com/nick1udwig/termai/releases/latest/download/install.sh | bash
+curl -fsSL https://github.com/nick1udwig/libertty/releases/latest/download/install.sh | bash
 ```
 
 Run it as the account that should own your terminals, files and services.
@@ -25,7 +41,7 @@ Interactive questions read from your terminal, so they still work when the scrip
 Accept the defaults to set up everything supported on your machine.
 Package installation and Linux Tailscale setup can require your sudo password.
 Tailscale login and enabling tailnet HTTPS can require following a browser link printed by the CLI.
-These approvals cannot be completed automatically by Termai.
+These approvals cannot be completed automatically by libertty.
 Install Tailscale on your phone, join the same tailnet, open the printed URL and enter the pairing token.
 
 ## Supported machines
@@ -54,8 +70,8 @@ If Linux has no systemd user manager, setup installs a launcher and prints the c
 
 ## Tailscale setup
 
-Termai listens on `127.0.0.1:7321` with the `/t` mount by default.
-Setup adds your machine's tailnet DNS name to Termai's allowed hosts and uses this scoped Serve command:
+libertty listens on `127.0.0.1:7321` with the `/t` mount by default.
+Setup adds your machine's tailnet DNS name to libertty's allowed hosts and uses this scoped Serve command:
 
 ```sh
 tailscale serve --bg --https=443 --set-path=/t http://127.0.0.1:7321
@@ -64,12 +80,12 @@ tailscale serve --bg --https=443 --set-path=/t http://127.0.0.1:7321
 On Linux, setup uses sudo for Tailscale configuration without granting the account permanent operator permissions.
 The installer leaves existing routes in place and reuses an identical route on subsequent runs.
 If `/t` already serves another application, choose a different `--base-path` or change that route yourself.
-It refuses to add Termai to an HTTPS listener with public Funnel exposure enabled.
-If new Serve setup fails, it restores Termai's previous allowed hosts and removes only the route it added.
+It refuses to add libertty to an HTTPS listener with public Funnel exposure enabled.
+If new Serve setup fails, it restores libertty's previous allowed hosts and removes only the route it added.
 
 When Voxtype Mobile is ready, setup also offers an Android app endpoint at `wss://YOUR-HOST.ts.net/voxtype/v1/dictate`.
 It prints the daemon's token file for pairing the Android app.
-Termai's built-in dictation connects directly to the local daemon and does not require that extra Serve route.
+libertty's built-in dictation connects directly to the local daemon and does not require that extra Serve route.
 Existing incompatible or custom Voxtype services may require manual migration, with the upstream installer refusing unexpected service commands.
 
 ## Options and unattended installation
@@ -77,79 +93,79 @@ Existing incompatible or custom Voxtype services may require manual migration, w
 To inspect the script before running it:
 
 ```sh
-curl -fsSL https://github.com/nick1udwig/termai/releases/latest/download/install.sh -o /tmp/termai-install.sh
-less /tmp/termai-install.sh
-bash /tmp/termai-install.sh
+curl -fsSL https://github.com/nick1udwig/libertty/releases/latest/download/install.sh -o /tmp/libertty-install.sh
+less /tmp/libertty-install.sh
+bash /tmp/libertty-install.sh
 ```
 
 To select a release, including a prerelease:
 
 ```sh
-bash /tmp/termai-install.sh --version v0.2.6
+bash /tmp/libertty-install.sh --version v0.2.6
 ```
 
 To change the port and mount:
 
 ```sh
-bash /tmp/termai-install.sh --port 7400 --base-path /terminal
+bash /tmp/libertty-install.sh --port 7400 --base-path /terminal
 ```
 
-To install only Termai without companion, service or Tailscale setup:
+To install only libertty without companion, service or Tailscale setup:
 
 ```sh
-bash /tmp/termai-install.sh --yes --no-service --no-companions --no-tailscale
-~/.local/bin/termai
+bash /tmp/libertty-install.sh --yes --no-service --no-companions --no-tailscale
+~/.local/bin/libertty
 ```
 
 `--yes` accepts all installer questions and can start services or install system packages unless you exclude those steps.
 It does not bypass sudo authentication or Tailscale login.
-`--no-service` applies to the Termai service, so also use `--no-companions` to avoid creating a Voxtype service.
+`--no-service` applies to the libertty service, so also use `--no-companions` to avoid creating a Voxtype service.
 `--prefix /absolute/path` changes where versioned application releases and the launcher are installed.
 `XDG_CONFIG_HOME` and `XDG_DATA_HOME` select the configuration and user data roots.
 
 For a downloaded or locally built archive, supply its SHA-256 digest explicitly:
 
 ```sh
-bash install.sh --archive release/termai-v0.2.6-linux-x64.tar.gz --sha256 YOUR_SHA256 --no-companions --no-tailscale
+bash install.sh --archive release/libertty-v0.2.6-linux-x64.tar.gz --sha256 YOUR_SHA256 --no-companions --no-tailscale
 ```
 
 ## Configuration, upgrades and troubleshooting
 
 | Default path | Purpose |
 | --- | --- |
-| `~/.local/bin/termai` | Launcher available to shells with `~/.local/bin` on PATH |
-| `~/.config/termai/config.json` | Private managed server environment |
-| `~/.local/share/termai/releases/` | Versioned application bundles |
-| `~/.local/share/termai/current` | Active release symlink |
-| `~/.local/share/termai/pairing-token` | Browser pairing token |
-| `~/.local/share/termai/setup-status.json` | Last optional setup results |
-| `~/.config/systemd/user/termai.service` | Linux user service |
-| `~/Library/LaunchAgents/com.termai.server.plist` | macOS login service |
+| `~/.local/bin/libertty` | Launcher available to shells with `~/.local/bin` on PATH |
+| `~/.config/libertty/config.json` | Private managed server environment |
+| `~/.local/share/libertty/releases/` | Versioned application bundles |
+| `~/.local/share/libertty/current` | Active release symlink |
+| `~/.local/share/libertty/pairing-token` | Browser pairing token |
+| `~/.local/share/libertty/setup-status.json` | Last optional setup results |
+| `~/.config/systemd/user/libertty.service` | Linux user service |
+| `~/Library/LaunchAgents/com.libertty.server.plist` | macOS login service |
 
 Rerun the one-liner to upgrade to the latest stable release or retry unfinished optional setup.
 Upgrades preserve the pairing token, application data and existing managed environment settings.
 An explicit port or mount option replaces that setting for the new installation.
 Previous releases remain on disk and are restored automatically if the new service fails its startup check.
-An existing unmanaged Termai service or launcher requires explicit migration before the installer will replace it.
-Restarting Termai ends live terminal connections, and interactive upgrades ask before restarting an active service.
-Optional setup failures leave Termai installed, report the failing step and return exit code 2.
+An existing unmanaged libertty service or launcher requires explicit migration before the installer will replace it.
+Restarting libertty ends live terminal connections, and interactive upgrades ask before restarting an active service.
+Optional setup failures leave libertty installed, report the failing step and return exit code 2.
 
 Edit `config.json` to change server environment variables, then restart the service.
 Keep the configuration and token files private.
 
 ```sh
-~/.local/bin/termai --version
-systemctl --user status termai.service
-journalctl --user -u termai.service -n 80
-systemctl --user restart termai.service
+~/.local/bin/libertty --version
+systemctl --user status libertty.service
+journalctl --user -u libertty.service -n 80
+systemctl --user restart libertty.service
 systemctl --user status voxtype.service
 tailscale serve status
 ```
 
-On macOS, inspect `~/.local/share/termai/server.log` and restart with:
+On macOS, inspect `~/.local/share/libertty/server.log` and restart with:
 
 ```sh
-launchctl kickstart -k "gui/$(id -u)/com.termai.server"
+launchctl kickstart -k "gui/$(id -u)/com.libertty.server"
 ```
 
 The unauthenticated `/t/healthz` endpoint reports only release metadata for readiness checks.

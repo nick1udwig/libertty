@@ -9,7 +9,7 @@ Historical TypeScript revisions remain in Git for benchmark comparisons.
 ## Execution and adapters
 
 All repairs execute beside local or SSH host facts on the backend.
-The retired `TERMAI_ENGINE` setting is ignored, and the hello message always announces `server`.
+The retired `LIBERTTY_ENGINE` setting is ignored, and the hello message always announces `server`.
 The former browser worker, Wasm bridge, `/api/context` and `/api/facts` endpoints have been removed.
 Tools can request suggestions through `/api/suggest`.
 

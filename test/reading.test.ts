@@ -40,7 +40,7 @@ function readingSuggestionChoice(command: string, phrase: string) {
 }
 
 test('reading alternatives use the command engine’s verified file and directory repairs', async () => {
-  const cwd = await mkdtemp(path.join(os.tmpdir(), 'termai-read-alternates-'));
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'libertty-read-alternates-'));
   try {
     await mkdir(path.join(cwd, 'docs'));
     await writeFile(path.join(cwd, 'README.md'), '# Read me');

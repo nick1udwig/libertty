@@ -1,3 +1,4 @@
+import './brand-storage.ts';
 import { requestJSON } from './api.ts';
 import { backendAccess, forgetBackendAccess, rememberBackendAccess } from './backend-access.ts';
 import { BrowserVault } from './browser-vault.ts';
@@ -429,7 +430,7 @@ async function pendingSource(backendUrl: string, session: string) {
 }
 async function consumePendingHerdr() {
   try {
-    const key = 'termai.pendingHerdr:' + new URL('.', document.baseURI).pathname;
+    const key = 'libertty.pendingHerdr:' + new URL('.', document.baseURI).pathname;
     const raw = sessionStorage.getItem(key);
     if (!raw) return;
     sessionStorage.removeItem(key);
@@ -448,7 +449,7 @@ async function consumePendingHerdr() {
 }
 async function consumePendingReading() {
   try {
-    const key = 'termai.pendingReading:' + new URL('.', document.baseURI).pathname;
+    const key = 'libertty.pendingReading:' + new URL('.', document.baseURI).pathname;
     const raw = sessionStorage.getItem(key);
     if (!raw) return;
     sessionStorage.removeItem(key);

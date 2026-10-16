@@ -1,9 +1,9 @@
-use serde_json::{Value, json};
-use std::{os::unix::fs::PermissionsExt, time::Duration};
-use termai_server::{
+use libertty_server::{
     herdr::Target,
     herdr_terminal_stream::{Hub, Size},
 };
+use serde_json::{Value, json};
+use std::{os::unix::fs::PermissionsExt, time::Duration};
 use tokio::sync::mpsc;
 
 struct Fixture {
@@ -70,7 +70,7 @@ async fn until(mut check: impl FnMut() -> bool) {
     .expect("Terminal stream must settle");
 }
 async fn frame(
-    receive: &mut mpsc::Receiver<termai_server::protocol::ServerMessage>,
+    receive: &mut mpsc::Receiver<libertty_server::protocol::ServerMessage>,
     width: u16,
     full: bool,
 ) -> Value {

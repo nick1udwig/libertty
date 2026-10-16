@@ -41,7 +41,7 @@ test('ssh2 preserves leading zero public-key bytes in synchronous and asynchrono
 });
 
 test('dependency preparation is idempotent and fixes both prebuilt and source-built macOS helper permissions', async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), 'termai-dependencies-'));
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'libertty-dependencies-'));
   try {
     const ssh = path.join(directory, 'node_modules/ssh2');
     await mkdir(path.join(ssh, 'lib'), { recursive: true });

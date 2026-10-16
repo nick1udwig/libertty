@@ -1,4 +1,5 @@
 use crate::storage::{atomic_write, create_private, private_directory, random_hex};
+use libertty_engine::utf16_len;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -6,7 +7,6 @@ use std::{
     path::{Path, PathBuf},
 };
 use subtle::ConstantTimeEq;
-use termai_engine::utf16_len;
 
 pub fn digest(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
@@ -25,9 +25,10 @@ fn invalid(message: &str) -> io::Error {
 }
 fn validate(token: &str) -> io::Result<String> {
     if utf16_len(token) < 24 || token.trim() != token || token.contains(['\r', '\n']) {
-        return Err(invalid(
-            "The pairing token must contain at least 24 characters with no surrounding whitespace. Check TERMAI_TOKEN or pairing-token in TERMAI_DATA_DIR.",
-        ));
+        return Err(invalid(concat!(
+            "The pairing token must contain at least 24 characters with no surrounding whitespace. ",
+            "Check LIBERTTY_TOKEN or pairing-token in LIBERTTY_DATA_DIR."
+        )));
     }
     Ok(token.into())
 }

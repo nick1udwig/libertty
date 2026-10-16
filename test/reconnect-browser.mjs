@@ -13,8 +13,8 @@ const origin = 'http://127.0.0.1:' + (process.env.TEST_PORT || String(fixturePor
 const token = 'reconnect-test-pairing-token';
 const server = startBackend({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: new URL(origin).port,
-  TERMAI_BASE_PATH: '/reconnect-test', TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_TOKEN: token,
-  TERMAI_DATA_DIR: fixture.directory + '/termai', TERMAI_NO_RC: '1', TERMAI_CWD: fixture.directory,
+  LIBERTTY_BASE_PATH: '/reconnect-test', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_TOKEN: token,
+  LIBERTTY_DATA_DIR: fixture.directory + '/libertty', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture.directory,
   HOME: fixture.directory, PATH: fixture.directory + ':' + process.env.PATH, HERDR_SOCKET_PATH: fixture.socketPath,
 } });
 const exited = once(server, 'exit');

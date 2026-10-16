@@ -1,10 +1,10 @@
 use crate::context::FileStamp;
+use libertty_engine::path;
+use libertty_engine::utf16_len;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     sync::{Arc, Mutex, OnceLock},
 };
-use termai_engine::path;
-use termai_engine::utf16_len;
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncSeekExt},
@@ -88,7 +88,7 @@ async fn cached_history(file: &str) -> Arc<Vec<String>> {
         .clone()
 }
 pub async fn readline_history_source(env: &BTreeMap<String, String>) -> String {
-    for key in ["TERMAI_HISTORY_FILE", "TERMAI_ETERNAL_HISTORY_FILE"] {
+    for key in ["LIBERTTY_HISTORY_FILE", "LIBERTTY_ETERNAL_HISTORY_FILE"] {
         if let Some(file) = env.get(key).filter(|v| !v.is_empty()) {
             return file.clone();
         }
@@ -106,17 +106,17 @@ pub async fn readline_history_source(env: &BTreeMap<String, String>) -> String {
 }
 pub async fn history_sources(env: &BTreeMap<String, String>) -> Vec<String> {
     let home = env.get("HOME").map(String::as_str).unwrap_or("");
-    let files = if let Some(file) = env.get("TERMAI_HISTORY_FILE").filter(|v| !v.is_empty()) {
+    let files = if let Some(file) = env.get("LIBERTTY_HISTORY_FILE").filter(|v| !v.is_empty()) {
         vec![
             Some(file.clone()),
-            env.get("TERMAI_ETERNAL_HISTORY_FILE").cloned(),
+            env.get("LIBERTTY_ETERNAL_HISTORY_FILE").cloned(),
         ]
     } else {
         vec![
             Some(path::join(&[home, ".bash_history"])),
             Some(path::join(&[home, ".bash_eternal_history"])),
-            env.get("TERMAI_ETERNAL_HISTORY_FILE").cloned(),
-            env.get("TERMAI_REAL_HISTFILE")
+            env.get("LIBERTTY_ETERNAL_HISTORY_FILE").cloned(),
+            env.get("LIBERTTY_REAL_HISTFILE")
                 .or_else(|| env.get("HISTFILE"))
                 .cloned(),
         ]
@@ -170,11 +170,11 @@ mod tests {
             eternal.to_str().unwrap()
         );
         env.insert(
-            "TERMAI_ETERNAL_HISTORY_FILE".into(),
+            "LIBERTTY_ETERNAL_HISTORY_FILE".into(),
             "/custom/eternal".into(),
         );
         assert_eq!(readline_history_source(&env).await, "/custom/eternal");
-        env.insert("TERMAI_HISTORY_FILE".into(), "/custom/history".into());
+        env.insert("LIBERTTY_HISTORY_FILE".into(), "/custom/history".into());
         assert_eq!(readline_history_source(&env).await, "/custom/history");
         assert!(history_sources(&env).await.is_empty());
     }
@@ -220,7 +220,7 @@ mod tests {
             ["echo standard", "echo eternal", "echo common"]
         );
         env.insert(
-            "TERMAI_HISTORY_FILE".into(),
+            "LIBERTTY_HISTORY_FILE".into(),
             standard.to_str().unwrap().into(),
         );
         assert_eq!(
@@ -228,15 +228,15 @@ mod tests {
             ["echo common", "echo standard"]
         );
         env.insert(
-            "TERMAI_ETERNAL_HISTORY_FILE".into(),
+            "LIBERTTY_ETERNAL_HISTORY_FILE".into(),
             standard.to_str().unwrap().into(),
         );
         assert_eq!(
             history_sources(&env).await,
             ["echo common", "echo standard"]
         );
-        env.insert("TERMAI_HISTORY_FILE".into(), "/dev/null".into());
-        env.remove("TERMAI_ETERNAL_HISTORY_FILE");
+        env.insert("LIBERTTY_HISTORY_FILE".into(), "/dev/null".into());
+        env.remove("LIBERTTY_ETERNAL_HISTORY_FILE");
         assert!(history_sources(&env).await.is_empty());
     }
 }

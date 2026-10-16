@@ -50,7 +50,7 @@ impl Syntax {
                 let command = command.to_owned();
                 let task = SharedTask::new(move |cancel| {
                     Box::pin(async move {
-                        let bash = local_bash(&std::env::vars().collect())?;
+                        let bash = local_bash(&crate::environment::vars().collect())?;
                         let env: BTreeMap<_, _> = [
                             ("PATH", "/usr/bin:/bin"),
                             ("LC_ALL", "C"),

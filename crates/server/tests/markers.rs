@@ -1,5 +1,5 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
-use termai_server::markers::{Event, Markers, marker};
+use libertty_server::markers::{Event, Markers, marker};
 fn all_splits(nonce: &str, record: &str, expected: &[Event], visible: &str) {
     for split in (0..=record.len()).filter(|split| record.is_char_boundary(*split)) {
         let mut parser = Markers::new(nonce);
@@ -20,7 +20,7 @@ fn wrapped_prompt_payload_survives_character_chunks_and_embedded_newlines() {
         .map(|bytes| std::str::from_utf8(bytes).unwrap())
         .collect::<Vec<_>>()
         .join("\n");
-    let record = format!("\x1b]777;termai;nonce;prompt;0;{wrapped}\x07");
+    let record = format!("\x1b]777;libertty;nonce;prompt;0;{wrapped}\x07");
     let mut parser = Markers::new("nonce");
     let mut events = Vec::new();
     for ch in record.chars() {
@@ -40,7 +40,7 @@ fn wrapped_prompt_payload_survives_character_chunks_and_embedded_newlines() {
 #[test]
 fn split_records_strip_only_this_shells_nonce_and_leave_other_oscs_visible() {
     let record = format!(
-        "before\x1b]777;termai;secret;prompt;7;{};{}\x07after",
+        "before\x1b]777;libertty;secret;prompt;7;{};{}\x07after",
         STANDARD.encode("/a folder"),
         STANDARD.encode("  3  echo hi")
     );
@@ -61,7 +61,7 @@ fn split_records_strip_only_this_shells_nonce_and_leave_other_oscs_visible() {
         ("\x1b]0;title\x07".into(), vec![])
     );
     assert_eq!(
-        parser.feed("\x1b]777;termai;secret;busy\x07"),
+        parser.feed("\x1b]777;libertty;secret;busy\x07"),
         ("".into(), vec![Event::Busy])
     );
 }
@@ -70,7 +70,7 @@ fn unicode_readline_prefixes_use_utf16_cursor_units() {
     let text = "echo 界😀 tail";
     let prefix = "echo 界😀";
     let record = format!(
-        "\x1b]777;termai;secret;input-line;{};{}\x07",
+        "\x1b]777;libertty;secret;input-line;{};{}\x07",
         STANDARD.encode(prefix),
         STANDARD.encode(text)
     );
@@ -96,7 +96,7 @@ fn capture_markers_validate_private_names_and_exit_codes() {
         "",
     );
     let record = format!(
-        "\x1b]777;termai;secret;reading-capture;read.aB123456;{};7\x07",
+        "\x1b]777;libertty;secret;reading-capture;read.aB123456;{};7\x07",
         STANDARD.encode("git diff")
     );
     all_splits(
@@ -147,7 +147,7 @@ fn capture_markers_validate_private_names_and_exit_codes() {
     all_splits(
         "secret",
         &format!(
-            "\x1b]777;termai;secret;transfer-capture;download.aB123456;{}\x07",
+            "\x1b]777;libertty;secret;transfer-capture;download.aB123456;{}\x07",
             STANDARD.encode("a b.txt")
         ),
         &[Event::TransferCapture {

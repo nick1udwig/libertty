@@ -1,9 +1,9 @@
-use serde_json::{Value, json};
-use std::{sync::Arc, time::Duration};
-use termai_server::{
+use libertty_server::{
     host::HostServices,
     session::{Session, Transport},
 };
+use serde_json::{Value, json};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 
 #[test]
@@ -18,12 +18,12 @@ fn pty_contracts_run_in_an_isolated_shell_environment() {
     std::fs::create_dir(root.path().join("subfolder")).unwrap();
     let result = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", "pty_contract_child", "--nocapture"])
-        .env("TERMAI_PTY_TEST_ROOT", root.path())
+        .env("LIBERTTY_PTY_TEST_ROOT", root.path())
         .env("HOME", root.path())
-        .env("TERMAI_NO_RC", "1")
-        .env("TERMAI_HISTORY_FILE", root.path().join("history"))
+        .env("LIBERTTY_NO_RC", "1")
+        .env("LIBERTTY_HISTORY_FILE", root.path().join("history"))
         .env(
-            "TERMAI_ETERNAL_HISTORY_FILE",
+            "LIBERTTY_ETERNAL_HISTORY_FILE",
             root.path().join("eternal-history"),
         )
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
@@ -190,7 +190,7 @@ fn large_readline_and_private_utilities_run_in_isolated_home() {
     let mut lines = (0..5500)
         .map(|i| format!("echo eternal-{i}"))
         .collect::<Vec<_>>();
-    lines[600] = "echo termai-eternal-needle".into();
+    lines[600] = "echo libertty-eternal-needle".into();
     std::fs::write(root.path().join(".bash_history"), "echo standard-only\n").unwrap();
     std::fs::write(
         root.path().join(".bash_eternal_history"),
@@ -204,13 +204,13 @@ fn large_readline_and_private_utilities_run_in_isolated_home() {
             "large_readline_and_private_utilities_child",
             "--nocapture",
         ])
-        .env("TERMAI_LARGE_HISTORY_ROOT", root.path())
+        .env("LIBERTTY_LARGE_HISTORY_ROOT", root.path())
         .env("HOME", root.path())
         .env("INPUTRC", "/dev/null")
         .env("HISTSIZE", "20")
-        .env("TERMAI_NO_RC", "1")
-        .env_remove("TERMAI_HISTORY_FILE")
-        .env_remove("TERMAI_ETERNAL_HISTORY_FILE")
+        .env("LIBERTTY_NO_RC", "1")
+        .env_remove("LIBERTTY_HISTORY_FILE")
+        .env_remove("LIBERTTY_ETERNAL_HISTORY_FILE")
         .output()
         .unwrap();
     assert!(
@@ -223,7 +223,7 @@ fn large_readline_and_private_utilities_run_in_isolated_home() {
 
 #[tokio::test]
 async fn large_readline_and_private_utilities_child() {
-    let Ok(root) = std::env::var("TERMAI_LARGE_HISTORY_ROOT") else {
+    let Ok(root) = std::env::var("LIBERTTY_LARGE_HISTORY_ROOT") else {
         return;
     };
     let session = Session::start(root.clone(), vec![], false, HostServices::new())
@@ -231,12 +231,12 @@ async fn large_readline_and_private_utilities_child() {
         .unwrap();
     let mut browser = Browser::attach(session.clone(), 0, None);
     browser.ready(0).await;
-    browser.send(json!({"type":"input","data":"\x12termai-eternal-needle\x05"}));
+    browser.send(json!({"type":"input","data":"\x12libertty-eternal-needle\x05"}));
     browser.send(json!({"type":"input-line","id":"search","prompt":session.state().prompt,"revision":session.state().input_revision}));
     let found = browser
         .until(|message| message["type"] == "input-line" && message["id"] == "search")
         .await;
-    assert_eq!(found["text"], "echo termai-eternal-needle");
+    assert_eq!(found["text"], "echo libertty-eternal-needle");
     assert_eq!(
         session.state().prompt,
         1,
@@ -246,7 +246,7 @@ async fn large_readline_and_private_utilities_child() {
     let mut expected = (500..5500)
         .map(|i| format!("echo eternal-{i}"))
         .collect::<Vec<_>>();
-    expected[100] = "echo termai-eternal-needle".into();
+    expected[100] = "echo libertty-eternal-needle".into();
     let saved = std::fs::read_to_string(format!("{root}/bash-history")).unwrap();
     let history = saved
         .lines()
@@ -307,7 +307,7 @@ async fn large_readline_and_private_utilities_child() {
 }
 #[tokio::test]
 async fn pty_contract_child() {
-    let Ok(cwd) = std::env::var("TERMAI_PTY_TEST_ROOT") else {
+    let Ok(cwd) = std::env::var("LIBERTTY_PTY_TEST_ROOT") else {
         return;
     };
     let session = Session::start(

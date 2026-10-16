@@ -1,12 +1,12 @@
 [package]
-name = "termai-server"
+name = "libertty-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-termai-engine = { path = "../engine" }
+libertty-engine = { path = "../engine" }
 serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
@@ -40,7 +40,7 @@ russh-sftp = "=2.1.1"
 openssl = { version = "=0.10.81", features = ["vendored"] }
 
 [[bin]]
-name = "termai"
+name = "libertty"
 path = "src/main.rs"
 
 [dev-dependencies]

@@ -5,7 +5,7 @@ import { chromium } from 'playwright-core';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
 import path from 'node:path';
-const root = path.resolve(import.meta.dirname, '..'), temp = await mkdtemp('/tmp/termai-ui-bench-');
+const root = path.resolve(import.meta.dirname, '..'), temp = await mkdtemp('/tmp/libertty-ui-bench-');
 const baseline = process.env.BENCH_BEFORE || '2a99127', rounds = Number(process.env.BENCH_REPEATS || 9);
 const processes = [], rows = [];
 let browser;
@@ -25,7 +25,7 @@ try {
     const origin = 'http://127.0.0.1:' + port;
     // Historical comparisons run the archived release; the working tree uses Rust.
     const reference = variant.name === 'before';
-    const proc = spawn(reference ? process.execPath : path.join(variant.cwd,'target/debug/termai'), reference ? ['server/index.ts'] : [], { cwd: variant.cwd, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', ...(reference ? { TERMAI_ENGINE: variant.engine } : {}), TERMAI_BASE_PATH: '', HOST: '127.0.0.1', PORT: String(port), TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_TOKEN: 'benchmark-pairing-token-123456789', TERMAI_NO_RC: '1', TERMAI_CWD: fixture, TERMAI_DATA_DIR: fixture + '/vault', TERMAI_HISTORY_FILE: fixture + '/history', TERMAI_ETERNAL_HISTORY_FILE: fixture + '/history' }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(proc);
+    const proc = spawn(reference ? process.execPath : path.join(variant.cwd,'target/debug/libertty'), reference ? ['server/index.ts'] : [], { cwd: variant.cwd, env: { ...process.env, HOME: fixture, NODE_ENV: 'production', ...(reference ? { TERMAI_ENGINE: variant.engine } : {}), HOST: '127.0.0.1', PORT: String(port), ...Object.fromEntries(Object.entries({ BASE_PATH: '', ALLOWED_HOSTS: '127.0.0.1', TOKEN: 'benchmark-pairing-token-123456789', NO_RC: '1', CWD: fixture, DATA_DIR: fixture + '/vault', HISTORY_FILE: fixture + '/history', ETERNAL_HISTORY_FILE: fixture + '/history' }).map(([name, value]) => [(reference ? 'TERMAI_' : 'LIBERTTY_') + name, value])) }, stdio: ['ignore', 'pipe', 'pipe'] }); processes.push(proc);
     let logs = ''; proc.stdout.on('data', chunk => logs += chunk); proc.stderr.on('data', chunk => logs += chunk);
     for (let i = 0; ; i++) { if (await fetch(origin).then(r => r.ok).catch(() => false)) break; if (i >= 150 || proc.exitCode !== null) throw new Error(logs); await delay(40); }
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' });

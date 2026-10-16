@@ -80,7 +80,7 @@ try {
   await view.getByRole('button', { name: 'File options' }).click(); await view.getByRole('menuitemradio', { name: 'Sort by name', exact: true }).click();
   assert.equal(await view.locator('.file-row').nth(1).getAttribute('aria-label'), 'Open folder New folder');
   await view.getByRole('button', { name: 'File options' }).click(); await view.getByRole('menuitemradio', { name: 'Sort by name', exact: true }).click();
-  await view.getByRole('button', { name: 'File options' }).click(); await page.screenshot({ path: '/tmp/termai-files-options.png' }); await page.keyboard.press('Escape');
+  await view.getByRole('button', { name: 'File options' }).click(); await page.screenshot({ path: '/tmp/libertty-files-options.png' }); await page.keyboard.press('Escape');
   // A slow directory response must leave the current folder and layout intact.
   let releaseListing, listingRequested;
   const held = new Promise(resolve => listingRequested = resolve), resume = new Promise(resolve => releaseListing = resolve);
@@ -105,7 +105,7 @@ try {
     status: el.querySelector('.file-status').textContent,
     listTop: el.querySelector('.file-list').getBoundingClientRect().top,
   })), beforeNavigation);
-  await page.screenshot({ path: '/tmp/termai-files-loading-spinner.png' });
+  await page.screenshot({ path: '/tmp/libertty-files-loading-spinner.png' });
   releaseListing(); await view.getByRole('button', { name: 'Download über file.bin', exact: true }).waitFor();
   assert.equal(await view.locator('.file-loading-spinner').evaluate(el => getComputedStyle(el).visibility), 'hidden');
   await page.unroute('**/api/files/list?**');
@@ -115,7 +115,7 @@ try {
   await progress.getByRole('heading', { name: 'Download complete', exact: true }).waitFor();
   assert.equal(await progress.locator('progress').getAttribute('value'), '100');
   assert.ok(await progress.getByRole('button', { name: 'Open', exact: true }).isVisible());
-  await page.screenshot({ path: '/tmp/termai-download-complete.png' });
+  await page.screenshot({ path: '/tmp/libertty-download-complete.png' });
   await progress.getByRole('checkbox', { name: 'Don’t show this again' }).check();
   await progress.getByRole('button', { name: 'Close', exact: true }).click();
   const silent = page.waitForEvent('download'); await view.getByRole('button', { name: 'Download über file.bin', exact: true }).click(); await silent;
@@ -130,7 +130,7 @@ try {
   await network.send('Network.enable'); await network.send('Network.emulateNetworkConditions', { offline: false, latency: 20, downloadThroughput: 64 * 1024, uploadThroughput: -1 });
   const moving = page.waitForEvent('download'); await view.getByRole('button', { name: 'Download progress.txt', exact: true }).click();
   await page.waitForFunction(() => { const p = document.querySelector('.download-dialog progress'); return p && p.value > 0 && p.value < 100; });
-  await page.screenshot({ path: '/tmp/termai-download-progress.png' }); await moving;
+  await page.screenshot({ path: '/tmp/libertty-download-progress.png' }); await moving;
   await progress.getByRole('heading', { name: 'Download complete', exact: true }).waitFor();
   const popupEvent = page.waitForEvent('popup'); await progress.getByRole('button', { name: 'Open', exact: true }).click(); const preview = await popupEvent; await preview.waitForLoadState(); assert.ok((await preview.locator('body').textContent()).startsWith('AAAA')); await preview.close();
   await progress.getByRole('button', { name: 'Close', exact: true }).click();
@@ -150,7 +150,7 @@ try {
   await view.getByText('2 selected', { exact: true }).waitFor();
   await view.getByRole('button', { name: 'Selection options' }).click();
   assert.equal(await view.getByRole('menuitem', { name: 'Rename', exact: true }).count(), 0);
-  await page.screenshot({ path: '/tmp/termai-files-selection.png' });
+  await page.screenshot({ path: '/tmp/libertty-files-selection.png' });
   const selectedDownloads = []; const recordDownload = download => selectedDownloads.push(download); page.on('download', recordDownload);
   await view.getByRole('menuitem', { name: 'Download', exact: true }).click();
   for (let n = 0; selectedDownloads.length < 2 && n < 100; n++) await delay(50);
@@ -177,19 +177,19 @@ try {
   await writeFile(fixture + '/local/docs/device.txt', 'from device');
   await page.reload(); await view.getByRole('button', { name: 'Download device.txt', exact: true }).waitFor();
   await view.getByRole('button', { name: 'Search files', exact: true }).click(); await view.getByRole('searchbox').fill('device'); assert.equal(await view.locator('.file-row').count(), 2);
-  await page.screenshot({ path: '/tmp/termai-files-mobile.png' });
+  await page.screenshot({ path: '/tmp/libertty-files-mobile.png' });
   // The same component uses bearer authentication against an independent backend.
   const secondOwner = (await (await request(second, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
   const secondSession = await (await request(second, 'api/sessions', secondOwner, { files: true })).json();
   await page.evaluate(({ owner, remote, fixture, second, secondOwner, secondSession }) => {
-    localStorage.setItem('termai.backends', JSON.stringify([{ id: 'second', name: 'Other backend', url: second }]));
-    localStorage.setItem('termai.tabs', JSON.stringify([{ id: 'remote-files', name: 'SSH files', mode: 'files', backendId: 'primary', session: remote.id, directory: fixture + '/remote' }, { id: 'direct-files', name: 'Direct files', mode: 'files', backendId: 'second', session: secondSession.id }]));
-    localStorage.setItem('termai.activeTab', JSON.stringify('remote-files'));
-    localStorage.setItem('termai.access:' + second, secondOwner);
+    localStorage.setItem('libertty.backends', JSON.stringify([{ id: 'second', name: 'Other backend', url: second }]));
+    localStorage.setItem('libertty.tabs', JSON.stringify([{ id: 'remote-files', name: 'SSH files', mode: 'files', backendId: 'primary', session: remote.id, directory: fixture + '/remote' }, { id: 'direct-files', name: 'Direct files', mode: 'files', backendId: 'second', session: secondSession.id }]));
+    localStorage.setItem('libertty.activeTab', JSON.stringify('remote-files'));
+    localStorage.setItem('libertty.access:' + second, secondOwner);
   }, { owner, remote, fixture, second, secondOwner, secondSession });
   // Switch primary pairing to the owner of the SSH fixture.
-  await context.addCookies([{ name: 'termai', value: owner, url: base }]);
-  await page.evaluate(() => { localStorage.removeItem('termai.access:' + new URL('.', document.baseURI).href); });
+  await context.addCookies([{ name: 'libertty', value: owner, url: base }]);
+  await page.evaluate(() => { localStorage.removeItem('libertty.access:' + new URL('.', document.baseURI).href); });
   await page.reload(); await view.getByRole('button', { name: 'Download uploaded.bin', exact: true }).waitFor();
   await view.locator('input[type=file]').setInputFiles({ name: 'remote-device.txt', mimeType: 'text/plain', buffer: Buffer.from('remote device') });
   await view.getByRole('button', { name: 'Download remote-device.txt', exact: true }).waitFor(); assert.equal(await readFile(fixture + '/remote/remote-device.txt', 'utf8'), 'remote device');

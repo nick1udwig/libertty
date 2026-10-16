@@ -13,7 +13,7 @@ Run builds, artifact integrity checks and deployment health checks when needed t
 
 ## Repository skills
 
-Read [.agents/skills/termai-ops/SKILL.md](.agents/skills/termai-ops/SKILL.md) for local deployment, systemd and Tailscale operations, version bumps, and release packaging.
-The ops skill's [version bump reference](.agents/skills/termai-ops/references/version-bumps.md) lists every active version field and the commands to find and verify them.
-Read [.agents/skills/termai-code-changes/SKILL.md](.agents/skills/termai-code-changes/SKILL.md) for implementation guidance and all validation requirements, including performance and package checks.
+Read [.agents/skills/libertty-ops/SKILL.md](.agents/skills/libertty-ops/SKILL.md) for local deployment, systemd and Tailscale operations, version bumps, and release packaging.
+The ops skill's [version bump reference](.agents/skills/libertty-ops/references/version-bumps.md) lists every active version field and the commands to find and verify them.
+Read [.agents/skills/libertty-code-changes/SKILL.md](.agents/skills/libertty-code-changes/SKILL.md) for implementation guidance and all validation requirements, including performance and package checks.
 Before any commit or merge, read the code changes skill and run the checks it requires for the current work item, applying the deploy or push exception above.

@@ -9,7 +9,7 @@ const sdk = `const mergeFileSnapshot = ${mergeFileSnapshot.toString()};` + Strin
   let port, next = 0, context, visible = false;
   const pending = new Map(), listeners = new Set(); let file;
   let ready; const readyPromise = new Promise(resolve => ready = resolve);
-  window.termai = Object.freeze({
+  window.libertty = Object.freeze({
     ready: readyPromise,
     get visible() { return visible; },
     onVisibility(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -22,8 +22,10 @@ const sdk = `const mergeFileSnapshot = ${mergeFileSnapshot.toString()};` + Strin
       });
     }
   });
+  // Installed plugins may still use the original SDK global.
+  window.termai = window.libertty;
   window.addEventListener('message', event => {
-    if (port || event.source !== parent || event.data?.type !== 'termai-plugin-init' || !event.ports[0]) return;
+    if (port || event.source !== parent || event.data?.type !== 'libertty-plugin-init' || !event.ports[0]) return;
     port = event.ports[0]; context = event.data.context;
     port.onmessage = ({ data }) => {
       if (data.type === 'visibility') { visible = data.visible === true; for (const fn of listeners) fn(visible); return; }
@@ -70,7 +72,7 @@ function externalView(pkg: PluginPackage, tab: TerminalTab, s: ExternalServices)
   frame.onload = () => {
     // A plugin navigating its frame does not receive another capability port.
     if (disposed || initialized) return; initialized = true;
-    frame.contentWindow?.postMessage({ type: 'termai-plugin-init', context: { name: tab.name, state: tab.pluginState ?? null } }, '*', [channel.port2]);
+    frame.contentWindow?.postMessage({ type: 'libertty-plugin-init', context: { name: tab.name, state: tab.pluginState ?? null } }, '*', [channel.port2]);
     channel.port1.postMessage({ type: 'visibility', visible });
   };
   return { element: frame, setVisible(value) { frame.hidden = !value; if (visible === value) return; visible = value; if (initialized && !disposed) channel.port1.postMessage({ type: 'visibility', visible }); },

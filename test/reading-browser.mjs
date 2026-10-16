@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 const fixturePort3167 = await freePort();
 
 const root = path.resolve(import.meta.dirname, '..');
-const fixture = await mkdtemp(path.join(os.tmpdir(), 'termai-reading-'));
+const fixture = await mkdtemp(path.join(os.tmpdir(), 'libertty-reading-'));
 const port = fixturePort3167, origin = `http://127.0.0.1:${port}`, mount = process.env.TEST_BASE_PATH || '', base = origin + mount, token = 'reading-test-token-123456789';
 await writeFile(path.join(fixture, 'note.txt'), 'A quiet place to read.\nSecond line.\n');
 await writeFile(path.join(fixture, 'README.md'), '# Reader heading\n\nA **formatted** paragraph.\n\n![Pixel](image.png)\n\n[Open note](note.txt)\n\n<script>window.markdownRan = true</script>\n');
@@ -23,17 +23,17 @@ await promisify(execFile)('git', ['init', '-q', fixture]);
 await writeFile(path.join(fixture, 'change.txt'), 'before\n');
 await promisify(execFile)('git', ['-C', fixture, 'add', 'change.txt']);
 await writeFile(path.join(fixture, 'change.txt'), 'after\n');
-const server = spawn(path.join(root, 'target/debug/termai'), [], { cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), NODE_ENV: 'production', HOME: fixture, TERMAI_CWD: fixture, TERMAI_DATA_DIR: fixture + '/data', TERMAI_TOKEN: token, TERMAI_NO_RC: '1', TERMAI_BASE_PATH: mount }, stdio: ['ignore', 'pipe', 'pipe'] });
+const server = spawn(path.join(root, 'target/debug/libertty'), [], { cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), NODE_ENV: 'production', HOME: fixture, LIBERTTY_CWD: fixture, LIBERTTY_DATA_DIR: fixture + '/data', LIBERTTY_TOKEN: token, LIBERTTY_NO_RC: '1', LIBERTTY_BASE_PATH: mount }, stdio: ['ignore', 'pipe', 'pipe'] });
 const serverExited = once(server, 'exit');
 let logs = '', browser;
 server.stdout.on('data', data => logs += data); server.stderr.on('data', data => logs += data);
 async function saveLegacyReading(page, retainPluginTab = false) {
   await page.evaluate(retain => {
-    const tabs = JSON.parse(localStorage.getItem('termai.tabs')), active = JSON.parse(localStorage.getItem('termai.activeTab'));
+    const tabs = JSON.parse(localStorage.getItem('libertty.tabs')), active = JSON.parse(localStorage.getItem('libertty.activeTab'));
     const tab = tabs.find(tab => tab.id === active);
-    localStorage.setItem('termai.readingTabs', JSON.stringify([{ id: tab.id, name: tab.name, backendId: tab.backendId, session: tab.session,
+    localStorage.setItem('libertty.readingTabs', JSON.stringify([{ id: tab.id, name: tab.name, backendId: tab.backendId, session: tab.session,
       path: tab.readPath, capture: tab.readCapture, exitCode: tab.readExitCode, sourceTabId: tab.parentTabId, lastUsed: tab.lastUsed }]));
-    if (!retain) localStorage.setItem('termai.tabs', JSON.stringify(tabs.filter(tab => tab.id !== active)));
+    if (!retain) localStorage.setItem('libertty.tabs', JSON.stringify(tabs.filter(tab => tab.id !== active)));
   }, retainPluginTab);
 }
 try {
@@ -73,15 +73,15 @@ try {
   await page.locator('.reading-view .reading-text').waitFor();
   assert.equal(await page.locator('[role=tab]').count(), 2);
   assert.equal(await page.locator('[role=tab][aria-selected=true] svg circle').count(), 1);
-  const reader = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))));
+  const reader = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))));
   assert.equal(reader.pluginId, 'reading'); assert.equal(reader.pluginVersion, '1'); assert.equal(reader.ownsSession, false);
   assert.equal(await page.locator('#' + await page.locator('[role=tab][aria-selected=true]').getAttribute('aria-controls')).count(), 1);
   await saveLegacyReading(page);
   await page.reload();
   await page.locator('.reading-view .reading-text').waitFor();
   assert.equal(await page.locator('.reading-text').textContent(), 'A quiet place to read.\nSecond line.\n');
-  assert.equal(await page.evaluate(() => localStorage.getItem('termai.readingTabs')), null, 'Legacy storage is cleared after migration');
-  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.pluginId === 'reading')), reader, 'Migration preserves the selected reader and its source');
+  assert.equal(await page.evaluate(() => localStorage.getItem('libertty.readingTabs')), null, 'Legacy storage is cleared after migration');
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'reading')), reader, 'Migration preserves the selected reader and its source');
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
   await frame.waitForFunction(() => window.__shellState?.ready);
@@ -130,7 +130,7 @@ try {
     assert.match(text, /diff --git/); assert.match(text, /-before\n\+after/);
     assert.equal(await page.locator('.reading-view:not([hidden]) .reading-header').count(), 0);
     const beforeReload = await page.locator('[role=tab]').count();
-    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('termai.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('termai.activeTab'))).readCapture);
+    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).readCapture);
     assert.match(capture, /^[a-f0-9]{32}$/);
     if (input === 'git diff | look at') await saveLegacyReading(page, true);
     await page.reload();

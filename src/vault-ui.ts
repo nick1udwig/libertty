@@ -34,7 +34,7 @@ $('delete-key').onclick = () => {
   if (!keyDetail) return; const { backend, key } = keyDetail;
   if (confirm(key.reference ? 'Remove this key reference? Its original file or agent identity will stay unchanged.' : 'Delete this private key from ' + (backend?.name || 'this browser') + '? Copies on other devices and existing SSH sessions will stay.')) void (backend ? api(backend, 'api/keychain', { action: 'delete', id: key.id }) : browserVault.remove(key.id)).then(() => { services.clearRoutes(); dialog('key-details').close(); void renderCards(); }).catch(error => notice(error.message));
 };
-$('export-key-backup').onclick = () => { if (keyDetail && !keyDetail.backend) { const key = keyDetail.key; void browserVault.export(key.id).then(text => downloadKey(text, key.name, '.termai-key.json')).catch(error => notice(error.message)); } };
+$('export-key-backup').onclick = () => { if (keyDetail && !keyDetail.backend) { const key = keyDetail.key; void browserVault.export(key.id).then(text => downloadKey(text, key.name, '.libertty-key.json')).catch(error => notice(error.message)); } };
 let transferMode: 'backup' | 'private' | 'restore' = 'backup';
 function openTransfer(mode: typeof transferMode) {
   if (!keyDetail) return; transferMode = mode;

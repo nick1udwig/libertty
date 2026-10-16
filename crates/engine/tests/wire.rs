@@ -1,5 +1,5 @@
+use libertty_engine::exchange;
 use serde_json::{Value, json};
-use termai_engine::exchange;
 
 #[test]
 fn malformed_requests_are_errors_and_do_not_corrupt_subsequent_requests() {
@@ -26,22 +26,22 @@ fn malformed_requests_are_errors_and_do_not_corrupt_subsequent_requests() {
 #[test]
 fn optional_wire_fields_reject_null_and_preserve_omission() {
     let valid = json!({"file":true,"directory":false,"executable":false});
-    let info: termai_engine::types::FileInfo = serde_json::from_value(valid.clone()).unwrap();
+    let info: libertty_engine::types::FileInfo = serde_json::from_value(valid.clone()).unwrap();
     assert_eq!(serde_json::to_value(info).unwrap(), valid);
     assert!(
-        serde_json::from_value::<termai_engine::types::FileInfo>(
+        serde_json::from_value::<libertty_engine::types::FileInfo>(
             json!({"file":true,"directory":false,"executable":false,"spelling":null})
         )
         .is_err()
     );
     assert!(
-        serde_json::from_value::<termai_engine::types::Flag>(
+        serde_json::from_value::<libertty_engine::types::Flag>(
             json!({"name":"--help","takesValue":false,"optionalValue":null})
         )
         .is_err()
     );
     assert!(
-        serde_json::from_value::<termai_engine::types::Candidate>(
+        serde_json::from_value::<libertty_engine::types::Candidate>(
             json!({"command":"ls","score":100,"changes":[],"literal":null})
         )
         .is_err()

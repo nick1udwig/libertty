@@ -2,6 +2,8 @@ use crate::{
     probes::{ABORTED, ProbeOptions, ProbePool, probe},
     shell::local_bash,
 };
+use libertty_engine::repair::shell_quote;
+use libertty_engine::utf16_len;
 use std::{
     collections::BTreeMap,
     process::Stdio,
@@ -11,8 +13,6 @@ use std::{
     },
     time::{Duration, SystemTime},
 };
-use termai_engine::repair::shell_quote;
-use termai_engine::utf16_len;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -45,7 +45,7 @@ async fn prepared_framework(env: &BTreeMap<String, String>) -> Option<Framework>
     // Only prepare a bare standard framework; loaders still run in each child.
     if env
         .keys()
-        .any(|key| key.starts_with("BASH_COMPLETION_") || key == "TERMAI_COMPLETIONS_FILE")
+        .any(|key| key.starts_with("BASH_COMPLETION_") || key == "LIBERTTY_COMPLETIONS_FILE")
     {
         return None;
     }
@@ -123,12 +123,12 @@ impl CompletionWorker {
             // Only the worker protocol needs to omit empty records.
             let mut body = COMPLETION_SCRIPT.replace(
                 r#"if ((${#COMPREPLY[@]})); then builtin printf '%s\0' "${COMPREPLY[@]:0:1000}" >&3; fi"#,
-                r#"for termai_completion_value in "${COMPREPLY[@]:0:1000}"; do
-  [[ -n "$termai_completion_value" ]] && builtin printf '%s\0' "$termai_completion_value" >&3
+                r#"for libertty_completion_value in "${COMPREPLY[@]:0:1000}"; do
+  [[ -n "$libertty_completion_value" ]] && builtin printf '%s\0' "$libertty_completion_value" >&3
 done"#);
             let setup = if let Some((file, _)) = &framework {
                 let start = body
-                    .find("  if [[ -n \"$TERMAI_COMPLETIONS_FILE\"")
+                    .find("  if [[ -n \"$LIBERTTY_COMPLETIONS_FILE\"")
                     .expect("completion source block");
                 let end = body[start..]
                     .find("  COMP_LINE=")
@@ -140,11 +140,17 @@ done"#);
                 String::new()
             };
             format!(
-                "{setup}while IFS= read -r -d '' termai_count; do\n[[ $termai_count =~ ^[0-9]+$ ]] && ((termai_count >= 3 && termai_count <= 65)) || exit 1\ntermai_words=()\nfor ((termai_i=0; termai_i<termai_count; termai_i++)); do IFS= read -r -d '' termai_word || exit 1; termai_words+=(\"$termai_word\"); done\n( set -- \"${{termai_words[@]}}\"\n{body}\n) < /dev/null\nbuiltin printf '\\0'\ndone"
+                "{setup}while IFS= read -r -d '' libertty_count; do\n[[ $libertty_count =~ ^[0-9]+$ ]] && ((libertty_count >= 3 && libertty_count <= 65)) || exit 1\nlibertty_words=()\nfor ((libertty_i=0; libertty_i<libertty_count; libertty_i++)); do IFS= read -r -d '' libertty_word || exit 1; libertty_words+=(\"$libertty_word\"); done\n( set -- \"${{libertty_words[@]}}\"\n{body}\n) < /dev/null\nbuiltin printf '\\0'\ndone"
             )
         };
         let mut child = Command::new(&bash)
-            .args(["--noprofile", "--norc", "-c", &script, "termai-completion"])
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                &script,
+                "libertty-completion",
+            ])
             .current_dir(cwd)
             .env_clear()
             .envs(env)
@@ -219,7 +225,7 @@ impl CompletionProvider {
         if !valid_completion_words(words) {
             return Ok(vec![]);
         }
-        let bash = local_bash(&std::env::vars().collect())?;
+        let bash = local_bash(&crate::environment::vars().collect())?;
         let framework = prepared_framework(env).await;
         let result = pool
             .run(cancel, async {
@@ -315,7 +321,7 @@ pub async fn shell_complete(
     if !valid_completion_words(words) {
         return Ok(vec![]);
     }
-    let bash = local_bash(&std::env::vars().collect())?;
+    let bash = local_bash(&crate::environment::vars().collect())?;
     let mut env = env.clone();
     env.extend([
         ("BASH_ENV".into(), "/dev/null".into()),
@@ -333,7 +339,7 @@ pub async fn shell_complete(
         "--norc",
         "-c",
         COMPLETION_SCRIPT,
-        "termai-completion",
+        "libertty-completion",
     ]
     .into_iter()
     .map(str::to_owned)

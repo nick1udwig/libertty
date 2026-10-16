@@ -54,7 +54,7 @@ test('nested reader handoffs reject malformed file paths and capture descriptors
   for (const value of [null, {}, { path: '' }, { path: '/work/\nfile' }, { ...capture, exitCode: 256 }, { ...capture, path: null }, { ...capture, capture: '../file' }]) assert.equal(readingOpen(value), false);
 });
 test('the independently packaged sample uses the supported manifest and view', async () => {
-  const pkg = parsePluginPackage(JSON.parse(await readFile(new URL('../examples/plugins/example.log-viewer.termai-plugin.json', import.meta.url), 'utf8')));
+  const pkg = parsePluginPackage(JSON.parse(await readFile(new URL('../examples/plugins/example.log-viewer.libertty-plugin.json', import.meta.url), 'utf8')));
   assert.equal(pkg.manifest.id, 'example.log-viewer');
   assert.equal(pkg.view, await readFile(new URL('../examples/plugins/log-viewer/view.html', import.meta.url), 'utf8'));
   for (const id of builtinIds) assert.throws(() => parsePluginPackage({ ...pkg, manifest: { ...pkg.manifest, id } }));

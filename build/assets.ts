@@ -6,18 +6,18 @@ import type { Plugin } from 'vite';
 
 export function externalWasm(): Plugin {
   return {
-    name: 'termai-external-wasm', enforce: 'pre',
+    name: 'libertty-external-wasm', enforce: 'pre',
     transform(code, id) {
       if (!id.split('?')[0].replaceAll('\\', '/').endsWith('/ghostty-web/dist/ghostty-web.js')) return;
       const payload = /"data:application\/wasm;base64,[A-Za-z0-9+/=]+"/g;
       if ([...code.matchAll(payload)].length !== 1) throw new Error('Review Ghostty WASM packaging before updating ghostty-web.');
-      return { code: "import termaiWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';\n" + code.replace(payload, 'termaiWasmUrl'), map: null };
+      return { code: "import liberttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';\n" + code.replace(payload, 'liberttyWasmUrl'), map: null };
     },
   };
 }
 export function compressedAssets(): Plugin {
   return {
-    name: 'termai-compressed-assets',
+    name: 'libertty-compressed-assets',
     generateBundle: { order: 'post', handler(_, bundle) {
       for (const output of Object.values(bundle)) {
         if (!/\.(?:js|css|wasm|svg)$/.test(output.fileName)) continue;
@@ -35,7 +35,7 @@ export function compressedAssets(): Plugin {
 export function appShell(): Plugin {
   let publicDir = '', root = '';
   return {
-    name: 'termai-app-shell',
+    name: 'libertty-app-shell',
     configResolved(config) { publicDir = config.publicDir; root = config.root; },
     generateBundle: { order: 'post', handler(_, bundle) {
       const files = Object.keys(bundle).filter(name => !/\.(?:gz|br|map)$/.test(name)).sort();
@@ -48,8 +48,8 @@ export function appShell(): Plugin {
       hash.update(readFileSync(path.join(root, 'index.html')));
       const assets = ['', 'terminal.html', 'icon.svg', 'manifest.webmanifest', ...files.filter(name => name.startsWith('assets/'))];
       const source = readFileSync(path.join(publicDir, 'sw.js'), 'utf8')
-        .replace('__TERMAI_BUILD__', hash.digest('hex').slice(0, 20))
-        .replace(/\/\*__TERMAI_ASSETS__\*\/\s*\[[^\]]*\]/, JSON.stringify(assets));
+        .replace('__LIBERTTY_BUILD__', hash.digest('hex').slice(0, 20))
+        .replace(/\/\*__LIBERTTY_ASSETS__\*\/\s*\[[^\]]*\]/, JSON.stringify(assets));
       this.emitFile({ type: 'asset', fileName: 'sw.js', source });
     } },
   };
@@ -58,7 +58,7 @@ export function appShell(): Plugin {
 /** Start terminal downloads with the workspace document, before its iframe mounts. */
 export function terminalPreloads(): Plugin {
   return {
-    name: 'termai-terminal-preloads',
+    name: 'libertty-terminal-preloads',
     transformIndexHtml: { order: 'post', handler(_html, context) {
       if (!context.bundle || !context.path.endsWith('/index.html')) return;
       return Object.values(context.bundle).flatMap(output => {

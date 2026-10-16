@@ -4,7 +4,7 @@ This report records the migration and its historical native/Wasm measurements.
 The client coordinator and Wasm tools have since been retired; current validation and build instructions are in [ci.md](ci.md) and [shared-engine.md](shared-engine.md).
 
 
-Issue [#10](https://github.com/nick1udwig/termai/issues/10) migrates the backend and shared engine while preserving the frontend and saved backend data.
+Issue [#10](https://github.com/nick1udwig/libertty/issues/10) migrates the backend and shared engine while preserving the frontend and saved backend data.
 The reference revision is `455386b`, and the implementation branch is `feat/rust-backend`.
 Migration contracts, reference fixtures and benchmark baselines were captured before production conversion and remain available in Git history.
 The Rust executable is the default for source commands, release packaging and installed services.
@@ -19,8 +19,8 @@ The live architecture benchmark compares complete native and Wasm candidate arra
 The asynchronous runtime batches independent host operations, caches facts within a request, limits active requests to 32, rejects foreign or incomplete replies, and drops request-owned futures when cancelled.
 The JavaScript adapter aborts callbacks, ignores late results, and releases Wasm allocations on success, failure and cancellation.
 The Wasm boundary limits individual inputs to 64 MiB, outstanding buffers to 64, and their combined bytes to 128 MiB.
-`termai_context` accepts `PreparedEngineContext` and installs the latest immutable catalog and environment under a monotonically increasing context ID.
-`termai_suggest_prepared` accepts `PreparedEngineRequest`, and warm repairs reuse the catalog until its version key or environment changes.
+`libertty_context` accepts `PreparedEngineContext` and installs the latest immutable catalog and environment under a monotonically increasing context ID.
+`libertty_suggest_prepared` accepts `PreparedEngineRequest`, and warm repairs reuse the catalog until its version key or environment changes.
 Replacing a context rejects its old handle for new calls while pending requests retain their original snapshots, and reset releases both contexts and requests.
 Native directory callbacks carry typed immutable arrays directly, and directory snapshots share their storage until a caller edits a copy.
 The Wasm bridge imports adapter-owned immutable directory arrays once and pins opaque references in the same exchange that resumes each reply batch.
@@ -68,7 +68,7 @@ npm run test:rust
 npm run test:rust-state
 npm run build
 npm test
-cargo build --locked -p termai-server --bin termai
+cargo build --locked -p libertty-server --bin libertty
 TEST_PORT=3137 TEST_BASE_PATH=/terminal npm run test:browser
 TEST_BASE_PATH=/terminal npm run test:reading
 node test/files-browser.mjs
@@ -79,7 +79,7 @@ npm run test:rust-herdr
 
 The cleanup branch retires corpus-only migration parity checks and the historical assertion ledger while retaining active unit, browser, saved-data compatibility and integration tests.
 Historical corpora and reports remain available in Git history, and benchmark tooling writes fresh results to ignored `.test-artifacts` files.
-The native oracle accepts one `{operation, args}` JSON request per line through `cargo run --locked --release -p termai-engine`.
+The native oracle accepts one `{operation, args}` JSON request per line through `cargo run --locked --release -p libertty-engine`.
 The asynchronous Rust `Runtime` and JavaScript `WasmEngine.invoke` interfaces support full suggestions, discovery, completion, file and directory repairs, candidate validation, and session metadata caching.
 Native and browser tests exercise prewarm expiry, prepared catalog isolation, immutable directory snapshots and cancellation with self-contained inputs.
 
@@ -99,7 +99,7 @@ The schema generator does not replace runtime authorization, prompt checks, byte
 ## HTTP and WebSocket behavior
 
 Every HTTP request must pass the configured Host allowlist, and every state-changing API request must pass the same-origin or explicit origin allowlist check.
-Pairing credentials use either the `termai` cookie or a bearer token, and the cookie retains the mounted path, HttpOnly, SameSite=Strict, one-year expiry, and Secure attribute for HTTPS.
+Pairing credentials use either the `libertty` cookie or a bearer token, and the cookie retains the mounted path, HttpOnly, SameSite=Strict, one-year expiry, and Secure attribute for HTTPS.
 `/healthz` is unauthenticated, `/api/connect` validates the pairing token, and download GET requests authenticate through a short-lived single-use ticket.
 Other API requests require a paired credential, and session names are scoped by owner with a limit of 32 open or opening sessions.
 `contracts/http.json` inventories methods, paths, schemas, body limits, authentication, response encodings, and error statuses.
@@ -145,7 +145,7 @@ Native adapters may supply local filesystem and syntax/completion processes, whi
 `AsyncEngineRequest`, `EngineResume` and `EngineStep` specify the implemented cooperative executor's start, reply and completion messages.
 Request and callback IDs are positive 32-bit integers, and a callback ID must belong to the engine request being resumed.
 Each callback batch has at most 64 ordered operations and accepts either ordered successful `values` or per-operation `results` containing a value or an error.
-`termai_directories` accepts `EngineDirectoryPins` for an active request, imports or reuses immutable arrays, and rejects invalid, duplicate, stale or oversized handle batches before changing state.
+`libertty_directories` accepts `EngineDirectoryPins` for an active request, imports or reuses immutable arrays, and rejects invalid, duplicate, stale or oversized handle batches before changing state.
 Packed `HostResult` variants reference that request's pinned entries and carry the original lookup version and completeness metadata.
 Unpinned or cross-request references cancel only the request being resumed, and pending pins survive global cache eviction until their reply is consumed or their request ends.
 A `HostError` rejects the entire callback batch, while per-operation errors retain the reference operation's own error handling.
@@ -220,7 +220,7 @@ Before the additional optimization round, native Rust measured faster medians in
 Exact-directory native medians are 0.185 ms for TypeScript and 0.22 ms for Rust, while the Wasm schema case is close at 1.76 ms for TypeScript and 1.845 ms for Rust.
 The native benchmark includes its peer-process IPC, and Wasm CPU measurements run in Node rather than on a phone.
 Detailed measurements are recorded in `.test-artifacts/speed-directory-optimization.json`, with both raw runs and the previous `.test-artifacts/speed-optimization.json` baseline retained alongside it.
-The pure engine profiling example is available through `cargo run --locked --release -p termai-engine --example profile`.
+The pure engine profiling example is available through `cargo run --locked --release -p libertty-engine --example profile`.
 
 ## Additional optimization round
 

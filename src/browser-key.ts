@@ -3,7 +3,7 @@ import type { KeyInfo } from './connections.ts';
 export interface KeyBackup { backendURL: string; backendName: string; keyId: string; savedAt: string }
 export interface BrowserKeyInfo extends KeyInfo { backups: KeyBackup[] }
 export interface EncryptedBrowserKey extends BrowserKeyInfo {
-  format: 'termai-browser-key'; version: 1;
+  format: 'libertty-browser-key' | 'termai-browser-key'; version: 1;
   kdf: { name: 'PBKDF2'; hash: 'SHA-256'; iterations: 600000; salt: string };
   cipher: { name: 'AES-GCM'; iv: string }; ciphertext: string;
 }
@@ -28,7 +28,7 @@ export async function generateBrowserKey(): Promise<{ privateKey: string; public
   const jwk = await crypto.subtle.exportKey('jwk', pair.privateKey), seed = un64(jwk.d!), publicBytes = un64(jwk.x!);
   const publicBlob = concat(string('ssh-ed25519'), string(publicBytes));
   const check = crypto.getRandomValues(new Uint8Array(4));
-  const privateBlob = concat(check, check, string('ssh-ed25519'), string(publicBytes), string(concat(seed, publicBytes)), string('termai'));
+  const privateBlob = concat(check, check, string('ssh-ed25519'), string(publicBytes), string(concat(seed, publicBytes)), string('libertty'));
   const padding = Uint8Array.from({ length: 8 - privateBlob.length % 8 }, (_, i) => i + 1);
   const container = concat(bytes('openssh-key-v1\0'), string('none'), string('none'), string(''), uint(1), string(publicBlob), string(concat(privateBlob, padding)));
   const pem = b64(container).match(/.{1,70}/g)!.join('\n'); seed.fill(0); privateBlob.fill(0); container.fill(0);
@@ -46,7 +46,7 @@ export function publicInfo(record: EncryptedBrowserKey): BrowserKeyInfo {
 export async function encryptBrowserKey(label: string, passphrase: string, key: { privateKey: string; publicKey: string; fingerprint: string }): Promise<EncryptedBrowserKey> {
   password(passphrase);
   if (!key.privateKey || key.privateKey.length > 20000) throw new Error('Invalid private key.');
-  const record: EncryptedBrowserKey = { format: 'termai-browser-key', version: 1, id: crypto.randomUUID(), name: name(label), publicKey: key.publicKey, fingerprint: key.fingerprint, createdAt: new Date().toISOString(), backups: [],
+  const record: EncryptedBrowserKey = { format: 'libertty-browser-key', version: 1, id: crypto.randomUUID(), name: name(label), publicKey: key.publicKey, fingerprint: key.fingerprint, createdAt: new Date().toISOString(), backups: [],
     kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: 600000, salt: b64(crypto.getRandomValues(new Uint8Array(16))) }, cipher: { name: 'AES-GCM', iv: b64(crypto.getRandomValues(new Uint8Array(12))) }, ciphertext: '' };
   const plaintext = bytes(key.privateKey);
   try { record.ciphertext = b64(new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: un64(record.cipher.iv), additionalData: associated(record) }, await wrappingKey(passphrase, record.kdf.salt), plaintext))); }
@@ -65,10 +65,11 @@ export function parseKeyBackup(text: string): EncryptedBrowserKey {
   try {
     if (text.length > 100000) throw new Error();
     const r = JSON.parse(text);
-    if (r.format !== 'termai-browser-key' || r.version !== 1 || r.kdf?.name !== 'PBKDF2' || r.kdf.hash !== 'SHA-256' || r.kdf.iterations !== 600000 || r.cipher?.name !== 'AES-GCM' ||
+    // The format is authenticated encryption data and must retain its original value.
+    if (!['libertty-browser-key', 'termai-browser-key'].includes(r.format) || r.version !== 1 || r.kdf?.name !== 'PBKDF2' || r.kdf.hash !== 'SHA-256' || r.kdf.iterations !== 600000 || r.cipher?.name !== 'AES-GCM' ||
       typeof r.name !== 'string' || typeof r.publicKey !== 'string' || r.publicKey.length > 12000 || typeof r.fingerprint !== 'string' || !/^SHA256:[A-Za-z0-9+/]{43}$/.test(r.fingerprint) || typeof r.createdAt !== 'string' || !Number.isFinite(Date.parse(r.createdAt)) ||
       typeof r.kdf.salt !== 'string' || un64(r.kdf.salt).length !== 16 || typeof r.cipher.iv !== 'string' || un64(r.cipher.iv).length !== 12 || typeof r.ciphertext !== 'string' || un64(r.ciphertext).length < 16 || un64(r.ciphertext).length > 21000) throw new Error();
     return { format: r.format, version: 1, id: crypto.randomUUID(), name: name(r.name), publicKey: r.publicKey, fingerprint: r.fingerprint, createdAt: r.createdAt, backups: [],
       kdf: { name: 'PBKDF2', hash: 'SHA-256', iterations: 600000, salt: r.kdf.salt }, cipher: { name: 'AES-GCM', iv: r.cipher.iv }, ciphertext: r.ciphertext };
-  } catch { throw new Error('Choose a termai encrypted key backup.'); }
+  } catch { throw new Error('Choose a libertty encrypted key backup.'); }
 }

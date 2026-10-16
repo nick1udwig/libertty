@@ -99,8 +99,8 @@ impl Uploads {
             return Err(Error::new("Uploads are limited to 1 GB per file.", 413));
         }
         let directory = file_path(cwd, home, directory)?;
-        let destination = termai_engine::path::join(&[&directory, name]);
-        let partial = termai_engine::path::join(&[&directory, &format!(".termai-upload-{id}")]);
+        let destination = libertty_engine::path::join(&[&directory, name]);
+        let partial = libertty_engine::path::join(&[&directory, &format!(".libertty-upload-{id}")]);
         let existing = self.0.lock().unwrap().get(key).cloned();
         let upload = match existing {
             Some(upload) => upload,
@@ -125,7 +125,7 @@ impl Uploads {
                 })?
             }
         };
-        if upload.destination != termai_engine::path::join(&[&directory, name])
+        if upload.destination != libertty_engine::path::join(&[&directory, name])
             || upload.size != size
         {
             return Err(Error::new("This upload continues a different file.", 409));

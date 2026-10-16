@@ -1,10 +1,10 @@
 use crate::{host::NativeHost, probes::ABORTED};
-use serde_json::Value;
-use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
-use termai_engine::{
+use libertty_engine::{
     Request,
     runtime::{Call, Reply, Runtime, Step},
 };
+use serde_json::Value;
+use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -54,9 +54,9 @@ impl NativeEngine {
             ),
         };
         std::thread::Builder::new()
-            .name("termai-engine".into())
+            .name("libertty-engine".into())
             .spawn(move || {
-                termai_engine::initialize();
+                libertty_engine::initialize();
                 let runtime = Rc::new(RefCell::new(Runtime::default()));
                 let local = tokio::task::LocalSet::new();
                 let work = local.run_until(async move {
@@ -106,7 +106,7 @@ impl NativeEngine {
                                 let reset = generation.clone();
                                 let deadline = tokio::time::Instant::now()
                                     + std::time::Duration::from_millis(
-                                        termai_engine::runtime::REPAIR_BUDGET_MS as u64,
+                                        libertty_engine::runtime::REPAIR_BUDGET_MS as u64,
                                     );
                                 let runtime = runtime.clone();
                                 tokio::task::spawn_local(async move {

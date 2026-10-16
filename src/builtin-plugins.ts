@@ -64,7 +64,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         if (!s.active(tab)) throw new Error('This tab has closed.');
         const session = herdrSession(tab.herdrSession), source = tab.herdrSource, sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
         const connection = backend.url + '#' + (source ? sourceHost || tab.hostId || source : '') + '#' + session;
-        const view = new HerdrView({ url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'termai.herdr.' + connection,
+        const view = new HerdrView({ url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'libertty.herdr.' + connection,
           reading: (terminalId, request) => {
             const source = { ...tab, readHerdrTerminal: terminalId };
             if ('path' in request) s.openReading(source, request.path);

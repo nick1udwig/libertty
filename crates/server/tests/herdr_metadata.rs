@@ -1,6 +1,6 @@
+use libertty_server::herdr::{Target, metadata};
 use serde_json::json;
 use std::{sync::atomic::Ordering, time::Duration};
-use termai_server::herdr::{Target, metadata};
 use tokio_util::sync::CancellationToken;
 #[path = "support/herdr.rs"]
 mod support;
@@ -15,7 +15,7 @@ fn count(fixture: &support::Fixture, method: &str) -> usize {
         .count()
 }
 async fn next(
-    receive: &mut tokio::sync::mpsc::Receiver<termai_server::herdr::Metadata>,
+    receive: &mut tokio::sync::mpsc::Receiver<libertty_server::herdr::Metadata>,
 ) -> serde_json::Value {
     tokio::time::timeout(Duration::from_secs(2), receive.recv())
         .await
@@ -180,7 +180,9 @@ async fn one_shot_rpc_connections_never_replay_actions_and_cancelled_calls_are_c
             let send = send.clone();
             tokio::spawn(async move {
                 let mut stream = BufReader::new(stream);
-                let Some(request) = termai_server::herdr::read_line(&mut stream).await.unwrap()
+                let Some(request) = libertty_server::herdr::read_line(&mut stream)
+                    .await
+                    .unwrap()
                 else {
                     return;
                 };

@@ -1,5 +1,5 @@
+use libertty_server::herdr_history::Hub;
 use std::time::Duration;
-use termai_server::herdr_history::Hub;
 #[path = "support/herdr.rs"]
 mod support;
 
@@ -114,7 +114,7 @@ async fn unchanged_metadata_is_suppressed_but_changed_status_is_delivered() {
     let fixture = support::Fixture::new().await;
     let (send, mut receive) = tokio::sync::mpsc::channel(16);
     let cancel = tokio_util::sync::CancellationToken::new();
-    let task = tokio::spawn(termai_server::herdr::metadata(
+    let task = tokio::spawn(libertty_server::herdr::metadata(
         fixture.target.clone(),
         send,
         cancel.clone(),

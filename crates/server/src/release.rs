@@ -28,7 +28,8 @@ pub fn configuration(file: &Path) -> Result<BTreeMap<String, String>, String> {
     let env = value["env"]
         .as_object()
         .ok_or("Invalid service environment.")?;
-    env.iter()
+    let environment = env
+        .iter()
         .map(|(name, value)| {
             let valid_name = !name.is_empty()
                 && name.bytes().enumerate().all(|(i, b)| {
@@ -40,7 +41,8 @@ pub fn configuration(file: &Path) -> Result<BTreeMap<String, String>, String> {
             }
             Ok((name.clone(), value.unwrap().to_owned()))
         })
-        .collect()
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    Ok(crate::environment::normalize(environment))
 }
 #[cfg(test)]
 mod tests {
@@ -49,9 +51,9 @@ mod tests {
     fn configuration_rejects_invalid_environment_and_preserves_values() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("config.json");
-        std::fs::write(&file, r#"{"env":{"TERMAI_CWD":"/home with spaces","PORT":"7321","_CUSTOM2":"","PATH":"/bin"},"unknown":true}"#).unwrap();
+        std::fs::write(&file, r#"{"env":{"LIBERTTY_CWD":"/home with spaces","PORT":"7321","_CUSTOM2":"","PATH":"/bin"},"unknown":true}"#).unwrap();
         let env = configuration(&file).unwrap();
-        assert_eq!(env["TERMAI_CWD"], "/home with spaces");
+        assert_eq!(env["LIBERTTY_CWD"], "/home with spaces");
         assert_eq!(env["_CUSTOM2"], "");
         for raw in [
             r#"{"env":{"lowercase":"x"}}"#,

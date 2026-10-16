@@ -3,15 +3,7 @@ use crate::{
     probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe},
     shell::local_bash,
 };
-use std::{
-    collections::{BTreeMap, VecDeque},
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::{Duration, Instant},
-};
-use termai_engine::{
+use libertty_engine::{
     command_policy::subcommands_for,
     help::{
         commands_from_help, commands_from_manual, flags_from_help, has_command_slot,
@@ -19,6 +11,14 @@ use termai_engine::{
     },
     path,
     types::{Catalog, CommandMetadata, Help},
+};
+use std::{
+    collections::{BTreeMap, VecDeque},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::{Duration, Instant},
 };
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -68,7 +68,7 @@ impl HelpProvider {
             return Ok(None);
         }
         let paths = if BUILTINS.contains(&command) {
-            vec![local_bash(&std::env::vars().collect())?]
+            vec![local_bash(&crate::environment::vars().collect())?]
         } else {
             env.get("PATH")
                 .map(String::as_str)
@@ -205,7 +205,7 @@ impl HelpProvider {
             .iter()
             .filter(|(k, _)| {
                 !["_", "PWD", "OLDPWD", "SHLVL", "LINES", "COLUMNS"].contains(&k.as_str())
-                    && !k.starts_with("TERMAI_")
+                    && !k.starts_with("LIBERTTY_")
             })
             .collect();
         let key =
@@ -274,7 +274,7 @@ impl HelpProvider {
                 "--norc",
                 "-c",
                 "builtin help \"$1\"",
-                "termai-help",
+                "libertty-help",
                 command,
             ]
             .into_iter()

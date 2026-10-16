@@ -13,16 +13,16 @@ const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pat
 const base = 'http://127.0.0.1:' + fixturePort3183, history = Array.from({ length: 160 }, (_, i) => `ROW-${i} alpha beta gamma`).join('\n')
   + '\nRead https://example.com/touch\n\x1b]8;;https://example.com/help\x07Open help\x1b]8;;\x07\n';
 fixture.setScreen(0, history);
-const server = spawn(new URL('../target/debug/termai', import.meta.url).pathname, [], { cwd: root, stdio: 'ignore', env: { ...process.env,
-  NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3183), TERMAI_ALLOWED_HOSTS: '127.0.0.1', TERMAI_ALLOWED_ORIGINS: base,
-  TERMAI_DATA_DIR: fixture.directory + '/termai', HOME: fixture.directory, TERMAI_CWD: fixture.directory, TERMAI_TOKEN: '',
-  TERMAI_NO_RC: '1', HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH,
+const server = spawn(new URL('../target/debug/libertty', import.meta.url).pathname, [], { cwd: root, stdio: 'ignore', env: { ...process.env,
+  NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3183), LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base,
+  LIBERTTY_DATA_DIR: fixture.directory + '/libertty', HOME: fixture.directory, LIBERTTY_CWD: fixture.directory, LIBERTTY_TOKEN: '',
+  LIBERTTY_NO_RC: '1', HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH,
 } });
 const exited = once(server, 'exit'), delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let browser, live;
 try {
   for (let i = 0; i < 100; i++) { if (await fetch(base).then(r => r.ok, () => false)) break; await delay(100); }
-  const token = (await readFile(fixture.directory + '/termai/pairing-token', 'utf8')).trim();
+  const token = (await readFile(fixture.directory + '/libertty/pairing-token', 'utf8')).trim();
   const response = await fetch(base + '/api/connect', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ token, noSession: true }) });
   assert.ok(response.ok); const { accessToken } = await response.json();
   const safari = process.env.TEST_BROWSER === 'webkit';

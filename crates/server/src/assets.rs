@@ -166,8 +166,8 @@ pub async fn serve(
     } else if html {
         match tokio::fs::read_to_string(selected).await {
             Ok(text) => Body::from(text.replacen(
-                "<base href=\"/\" data-termai-base>",
-                &format!("<base href=\"{base}\" data-termai-base>"),
+                "<base href=\"/\" data-libertty-base>",
+                &format!("<base href=\"{base}\" data-libertty-base>"),
                 1,
             )),
             Err(_) => return empty(StatusCode::NOT_FOUND),

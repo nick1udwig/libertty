@@ -20,7 +20,7 @@ fn unavailable() -> Failure {
     )
 }
 pub fn origin(value: &str) -> Result<String, String> {
-    let url = url::Url::parse(value).map_err(|_| "Invalid TERMAI_DEV_FRONTEND.")?;
+    let url = url::Url::parse(value).map_err(|_| "Invalid LIBERTTY_DEV_FRONTEND.")?;
     if url.scheme() != "http"
         || url.host_str() != Some("127.0.0.1")
         || url.port().is_none()
@@ -30,7 +30,7 @@ pub fn origin(value: &str) -> Result<String, String> {
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err("TERMAI_DEV_FRONTEND must be a loopback HTTP origin with a port.".into());
+        return Err("LIBERTTY_DEV_FRONTEND must be a loopback HTTP origin with a port.".into());
     }
     Ok(value.trim_end_matches('/').into())
 }
@@ -53,7 +53,8 @@ pub async fn serve(
                 .header("content-type", "text/html; charset=utf-8")
                 .header("cache-control", "no-store")
                 .body(Body::from(
-                    include_str!("../assets/pairing.html").replace("__TERMAI_PUBLIC_BASE__", base),
+                    include_str!("../assets/pairing.html")
+                        .replace("__LIBERTTY_PUBLIC_BASE__", base),
                 ))
                 .unwrap());
         }

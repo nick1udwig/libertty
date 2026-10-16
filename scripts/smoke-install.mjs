@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 
 const archive = path.resolve(process.argv[2]);
 const root = path.resolve(import.meta.dirname, '..');
-const home = await mkdtemp(path.join(os.tmpdir(), 'termai-install-smoke-'));
+const home = await mkdtemp(path.join(os.tmpdir(), 'libertty-install-smoke-'));
 let backend;
 try {
   const listener = net.createServer().listen(0, '127.0.0.1'); await once(listener, 'listening');
@@ -18,12 +18,12 @@ try {
   const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: home + '/.config', XDG_DATA_HOME: home + '/.local/share' };
   const digest = createHash('sha256').update(await readFile(archive)).digest('hex');
   execFileSync('bash', [root + '/install.sh', '--archive', archive, '--sha256', digest, '--yes', '--no-service', '--no-companions', '--no-tailscale', '--port', port], { env, stdio: 'inherit', timeout: 120000 });
-  const launcher = home + '/.local/bin/termai';
-  assert.match(execFileSync(launcher, ['--version'], { env, encoding: 'utf8' }), /termai \d+\.\d+\.\d+/);
-  const configFile = home + '/.config/termai/config.json';
+  const launcher = home + '/.local/bin/libertty';
+  assert.match(execFileSync(launcher, ['--version'], { env, encoding: 'utf8' }), /libertty \d+\.\d+\.\d+/);
+  const configFile = home + '/.config/libertty/config.json';
   const config = JSON.parse(await readFile(configFile, 'utf8'));
   // The managed config must set cwd, port and data paths even outside the release directory.
-  backend = spawn(launcher, [], { env: { ...env, TERMAI_NO_RC: '1' }, cwd: home, stdio: 'ignore' });
+  backend = spawn(launcher, [], { env: { ...env, LIBERTTY_NO_RC: '1' }, cwd: home, stdio: 'ignore' });
   let ready = false;
   for (let i = 0; i < 100; i++) {
     try {
@@ -35,7 +35,7 @@ try {
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   assert.ok(ready, 'Installed launcher must start the packaged server.');
-  const token = await readFile(home + '/.local/share/termai/pairing-token', 'utf8'); assert.ok(token.trim().length >= 32);
+  const token = await readFile(home + '/.local/share/libertty/pairing-token', 'utf8'); assert.ok(token.trim().length >= 32);
   const exited = once(backend, 'exit'); backend.kill(); await exited; backend = undefined;
   console.log('Installed release passed: verified bootstrap, private config, user launcher and server readiness.');
 } finally {

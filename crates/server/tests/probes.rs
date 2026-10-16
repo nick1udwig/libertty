@@ -1,3 +1,4 @@
+use libertty_server::probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe};
 use std::{
     sync::{
         Arc,
@@ -5,7 +6,6 @@ use std::{
     },
     time::Duration,
 };
-use termai_server::probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]

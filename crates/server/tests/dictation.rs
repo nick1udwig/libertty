@@ -1,4 +1,5 @@
 use futures::{SinkExt, StreamExt};
+use libertty_server::dictation::{self, Recording};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -9,7 +10,6 @@ use std::{
     },
     time::Duration,
 };
-use termai_server::dictation::{self, Recording};
 use tokio_tungstenite::{
     accept_hdr_async,
     tungstenite::{
@@ -85,11 +85,11 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
     let env = BTreeMap::from([
         ("HOME".into(), root.path().to_string_lossy().into_owned()),
         (
-            "TERMAI_VOXTYPE_TOKEN_FILE".into(),
+            "LIBERTTY_VOXTYPE_TOKEN_FILE".into(),
             root.path().join("token").to_string_lossy().into_owned(),
         ),
         (
-            "TERMAI_VOXTYPE_URL".into(),
+            "LIBERTTY_VOXTYPE_URL".into(),
             format!("ws://127.0.0.1:{port}/v1/dictate"),
         ),
     ]);
@@ -310,7 +310,7 @@ async fn installer_commands_quote_paths_and_validate_https_without_running_insta
     let mut env = BTreeMap::from([
         ("HOME".into(), root.path().to_string_lossy().into_owned()),
         (
-            "TERMAI_VOXTYPE_SOURCE".into(),
+            "LIBERTTY_VOXTYPE_SOURCE".into(),
             checkout.to_string_lossy().into_owned(),
         ),
     ]);
@@ -320,10 +320,10 @@ async fn installer_commands_quote_paths_and_validate_https_without_running_insta
             .unwrap()
             .contains("'\\''")
     );
-    env.remove("TERMAI_VOXTYPE_SOURCE");
+    env.remove("LIBERTTY_VOXTYPE_SOURCE");
     assert!(dictation::install_command(&env).await.is_err());
     env.insert(
-        "TERMAI_VOXTYPE_INSTALL_URL".into(),
+        "LIBERTTY_VOXTYPE_INSTALL_URL".into(),
         "http://example.com/install".into(),
     );
     assert_eq!(
@@ -331,7 +331,7 @@ async fn installer_commands_quote_paths_and_validate_https_without_running_insta
         "The installer URL must use HTTPS."
     );
     env.insert(
-        "TERMAI_VOXTYPE_INSTALL_URL".into(),
+        "LIBERTTY_VOXTYPE_INSTALL_URL".into(),
         "https://raw.githubusercontent.com/example/voxtype/main/scripts/install".into(),
     );
     let command = dictation::install_command(&env).await.unwrap();
@@ -345,11 +345,11 @@ fn resume_environment(root: &std::path::Path, port: u16) -> BTreeMap<String, Str
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
     BTreeMap::from([
         (
-            "TERMAI_VOXTYPE_TOKEN_FILE".into(),
+            "LIBERTTY_VOXTYPE_TOKEN_FILE".into(),
             file.to_string_lossy().into_owned(),
         ),
         (
-            "TERMAI_VOXTYPE_URL".into(),
+            "LIBERTTY_VOXTYPE_URL".into(),
             format!("ws://127.0.0.1:{port}/v1/dictate"),
         ),
     ])

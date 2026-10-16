@@ -12,7 +12,7 @@ export function boundaries(definitions) {
   const path = { type: 'string', maxLength: 4096, 'x-utf16MaxLength': 4096, pattern: '^[^\\u0000]*$' };
   definitions.Json = { type: ['object', 'array', 'string', 'number', 'boolean', 'null'] };
   definitions.PathReply = object({ path });
-  definitions.ImageUploadReply = object({ path: { ...path, pattern: '^/tmp/termai-image-[a-f0-9]+\\.(png|jpg|jpeg|webp|gif)$' } });
+  definitions.ImageUploadReply = object({ path: { ...path, pattern: '^/tmp/libertty-image-[a-f0-9]+\\.(png|jpg|jpeg|webp|gif)$' } });
   definitions.HerdrSuggestReply = object({ candidates: { type: 'array', items: ref('Candidate'), maxItems: 4 } });
   definitions.DictationStatus = object({ installed: bool, available: bool, reason: string }, ['installed', 'available']);
   definitions.EmptyRequest = object({}, []);
@@ -113,7 +113,7 @@ export function boundaries(definitions) {
   route('POST', '/api/herdr/ticket', 'EmptyRequest', 'TicketReply'); route('POST', '/api/herdr/notifications', 'PushViewRequest', 'Ok');
   route('GET', '/api/notifications/key', null, 'PushKeyReply'); route('POST', '/api/notifications/subscribe', 'PushSubscribeRequest', 'PushDeviceReply');
   route('POST', '/api/notifications/unsubscribe', 'PushDeviceRequest', 'Ok'); route('POST', '/api/notifications/unwatch', 'PushViewRequest', 'Ok');
-  return { version: 1, basePath: 'All paths are relative to TERMAI_BASE_PATH.', schemas: './schemas.json',
+  return { version: 1, basePath: 'All paths are relative to LIBERTTY_BASE_PATH.', schemas: './schemas.json',
     unknownFields: 'ignore', errors: ref('Error'), securityHeaders: { 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'SAMEORIGIN' },
     routes, sockets: [{ path: '/ws', client: ref('ClientMessage'), server: ref('ServerMessage'), maxPayloadBytes: 128 * 1024, lifecycle: './ws-lifecycle.json#/terminal' },
       { path: '/herdr/ws', client: ref('HerdrClientMessage'), server: union([ref('HerdrMessage'), ref('ServerMessage')]), maxPayloadBytes: 128 * 1024, lifecycle: './ws-lifecycle.json#/herdr' }] };

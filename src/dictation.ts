@@ -119,7 +119,7 @@ export class DictationControl {
     });
     setInterval(() => void this.poll(), 15000);
   }
-  private save(value: string) { try { localStorage.setItem('termai.voxtype:' + this.host.key, value); } catch {} }
+  private save(value: string) { try { localStorage.setItem('libertty.voxtype:' + this.host.key, value); } catch {} }
   get active() { return this.phase !== 'idle'; }
   connected(online: boolean) {
     const changed = this.online !== online;
@@ -185,7 +185,7 @@ export class DictationControl {
   private offer() {
     // Old versions saved "installed" merely on finding a token or binary. Only
     // an explicit dismissal should hide help when the API cannot actually be used.
-    let suppressed = false; try { suppressed = localStorage.getItem('termai.voxtype:' + this.host.key) === 'dismissed'; } catch {}
+    let suppressed = false; try { suppressed = localStorage.getItem('libertty.voxtype:' + this.host.key) === 'dismissed'; } catch {}
     if (this.daemonAvailable !== false || !this.online || !this.visible || document.hidden || suppressed || this.offered || !this.host.state().ready || document.querySelector('dialog[open]')) return;
     this.dialog.querySelector('h2')!.textContent = this.installed ? 'Enable Voxtype dictation' : 'Dictate with Voxtype Mobile';
     this.dialog.querySelector('[data-explanation]')!.textContent = this.installed

@@ -10,7 +10,7 @@ export async function publishRelease({ directory, tag, installer, gh = args => s
   const digest = async file => createHash('sha256').update(await readFile(path.join(directory, file))).digest('hex');
   const files = [], sums = [];
   for (const target of ['linux-x64', 'linux-arm64', 'darwin-arm64']) {
-    const archive = `termai-${tag}-${target}.tar.gz`;
+    const archive = `libertty-${tag}-${target}.tar.gz`;
     const sum = await digest(archive);
     assert.equal(await readFile(path.join(directory, archive + '.sha256'), 'utf8'), sum + '  ' + archive + '\n', archive + ': checksum mismatch');
     files.push(archive, archive + '.sha256');

@@ -46,26 +46,26 @@ impl Backend {
         std::fs::create_dir(root.path().join("dist/assets")).unwrap();
         std::fs::write(
             root.path().join("dist/index.html"),
-            "<base href=\"/\" data-termai-base>",
+            "<base href=\"/\" data-libertty-base>",
         )
         .unwrap();
         std::fs::write(root.path().join("dist/assets/test.wasm"), b"\0asm").unwrap();
         std::fs::write(root.path().join("dist/assets/test.wasm.br"), b"compressed").unwrap();
         let stderr = std::fs::File::create(root.path().join("stderr.log")).unwrap();
-        let child = Command::new(env!("CARGO_BIN_EXE_termai"))
+        let child = Command::new(env!("CARGO_BIN_EXE_libertty"))
             .env("HOST", "127.0.0.1")
             .env("PORT", port.to_string())
-            .env("TERMAI_ENGINE", engine)
-            .env("TERMAI_BASE_PATH", base)
-            .env("TERMAI_CWD", root.path())
+            .env("LIBERTTY_ENGINE", engine)
+            .env("LIBERTTY_BASE_PATH", base)
+            .env("LIBERTTY_CWD", root.path())
             .env("HOME", root.path())
             .env("HERDR_SOCKET_PATH", root.path().join("herdr.sock"))
-            .env("TERMAI_NO_RC", "1")
-            .env("TERMAI_DIST_DIR", root.path().join("dist"))
-            .env("TERMAI_DATA_DIR", root.path().join("data"))
-            .env("TERMAI_TOKEN", "test-local-pairing-token-123456789")
-            .env("TERMAI_ALLOWED_HOSTS", "127.0.0.1,localhost")
-            .env("TERMAI_ALLOWED_ORIGINS", "")
+            .env("LIBERTTY_NO_RC", "1")
+            .env("LIBERTTY_DIST_DIR", root.path().join("dist"))
+            .env("LIBERTTY_DATA_DIR", root.path().join("data"))
+            .env("LIBERTTY_TOKEN", "test-local-pairing-token-123456789")
+            .env("LIBERTTY_ALLOWED_HOSTS", "127.0.0.1,localhost")
+            .env("LIBERTTY_ALLOWED_ORIGINS", "")
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr))
             .spawn()
@@ -200,9 +200,9 @@ async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
     for herdr in [false, true] {
         for protocol in [
             None,
-            Some(termai_server::wire::BINARY),
-            Some(termai_server::wire::GZIP),
-            Some(termai_server::wire::GZIP_FAST),
+            Some(libertty_server::wire::BINARY),
+            Some(libertty_server::wire::GZIP),
+            Some(libertty_server::wire::GZIP_FAST),
         ] {
             let (ticket_path, socket_path, query) = if herdr {
                 (
@@ -273,7 +273,7 @@ async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
             })
             .await
             .unwrap();
-            let malformed = if protocol == Some(termai_server::wire::BINARY) {
+            let malformed = if protocol == Some(libertty_server::wire::BINARY) {
                 Message::Binary(vec![b'T', b'M', 2, 3].into())
             } else {
                 Message::Text("{invalid".into())
@@ -289,7 +289,7 @@ async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
             .await
             .unwrap();
             assert_eq!(u16::from(frame.code), 1008);
-            let reason = if protocol == Some(termai_server::wire::BINARY) {
+            let reason = if protocol == Some(libertty_server::wire::BINARY) {
                 "Invalid wire message"
             } else if herdr {
                 "Invalid terminal message"
@@ -651,7 +651,7 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
             .headers
             .contains("Path=/terminal/; HttpOnly; SameSite=Strict; Max-Age=31536000")
     );
-    let cookie = format!("termai={owner}");
+    let cookie = format!("libertty={owner}");
     assert_eq!(
         backend
             .request("GET", "/api/ping", &[("Cookie", &cookie)], b"")
@@ -683,7 +683,7 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
     );
     let page = backend.request("GET", "/", &[], b"");
     assert_eq!(page.status, 200);
-    assert_eq!(page.bytes, b"<base href=\"/terminal/\" data-termai-base>");
+    assert_eq!(page.bytes, b"<base href=\"/terminal/\" data-libertty-base>");
     let wasm = backend.request(
         "GET",
         "/assets/test.wasm",
@@ -762,7 +762,7 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
     };
     let root = backend.root.path();
     assert_eq!(resumable("u1", 5, 0, &[1, 2]).json(), json!({"received":2}));
-    assert!(!root.join("resumed.bin").exists() && root.join(".termai-upload-u1").exists());
+    assert!(!root.join("resumed.bin").exists() && root.join(".libertty-upload-u1").exists());
     assert_eq!(
         resumable("u1", 5, 0, &[]).json(),
         json!({"received":2}),
@@ -776,7 +776,7 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
         std::fs::read(root.join("resumed.bin")).unwrap(),
         [1, 2, 3, 4, 5]
     );
-    assert!(!root.join(".termai-upload-u1").exists());
+    assert!(!root.join(".libertty-upload-u1").exists());
     assert_eq!(
         resumable("u2", 5, 0, &[]).status,
         409,

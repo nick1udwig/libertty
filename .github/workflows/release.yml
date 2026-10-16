@@ -80,7 +80,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: termai-linux-x64
+          shared-key: libertty-linux-x64
           cache-on-failure: true
           cache-bin: false
       - run: npm ci --no-audit --no-fund
@@ -205,7 +205,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: termai-${{ matrix.target }}
+          shared-key: libertty-${{ matrix.target }}
           cache-on-failure: true
           cache-bin: false
       - name: Install Linux runtime dependencies
@@ -217,7 +217,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           brew install bash
-          echo "TERMAI_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
+          echo "LIBERTTY_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
       - name: Install dependencies and build the frontend
         run: |
           npm ci --no-audit --no-fund
@@ -251,11 +251,11 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           npm run release:package
-          node scripts/smoke-release.mjs "release/termai-$RELEASE_TAG-$TARGET.tar.gz"
-          node scripts/smoke-install.mjs "release/termai-$RELEASE_TAG-$TARGET.tar.gz"
+          node scripts/smoke-release.mjs "release/libertty-$RELEASE_TAG-$TARGET.tar.gz"
+          node scripts/smoke-install.mjs "release/libertty-$RELEASE_TAG-$TARGET.tar.gz"
       - uses: actions/upload-artifact@v7
         with:
-          name: termai-${{ matrix.target }}
+          name: libertty-${{ matrix.target }}
           path: |
             release/*.tar.gz
             release/*.sha256
@@ -283,7 +283,7 @@ jobs:
           node-version: ${{ needs.source.outputs.node }}
       - uses: actions/download-artifact@v8
         with:
-          pattern: termai-*
+          pattern: libertty-*
           path: release
           merge-multiple: true
       - name: Verify all files, upload to a draft and publish last

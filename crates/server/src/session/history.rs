@@ -1,9 +1,9 @@
+use libertty_engine::types::SharedList;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     sync::{Arc, LazyLock},
     time::{Duration, Instant},
 };
-use termai_engine::types::SharedList;
 
 pub(super) struct History {
     lines: VecDeque<String>,

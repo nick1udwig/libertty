@@ -1,8 +1,8 @@
-use std::io::{self, BufRead};
-use termai_server::protocol::{
+use libertty_server::protocol::{
     ClientMessage, DictationSource, DictationState, EngineMode, HerdrFrame, RepairReply,
     ServerMessage,
 };
+use std::io::{self, BufRead};
 fn server_samples() -> Vec<ServerMessage> {
     let id = || "fixture".to_owned();
     vec![
@@ -16,7 +16,7 @@ fn server_samples() -> Vec<ServerMessage> {
             cursor: Some(2),
         },
         ServerMessage::Transfer {
-            request: termai_server::transfers::Request {
+            request: libertty_server::transfers::Request {
                 id: id(),
                 action: "download".into(),
                 path: "/fixture".into(),
@@ -32,7 +32,7 @@ fn server_samples() -> Vec<ServerMessage> {
             repairing: Some(true),
         },
         ServerMessage::Dictation {
-            resume: Some(termai_server::dictation::Checkpoint {
+            resume: Some(libertty_server::dictation::Checkpoint {
                 accepted_frames: 0,
                 finished: false,
             }),
@@ -43,7 +43,7 @@ fn server_samples() -> Vec<ServerMessage> {
         ServerMessage::ReadingFile {
             path: "/fixture".into(),
         },
-        ServerMessage::ReadingCapture(termai_server::reading::Descriptor {
+        ServerMessage::ReadingCapture(libertty_server::reading::Descriptor {
             id: id(),
             name: "output".into(),
             exit_code: 0,
@@ -89,7 +89,7 @@ fn server_samples() -> Vec<ServerMessage> {
             bytes: [].into(),
         }),
         ServerMessage::State {
-            state: termai_server::session::ShellState {
+            state: libertty_server::session::ShellState {
                 cwd: "/fixture".into(),
                 input_revision: 2,
                 input_context: None,

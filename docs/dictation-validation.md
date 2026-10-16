@@ -1,6 +1,6 @@
 # Dictation capture and screen wake validation
 
-Termai requests a screen wake lock for every recording because background microphone capture cannot be assumed reliable across mobile browsers.
+libertty requests a screen wake lock for every recording because background microphone capture cannot be assumed reliable across mobile browsers.
 The [Screen Wake Lock specification](https://www.w3.org/TR/screen-wake-lock/) restricts acquisition to visible, eligible documents and allows denial or automatic release.
 Embedded ordinary terminals and Herdr panes request from the same-origin outer document, falling back to their own document for other embeds with delegated permissions.
 This prevents automatic screen timeout where supported and permitted, but cannot override an explicit device lock.

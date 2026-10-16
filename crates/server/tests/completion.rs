@@ -1,8 +1,8 @@
-use std::{collections::BTreeMap, time::Duration};
-use termai_server::{
+use libertty_server::{
     completion::{CompletionProvider, shell_complete},
     probes::{ABORTED, ProbePool},
 };
+use std::{collections::BTreeMap, time::Duration};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
@@ -77,7 +77,7 @@ async fn reused_workers_preserve_fresh_definitions_files_environment_and_isolati
         ("PATH".into(), "/usr/bin:/bin".into()),
         ("VALUE".into(), "env-first".into()),
         (
-            "TERMAI_COMPLETIONS_FILE".into(),
+            "LIBERTTY_COMPLETIONS_FILE".into(),
             definitions.to_string_lossy().into_owned(),
         ),
     ]);
@@ -139,7 +139,7 @@ async fn cancelled_and_oversized_completions_discard_workers_and_recover() {
     let env = BTreeMap::from([
         ("PATH".into(), "/usr/bin:/bin".into()),
         (
-            "TERMAI_COMPLETIONS_FILE".into(),
+            "LIBERTTY_COMPLETIONS_FILE".into(),
             definitions.to_string_lossy().into_owned(),
         ),
     ]);

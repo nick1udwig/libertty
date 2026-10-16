@@ -1,9 +1,9 @@
+use libertty_server::herdr::{Target, read_line};
 use serde_json::{Value, json};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
-use termai_server::herdr::{Target, read_line};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixListener,
@@ -34,7 +34,7 @@ impl Fixture {
         let path = directory.path().join("herdr.sock");
         let listener = UnixListener::bind(&path).unwrap();
         let snapshot = Arc::new(Mutex::new(json!({"version":"test","protocol":22,
-            "workspaces":[{"workspace_id":"w1","label":"Termai","active_tab_id":"t1"}],
+            "workspaces":[{"workspace_id":"w1","label":"libertty","active_tab_id":"t1"}],
             "tabs":[{"tab_id":"t1","workspace_id":"w1","label":"API"}],
             "panes":[{"pane_id":"w1:p0","terminal_id":"term_0","workspace_id":"w1","tab_id":"t1","focused":true,"label":"API","cwd":"/workspace"}],
             "agents":[{"terminal_id":"term_0","pane_id":"w1:p0","workspace_id":"w1","tab_id":"t1","name":"agent-address","agent":"fixture","agent_status":"working","state_change_seq":1,"revision":1,"cwd":"/workspace"}]

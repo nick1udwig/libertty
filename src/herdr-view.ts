@@ -295,10 +295,10 @@ export class HerdrView {
     if (!this.selected) this.host.ready?.();
     requestAnimationFrame(() => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } });
   }
-  private get spaceMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStrip') || 'null') !== 'agents'; } catch { return true; } }
+  private get spaceMode() { try { return JSON.parse(localStorage.getItem('libertty.herdrStrip') || 'null') !== 'agents'; } catch { return true; } }
   // Status lanes are the default order; only an explicit Manual choice keeps the saved order.
-  private get laneMode() { try { return JSON.parse(localStorage.getItem('termai.herdrStripOrder') || 'null') !== 'manual'; } catch { return true; } }
-  private get tapMode(): RepoTap { try { const mode = JSON.parse(localStorage.getItem('termai.herdrSpaceTap') || 'null'); return mode === 'root' || mode === 'tree' || mode === 'triage' ? mode : 'recent'; } catch { return 'recent'; } }
+  private get laneMode() { try { return JSON.parse(localStorage.getItem('libertty.herdrStripOrder') || 'null') !== 'manual'; } catch { return true; } }
+  private get tapMode(): RepoTap { try { const mode = JSON.parse(localStorage.getItem('libertty.herdrSpaceTap') || 'null'); return mode === 'root' || mode === 'tree' || mode === 'triage' ? mode : 'recent'; } catch { return 'recent'; } }
   private get order() { return this.spaceMode ? this.preferences.spaceOrder! : this.preferences.order; }
   private set order(value: string[]) { if (this.spaceMode) this.preferences.spaceOrder = value; else this.preferences.order = value; }
   private get stripSelection() {
@@ -542,7 +542,7 @@ export class HerdrView {
       const result = await this.host.api<{ workspaceId: string; terminalId?: string }>('api/herdr/action', { action: 'create-space', ...(space ? { workspaceId: space.id } : {}), ...(terminal ? { terminalId: terminal.terminalId } : {}) });
       if (this.disposed) return;
       const snapshot = await this.host.api<import('./herdr-protocol.ts').HerdrSnapshot>('api/herdr/snapshot');
-      try { localStorage.setItem('termai.herdrStrip', JSON.stringify('spaces')); } catch { /* Default to spaces when preferences are unavailable. */ }
+      try { localStorage.setItem('libertty.herdrStrip', JSON.stringify('spaces')); } catch { /* Default to spaces when preferences are unavailable. */ }
       this.selected = result.terminalId || snapshot.spaces?.find(space => space.id === result.workspaceId)?.selectedTerminalId || '';
       this.receive({ type: 'snapshot', snapshot });
       this.strip.querySelector<HTMLElement>('[data-terminal="' + CSS.escape(this.repoOf(result.workspaceId)?.id || 'space:' + result.workspaceId) + '"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -757,7 +757,8 @@ export class HerdrView {
         const options = await this.host.api<{ actions?: string[] }>('api/herdr/options');
         if (!modal.open || this.disposed) return;
         progress.textContent = '';
-        if (!options.actions?.includes('split')) throw new Error('This Termai backend is older than the interface. Restart it with the current build to enable Split.');
+        if (!options.actions?.includes('split')) throw new Error('This libertty backend is older than the interface. ' +
+          'Restart it with the current build to enable Split.');
         field('Split direction', picker); picker.setAttribute('aria-label', 'Split direction');
         for (const [value, label] of [['right', 'Right (side by side)'], ['down', 'Down (above and below)']]) { const option = node('option', '', label); option.value = value; picker.append(option); }
         context.textContent = space.name + ' · ' + (this.terminals.find(t => t.terminalId === terminalId)?.name || 'No running terminal');

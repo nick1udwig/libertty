@@ -1,4 +1,4 @@
-# termai reference
+# libertty reference
 
 Implementation, testing, and deployment notes.
 Start with the [README](../README.md) or the [usage guide](usage.md).
@@ -19,14 +19,14 @@ npm run dev
 
 Open **http://127.0.0.1:3000**.
 The server opens a shell in the directory where it was launched.
-Override that with `TERMAI_CWD=/path/to/project`.
+Override that with `LIBERTTY_CWD=/path/to/project`.
 It sources your `.bashrc` for aliases/functions, then installs its own prompt/history hooks and Emacs Readline bindings inside this session.
 It does not edit your shell configuration or save new commands into your existing Bash history files.
 
 Ctrl-R and arrow-key history search Bash's in-memory history, initially loaded from the host's `~/.bash_eternal_history` in both local and SSH terminals.
-If that file is absent, Termai loads `~/.bash_history`.
+If that file is absent, libertty loads `~/.bash_history`.
 Readline retains the latest 5,000 entries, including new commands from the current terminal.
-`TERMAI_HISTORY_FILE` overrides the local source, followed by `TERMAI_ETERNAL_HISTORY_FILE`; explicit overrides do not fall back to another file.
+`LIBERTTY_HISTORY_FILE` overrides the local source, followed by `LIBERTTY_ETERNAL_HISTORY_FILE`; explicit overrides do not fall back to another file.
 Open a new terminal to load a changed source.
 
 For the production PWA:
@@ -108,7 +108,7 @@ Exact executable names take precedence, quoted text and free-form arguments are 
 The [shared repair library](shared-engine.md) runs on the backend with direct filesystem and subprocess access.
 `/api/suggest` provides suggestions for tools, while terminal repair and dictation use the existing WebSocket.
 Local and SSH sessions use this same native engine.
-The retired `TERMAI_ENGINE` setting is ignored for compatibility with installed configurations.
+The retired `LIBERTTY_ENGINE` setting is ignored for compatibility with installed configurations.
 
 The browser uses Ghostty’s native terminal input textarea for dictation, a Ghostty canvas for terminal output, and a direct WebSocket connection.
 Output bypasses UI state and is drained in bounded animation-frame batches.
@@ -116,7 +116,7 @@ The server pauses PTY reads when unacknowledged output reaches its window limit.
 
 The host supplies a catalog from the actual shell's `compgen` output, current-directory entries (up to 10,000, with immediate entries prioritized) plus one level of nearby files within a 4,000-path budget, and up to 5,000 history entries from `.bash_history`, `.bash_eternal_history`, the live shell’s configured `HISTFILE`, and this terminal session.
 History readers take bounded tails of large files and refresh in the background.
-`TERMAI_HISTORY_FILE` overrides the default sources; `TERMAI_ETERNAL_HISTORY_FILE` adds an explicit eternal-history source.
+`LIBERTTY_HISTORY_FILE` overrides the default sources; `LIBERTTY_ETERNAL_HISTORY_FILE` adds an explicit eternal-history source.
 Commands observed in this session also carry working-directory context for ranking.
 Deterministic matching handles spoken punctuation, a small set of number pronunciations, simple English phonetic similarity, edit distance, and history ranking.
 Filename repair is scoped to known file-taking command positions; arbitrary text arguments are preserved.
@@ -240,8 +240,8 @@ HTTPS is needed for normal PWA installation and browser capabilities on remote h
 For example, with an existing HTTPS reverse proxy on the same machine:
 
 ```sh
-TERMAI_TOKEN='a-long-random-token-of-at-least-24-characters' \
-TERMAI_ALLOWED_HOSTS='termai.example.com' \
+LIBERTTY_TOKEN='a-long-random-token-of-at-least-24-characters' \
+LIBERTTY_ALLOWED_HOSTS='libertty.example.com' \
 npm start
 ```
 
@@ -249,8 +249,8 @@ Point the proxy at `127.0.0.1:3000`, preserve the `Host` header, and forward Web
 Enter the token in the app's connection screen.
 For a direct LAN binding, additionally set `HOST=0.0.0.0`; the server requires explicit allowed hostnames for non-loopback bindings.
 Pairing is required for all bindings, including localhost.
-If `TERMAI_TOKEN` is unset or empty, a random token is saved to `$TERMAI_DATA_DIR/pairing-token` (default `~/.local/share/termai/pairing-token`) and printed at startup.
-`TERMAI_ALLOWED_HOSTS` is a comma-separated list of hostnames/IPs without schemes or ports.
+If `LIBERTTY_TOKEN` is unset or empty, a random token is saved to `$LIBERTTY_DATA_DIR/pairing-token` (default `~/.local/share/libertty/pairing-token`) and printed at startup.
+`LIBERTTY_ALLOWED_HOSTS` is a comma-separated list of hostnames/IPs without schemes or ports.
 
 The shell runs with your user privileges.
 The server validates Host and Origin, uses an HttpOnly SameSite session cookie, and requires the pairing token before granting access to any local or remote session.
@@ -258,23 +258,23 @@ It is a single-user MVP, without multi-user isolation or an internet-facing acco
 
 ## Existing local deployment (machine-specific)
 
-The app runs as the enabled user service `termai.service` on **127.0.0.1:7321**.
+The app runs as the enabled user service `libertty.service` on **127.0.0.1:7321**.
 Open **https://omafwchy.taila510b.ts.net/t/** from a device on the tailnet.
 Tailscale Serve forwards only `/t` to this app; existing routes stay separate.
 
 ```sh
-systemctl --user status termai
-systemctl --user restart termai
-journalctl --user -u termai -f
+systemctl --user status libertty
+systemctl --user restart libertty
+journalctl --user -u libertty -f
 ```
 
-The service uses `TERMAI_BASE_PATH=/t` and explicitly allows the tailnet hostname.
+The service uses `LIBERTTY_BASE_PATH=/t` and explicitly allows the tailnet hostname.
 Assets, API requests, WebSockets, cookies, the manifest and service worker are scoped to `/t/`.
 This route requires the pairing token as well as tailnet access.
 Read the token in the service’s startup journal.
 To rebuild changes, run `npm run build:release` and restart the service.
 
-For another subpath deployment, set `TERMAI_BASE_PATH` at runtime and use a reverse proxy that preserves the Host header.
+For another subpath deployment, set `LIBERTTY_BASE_PATH` at runtime and use a reverse proxy that preserves the Host header.
 Both prefix-preserving and prefix-stripping proxies are supported.
 Tailscale Serve strips its mount prefix.
 
@@ -300,7 +300,7 @@ mkdir -p docs/images
 cp .test-artifacts/example-{git-init,ls,python}.png docs/images/
 ```
 
-These fixtures verify termai’s text repair; they do not record audio or benchmark Aqua Voice, Wispr Flow, or a phone keyboard.
+These fixtures verify libertty’s text repair; they do not record audio or benchmark Aqua Voice, Wispr Flow, or a phone keyboard.
 
 Actual Android/iOS dictation, IMEs, touch selection and software-keyboard behavior still need device testing.
 Browsers do not expose one universal dictation event: the app recognizes multi-character insertions, replacement text and bulk committed compositions; clipboard paste stays raw.
@@ -313,4 +313,4 @@ Automated keyboard-size tests simulate viewport changes; they do not emulate an 
 Linux/Bash is the implemented host target.
 
 The original product conversation is preserved in [initial-spec.md](../archive/migration/README.md); the user's desires take precedence over its assistant recommendations.
-The complete benchmark project was moved to **`~/git/termai-benchmark`** before MVP work began; see its `terminal-comparison.md` for the engine decision.
+The complete benchmark project was moved to **`~/git/libertty-benchmark`** before MVP work began; see its `terminal-comparison.md` for the engine decision.

@@ -29,7 +29,7 @@ export async function freePort() {
   }
 }
 export function startBackend(options = {}) {
-  return spawn(root + 'target/debug/termai', [], { cwd: root, ...options });
+  return spawn(root + 'target/debug/libertty', [], { cwd: root, ...options });
 }
 export function launchBrowser(options = {}) {
   return chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, ...options });

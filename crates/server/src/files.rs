@@ -1,6 +1,7 @@
 use crate::filesystem::FileSystem;
 use axum::body::Body;
 use futures::{StreamExt, future::BoxFuture};
+use libertty_engine::utf16_len;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -9,7 +10,6 @@ use std::{
     path::Path,
     time::{Duration, Instant},
 };
-use termai_engine::utf16_len;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const MAX_UPLOAD: u64 = 1024 * 1024 * 1024;
@@ -27,7 +27,7 @@ pub async fn upload_image_on(fs: &FileSystem, name: &str, body: Body) -> Result<
         return Err(Error::new("Choose a nonempty image.", 400));
     }
     let name = format!(
-        "termai-image-{}.{}",
+        "libertty-image-{}.{}",
         crate::storage::random_hex(16),
         extension
     );
@@ -70,11 +70,11 @@ pub fn file_path(cwd: &str, home: &str, input: &str) -> Result<String> {
     let expanded = if input == "~" {
         home.into()
     } else if let Some(tail) = input.strip_prefix("~/") {
-        termai_engine::path::join(&[home, tail])
+        libertty_engine::path::join(&[home, tail])
     } else {
         input.into()
     };
-    Ok(termai_engine::path::resolve(&[cwd, &expanded]))
+    Ok(libertty_engine::path::resolve(&[cwd, &expanded]))
 }
 pub fn valid_name(name: &str) -> bool {
     !name.is_empty()
@@ -117,7 +117,7 @@ pub async fn list_files_on(fs: &FileSystem, cwd: &str, home: &str, input: &str) 
             .then_with(|| collator.compare(&a.name, &b.name))
     });
     Ok(Listing {
-        parent: termai_engine::path::dirname(&directory),
+        parent: libertty_engine::path::dirname(&directory),
         path: directory,
         entries,
         truncated,
@@ -136,7 +136,7 @@ pub async fn make_directory_on(
     if !valid_name(name) {
         return Err(Error::new("Enter a valid folder name.", 400));
     }
-    let target = termai_engine::path::join(&[&file_path(cwd, home, input)?, name]);
+    let target = libertty_engine::path::join(&[&file_path(cwd, home, input)?, name]);
     fs.create_directory(&target, 0o755).await?;
     Ok(json!({"path":target}))
 }
@@ -204,7 +204,7 @@ pub async fn upload_on(
     {
         return Err(too_large());
     }
-    let file = termai_engine::path::join(&[&directory, name]);
+    let file = libertty_engine::path::join(&[&directory, name]);
     let mut output = fs.create_new(&file, 0o600).await?;
     let mut guard = RemoveOnDrop::new(file, fs);
     let work = async {
@@ -282,7 +282,7 @@ where
                 .filter(|s| valid_name(s))
                 .ok_or_else(|| Error::new("Enter a valid file name.", 400))?;
             let destination =
-                termai_engine::path::join(&[&termai_engine::path::dirname(&file), name]);
+                libertty_engine::path::join(&[&libertty_engine::path::dirname(&file), name]);
             if destination != file {
                 absent(fs, &destination).await?;
                 fs.rename(&file, &destination, false).await?;
@@ -304,9 +304,9 @@ where
                 409,
             ));
         }
-        let temporary = termai_engine::path::join(&[
-            &termai_engine::path::dirname(&file),
-            &format!(".termai-edit-{}", crate::storage::random_hex(12)),
+        let temporary = libertty_engine::path::join(&[
+            &libertty_engine::path::dirname(&file),
+            &format!(".libertty-edit-{}", crate::storage::random_hex(12)),
         ]);
         let mut output = fs
             .create_new(
@@ -362,9 +362,9 @@ where
         let target = if destination.is_empty() {
             None
         } else {
-            Some(termai_engine::path::join(&[
+            Some(libertty_engine::path::join(&[
                 &destination,
-                &termai_engine::path::basename(file),
+                &libertty_engine::path::basename(file),
             ]))
         };
         if let Some(target) = &target {

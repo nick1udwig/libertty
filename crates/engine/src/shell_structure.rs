@@ -171,7 +171,7 @@ pub fn protect(input: &str) -> Option<ProtectedInput> {
         expressions: Vec::new(),
     };
     let mut at = 0;
-    let mut prefix = "__termai_expression_".to_owned();
+    let mut prefix = "__libertty_expression_".to_owned();
     while input.contains(&prefix) {
         prefix.push('_');
     }

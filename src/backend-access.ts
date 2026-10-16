@@ -1,4 +1,4 @@
-const keyFor = (url: string) => 'termai.access:' + url;
+const keyFor = (url: string) => 'libertty.access:' + url;
 
 /** Persist the issued credential per backend, never the server's pairing code. */
 export function rememberBackendAccess(url: string, token: string) {

@@ -1,4 +1,4 @@
-use termai_server::paste_mode::PasteMode;
+use libertty_server::paste_mode::PasteMode;
 #[test]
 fn split_dec_sequences_resets_and_control_strings_preserve_paste_mode() {
     let sequence = "\x1b[?1004;2004h";
