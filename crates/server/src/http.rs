@@ -158,6 +158,7 @@ struct HerdrTicket {
     target: herdr::Target,
     until: Instant,
 }
+#[derive(Clone)]
 struct Download {
     owner: String,
     terminal: String,
@@ -166,6 +167,28 @@ struct Download {
     name: String,
     until: Instant,
     transfer: Option<String>,
+    /// The file's size and modification time when the ticket was issued, so a resume never splices two versions.
+    version: (u64, f64),
+    started: bool,
+}
+/// Retires a download once its last byte leaves, because a sized body ends without polling for its end.
+struct DownloadProgress {
+    app: Arc<App>,
+    ticket: String,
+    session: Arc<Session>,
+    transfer: Option<String>,
+    remaining: u64,
+}
+impl DownloadProgress {
+    fn sent(&mut self, bytes: usize) {
+        self.remaining = self.remaining.saturating_sub(bytes as u64);
+        if self.remaining == 0 {
+            if let Some(id) = self.transfer.take() {
+                self.session.remove_transfer(&id);
+            }
+            self.app.downloads.lock().unwrap().remove(&self.ticket);
+        }
+    }
 }
 pub struct App {
     pub config: Config,
@@ -550,26 +573,42 @@ impl App {
                 name: name.clone(),
                 until: Instant::now() + Duration::from_secs(60),
                 transfer,
+                version: attrs.version(),
+                started: false,
             },
         );
         Ok(json!({"ticket":ticket,"name":name,"size":attrs.len()}))
     }
-    async fn send_download(&self, ticket: &str) -> Result<Response<Body>, Failure> {
+    /// Stream a download, resuming from `offset` after an interruption; the ticket retires once a request reaches the end.
+    async fn send_download(
+        self: &Arc<Self>,
+        ticket: &str,
+        offset: u64,
+    ) -> Result<Response<Body>, Failure> {
         let expired = || {
             (
                 StatusCode::NOT_FOUND,
                 "This download link has expired. Download the file again.".into(),
             )
         };
-        let download = self
-            .downloads
-            .lock()
-            .unwrap()
-            .remove(ticket)
-            .ok_or_else(expired)?;
-        if download.until < Instant::now() || !self.owners.lock().unwrap().has(&download.owner) {
-            return Err(expired());
-        }
+        let download = {
+            let mut downloads = self.downloads.lock().unwrap();
+            let download = downloads.get_mut(ticket).ok_or_else(expired)?;
+            if download.until < Instant::now() || !self.owners.lock().unwrap().has(&download.owner)
+            {
+                downloads.remove(ticket);
+                return Err(expired());
+            }
+            // A started download may resume for as long as one attempt may last.
+            if !download.started {
+                download.started = true;
+                download.until = Instant::now() + Duration::from_secs(30 * 60);
+            }
+            download.clone()
+        };
+        let retire = || {
+            self.downloads.lock().unwrap().remove(ticket);
+        };
         let session = download.session.upgrade().ok_or_else(expired)?;
         if !self
             .sessions
@@ -590,32 +629,55 @@ impl App {
             .await
             .map_err(file_failure)?;
         if !attrs.is_file() {
+            retire();
             return Err(fail("Choose a regular file to download."));
+        }
+        if attrs.version() != download.version {
+            retire();
+            return Err((
+                StatusCode::CONFLICT,
+                "The file changed during the download. Download it again.".into(),
+            ));
+        }
+        let size = attrs.len();
+        if offset > 0 && offset >= size {
+            return Err((
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                "The download is already complete.".into(),
+            ));
         }
         let file = session
             .filesystem()
-            .open_read(&download.file)
+            .open_read_at(&download.file, offset)
             .await
             .map_err(file_failure)?;
         let stream = tokio_util::io::ReaderStream::new(file);
         let deadline = tokio::time::Instant::now() + Duration::from_secs(30 * 60);
+        let mut progress = DownloadProgress {
+            app: self.clone(),
+            ticket: ticket.to_owned(),
+            session,
+            transfer: download.transfer,
+            remaining: size - offset,
+        };
+        progress.sent(0);
         let stream = futures::stream::unfold(
-            (stream, session, download.transfer, deadline),
-            |(mut stream, session, transfer, deadline)| async move {
+            (stream, deadline, progress),
+            |(mut stream, deadline, mut progress)| async move {
                 match tokio::time::timeout_at(deadline, stream.next()).await {
-                    Ok(Some(chunk)) => Some((chunk, (stream, session, transfer, deadline))),
-                    Ok(None) => {
-                        if let Some(id) = transfer {
-                            session.remove_transfer(&id);
+                    Ok(Some(chunk)) => {
+                        if let Ok(bytes) = &chunk {
+                            progress.sent(bytes.len());
                         }
-                        None
+                        Some((chunk, (stream, deadline, progress)))
                     }
+                    Ok(None) => None,
                     Err(_) => Some((
                         Err(std::io::Error::new(
                             std::io::ErrorKind::TimedOut,
                             "Download timed out.",
                         )),
-                        (stream, session, transfer, deadline),
+                        (stream, deadline, progress),
                     )),
                 }
             },
@@ -632,9 +694,17 @@ impl App {
                 }
             })
             .collect::<String>();
-        Ok(Response::builder()
+        let mut response = Response::builder()
             .header("content-type", "application/octet-stream")
-            .header("content-length", attrs.len())
+            .header("content-length", size - offset)
+            .header("accept-ranges", "bytes");
+        if offset > 0 {
+            response = response.status(StatusCode::PARTIAL_CONTENT).header(
+                "content-range",
+                format!("bytes {offset}-{}/{size}", size - 1),
+            );
+        }
+        Ok(response
             .header("cache-control", "no-store")
             .header(
                 "content-disposition",
@@ -708,7 +778,7 @@ async fn security(State(app): State<Arc<App>>, req: Request<Body>, next: Next) -
             ("access-control-allow-credentials", "true"),
             (
                 "access-control-allow-headers",
-                "Content-Type, Authorization, If-None-Match, X-Termai-Link, Idempotency-Key",
+                "Content-Type, Authorization, If-None-Match, X-Termai-Link, Idempotency-Key, Range",
             ),
             ("access-control-allow-methods", "GET, POST, DELETE, OPTIONS"),
             ("access-control-allow-private-network", "true"),

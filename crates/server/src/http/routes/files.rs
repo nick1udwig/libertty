@@ -5,8 +5,25 @@ pub(super) async fn api_files_download_download(
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = parse_query(req.uri())?;
+    // Only an open-ended byte range resumes; any other range receives the whole file.
+    let offset = req
+        .headers()
+        .get("range")
+        .and_then(|value| {
+            value
+                .to_str()
+                .ok()?
+                .strip_prefix("bytes=")?
+                .strip_suffix('-')?
+                .parse()
+                .ok()
+        })
+        .unwrap_or(0);
     return app
-        .send_download(query.get("ticket").map(String::as_str).unwrap_or(""))
+        .send_download(
+            query.get("ticket").map(String::as_str).unwrap_or(""),
+            offset,
+        )
         .await;
 }
 

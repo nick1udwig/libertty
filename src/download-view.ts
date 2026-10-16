@@ -1,6 +1,7 @@
 import { button } from './dom.ts';
 import { closeIcon } from './icons.ts';
 import './download-view.css';
+import { fetchResumable } from './resumable-download.ts';
 export interface DownloadTicket { ticket: string; name: string; size: number }
 export function showDownloads() { try { return localStorage.getItem('termai.showDownloads') !== 'false'; } catch { return true; } }
 // Only inert formats are opened in the app's origin. HTML, SVG and executable
@@ -31,7 +32,6 @@ function createPanel() {
   modal.oncancel = event => { event.preventDefault(); dismiss(); };
   return { modal, abort, urls, rows, show, start() { pending++; heading.textContent = 'Downloading…'; close.textContent = 'Cancel'; }, end(error = false) { failed ||= error; if (--pending === 0) { heading.textContent = failed ? 'Download failed' : 'Download complete'; close.textContent = 'Close'; if (!modal.open && !failed) dispose(); } } };
 }
-/** XHR's Blob response lets the browser spool bytes without a JS chunk array. */
 export async function downloadFile(base: string, prepare: () => Promise<DownloadTicket>, fallbackName = 'File') {
   const view = panel ||= createPanel(); view.start();
   const row = document.createElement('section'), name = document.createElement('p'), progress = document.createElement('progress'), status = document.createElement('p');
@@ -40,17 +40,11 @@ export async function downloadFile(base: string, prepare: () => Promise<Download
   try {
     const ticket = await prepare(); view.abort.signal.throwIfAborted(); name.textContent = ticket.name;
     const url = new URL('api/files/download', base); url.searchParams.set('ticket', ticket.ticket);
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      const xhr = new XMLHttpRequest(); xhr.open('GET', url); xhr.responseType = 'blob'; xhr.timeout = 30 * 60 * 1000;
-      const stop = () => xhr.abort(); view.abort.signal.addEventListener('abort', stop, { once: true });
-      xhr.onloadend = () => view.abort.signal.removeEventListener('abort', stop);
-      xhr.onprogress = event => { const total = event.lengthComputable ? event.total : ticket.size; const percent = total ? Math.min(99, Math.floor(event.loaded / total * 100)) : 0; progress.value = percent; status.textContent = `${percent}% · ${(event.loaded / 1024 / 1024).toFixed(1)} MB received`; };
-      xhr.onload = () => xhr.status === 200 ? resolve(xhr.response) : reject(new Error('Download failed. Try downloading the file again.'));
-      xhr.onerror = () => reject(new Error('Download interrupted. Check your connection and try again.'));
-      xhr.ontimeout = () => reject(new Error('Download timed out. Try again.'));
-      xhr.onabort = () => reject(new DOMException('Download cancelled.', 'AbortError'));
-      xhr.send();
-    });
+    // An interrupted or stalled download resumes from the bytes already received.
+    const blob = await fetchResumable(url, { size: ticket.size, signal: view.abort.signal, progress: received => {
+      const percent = ticket.size ? Math.min(99, Math.floor(received / ticket.size * 100)) : 0;
+      progress.value = percent; status.textContent = `${percent}% · ${(received / 1024 / 1024).toFixed(1)} MB received`;
+    } });
     view.abort.signal.throwIfAborted();
     const saved = URL.createObjectURL(blob); view.urls.push(saved);
     const link = document.createElement('a'); link.href = saved; link.download = ticket.name; document.body.append(link); link.click(); link.remove();

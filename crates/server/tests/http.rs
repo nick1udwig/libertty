@@ -787,6 +787,45 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
             .contains("attachment; filename=\"download\"; filename*=UTF-8''sample.bin")
     );
     assert_eq!(backend.request("GET", &path, &[], b"").status, 404);
+    // An interrupted download resumes from its last byte, and reaching the end retires the ticket.
+    let ticket = |name: &str| {
+        let ticket = backend
+            .api(
+                "POST",
+                &format!("/api/files/download?session={sid}"),
+                Some(&owner),
+                Some(json!({ "path": name })),
+            )
+            .json();
+        format!(
+            "/api/files/download?ticket={}",
+            ticket["ticket"].as_str().unwrap()
+        )
+    };
+    let path = ticket("sample.bin");
+    let resumed = backend.request("GET", &path, &[("Range", "bytes=2-")], b"");
+    assert_eq!(
+        (resumed.status, &resumed.bytes[..]),
+        (206, &[65, 66, 67][..])
+    );
+    assert!(resumed.headers.contains("content-range: bytes 2-4/5"));
+    assert_eq!(backend.request("GET", &path, &[], b"").status, 404);
+    let path = ticket("sample.bin");
+    assert_eq!(
+        backend
+            .request("GET", &path, &[("Range", "bytes=5-")], b"")
+            .status,
+        416
+    );
+    std::fs::write(backend.root.path().join("sample.bin"), [1, 2, 3]).unwrap();
+    assert_eq!(
+        backend
+            .request("GET", &path, &[("Range", "bytes=1-")], b"")
+            .status,
+        409,
+        "a changed file cannot be spliced onto earlier bytes"
+    );
+    std::fs::write(backend.root.path().join("sample.bin"), [0, 255, 65, 66, 67]).unwrap();
     let revoke = backend
         .api(
             "POST",

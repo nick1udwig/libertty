@@ -280,6 +280,8 @@ The backend runs a keyed request to completion even if the browser abandons it, 
 A retry that arrives while the first attempt is still running waits for that attempt's reply instead of starting another.
 A request that timed out is retried only once, because it may still be running on a slow link.
 Streamed uploads are never repeated automatically, and cross-origin changes carry no key because an older backend would reject the header during CORS preflight.
+A download that fails or receives nothing for twenty seconds requests the rest of the file with an open-ended byte range, retrying up to five times.
+The backend refuses a resume once the file's size or modification time differs from when the link was issued.
 
 ## Terminal replay batches
 

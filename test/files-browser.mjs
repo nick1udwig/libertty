@@ -46,6 +46,11 @@ try {
     const ticket = await (await request(base, 'api/files/download?session=' + id, owner, { path: folder + '/uploaded.bin' })).json();
     const download = await fetch(base + 'api/files/download?ticket=' + ticket.ticket); assert.match(download.headers.get('content-disposition'), /attachment/); assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
     assert.equal((await fetch(base + 'api/files/download?ticket=' + ticket.ticket)).status, 404);
+    // Local and SFTP files resume from an offset, and the resumed request completes the link.
+    const resume = await (await request(base, 'api/files/download?session=' + id, owner, { path: folder + '/uploaded.bin' })).json();
+    const rest = await fetch(base + 'api/files/download?ticket=' + resume.ticket, { headers: { Range: 'bytes=2-' } });
+    assert.equal(rest.status, 206); assert.deepEqual(Buffer.from(await rest.arrayBuffer()), bytes.subarray(2));
+    assert.equal((await fetch(base + 'api/files/download?ticket=' + resume.ticket)).status, 404);
     assert.equal((await request(base, 'api/files/download?session=' + id, owner, { path: folder })).status, 400);
   }
   browser = await launchBrowser({ });
@@ -193,6 +198,6 @@ try {
   const crossDownload = page.waitForEvent('download'); await view.getByRole('button', { name: 'Download cross-origin.txt', exact: true }).click();
   assert.equal(await readFile(await (await crossDownload).path(), 'utf8'), 'cross origin');
   assert.deepEqual(errors, []);
-  console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, one-use links, no shell in Files tabs, mobile menu and restored directory');
+  console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, resumed downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, links retired after one complete download, no shell in Files tabs, mobile menu and restored directory');
 } catch (e) { console.error(system.logs); throw e; }
 finally { await browser?.close(); await system.close(); }
