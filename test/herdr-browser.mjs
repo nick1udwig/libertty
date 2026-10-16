@@ -59,7 +59,7 @@ try {
   const scoped = (await (await request('herdr/ticket?herdrSession=work', {}, bearer)).json()).ticket;
   await new Promise((resolve, reject) => { const ws = new WebSocket(base.replace('http:', 'ws:') + '/herdr/ws?ticket=' + scoped, { origin }); ws.once('open', () => { ws.close(); reject(new Error('Session scope bypass')); }); ws.once('error', error => { assert.match(error.message, /403/); resolve(); }); });
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write', 'microphone'] }); page = await context.newPage(); page.setDefaultTimeout(12000);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'light', hasTouch: true, permissions: ['clipboard-read', 'clipboard-write', 'microphone'] }); page = await context.newPage(); page.setDefaultTimeout(12000);
   const notificationRequests = [], notificationDevice = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
   await context.route('**/api/notifications/**', async route => {
     if (new URL(route.request().url()).pathname.endsWith('/key')) { await route.continue(); return; }
@@ -199,7 +199,7 @@ try {
   await until(async () => (await text()).includes('Live Herdr terminal'), 'restore initial terminal');
   assert.equal(await tab(0).getAttribute('data-status'), 'idle'); assert.equal(await tab(1).getAttribute('data-status'), 'working');
   const idle = await tab(0).locator('.herdr-status-dot').evaluate(el => ({ fill: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderColor }));
-  assert.equal(idle.fill, 'rgba(0, 0, 0, 0)'); assert.equal(idle.border, 'rgb(168, 240, 160)');
+  assert.equal(idle.fill, 'rgba(0, 0, 0, 0)'); assert.equal(idle.border, 'rgb(30, 95, 45)');
   assert.equal(await terminal.locator('#shortcut-buttons').textContent(), await shell.locator('#shortcut-buttons').textContent());
   await page.locator('#workspace-shortcuts').waitFor({ state: 'visible' });
   assert.equal(await terminal.locator('.input-dock').isVisible(), false, 'Embedded pane delegates shortcuts to the workspace');

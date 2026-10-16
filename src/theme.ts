@@ -27,8 +27,8 @@ export const terminalThemes: Record<ThemeName, ITheme> = {
 };
 
 export function readTheme(): ThemeChoice {
-  const value = saved<string>('theme', 'forest');
-  return (themeChoices as readonly string[]).includes(value) ? (value as ThemeChoice) : 'forest';
+  const value = saved<string>('theme', 'auto');
+  return (themeChoices as readonly string[]).includes(value) ? (value as ThemeChoice) : 'auto';
 }
 
 const light = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: light)') : undefined;

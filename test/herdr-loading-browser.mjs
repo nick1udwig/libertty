@@ -22,7 +22,7 @@ try {
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'backend');
   const token = (await readFile(fixture.directory+'/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({args:['--use-gl=angle','--use-angle=gl']});
-  const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  const context = await browser.newContext({viewport:{width:390,height:844},colorScheme:'dark',isMobile:true,hasTouch:true});
   await installWireObserver(context);
   await context.addInitScript(({first,second}) => {
     if (window === parent) {

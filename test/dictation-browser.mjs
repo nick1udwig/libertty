@@ -59,7 +59,7 @@ let browser;
 try {
   for (let i = 0; i < 100; i++) { if (await fetch(base).then(r => r.ok, () => false)) break; if (server.exitCode !== null) throw new Error(logs); await new Promise(r => setTimeout(r, 100)); }
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
-  const context = await browser.newContext({ viewport: { width: 600, height: 850 }, hasTouch: true, serviceWorkers: 'block' });
+  const context = await browser.newContext({ viewport: { width: 600, height: 850 }, colorScheme: 'light', hasTouch: true, serviceWorkers: 'block' });
   const page = await context.newPage();
   await page.route('**/assets/terminal-*.js', async route => {
     const response = await route.fetch(), original = await response.text();
@@ -192,8 +192,8 @@ try {
   assert.equal(await page.evaluate(() => window.__captureContext.state), 'running', 'Startup resumes audio after a permission/device interruption');
   assert.equal(await page.evaluate(() => window.__wakeLocks.at(-1)?.released), false, 'Recording holds a screen wake lock');
   assert.deepEqual(await mic.boundingBox(), micPosition, 'Expanding controls must keep the button under the finger');
-  assert.equal(await mic.evaluate(el => getComputedStyle(el).backgroundColor), 'rgba(168, 240, 160, 0.11)');
-  assert.equal(await mic.evaluate(el => getComputedStyle(el).color), 'rgb(168, 240, 160)');
+  assert.equal(await mic.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(220, 232, 218)');
+  assert.equal(await mic.evaluate(el => getComputedStyle(el).color), 'rgb(30, 95, 45)');
   assert.equal(await mic.locator('.dictation-check').isVisible(), true);
   assert.equal(await page.locator('.dictation-activity line').count(), 11);
   assert.equal((await page.locator('.dictation-cancel').boundingBox()).width, 48);
