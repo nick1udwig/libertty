@@ -1,0 +1,14 @@
+[package]
+name = "libertty-engine-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+libertty-engine = { path = "../engine" }
+serde_json.workspace = true

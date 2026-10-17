@@ -1,7 +1,7 @@
 import type { ITheme } from 'ghostty-web';
 import { saved } from './persistence.ts';
 
-export const themeChoices = ['forest', 'paper', 'ink', '1776', 'auto'] as const;
+export const themeChoices = ['forest', 'paper', 'ink', '1776', 'flag', 'auto'] as const;
 export type ThemeChoice = (typeof themeChoices)[number];
 export type ThemeName = Exclude<ThemeChoice, 'auto'>;
 
@@ -23,6 +23,12 @@ export const terminalThemes: Record<ThemeName, ITheme> = {
     background: '#0b1430', foreground: '#e9edf7', cursor: '#ff4f64', cursorAccent: '#0b1430', selectionBackground: '#2a3f7a', selectionForeground: '#ffffff',
     black: '#63719d', red: '#ff5c6f', green: '#7fd99a', yellow: '#f3c45a', blue: '#7aa7ff', magenta: '#d59cff', cyan: '#6fd6e8', white: '#d5dbea',
     brightBlack: '#8592bb', brightRed: '#ff8a98', brightGreen: '#a6e8b9', brightYellow: '#f8d88e', brightBlue: '#a3c3ff', brightMagenta: '#e4bfff', brightCyan: '#9be6f1', brightWhite: '#ffffff',
+  },
+  // Flag writes in Old Glory Blue on a near-white canvas, which stays off pure white so an agent's white text still flips like Paper's.
+  flag: {
+    background: '#fcfdff', foreground: '#0a2550', cursor: '#b31942', cursorAccent: '#ffffff', selectionBackground: '#d6e2f6', selectionForeground: '#0a2550',
+    black: '#0a2550', red: '#b31942', green: '#1e6b2e', yellow: '#7a5200', blue: '#0a3161', magenta: '#7b2d8e', cyan: '#0e6470', white: '#5f6578',
+    brightBlack: '#475b82', brightRed: '#c42852', brightGreen: '#2a7a38', brightYellow: '#8a5d00', brightBlue: '#1f4f9a', brightMagenta: '#8e3fa3', brightCyan: '#147483', brightWhite: '#6e7488',
   },
 };
 

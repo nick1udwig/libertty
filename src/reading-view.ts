@@ -4,7 +4,7 @@ import './reading-view.css';
 export interface ReadingView { element: HTMLElement; dispose(): void }
 export interface ReadingResources { load(path: string): Promise<Blob>; open(path: string): void }
 
-const markdown = new MarkdownIt({ html: false, linkify: true, typographer: true });
+const markdown = new MarkdownIt({ html: true, linkify: true, typographer: true });
 markdown.renderer.rules.link_open = (tokens, index, options, _env, self) => {
   const token = tokens[index];
   token.attrSet('rel', 'noopener noreferrer');
@@ -18,6 +18,47 @@ markdown.renderer.rules.image = (tokens, index, options, _env, self) => {
   token.attrSet('alt', token.content);
   return self.renderToken(tokens, index, options);
 };
+
+// Raw HTML keeps only inert presentational markup, so README layouts and images render without running anything.
+const blocks = new Set(['p', 'div', 'span', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'blockquote', 'pre', 'code', 'kbd', 'samp',
+  'em', 'strong', 'b', 'i', 'u', 's', 'del', 'ins', 'mark', 'small', 'sub', 'sup', 'abbr', 'br', 'hr', 'a', 'img', 'picture', 'figure', 'figcaption',
+  'details', 'summary', 'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption']);
+const removed = new Set(['script', 'style', 'iframe', 'frame', 'frameset', 'object', 'embed', 'template', 'noscript', 'link', 'meta', 'base',
+  'form', 'input', 'button', 'textarea', 'select', 'option', 'svg', 'math', 'audio', 'video', 'source', 'track', 'canvas', 'title', 'head']);
+const attributes: Record<string, string[]> = { a: ['href', 'title'], img: ['src', 'alt', 'title', 'width', 'height', 'data-reading-src'],
+  ol: ['start'], th: ['colspan', 'rowspan'], td: ['colspan', 'rowspan'], code: ['class'], details: ['open'], abbr: ['title'] };
+function sanitize(html: string): DocumentFragment {
+  const template = document.createElement('template'); template.innerHTML = html;
+  for (const element of [...template.content.querySelectorAll('*')]) {
+    const tag = element.localName;
+    if (!blocks.has(tag)) { if (removed.has(tag)) element.remove(); else element.replaceWith(...element.childNodes); continue; }
+    const allowed = attributes[tag] || [];
+    for (const { name } of [...element.attributes]) if (!allowed.includes(name) && name !== 'align') element.removeAttribute(name);
+    if (tag === 'a') {
+      if (/^\s*(?:javascript|vbscript|data):/i.test(element.getAttribute('href') || '')) element.removeAttribute('href');
+      element.setAttribute('rel', 'noopener noreferrer'); element.setAttribute('target', '_blank');
+    }
+    // Images load only through the reader's resources, never straight from the page.
+    if (tag === 'img') { if (!element.hasAttribute('data-reading-src')) element.setAttribute('data-reading-src', element.getAttribute('src') || ''); element.setAttribute('src', 'data:,'); }
+  }
+  return template.content;
+}
+
+/** Wrap a code block with a button that copies its text. */
+function copyable(block: HTMLPreElement) {
+  const wrapper = document.createElement('div'); wrapper.className = 'reading-code'; block.before(wrapper);
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'reading-copy'; button.textContent = 'Copy';
+  button.setAttribute('aria-label', 'Copy code');
+  let timer = 0;
+  const label = (text: string) => { button.textContent = text; clearTimeout(timer); timer = window.setTimeout(() => { button.textContent = 'Copy'; }, 1600); };
+  button.addEventListener('click', () => {
+    const text = block.textContent?.replace(/\n$/, '') || '';
+    const select = () => { getSelection()?.selectAllChildren(block); label('Selected'); };
+    if (!navigator.clipboard) { select(); return; }
+    void navigator.clipboard.writeText(text).then(() => label('Copied'), select);
+  });
+  wrapper.append(block, button);
+}
 
 function localLink(file: string, href: string): string | undefined {
   if (!href || href.startsWith('#') || href.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(href)) return undefined;
@@ -41,7 +82,8 @@ export function readingView(file: string, blob: Blob, resources?: ReadingResourc
     paper.textContent = 'Loading Markdown…'; stage.append(paper);
     void blob.text().then(value => {
       if (disposed) return;
-      paper.innerHTML = markdown.render(value);
+      paper.replaceChildren(sanitize(markdown.render(value)));
+      for (const block of paper.querySelectorAll('pre')) copyable(block);
       for (const image of paper.querySelectorAll<HTMLImageElement>('img[data-reading-src]')) {
         const src = image.dataset.readingSrc || '';
         const path = localLink(file, src);

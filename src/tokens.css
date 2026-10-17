@@ -55,6 +55,20 @@
   --glass:#0b1430cc;--glass-strong:#0b1430eb;--glass-surface:#101b3bcc;--glass-overlay:#15224aeb;
   --term-fg:#e9edf7;--term-cursor:#ff4f64;--selected-ring:0px;
 }
+/* Flag is a light theme with Old Glory Blue text, pale blue bars and an Old Glory Red accent. */
+:root[data-theme=flag]{
+  color-scheme:light;
+  --bg:#fcfdff;--surface:#e3eaf6;--raised:#ffffff;--overlay:#ffffff;--hover:#d5dff0;--press:#c6d3ea;
+  --line:#c3d0e6;--line-strong:#7f93bb;
+  --text:#0a2550;--text-2:#23406f;--muted:#475b82;--faint:#53668b;
+  --accent:#b31942;--accent-hover:#8f1435;--accent-ink:#ffffff;--accent-soft:#f7dfe5;--accent-line:#b31942;
+  --info:#1f5fbf;--warn:#7a5200;--danger:#a3122a;--danger-soft:#f6dde1;
+  --shadow-pop:0 6px 18px #0a25502e;--shadow-sheet:0 16px 48px #0a255040;
+  --scrim:#0a25508c;
+  --selection:#d6e2f6;--scroll-thumb:#7f93bb;--warn-line:#7a5200;--info-soft:#d6e2f6;--info-selected:#e8eef9;--info-line:#1f5fbf;
+  --glass:#fcfdfff2;--glass-strong:#fcfdfff5;--glass-surface:#e3eaf6f2;--glass-overlay:#fffffff5;
+  --term-fg:#0a2550;--term-cursor:#b31942;--selected-ring:1px;
+}
 ::selection{background:var(--selection)}
 
 /* Shortcut keys look identical in the terminal dock and the workspace bar. */

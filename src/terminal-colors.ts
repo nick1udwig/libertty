@@ -44,7 +44,7 @@ function channels(color: number): [number, number, number] { return [color >> 16
 const cellColors = ['foreground', 'background', 'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white', 'brightBlack', 'brightRed', 'brightGreen', 'brightYellow', 'brightBlue', 'brightMagenta', 'brightCyan', 'brightWhite'] as const;
 
 // Agents in Herdr panes, and programs whose background query goes unanswered, paint for a dark terminal.
-// Paper keeps its own palette and flips the lightness of every other color, so dark input boxes, diffs and code blocks render light.
+// Light themes keep their own palette and flip the lightness of every other color, so dark input boxes, diffs and code blocks render light.
 export function adaptDarkAppColors(renderer: ColorRenderer | undefined, theme: ITheme) {
   if (typeof renderer?.rgbToCSS !== 'function') return;
   // Only colors a cell can carry count as the theme's own, so an app's white text still flips even though Paper's cursor accent is white.

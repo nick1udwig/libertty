@@ -147,7 +147,7 @@ const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 /
   scrollback: 5000, cursorBlink: true, smoothScrollDuration: 0,
   theme: terminalThemes[terminalTheme] });
 term.open($('terminal'));
-if (terminalTheme === 'paper') adaptDarkAppColors(term.renderer as unknown as Parameters<typeof adaptDarkAppColors>[0], terminalThemes.paper);
+if (terminalTheme === 'paper' || terminalTheme === 'flag') adaptDarkAppColors(term.renderer as unknown as Parameters<typeof adaptDarkAppColors>[0], terminalThemes[terminalTheme]);
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
 const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));

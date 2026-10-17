@@ -6,3 +6,4 @@ release/
 .env
 *.log
 /target/
+dist-site/

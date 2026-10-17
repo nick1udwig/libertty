@@ -14,7 +14,7 @@ try {
     window.result = { selected: 0, held: 0, dragged: 0, dropped: 0, vertical: 0, cancelled: 0 };
     for (const strip of document.querySelectorAll('#tabs,.herdr-agent-strip')) {
       for (let i = 0; i < 8; i++) {
-        const tab = document.createElement('button'); tab.className = strip.id ? 'tab' : 'herdr-agent-tab'; tab.textContent = 'Terminal ' + i; strip.append(tab);
+        const tab = document.createElement(strip.id ? 'div' : 'button'); tab.className = strip.id ? 'tab' : 'herdr-agent-tab'; if (strip.id) tab.role = 'tab'; tab.textContent = 'Terminal ' + i; strip.append(tab);
         tabGestures(tab, { scroll: strip, select: () => result.selected++, hold: () => result.held++, drag: () => result.dragged++, drop: () => result.dropped++ });
         tab.addEventListener('pointercancel', () => result.cancelled++);
       }
@@ -48,5 +48,26 @@ try {
     assert.equal(await page.evaluate(() => result.vertical), 1, 'Vertical drawer gestures remain available');
     await page.evaluate(() => { for (const key in result) result[key] = 0; });
   }
-  console.log('PASS: Native horizontal scrolling, paused swipes, reverse swipes, held reordering, and vertical drawer gestures on both tab strips.');
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  const strip = page.locator('#tabs'), bounds = await strip.boundingBox(), y = bounds.y + bounds.height / 2;
+  await strip.evaluate(element => { element.scrollLeft = 0; });
+  await page.mouse.move(300, y); await page.mouse.down(); await page.mouse.move(280, y, { steps: 2 });
+  await page.mouse.move(270, y + 50, { steps: 2 });
+  assert.equal(await strip.evaluate(element => element.scrollLeft), 30, 'A mouse drag keeps scrolling as it drifts below the strip');
+  await page.mouse.move(210, y + 60, { steps: 2 }); await page.mouse.up();
+  assert.equal(await strip.evaluate(element => element.scrollLeft), 90, 'A mouse drag returns without jumping');
+  // On a desktop, a drag past the strip's edge must not start a text selection, whose autoscroll fights the drag.
+  const desktop = await (await browser.newContext({ viewport: { width: 400, height: 700 } })).newPage();
+  await desktop.setContent(`<style>${css.join('\n')}body{margin:0}#tabs{width:100%;height:50px}.tab{min-width:180px;height:44px;flex-shrink:0}</style><div id="tabs"></div>`);
+  await desktop.addScriptTag({ content: script + `
+    const strip = document.querySelector('#tabs');
+    for (let i = 0; i < 8; i++) { const tab = document.createElement('div'); tab.className = 'tab'; tab.role = 'tab'; tab.textContent = 'Terminal ' + i; strip.append(tab); tabGestures(tab, { scroll: strip, select() {}, hold() {} }); }
+  ` });
+  const edge = await desktop.locator('#tabs').boundingBox(), row = edge.y + edge.height / 2;
+  await desktop.mouse.move(250, row); await desktop.mouse.down();
+  for (let x = 260; x <= 399; x += 7) await desktop.mouse.move(x, row);
+  await delay(300);
+  assert.equal(await desktop.locator('#tabs').evaluate(element => element.scrollLeft), 0, 'Dragging past the strip edge does not autoscroll it');
+  await desktop.mouse.up();
+  console.log('PASS: Native horizontal scrolling, paused swipes, reverse swipes, held reordering, vertical drawer gestures, drifting mouse drags and drags past the edge on the tab strips.');
 } finally { await browser.close(); }

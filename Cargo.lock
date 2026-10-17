@@ -1860,6 +1860,64 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
+name = "libertty-engine"
+version = "0.2.6"
+dependencies = [
+ "futures",
+ "icu_collator",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "libertty-engine-wasm"
+version = "0.2.6"
+dependencies = [
+ "libertty-engine",
+ "serde_json",
+]
+
+[[package]]
+name = "libertty-server"
+version = "0.2.6"
+dependencies = [
+ "aes-gcm 0.10.3",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "flate2",
+ "futures",
+ "icu_collator",
+ "libc",
+ "libertty-engine",
+ "openssl",
+ "p256 0.13.2",
+ "percent-encoding",
+ "portable-pty",
+ "rand 0.8.8",
+ "regex",
+ "reqwest",
+ "russh",
+ "russh-sftp",
+ "scrypt 0.11.0",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "ssh-key 0.6.7",
+ "subtle",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "unicode-normalization",
+ "url",
+ "vt100",
+ "web-push",
+ "zeroize",
+]
+
+[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3649,56 +3707,6 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "libertty-engine"
-version = "0.2.6"
-dependencies = [
- "futures",
- "icu_collator",
- "regex",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "libertty-server"
-version = "0.2.6"
-dependencies = [
- "aes-gcm 0.10.3",
- "axum",
- "base64 0.22.1",
- "chrono",
- "flate2",
- "futures",
- "icu_collator",
- "libc",
- "openssl",
- "p256 0.13.2",
- "percent-encoding",
- "portable-pty",
- "rand 0.8.8",
- "regex",
- "reqwest",
- "russh",
- "russh-sftp",
- "scrypt 0.11.0",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "ssh-key 0.6.7",
- "subtle",
- "tempfile",
- "libertty-engine",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "unicode-normalization",
- "url",
- "vt100",
- "web-push",
- "zeroize",
 ]
 
 [[package]]

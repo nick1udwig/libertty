@@ -11,7 +11,7 @@ textarea{font-family:var(--font-mono);font-size:13px;line-height:1.5;resize:vert
 
 #workspace-app{height:var(--height);display:flex;flex-direction:column;overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:var(--bg)}
 .terminal-header{display:flex;align-items:center;gap:6px;padding:4px 8px;flex:none;height:44px;border-top:1px solid var(--line)}.terminal-header .icon{height:36px;min-width:36px;flex-basis:36px}.terminal-header svg,.back svg{display:block;flex:none}
-#tabs{touch-action:pan-x;display:flex;gap:6px;min-width:0;flex:1;overflow-x:auto;scrollbar-width:none}#tabs::-webkit-scrollbar{display:none}
+#tabs{touch-action:pan-x;display:flex;gap:6px;min-width:0;flex:1;overflow-x:auto;scrollbar-width:none;user-select:none}#tabs::-webkit-scrollbar{display:none}
 .tab{display:flex;align-items:center;gap:8px;border-radius:var(--r-md);min-width:120px;max-width:230px;flex:1 0 auto;background:none;border:1px solid transparent;padding-left:12px;height:36px;color:var(--muted)}.tab:hover{background:var(--raised);color:var(--text-2)}
 .tab[aria-selected=true]{background:var(--raised);border-color:var(--line-strong);color:var(--text)}
 .tab-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px;font-size:14px}.tab-close{display:grid;place-items:center;margin-left:auto;min-width:32px;min-height:32px;padding:0;font-size:18px;background:none;color:inherit;opacity:.7;border-radius:var(--r-sm)}.tab-close:hover{opacity:1}
@@ -75,6 +75,8 @@ dialog .primary[type=submit]{width:100%;margin-top:8px}dialog .actions .primary{
 #workspace-shortcuts{flex:none;background:var(--surface);padding:4px 8px}
 /* 1776 draws a red, white and red stripe where the terminal meets the bars below it. */
 :root[data-theme="1776"] :is(#workspace-navigation,.bottom-nav){border-top:3px solid var(--accent);border-image:linear-gradient(var(--accent) 0 1px,var(--text) 1px 2px,var(--accent) 2px 3px) 3 0 0 0}
+/* Flag draws thirteen red and white stripes with an Old Glory Blue canton above the bars. */
+:root[data-theme=flag] :is(#workspace-navigation,.bottom-nav){border-top:13px solid transparent;background:linear-gradient(#0a3161,#0a3161) 0 0/52px 13px no-repeat border-box,repeating-linear-gradient(180deg,var(--accent) 0 1px,var(--bg) 1px 2px) 0 0/100% 13px no-repeat border-box,var(--surface)}
 #workspace-navigation{flex:none;min-width:0;background:var(--surface)}
 #workspace-navigation.herdr-navigation,#workspace-navigation.herdr-navigation #tabs,#workspace-navigation.herdr-navigation .herdr-agent-strip{touch-action:pan-x}
 #terminal-tabs-drawer{height:44px;overflow:hidden;transition:height .2s ease}

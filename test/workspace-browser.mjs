@@ -136,6 +136,7 @@ try {
   await switchTheme('paper'); assert.deepEqual(await themeOf(page), ['paper', '#fbfaf6', '#fbfaf6']); assert.deepEqual(await themeOf(frame), ['paper', '#fbfaf6', '#fbfaf6']);
   await switchTheme('ink'); assert.deepEqual(await themeOf(frame), ['ink', '#000', '#000000']);
   await switchTheme('1776'); assert.deepEqual(await themeOf(page), ['1776', '#0b1430', '#0b1430']); assert.deepEqual(await themeOf(frame), ['1776', '#0b1430', '#0b1430']);
+  await switchTheme('flag'); assert.deepEqual(await themeOf(page), ['flag', '#fcfdff', '#fcfdff']); assert.deepEqual(await themeOf(frame), ['flag', '#fcfdff', '#fcfdff']);
   await switchTheme('forest'); assert.deepEqual(await themeOf(page), ['forest', '#0b0f0d', '#0b0f0d']); assert.deepEqual(await themeOf(frame), ['forest', '#0b0f0d', '#0b0f0d']);
   await page.locator('#customize-shortcuts').click(); assert.equal(await page.locator('dialog[open]').count(), 0);
   await page.locator('#add-shortcut').click();

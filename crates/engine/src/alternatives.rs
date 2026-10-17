@@ -1,11 +1,13 @@
-use libertty_engine::utf16_len;
-use libertty_engine::{
+//! Alternatives for typed or dictated input, shared by the backend and browser adapters.
+use crate::utf16_len;
+use crate::{
     shell_structure::{Separator, command_list},
     types::Candidate,
     validation::simple_words,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::future::Future;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
@@ -39,7 +41,7 @@ impl Intent {
                     .collect()
             })
             .unwrap_or_else(|| vec!["look at".into()]);
-        let expanded = libertty_engine::speech::expand_symbols(text, true);
+        let expanded = crate::speech::expand_symbols(text, true);
         let expanded = expanded.trim_end_matches(['.', '!', '?']);
         if let Some(list) = command_list(expanded)
             && list.separators.last() == Some(&Separator::Pipe)
@@ -88,10 +90,10 @@ pub struct Prepared {
     pub selected: String,
     pub candidates: Vec<Candidate>,
 }
-pub async fn prepare<'a>(
+pub async fn prepare<F: Future<Output = Result<Value, String>>>(
     text: &str,
     intent: &Intent,
-    mut suggest: impl FnMut(String) -> futures::future::BoxFuture<'a, Result<Value, String>>,
+    mut suggest: impl FnMut(String) -> F,
 ) -> Result<Prepared, String> {
     let query = intent.query(text);
     let phrase = match intent {
@@ -133,10 +135,7 @@ pub async fn prepare<'a>(
             }
             Intent::ReadingFile { phrase, .. } => {
                 let words = simple_words(&candidate.command).unwrap();
-                format!(
-                    "{phrase} {}",
-                    libertty_engine::repair::shell_quote(&words[1].value)
-                )
+                format!("{phrase} {}", crate::repair::shell_quote(&words[1].value))
             }
         };
     }
@@ -159,16 +158,27 @@ pub async fn prepare<'a>(
 mod tests {
     use super::*;
     use serde_json::json;
-    #[tokio::test]
-    async fn reading_intent_keeps_the_phrase_and_runs_fallback_on_the_backend() {
+    use std::{
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
+    /// These suggestion stubs never wait, so one poll completes the preparation.
+    fn ready<T>(future: impl Future<Output = T>) -> T {
+        match pin!(future).poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(value) => value,
+            Poll::Pending => panic!("Suggestion stubs must not wait"),
+        }
+    }
+    #[test]
+    fn reading_intent_keeps_the_phrase_and_runs_fallback_on_the_backend() {
         let intent = Intent::detect("look at get diff", &Value::Null);
         let mut queries = vec![];
-        let result = prepare("look at get diff", &intent, |query| {
+        let result = ready(prepare("look at get diff", &intent, |query| {
             queries.push(query.clone());
-            Box::pin(async move {
+            async move {
                 Ok(json!({"candidates":if query.starts_with("cat ") { vec![Candidate::literal(&query)] } else { vec![Candidate { command: "git diff".into(), score: 100.0, changes: vec![], literal: None, evidence: Default::default() }] }}))
-            })
-        }).await.unwrap();
+            }
+        })).unwrap();
         assert_eq!(queries, ["cat get diff", "get diff"]);
         assert_eq!(result.selected, "look at git diff");
         assert_eq!(result.original, "look at get diff");
@@ -186,17 +196,16 @@ mod tests {
             Intent::ReadingFile { .. }
         ));
     }
-    #[tokio::test]
-    async fn malformed_intent_cannot_put_control_characters_into_an_applied_line() {
+    #[test]
+    fn malformed_intent_cannot_put_control_characters_into_an_applied_line() {
         let intent = Intent::ReadingFile {
             phrase: "look at\r".into(),
             operand: "notes".into(),
         };
         assert!(
-            prepare("look at notes", &intent, |_| Box::pin(async {
+            ready(prepare("look at notes", &intent, |_| async {
                 panic!("Invalid intent must not request facts")
             }))
-            .await
             .is_err()
         );
     }

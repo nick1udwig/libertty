@@ -90,6 +90,7 @@ Keep libertty running; Tailscale Serve does not start it for you.
 ## Documentation
 
 - [Server setup](docs/setup.md): one-line installation, companions, Tailscale and user services.
+- [Project site](docs/site.md): the landing page and its in-browser demo of the app.
 - [Releases](docs/releases.md): native build checks, dependency pins and publishing.
 - [Usage guide](docs/usage.md): connections, pairing, dictation, touch controls and file transfers.
 - [Technical reference](docs/reference.md): shell integration, command repair, deployment and testing.

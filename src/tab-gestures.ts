@@ -5,7 +5,7 @@ interface TabGestures {
 }
 /** Swiping scrolls the strip; holding opens actions and allows reordering. */
 export function tabGestures(element: HTMLElement, actions: TabGestures) {
-  let press: { id: number; x: number; y: number; scroll: number; touch: boolean; held: boolean; dragged: boolean; moved: boolean } | undefined;
+  let press: { id: number; x: number; y: number; scroll: number; touch: boolean; held: boolean; dragged: boolean; moved: boolean; scrolling: boolean } | undefined;
   let timer: ReturnType<typeof setTimeout>, suppress = false;
   const preventHeldScroll = (event: TouchEvent) => { if (press?.held && event.cancelable) event.preventDefault(); };
   const finish = () => {
@@ -16,7 +16,7 @@ export function tabGestures(element: HTMLElement, actions: TabGestures) {
   element.addEventListener('pointerdown', event => {
     const button = (event.target as HTMLElement).closest('button');
     if (event.button !== 0 || button && button !== element) return;
-    suppress = false; press = { id: event.pointerId, x: event.clientX, y: event.clientY, scroll: actions.scroll?.scrollLeft || 0, touch: event.pointerType === 'touch', held: false, dragged: false, moved: false };
+    suppress = false; press = { id: event.pointerId, x: event.clientX, y: event.clientY, scroll: actions.scroll?.scrollLeft || 0, touch: event.pointerType === 'touch', held: false, dragged: false, moved: false, scrolling: false };
     element.setPointerCapture(event.pointerId);
     timer = setTimeout(() => {
       if (!press || press.moved) return;
@@ -41,7 +41,8 @@ export function tabGestures(element: HTMLElement, actions: TabGestures) {
       return;
     }
     press.moved = true; clearTimeout(timer);
-    if (!press.touch && actions.scroll && Math.abs(dx) >= Math.abs(dy)) { event.preventDefault(); actions.scroll.scrollLeft = press.scroll - dx; }
+    // Once a mouse drag scrolls the strip it keeps following the pointer, even as it drifts off the strip vertically.
+    if (!press.touch && actions.scroll && (press.scrolling || Math.abs(dx) >= Math.abs(dy))) { event.preventDefault(); press.scrolling = true; actions.scroll.scrollLeft = press.scroll - dx; }
   });
   element.addEventListener('pointerup', event => { if (press?.id !== event.pointerId) return; if (press.dragged) actions.drop?.(event.clientX); finish(); });
   element.addEventListener('pointercancel', finish);
