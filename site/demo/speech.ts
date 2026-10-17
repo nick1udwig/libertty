@@ -10,20 +10,20 @@ export function listen(): Listening {
   const fallback = () => scripted[turn++ % scripted.length];
   if (!Recognizer) return { finish: async () => fallback(), cancel() {} };
   const recognition = new Recognizer(), heard: string[] = [];
-  let failed = false, ended = false, wake: () => void = () => {};
+  let ended = false, wake: () => void = () => {};
   recognition.continuous = true; recognition.interimResults = false; recognition.lang = navigator.language || 'en-US';
   recognition.addEventListener('result', (event: any) => {
     for (let i = event.resultIndex; i < event.results.length; i++) if (event.results[i].isFinal) heard.push(event.results[i][0].transcript.trim());
   });
-  // Without microphone access or a recognition service, the scripted phrase keeps the demo going.
-  recognition.addEventListener('error', (event: any) => { if (event.error !== 'no-speech' && event.error !== 'aborted') failed = true; });
   recognition.addEventListener('end', () => { ended = true; wake(); });
-  try { recognition.start(); } catch { failed = true; ended = true; }
+  try { recognition.start(); } catch { ended = true; }
   return {
     async finish() {
       // A recognition service that never answers counts as unavailable.
-      if (!ended) { const done = new Promise<void>(resolve => { wake = resolve; }); recognition.stop(); await Promise.race([done, new Promise(resolve => setTimeout(resolve, 3000))]); if (!ended) { failed = true; recognition.abort(); } }
-      return failed && !heard.length ? fallback() : heard.join(' ').trim();
+      try { if (!ended) { const done = new Promise<void>(resolve => { wake = resolve; }); recognition.stop(); await Promise.race([done, new Promise(resolve => setTimeout(resolve, 3000))]); if (!ended) recognition.abort(); } }
+      catch { /* A recognizer that cannot stop has already ended. */ }
+      // Recognition often hears nothing inside a framed page on phones, so the demo still shows a dictated command.
+      return heard.join(' ').trim() || fallback();
     },
     cancel() { ended = true; recognition.abort(); },
   };
