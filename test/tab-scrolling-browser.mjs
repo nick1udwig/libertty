@@ -48,5 +48,13 @@ try {
     assert.equal(await page.evaluate(() => result.vertical), 1, 'Vertical drawer gestures remain available');
     await page.evaluate(() => { for (const key in result) result[key] = 0; });
   }
-  console.log('PASS: Native horizontal scrolling, paused swipes, reverse swipes, held reordering, and vertical drawer gestures on both tab strips.');
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  const strip = page.locator('#tabs'), bounds = await strip.boundingBox(), y = bounds.y + bounds.height / 2;
+  await strip.evaluate(element => { element.scrollLeft = 0; });
+  await page.mouse.move(300, y); await page.mouse.down(); await page.mouse.move(280, y, { steps: 2 });
+  await page.mouse.move(270, y + 50, { steps: 2 });
+  assert.equal(await strip.evaluate(element => element.scrollLeft), 30, 'A mouse drag keeps scrolling as it drifts below the strip');
+  await page.mouse.move(210, y + 60, { steps: 2 }); await page.mouse.up();
+  assert.equal(await strip.evaluate(element => element.scrollLeft), 90, 'A mouse drag returns without jumping');
+  console.log('PASS: Native horizontal scrolling, paused swipes, reverse swipes, held reordering, vertical drawer gestures and drifting mouse drags on the tab strips.');
 } finally { await browser.close(); }
