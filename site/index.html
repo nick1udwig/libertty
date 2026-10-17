@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0b1430" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="description" content="All terminals are created equal. Intelligent dictation and agent integrations to make mobile a first-class terminal.">
+  <title>libertty · All terminals are created equal.</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Public+Sans:wght@400;500;600&display=swap">
+  <style>
+    /* The page around the phone never changes after load; it follows the system between the 1776 and flag looks. */
+    :root {
+      color-scheme: light;
+      --bg: #ffffff; --lift: #e3eaf6; --text: #0a2550; --text-2: #23406f; --muted: #475b82; --accent: #b31942; --accent-ink: #ffffff;
+      --command: #f3f6fb; --line: #7f93bb; --prompt: #1e6b2e; --shadow: #0a316140; --app: #fcfdff;
+      --band: linear-gradient(#0a3161, #0a3161) left / 180px 100% no-repeat, repeating-linear-gradient(180deg, #b31942 0 1px, #ffffff 1px 2px);
+      --band-height: 13px;
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --bg: #0b1430; --lift: #1a2a5e; --text: #f5f7fc; --text-2: #c8d0e6; --muted: #98a5c8; --accent: #ff4f64; --accent-ink: #0b1430;
+        --command: #101b3b; --line: #3a4f88; --prompt: #7fd99a; --shadow: #00000080; --app: #0b1430;
+        --band: linear-gradient(#ff4f64 0 1px, #f5f7fc 1px 2px, #ff4f64 2px 3px);
+        --band-height: 3px;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: radial-gradient(60vw 70vh at 72% 52%, var(--lift), var(--bg) 72%) var(--bg) fixed;
+      color: var(--text); font-family: var(--sans);
+      padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+    }
+    .band { position: fixed; inset: 0 0 auto; height: var(--band-height); background: var(--band); }
+    main { min-height: 100%; max-width: 1240px; margin: 0 auto; padding-block: 32px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(32px, 6vw, 96px); }
+    .copy { display: grid; gap: 28px; max-width: 600px; }
+    .mark { font: 700 22px var(--mono); color: var(--accent); letter-spacing: -0.01em; margin: 0; }
+    .mark span { color: var(--muted); font-weight: 400; }
+    h1 { font: 600 clamp(40px, 5vw, 64px) / 1.05 var(--mono); letter-spacing: -0.045em; margin: 0; text-wrap: balance; }
+    .lede { font-size: 21px; line-height: 1.5; color: var(--text-2); margin: 0; max-width: 31ch; text-wrap: pretty; }
+    .install { display: flex; align-items: center; gap: 12px; max-width: 100%; width: max-content; padding: 8px 8px 8px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--command); font: 15px var(--mono); }
+    .install code { font: inherit; white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .install code::before { content: "$ "; color: var(--prompt); }
+    .install button { flex: none; display: flex; align-items: center; gap: 6px; margin-left: 6px; border: 0; border-radius: 7px; padding: 8px 12px; background: var(--accent); color: var(--accent-ink); font: 600 13px var(--sans); cursor: pointer; }
+    .install button:active { transform: translateY(1px); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    nav { display: flex; flex-wrap: wrap; gap: 24px; font-size: 15px; }
+    nav a { color: var(--muted); text-decoration: none; }
+    nav a:first-child, nav a:hover { color: var(--text); }
+    /* Only the screen inside the bezel is live. */
+    .phone { justify-self: center; padding: 16px; border-radius: 62px; background: #05070a; box-shadow: 0 0 0 2px #2a2f2c, 0 40px 90px var(--shadow), inset 0 0 0 1px #3a403c; }
+    .screen { display: flex; flex-direction: column; height: min(844px, calc(100dvh - 96px)); aspect-ratio: 390 / 844; border-radius: 46px; overflow: hidden; background: var(--app); color: var(--text); }
+    .status { flex: none; height: 46px; display: flex; align-items: center; justify-content: space-between; padding: 4px 30px 0 34px; font: 600 15px system-ui, -apple-system, sans-serif; }
+    .status svg { display: block; }
+    .home { flex: none; height: 26px; display: grid; place-items: center; }
+    .home::before { content: ""; width: 132px; height: 5px; border-radius: 3px; background: var(--text); opacity: .85; }
+    .phone iframe { display: block; flex: 1; min-height: 0; width: 100%; border: 0; background: var(--app); }
+    /* On a phone the page is the app itself. */
+    @media (max-width: 760px) {
+      body { padding: 0; background: var(--bg); overflow: hidden; }
+      .band, .copy { display: none; }
+      main { display: block; padding: 0; }
+      .phone { position: fixed; inset: 0; padding: 0; border-radius: 0; box-shadow: none; background: var(--app); }
+      .screen { height: var(--viewport-height, 100%); aspect-ratio: auto; border-radius: 0; }
+      .status, .home { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="band" aria-hidden="true"></div>
+  <main>
+    <section class="copy" aria-labelledby="headline">
+      <p class="mark">›_ libertty <span>v0.2.6</span></p>
+      <h1 id="headline">All terminals are created equal.</h1>
+      <p class="lede">Intelligent dictation and agent integrations to make mobile a first-class terminal.</p>
+      <div class="install"><code id="install">curl -fsSL https://install.libertty.sh | bash</code><button id="copy" type="button" aria-label="Copy the install command">Copy</button></div>
+      <nav aria-label="Project">
+        <a href="https://github.com/nick1udwig/libertty">GitHub</a>
+        <a href="https://github.com/nick1udwig/libertty/blob/master/docs/setup.md">Setup guide</a>
+        <a href="https://github.com/nick1udwig/libertty/blob/master/docs/usage.md">Usage</a>
+      </nav>
+    </section>
+    <div class="phone"><div class="screen">
+      <div class="status" aria-hidden="true"><span>9:41</span><svg width="44" height="12" viewBox="0 0 44 12" fill="currentColor"><path d="M0 9h3v3H0zM5 6h3v6H5zM10 3h3v9h-3zM15 0h3v12h-3z"/><rect x="22.5" y=".5" width="19" height="11" rx="3" fill="none" stroke="currentColor"/><rect x="24.5" y="2.5" width="13" height="7" rx="1.5"/><path d="M43 4v4"/></svg></div>
+      <iframe id="app" title="libertty running in a phone" allow="microphone; clipboard-read; clipboard-write; screen-wake-lock"></iframe>
+      <div class="home" aria-hidden="true"></div>
+    </div></div>
+  </main>
+  <script>
+    // Phones get the app full-screen, opening on the README; desktops get it inside the phone, opening on the terminal.
+    const phone = matchMedia('(max-width: 760px)').matches, app = document.getElementById('app');
+    app.src = 'app.html' + (phone ? '?layout=phone' : '');
+    if (phone && window.visualViewport) {
+      const fit = () => document.documentElement.style.setProperty('--viewport-height', visualViewport.height + 'px');
+      visualViewport.addEventListener('resize', fit); fit();
+    }
+    document.getElementById('copy').addEventListener('click', () => {
+      const command = document.getElementById('install').textContent;
+      navigator.clipboard?.writeText(command).catch(() => getSelection().selectAllChildren(document.getElementById('install')));
+    });
+  </script>
+</body>
+</html>
