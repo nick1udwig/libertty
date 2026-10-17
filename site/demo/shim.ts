@@ -34,10 +34,10 @@ export function install(win: Window & typeof globalThis, server: DemoServer) {
         });
       }, 0);
     }
-    // Binary frames carry dictation audio, which the browser's own speech recognition replaces here.
     send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
       if (this.readyState !== 1) throw new win.DOMException('The socket is not open.', 'InvalidStateError');
-      if (typeof data === 'string') queueMicrotask(() => { if (this.readyState === 1) this.connection?.message(data); });
+      const message = typeof data === 'string' ? data : data instanceof Blob ? undefined : envelope(data);
+      if (message) queueMicrotask(() => { if (this.readyState === 1) this.connection?.message(message); });
     }
     close(code = 1000, reason = '') { if (this.readyState < 2) { this.readyState = 2; queueMicrotask(() => this.finish(code, reason)); } }
     private finish(code: number, reason: string) {
@@ -51,4 +51,20 @@ export function install(win: Window & typeof globalThis, server: DemoServer) {
     }
   }
   win.WebSocket = DemoSocket as unknown as typeof WebSocket;
+}
+
+const decoder = new TextDecoder();
+/** Read the binary envelopes from src/wire.ts back into the JSON messages the demo backend handles. */
+function envelope(data: ArrayBufferLike | ArrayBufferView): string | undefined {
+  const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
+  if (bytes.length < 4 || bytes[0] !== 84 || bytes[1] !== 77 || bytes[2] !== 1) return;
+  const payload = bytes.subarray(4), view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  switch (bytes[3]) {
+    case 3: return JSON.stringify({ type: 'input', data: decoder.decode(payload) });
+    case 4: return JSON.stringify({ type: 'ack', seq: view.getFloat64(0, true) });
+    case 5: return JSON.stringify({ type: 'resize', cols: view.getUint16(0, true), rows: view.getUint16(2, true), ...(payload[4] < 2 ? { mobile: payload[4] === 1 } : {}) });
+    case 8: return JSON.stringify({ type: 'input', seq: view.getFloat64(0, true), data: decoder.decode(payload.subarray(8)) });
+    // Dictation audio is replaced by the browser's own speech recognition here.
+    default: return;
+  }
 }

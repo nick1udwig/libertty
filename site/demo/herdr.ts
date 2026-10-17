@@ -16,7 +16,7 @@ const reply = 'This is a recorded session in the libertty demo, so I can\'t chan
 
 interface Choice { title: string; detail: string[]; options: string[]; answer(index: number): void }
 class Pane {
-  cols = 48; rows = 30; revision = 0; version = 0;
+  cols = 48; rows = 30; revision = 0; version = 0; frames = 0;
   lines: string[]; input = ''; cursor = 0; busy = ''; started = 0; choice?: Choice; selected = 0;
   peers = new Set<Peer>(); footer: string;
   private dictation?: { id: string; listening: Listening };
@@ -95,13 +95,13 @@ class Pane {
     const utf8 = new TextEncoder().encode('\x1b[H\x1b[2J' + visible.join('\r\n') + point);
     let binary = ''; for (const byte of utf8) binary += String.fromCharCode(byte);
     const screen = { type: 'screen', text: rows.join('\n') + '\n', version: ++this.version };
-    const frame = { type: 'herdr-frame', width: this.cols, height: this.rows, full: true, bytes: btoa(binary) };
+    const frame = { type: 'herdr-frame', seq: ++this.frames, width: this.cols, height: this.rows, full: true, bytes: btoa(binary) };
     for (const target of peer ? [peer] : this.peers) { target.send(screen); target.send(frame); }
   }
 
   attach(peer: Peer) {
     this.peers.add(peer);
-    peer.send({ type: 'state', state: { cwd: this.agent.cwd, inputRevision: this.revision, promptRevision: 0, ready: false, prompt: 0, exited: false, inputTarget: 'program' } });
+    peer.send({ type: 'state', state: { cwd: this.agent.cwd, inputRevision: this.revision, promptRevision: 0, ready: false, prompt: 0, exited: false, inputTarget: 'program', inputContext: this.agent.paneId } });
   }
   detach(peer: Peer) { this.peers.delete(peer); if (!this.peers.size) { this.dictation?.listening.cancel(); this.dictation = undefined; } }
   message(peer: Peer, message: any) {
