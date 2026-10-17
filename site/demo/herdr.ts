@@ -107,7 +107,10 @@ class Pane {
   message(peer: Peer, message: any) {
     switch (message.type) {
       case 'ping': peer.send({ type: 'pong' }); return;
-      case 'resize': this.cols = Math.max(20, message.cols); this.rows = Math.max(6, message.rows); this.render(); return;
+      case 'resize':
+        this.cols = Math.max(20, message.cols); this.rows = Math.max(6, message.rows);
+        // The scripted pane redraws at once, so the redraw barrier a mobile pane waits for has already passed.
+        peer.send({ type: 'herdr-layout', cols: this.cols, rows: this.rows, ready: true }); this.render(); return;
       case 'herdr-frame-request': this.render(peer); return;
       case 'input': this.revision++; for (const key of String(message.data).match(keys) || []) this.key(key); return;
       case 'paste': this.revision++; this.insert(message.text); return;
