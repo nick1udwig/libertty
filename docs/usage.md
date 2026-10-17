@@ -214,6 +214,7 @@ At a terminal prompt, type `look at README.md` and press Enter to open the file 
 Dictating the same phrase offers eye-icon alternatives for verified file and directory paths, using the command suggestion engine.
 Paths are resolved from that terminal's current directory, including on SSH hosts; quoted paths can contain spaces.
 The viewer renders Markdown and supports plain text, common image formats, PDF, audio, and video.
+Markdown may include basic HTML such as `<img>` and `<p align="center">`, while scripts, styles, forms and event handlers are removed.
 Other binary files show an unsupported preview message.
 Files are limited to 20 MB in this first version.
 Change the trigger phrases under **Settings → Reading Mode**.
