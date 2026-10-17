@@ -42,9 +42,13 @@ function fact(operation: Operation, cwd: string): unknown {
   switch (operation.kind) {
     case 'scoped': return fact(operation.operation, normalize(operation.cwd, cwd));
     case 'stat': return info(stat(normalize(operation.path, cwd)), operation.executable);
+    // As on the server, a missing path comes back with its parent's listing, which is how the engine finds a near match.
     case 'lookup': {
       const path = normalize(operation.path, cwd), node = stat(path);
-      return { info: info(node), ...(node?.directory ? { listing: { version: String(node.modified), entries: entries(path), complete: true } } : {}) };
+      if (node) return { info: info(node) };
+      const parent = path.slice(0, path.lastIndexOf('/')) || '/', folder = stat(parent);
+      // The engine reads an absent field as missing, and rejects null.
+      return { ...(folder?.directory ? { listing: { version: String(folder.modified), entries: entries(parent, 10000), complete: true } } : {}) };
     }
     case 'entries': return entries(normalize(operation.path, cwd), operation.limit);
     case 'syntax': return true;
