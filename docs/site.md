@@ -28,8 +28,8 @@ Everything the visitor sees and touches inside the phone is the real frontend.
 The backend answers the HTTP routes and JSON WebSocket messages the app uses, in `site/demo/server.ts`.
 `site/demo/shell.ts` and `site/demo/commands.ts` provide a small shell over a snapshot of the tracked repository, with a pager and a minimal vi in `site/demo/programs.ts`.
 Typed repairs and dictation alternatives run the backend's own engine code through `crates/engine-wasm`.
-Dictation transcribes with the browser's speech recognition where available, and a scripted phrase stands in when it is unavailable or hears nothing.
-The app's own recorder gets a silent stream, since phones give the microphone to one listener at a time.
+Dictation records the same microphone stream the app captures and shows levels for, and Whisper transcribes it in a Web Worker in place of Voxtype.
+The `whisper-tiny.en` model, about 41 MB, downloads from Hugging Face on the first dictation, with transformers.js loaded from jsDelivr.
 `site/demo/herdr.ts` scripts Herdr agents modeled on libertty's own development, including a permission prompt the visitor can answer.
 Files the visitor edits or uploads last until the page reloads.
 

@@ -64,7 +64,7 @@ function envelope(data: ArrayBufferLike | ArrayBufferView): string | undefined {
     case 4: return JSON.stringify({ type: 'ack', seq: view.getFloat64(0, true) });
     case 5: return JSON.stringify({ type: 'resize', cols: view.getUint16(0, true), rows: view.getUint16(2, true), ...(payload[4] < 2 ? { mobile: payload[4] === 1 } : {}) });
     case 8: return JSON.stringify({ type: 'input', seq: view.getFloat64(0, true), data: decoder.decode(payload.subarray(8)) });
-    // Dictation audio is replaced by the browser's own speech recognition here.
+    // Dictation audio is transcribed from the microphone stream instead, by Whisper in the workspace.
     default: return;
   }
 }

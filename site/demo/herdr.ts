@@ -135,7 +135,9 @@ class Pane {
     if (!dictation || dictation.id !== message.id) return;
     this.dictation = undefined;
     if (message.action === 'cancel') { dictation.listening.cancel(); return; }
-    const text = (await dictation.listening.finish()).replace(/[\x00-\x1f\x7f]/g, '');
+    let text: string;
+    try { text = (await dictation.listening.finish()).replace(/[\x00-\x1f\x7f]/g, ''); }
+    catch (error) { peer.send({ type: 'dictation', id: dictation.id, state: 'error', message: (error as Error).message }); return; }
     if (text) {
       this.revision++; this.insert(text);
       peer.send({ type: 'pasted', text, replace: false, source: 'dictation', repairing: false, prompt: 0, revision: this.revision });

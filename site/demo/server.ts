@@ -1,11 +1,13 @@
 import { Herdr } from './herdr.ts';
 import { captures, Shell, type Peer } from './shell.ts';
+import type { Recorder } from './recording.ts';
+import { microphoneOpened } from './speech.ts';
 import { bytes, list, mkdir, normalize, remove, rename, repo, stat, text, write } from './vfs.ts';
 
 /** The demo's backend: the HTTP routes and WebSocket endpoints the app uses, answered in the page. */
 export interface Reply { status: number; type?: string; body: string | Uint8Array }
 export interface Connection { message(data: string): void; close(): void }
-export interface DemoServer { request(method: string, url: string, body: string | Uint8Array | undefined): Promise<Reply>; connect(url: string, peer: Peer): Connection }
+export interface DemoServer { request(method: string, url: string, body: string | Uint8Array | undefined): Promise<Reply>; connect(url: string, peer: Peer): Connection; microphone(record: Recorder): void }
 
 const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), byte => byte.toString(16).padStart(2, '0')).join('');
 const json = (value: unknown, status = 200): Reply => ({ status, type: 'application/json', body: JSON.stringify(value) });
@@ -84,6 +86,7 @@ export function createServer(): DemoServer {
   }
 
   return {
+    microphone: microphoneOpened,
     async request(method, address, body) {
       const url = new URL(address);
       let parsed: unknown = body;

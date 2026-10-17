@@ -193,7 +193,9 @@ export class Shell {
     if (!dictation || dictation.id !== message.id) return;
     this.dictation = undefined;
     if (message.action === 'cancel') { dictation.listening.cancel(); return; }
-    const text = (await dictation.listening.finish()).replace(/[\x00-\x1f\x7f]/g, '');
+    let text: string;
+    try { text = (await dictation.listening.finish()).replace(/[\x00-\x1f\x7f]/g, ''); }
+    catch (error) { this.peer?.send({ type: 'dictation', id: dictation.id, state: 'error', message: (error as Error).message }); return; }
     const target = this.state.ready ? 'shell' : this.program ? 'program' : undefined;
     if (text && (target !== dictation.target || this.state.inputRevision !== dictation.revision || (target === 'shell' && this.state.prompt !== dictation.prompt))) {
       this.peer?.send({ type: 'dictation', id: dictation.id, state: 'error', message: 'The terminal changed during dictation. No text was inserted.' });
