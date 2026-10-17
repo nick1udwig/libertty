@@ -14,6 +14,18 @@ export function wrap(line: string, width: number) {
   rows.push(row);
   return rows;
 }
+const visible = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, '').length;
+/** Word-wrap text to the terminal width, continuing each line at its indent; no-break spaces hold a phrase together. */
+export function flow(text: string, width: number) {
+  return text.split('\n').map(line => {
+    const indent = /^ */.exec(line)![0], rows: string[] = []; let row = '';
+    for (const word of line.slice(indent.length).split(' ').filter(Boolean)) {
+      if (row && visible(indent + row + ' ' + word) > width) { rows.push(indent + row); row = word; } else row = row ? row + ' ' + word : word;
+    }
+    rows.push(indent + row);
+    return rows.join('\n');
+  }).join('\n').replaceAll('\u00a0', ' ');
+}
 const keys = /\x1b\[[0-9;]*[@-~]|\x1bO[@-~]|\x1b|[\s\S]/g;
 
 /** Page through text like less, with q to quit. */

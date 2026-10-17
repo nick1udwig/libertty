@@ -1,6 +1,7 @@
 import type { ShellState } from '../../src/protocol.ts';
 import { readingPipeline, readingRequest } from '../../src/reading-request.ts';
 import { commandNames, run, type Program } from './commands.ts';
+import { flow } from './programs.ts';
 import { alternatives, detectIntent, type Intent } from './engine.ts';
 import { listen, type Listening } from './speech.ts';
 import { display, list, normalize, repo, stat } from './vfs.ts';
@@ -24,10 +25,17 @@ export class Shell {
   private dictation?: { id: string; listening: Listening; prompt: number; revision: number; target: string; phrases: string[] };
   private repairs = new Set<string>();
 
-  constructor() {
-    const green = (text: string) => `\x1b[32m${text}\x1b[0m`;
-    this.write(['\x1b[1mWelcome to the libertty demo.\x1b[0m', 'This shell runs in your browser on', 'a copy of the libertty repository.', '',
-      `Try ${green('ls')}, ${green('vi README.md')} or`, `${green('look at README.md')}, tap the mic`, `and say a command, or type ${green('help')}.`, '', ''].join('\r\n'));
+  private greeted = false;
+  // The welcome waits for the terminal's first size, so it wraps to the screen it appears on.
+  private greet() {
+    this.greeted = true;
+    const green = (text: string) => `\x1b[32m${text.replaceAll(' ', '\u00a0')}\x1b[0m`;
+    this.write(flow(`\x1b[1mWelcome to the libertty demo.\x1b[0m
+This shell runs in your browser on a copy of the libertty repository.
+
+Try ${green('ls')}, ${green('vi README.md')} or ${green('look at README.md')}. Tap the mic and say a command, or type ${green('help')}.
+
+`, this.cols).replace(/\n/g, '\r\n'));
     this.prompt();
   }
   get current() { return { ...this.state, cwd: this.cwd }; }
@@ -52,7 +60,7 @@ export class Shell {
   message(message: any) {
     switch (message.type) {
       case 'ping': this.peer?.send({ type: 'pong' }); return;
-      case 'resize': this.cols = Math.max(10, message.cols); this.rows = Math.max(4, message.rows); this.program?.resize(); return;
+      case 'resize': this.cols = Math.max(10, message.cols); this.rows = Math.max(4, message.rows); if (!this.greeted) this.greet(); this.program?.resize(); return;
       case 'input': this.state.inputRevision++; this.input(message.data); return;
       case 'paste': this.insert(message.text); return;
       case 'replace': return this.replace(message);

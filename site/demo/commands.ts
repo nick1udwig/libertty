@@ -1,5 +1,5 @@
 import { branch, log } from 'virtual:libertty-repo';
-import { pager, editor } from './programs.ts';
+import { editor, flow, pager } from './programs.ts';
 import type { Shell } from './shell.ts';
 import { bytes, changes, display, home, list, mkdir, normalize, remove, rename, stat, text, write } from './vfs.ts';
 
@@ -61,19 +61,21 @@ function walk(path: string, visit: (path: string) => void) {
 function count(text: string) { return text.split('\n').length - (text.endsWith('\n') ? 1 : 0); }
 
 const commands: Record<string, Command> = {
-  help: ({ out }) => {
-    out(`This demo shell runs in your browser over a copy of the libertty repository.
-Files you create or edit last until you reload.
+  help: ({ out, context }) => {
+    const heading = (text: string) => `\x1b[1m${text}\x1b[0m`, phrase = (text: string) => text.replaceAll(' ', '\u00a0');
+    out(flow(`This demo shell runs in your browser on a copy of the libertty repository. Files you create or edit last until you reload.
 
-  Files     ls  cd  pwd  cat  head  tail  wc  grep  find  tree
-            mkdir  touch  rm  mv  cp  echo  less  vi
-  Git       git status  git log  git log --oneline  git branch  git show
-  Reading   look at README.md   or   git log --oneline | look at
-  Other     clear  history  whoami  hostname  date  uname
+${heading('Files')}
+  ls cd pwd cat head tail wc grep find tree mkdir touch rm mv cp echo less vi
+${heading('Git')}
+  ${['git status', 'git log', 'git log --oneline', 'git branch', 'git show'].map(phrase).join(', ')}
+${heading('Reading')}
+  ${phrase('look at README.md')} or ${phrase('git log --oneline | look at')}
+${heading('Other')}
+  clear history whoami hostname date uname
 
-Tap the mic and say a command, such as "look at readme dot md" or "cd docs".
-libertty repairs what you said with this shell's files and history.
-`);
+Tap the mic and say a command, such as ${phrase('"look at readme dot md"')} or ${phrase('"cd docs"')}. libertty repairs what you said with this shell's files and history.
+`, context.shell.cols));
     return 0;
   },
   ls: ({ args, out, err, context }) => {
