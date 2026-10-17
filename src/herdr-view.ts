@@ -34,7 +34,7 @@ interface Host {
   notificationDevice?(): string | undefined;
 }
 type StripItem = HerdrAgent & { space?: HerdrSpace; repo?: SpaceRepo };
-interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; collapsedLanes?: HerdrLane[]; spaceTerminals?: Record<string, string>; repoSpaces?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']>; /** Earlier versions kept the snapshot cache here. */ snapshot?: unknown }
+interface Preferences { order: string[]; spaceOrder?: string[]; spaceGroups?: string[][]; collapsedGroups?: string[]; collapsedLanes?: HerdrLane[]; spaceTerminals?: Record<string, string>; repoSpaces?: Record<string, string>; selected?: string; state?: ReturnType<HerdrState['checkpoint']> }
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
   private strip = node('div', 'herdr-agent-strip');
@@ -51,8 +51,6 @@ export class HerdrView {
   private preferences: Preferences;
   private transport!: ReconnectingSocket;
   private get ws() { return this.transport?.socket; }
-  private offeredWire?: string[];
-  private supportsHeartbeat = false;
   private recovering?: Promise<void>;
   private recoveryRetry?: ReturnType<typeof setTimeout>;
   private disposed = false;
@@ -105,9 +103,9 @@ export class HerdrView {
     this.selected = this.preferences.selected || '';
     let stored: unknown;
     try { stored = JSON.parse(localStorage.getItem(host.key + '.snapshot') || 'null'); } catch { /* Start without the cache. */ }
-    const cached = herdrCache(stored ?? this.preferences.snapshot); delete this.preferences.snapshot;
+    const cached = herdrCache(stored);
     if (cached) {
-      this.cached = true; this.terminals = cached.terminals || cached.agents; this.spaces = cached.spaces || []; this.repos = spaceRepos(this.spaces);
+      this.cached = true; this.terminals = cached.terminals; this.spaces = cached.spaces; this.repos = spaceRepos(this.spaces);
       this.tracker.agents = cached.agents; this.ensureSelection();
     }
     this.element.setAttribute('aria-label', 'Herdr connection');
@@ -186,11 +184,10 @@ export class HerdrView {
     this.unsubscribers.push(() => window.removeEventListener('resize', reposition), () => visualViewport?.removeEventListener('resize', reposition));
     this.transport = new ReconnectingSocket({
       available: () => !this.disposed && !this.recovering && (!document.hidden || !this.transport.backgroundExpired) && navigator.onLine,
-      protocols: () => wireProtocols(this.offeredWire),
-      heartbeat: () => this.supportsHeartbeat,
+      protocols: wireProtocols,
       prepare: async signal => {
-        const { ticket, wire, heartbeat } = await this.host.api<{ ticket: string; wire?: string[]; heartbeat?: boolean }>('api/herdr/ticket', {}, signal);
-        signal.throwIfAborted(); this.offeredWire = wire; this.supportsHeartbeat = heartbeat === true;
+        const { ticket } = await this.host.api<{ ticket: string }>('api/herdr/ticket', {}, signal);
+        signal.throwIfAborted();
         const url = this.endpoint('herdr/ws');
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
         return url;
@@ -276,7 +273,7 @@ export class HerdrView {
     this.liveSnapshot = true; this.cached = false; this.cacheLater(message.snapshot);
     const previousSpace = this.terminals.find(terminal => terminal.terminalId === this.selected)?.workspaceId;
     this.status.textContent = '';
-    this.terminals = message.snapshot.terminals || message.snapshot.agents; this.spaces = message.snapshot.spaces || []; this.repos = spaceRepos(this.spaces);
+    this.terminals = message.snapshot.terminals; this.spaces = message.snapshot.spaces; this.repos = spaceRepos(this.spaces);
     const notifications = this.tracker.update(message.snapshot);
     this.acknowledge(this.quietSnapshot ? this.currentNotifications() : notifications);
     if (!this.quietSnapshot) for (const event of notifications) this.host.notification(event);
@@ -753,12 +750,6 @@ export class HerdrView {
     let updateBranches: (() => void) | undefined;
     try {
       if (action === 'split') {
-        progress.textContent = 'Checking split support…';
-        const options = await this.host.api<{ actions?: string[] }>('api/herdr/options');
-        if (!modal.open || this.disposed) return;
-        progress.textContent = '';
-        if (!options.actions?.includes('split')) throw new Error('This libertty backend is older than the interface. ' +
-          'Restart it with the current build to enable Split.');
         field('Split direction', picker); picker.setAttribute('aria-label', 'Split direction');
         for (const [value, label] of [['right', 'Right (side by side)'], ['down', 'Down (above and below)']]) { const option = node('option', '', label); option.value = value; picker.append(option); }
         context.textContent = space.name + ' · ' + (this.terminals.find(t => t.terminalId === terminalId)?.name || 'No running terminal');

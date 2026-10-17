@@ -3,5 +3,5 @@
   "crates/server/assets/completion.sh": "bc958ba1ca3e7b0833b8e1c8346656988004478dad8fa2021230ea984dc21ab1",
   "crates/server/assets/completion-snapshot.sh": "af1541a7e1a0e77ffbcd66c6cb470feeedc5800cc3757e7ea26e49c1eba9bafa",
   "crates/server/assets/describe.py": "fa4928df0bcd5c173203d662ac61b45765157119e61683f09c229a07c012c6d9",
-  "crates/server/assets/pairing.html": "6a874f0cf04be680f598a3df2a398a6e0d71bfd7e1a6c701fed1c060f13c7c57"
+  "crates/server/assets/pairing.html": "4228d35dd05f36c4659ee4f44484dbda98c20c43d13d4eaf6adbae813205ee67"
 }

@@ -13,9 +13,10 @@ async function fixture(t, platform = 'linux', manager = true) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const home = directory + '/home with spaces', bundle = directory + '/bundle';
   await mkdir(home); await mkdir(bundle + '/scripts', { recursive: true });
-  const metadata = { version: '0.1.0', tag: 'v0.1.0', commit: '1'.repeat(40), platform: platform + '-arm64' };
+  const metadata = { version: '0.1.0', tag: 'v0.1.0', commit: '1'.repeat(40), platform: platform + '-arm64', backend: 'rust' };
   await writeFile(bundle + '/release.json', JSON.stringify(metadata));
-  await writeFile(bundle + '/scripts/launch.mjs', '// fixture');
+  await mkdir(bundle + '/bin');
+  await writeFile(bundle + '/bin/libertty-backend', '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const calls = [];
   const command = (name, args, options = {}) => {
     calls.push({ name, args });
@@ -30,66 +31,6 @@ async function fixture(t, platform = 'linux', manager = true) {
 test('installer validates explicit options before making changes', () => {
   assert.deepEqual(parseOptions(['--yes', '--port', '7400', '--base-path', '/workspace']), { yes: true, port: '7400', 'base-path': '/workspace' });
   for (const args of [['--port', '0'], ['--port', '65536'], ['--base-path', '/x?'], ['--prefix'], ['--surprise']]) assert.throws(() => parseOptions(args));
-});
-async function legacyInstallation(f, platform = 'linux') {
-  const config = f.home + '/config/termai/config.json';
-  const unit = platform === 'linux' ? f.home + '/config/systemd/user/termai.service' : f.home + '/Library/LaunchAgents/com.termai.server.plist';
-  await mkdir(path.dirname(config), { recursive: true });
-  await mkdir(path.dirname(unit), { recursive: true });
-  await mkdir(f.home + '/data/termai', { recursive: true });
-  await mkdir(f.home + '/.local/bin', { recursive: true });
-  await writeFile(f.home + '/data/termai/pairing-token', 'existing-pairing-token');
-  await writeFile(config, JSON.stringify({ managedBy: 'termai', env: { PORT: '7600', TERMAI_BASE_PATH: '/existing', TERMAI_CWD: '/saved/workspace', TERMAI_DATA_DIR: f.home + '/data/termai', TERMAI_TOKEN: 'saved-token', LIBERTTY_CWD: '/new/workspace' } }));
-  await writeFile(unit, '# Managed by the Termai installer\nlegacy service');
-  await writeFile(f.home + '/.local/bin/termai', '#!/bin/sh\n# Managed by the Termai installer\nlegacy launcher');
-  const run = f.dependencies.command;
-  f.dependencies.command = (name, args, options) => {
-    if ((args.includes('termai.service') || args.some(arg => arg.endsWith('/com.termai.server'))) && (args.includes('is-active') || args.includes('is-enabled') || args.includes('print'))) return { ok: true, stdout: '' };
-    return run(name, args, options);
-  };
-  return { config, unit };
-}
-for (const platform of ['linux', 'darwin']) {
-  test(`rebrand migrates ${platform} service and settings while preserving pairing data`, async t => {
-    const f = await fixture(t, platform), legacy = await legacyInstallation(f, platform);
-    const installed = await install({ yes: true }, f.dependencies);
-    assert.equal(installed.config.managedBy, 'libertty');
-    assert.equal(installed.config.env.PORT, '7600');
-    assert.equal(installed.config.env.LIBERTTY_BASE_PATH, '/existing');
-    assert.equal(installed.config.env.LIBERTTY_CWD, '/new/workspace');
-    assert.equal(installed.config.env.LIBERTTY_TOKEN, 'saved-token');
-    assert.equal(installed.config.env.LIBERTTY_DATA_DIR, f.home + '/data/termai');
-    assert.equal('TERMAI_TOKEN' in installed.config.env, false);
-    assert.equal(await readFile(f.home + '/data/termai/pairing-token', 'utf8'), 'existing-pairing-token');
-    await assert.rejects(stat(legacy.unit), { code: 'ENOENT' });
-    assert.ok((await readFile(f.home + '/.local/bin/termai', 'utf8')).includes(installed.launch));
-    assert.equal(JSON.parse(await readFile(legacy.config, 'utf8')).managedBy, 'termai');
-    assert.ok(f.calls.some(call => platform === 'linux' ? call.args.join(' ') === '--user disable --now termai.service' : call.args.includes('bootout')));
-  });
-  test(`failed rebrand restores the ${platform} service and legacy launcher`, async t => {
-    const f = await fixture(t, platform), legacy = await legacyInstallation(f, platform);
-    const originalUnit = await readFile(legacy.unit, 'utf8'), originalLauncher = await readFile(f.home + '/.local/bin/termai', 'utf8');
-    f.dependencies.health = async () => { throw new Error('fixture startup failure'); };
-    await assert.rejects(install({ yes: true }, f.dependencies), /Previous release.*restored/);
-    assert.equal(await readFile(legacy.unit, 'utf8'), originalUnit);
-    assert.equal(await readFile(f.home + '/.local/bin/termai', 'utf8'), originalLauncher);
-    await assert.rejects(stat(f.home + '/config/libertty/config.json'), { code: 'ENOENT' });
-    assert.ok(f.calls.some(call => platform === 'linux' ? call.args.join(' ') === '--user restart termai.service' : call.args.includes('bootstrap') && call.args.includes(legacy.unit)));
-  });
-}
-test('Rust releases install a direct native launcher and upgrades can roll back to Node', async t => {
-  const f = await fixture(t);
-  f.metadata.backend = 'rust';
-  await writeFile(f.bundle + '/release.json', JSON.stringify(f.metadata));
-  const installed = await install({ yes: true, 'no-service': true }, f.dependencies);
-  const launcher = await readFile(installed.launch, 'utf8');
-  assert.ok(launcher.includes("/bin/libertty-backend' --config '"));
-  assert.ok(!launcher.includes('/bin/node'));
-  f.metadata.version = '0.2.0'; f.metadata.tag = 'v0.2.0'; f.metadata.commit = '2'.repeat(40); f.metadata.backend = 'node';
-  await writeFile(f.bundle + '/release.json', JSON.stringify(f.metadata));
-  await install({ yes: true, 'no-service': true }, f.dependencies);
-  assert.ok((await readFile(installed.launch, 'utf8')).includes('/scripts/launch.mjs'));
-  assert.ok(await stat(installed.releaseDir));
 });
 test('fresh install uses user systemd, preserves pairing data, and quotes paths with spaces', async t => {
   const f = await fixture(t); await mkdir(f.home + '/data/libertty', { recursive: true });
@@ -142,17 +83,6 @@ test('upgrades retain custom environment settings and previous versions', async 
   assert.equal(updated.config.env.PORT, '7600'); assert.equal(updated.config.env.LIBERTTY_CWD, '/custom/workspace');
   assert.ok(await stat(installed.releaseDir)); assert.notEqual(updated.releaseDir, installed.releaseDir);
 });
-test('upgrades accept the earlier capitalization of installer ownership markers', async t => {
-  const f = await fixture(t), installed = await install({ yes: true, 'no-service': true }, f.dependencies);
-  const marker = '# Managed by the libertty installer';
-  const earlierMarker = marker.replace('libertty', name => name[0].toUpperCase() + name.slice(1));
-  for (const file of [installed.launch, f.home + '/.local/bin/libertty']) {
-    const launcher = await readFile(file, 'utf8');
-    await writeFile(file, launcher.replace(marker, earlierMarker));
-  }
-  await install({ yes: true, 'no-service': true }, f.dependencies);
-  assert.ok((await readFile(installed.launch, 'utf8')).includes(marker));
-});
 test('machines without a user bus get a manual launcher without system service mutation', async t => {
   const f = await fixture(t, 'linux', false), installed = await install({ yes: true }, f.dependencies);
   assert.equal(installed.service, false); assert.ok(await stat(installed.launch));
@@ -183,7 +113,7 @@ test('bootstrap installs its launcher when the temporary directory is reached th
   const directory = await mkdtemp(path.join(os.tmpdir(), 'libertty-symlink-install-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const bundle = path.join(directory, 'bundle'), home = path.join(directory, 'home');
-  for (const entry of ['bin', 'scripts', 'server', 'build', 'node_modules']) await mkdir(path.join(bundle, entry), { recursive: true });
+  for (const entry of ['bin', 'scripts', 'build', 'node_modules']) await mkdir(path.join(bundle, entry), { recursive: true });
   await mkdir(home); await mkdir(path.join(directory, 'temporary'));
   const temporary = path.join(directory, 'temporary-alias');
   await symlink(path.join(directory, 'temporary'), temporary);
@@ -191,9 +121,8 @@ test('bootstrap installs its launcher when the temporary directory is reached th
   await symlink(path.join(root, 'node_modules/ws'), path.join(bundle, 'node_modules/ws'));
   for (const entry of ['setup.mjs', 'setup-integrations.mjs']) await cp(path.join(root, 'scripts', entry), path.join(bundle, 'scripts', entry));
   await cp(path.join(root, 'build/release-config.json'), path.join(bundle, 'build/release-config.json'));
-  await writeFile(path.join(bundle, 'release.json'), JSON.stringify({ version: '0.1.1', tag: 'v0.1.1', commit: '1'.repeat(40), platform: process.platform + '-' + process.arch }));
-  await writeFile(path.join(bundle,'scripts/launch.mjs'), "import { readFile } from 'node:fs/promises'; const config=JSON.parse(await readFile(process.argv[process.argv.indexOf('--config')+1],'utf8')); Object.assign(process.env,config.env); await import('../server/index.ts');\n");
-  await writeFile(path.join(bundle, 'server/index.ts'), 'console.log("libertty 0.1.1");\n');
+  await writeFile(path.join(bundle, 'release.json'), JSON.stringify({ version: '0.1.1', tag: 'v0.1.1', commit: '1'.repeat(40), platform: process.platform + '-' + process.arch, backend: 'rust' }));
+  await writeFile(path.join(bundle, 'bin/libertty-backend'), '#!/bin/sh\necho "libertty 0.1.1"\n', { mode: 0o755 });
   const archive = path.join(directory, 'app.tar.gz');
   execFileSync('tar', ['-czf', archive, '-C', bundle, '.']);
   const digest = createHash('sha256').update(await readFile(archive)).digest('hex');

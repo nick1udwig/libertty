@@ -109,8 +109,7 @@ pub(super) async fn api_herdr_captured(
         return Err(fail("This connection has closed."));
     }
     let local = source.remote.is_none()
-        && socket_path
-            == herdr::socket(&session, &crate::environment::vars().collect()).map_err(fail)?;
+        && socket_path == herdr::socket(&session, &std::env::vars().collect()).map_err(fail)?;
     let result = json!({"herdrSession":session,"herdrSource":if local{""}else{&sid},"name":if target.session.is_empty(){"Herdr".into()}else{format!("Herdr · {}",target.session)},"remote":source.remote.is_some()});
     app.herdr_targets
         .lock()
@@ -257,8 +256,6 @@ pub(super) async fn api_herdr_ticket(
     tickets.insert(
         ticket.clone(),
         HerdrTicket {
-            history_delta: input.history_delta,
-            frame_ack: input.frame_ack,
             size,
             owner: owner.into(),
             session: session_name,
@@ -268,9 +265,7 @@ pub(super) async fn api_herdr_ticket(
             until: Instant::now() + Duration::from_secs(15),
         },
     );
-    ok(
-        json!({"ticket":ticket,"initialGeometry":true,"parkViews":true,"redrawBarrier":true,"heartbeat":true,"inputContexts":true,"wire":[wire::BINARY,wire::GZIP_FAST,wire::GZIP]}),
-    )
+    ok(json!({"ticket":ticket}))
 }
 
 pub(super) async fn api_herdr_reading(

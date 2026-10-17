@@ -2,11 +2,9 @@ import {
   backendURL,
   type BackendProfile,
   type HostProfile,
-  type LegacyReadingTab,
   type TerminalTab,
 } from './connections.ts';
 import { saved, validSession } from './persistence.ts';
-import { migratePluginTab, migrateReadingTab } from './plugins.ts';
 
 export interface WorkspaceState {
   backends: BackendProfile[];
@@ -62,28 +60,18 @@ export function loadWorkspace(primary: BackendProfile): WorkspaceState {
       ['http', 'ssh', 'herdr'].includes(h.kind) &&
       backends.some((b) => b.id === h.backendId),
   );
-  let tabs: TerminalTab[] = saved<TerminalTab[]>('tabs', [])
-    .filter(
-      (t) =>
-        t &&
-        typeof t.id === 'string' &&
-        typeof t.name === 'string' &&
-        backends.some((b) => b.id === t.backendId) &&
-        validSession(t.session),
-    )
-    .map(migratePluginTab);
-  for (const tab of saved<LegacyReadingTab[]>('readingTabs', []).filter(
+  let tabs: TerminalTab[] = saved<TerminalTab[]>('tabs', []).filter(
     (t) =>
       t &&
       typeof t.id === 'string' &&
       typeof t.name === 'string' &&
-      typeof t.path === 'string' &&
-      typeof t.sourceTabId === 'string' &&
+      typeof t.pluginId === 'string' &&
+      !!t.pluginId &&
+      typeof t.pluginVersion === 'string' &&
+      !!t.pluginVersion &&
       backends.some((b) => b.id === t.backendId) &&
       validSession(t.session),
-  )) {
-    if (!tabs.some((existing) => existing.id === tab.id)) tabs.push(migrateReadingTab(tab));
-  }
+  );
   let active = saved<string>('activeTab', '') || tabs[0]?.id || '';
   return { backends, hosts, tabs, active };
 }
@@ -96,7 +84,6 @@ export function saveWorkspace(workspace: WorkspaceState, notice: (message: strin
       activeTab: workspace.active,
     }))
       localStorage.setItem('libertty.' + key, JSON.stringify(value));
-    localStorage.removeItem('libertty.readingTabs');
   } catch {
     notice('Browser storage is unavailable. Connections will last for this page only.');
   }

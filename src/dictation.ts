@@ -183,8 +183,7 @@ export class DictationControl {
     finally { this.polling = false; this.render(); }
   }
   private offer() {
-    // Old versions saved "installed" merely on finding a token or binary. Only
-    // an explicit dismissal should hide help when the API cannot actually be used.
+    // Only an explicit dismissal suppresses setup help.
     let suppressed = false; try { suppressed = localStorage.getItem('libertty.voxtype:' + this.host.key) === 'dismissed'; } catch {}
     if (this.daemonAvailable !== false || !this.online || !this.visible || document.hidden || suppressed || this.offered || !this.host.state().ready || document.querySelector('dialog[open]')) return;
     this.dialog.querySelector('h2')!.textContent = this.installed ? 'Enable Voxtype dictation' : 'Dictate with Voxtype Mobile';

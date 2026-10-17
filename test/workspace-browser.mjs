@@ -62,7 +62,7 @@ try {
   await new Promise((resolve, reject) => { const socket = new WebSocket(socketURL, { origin }); socket.once('open', () => { socket.close(); reject(new Error('Reused websocket ticket was accepted')); }); socket.once('error', error => { assert.match(error.message, /403/); resolve(); }); });
   await request(origin, 'sessions/close?session=' + isolated, ownerA, {});
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 } }), page = await context.newPage();
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'dark' }), page = await context.newPage();
   // Inspect the real terminal buffer without exposing a debug API in production.
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await context.route('**/assets/terminal-*.js', async route => {
@@ -127,7 +127,12 @@ try {
   // A theme change restyles the workspace at once and reloads the terminal into the same session with the matching palette.
   const themeOf = target => target.evaluate(() => [document.documentElement.dataset.theme ?? 'forest', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim(), document.querySelector('meta[name=theme-color]').content]);
   const switchTheme = async name => { await frame.evaluate(() => { window.__previousTheme = true; }); await page.locator('#theme').selectOption(name); await frame.waitForFunction(() => !window.__previousTheme && window.__shellState?.ready); };
-  assert.equal(await page.locator('#theme').inputValue(), 'forest'); assert.deepEqual(await themeOf(page), ['forest', '#0b0f0d', '#0b0f0d']);
+  assert.equal(await page.locator('#theme').inputValue(), 'auto'); assert.deepEqual(await themeOf(page), ['ink', '#000', '#000000']); assert.deepEqual(await themeOf(frame), ['ink', '#000', '#000000']);
+  await frame.evaluate(() => { window.__previousTheme = true; });
+  await page.emulateMedia({ colorScheme: 'light' }); await frame.waitForFunction(() => !window.__previousTheme && window.__shellState?.ready);
+  assert.equal(await page.locator('#theme').inputValue(), 'auto'); assert.deepEqual(await themeOf(page), ['paper', '#fbfaf6', '#fbfaf6']); assert.deepEqual(await themeOf(frame), ['paper', '#fbfaf6', '#fbfaf6']);
+  await frame.evaluate(() => { window.__previousTheme = true; });
+  await page.emulateMedia({ colorScheme: 'dark' }); await frame.waitForFunction(() => !window.__previousTheme && window.__shellState?.ready);
   await switchTheme('paper'); assert.deepEqual(await themeOf(page), ['paper', '#fbfaf6', '#fbfaf6']); assert.deepEqual(await themeOf(frame), ['paper', '#fbfaf6', '#fbfaf6']);
   await switchTheme('ink'); assert.deepEqual(await themeOf(frame), ['ink', '#000', '#000000']);
   await switchTheme('1776'); assert.deepEqual(await themeOf(page), ['1776', '#0b1430', '#0b1430']); assert.deepEqual(await themeOf(frame), ['1776', '#0b1430', '#0b1430']);
@@ -208,7 +213,7 @@ try {
   assert.equal(await page.locator('#backend-filter').inputValue(), 'browser');
   assert.equal((await vaultData('primary')).keys.length, 0); assert.equal((await vaultData('secondary')).keys.length, 0);
   const records = await page.evaluate(() => new Promise((resolve, reject) => {
-    const open = indexedDB.open('termai-keychain', 1); open.onerror = () => reject(open.error); open.onsuccess = () => { const db = open.result, read = db.transaction('keys').objectStore('keys').getAll(); read.onsuccess = () => { resolve(read.result); db.close(); }; };
+    const open = indexedDB.open('libertty-keychain', 1); open.onerror = () => reject(open.error); open.onsuccess = () => { const db = open.result, read = db.transaction('keys').objectStore('keys').getAll(); read.onsuccess = () => { resolve(read.result); db.close(); }; };
   }));
   assert.equal(records.length, 1); assert.ok(records[0].ciphertext); assert.ok(!JSON.stringify(records).includes('PRIVATE KEY') && !JSON.stringify(records).includes('test-key-passphrase'));
   const backupDownload = page.waitForEvent('download'); await page.locator('#export-key-backup').click();

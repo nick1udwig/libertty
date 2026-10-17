@@ -43,7 +43,7 @@ try {
     if (!localStorage.getItem('libertty.tabs')) {
       const id = crypto.randomUUID();
       localStorage.setItem('libertty.hosts', JSON.stringify([{ id: 'herdr-native', name: 'Herdr', kind: 'herdr', backendId: 'primary' }]));
-      localStorage.setItem('libertty.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', mode: 'herdr', backendId: 'primary', hostId: 'herdr-native' }]));
+      localStorage.setItem('libertty.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', pluginId:'herdr',pluginVersion:'1', backendId: 'primary', hostId: 'herdr-native' }]));
       localStorage.setItem('libertty.activeTab', JSON.stringify(id));
     }
     // Reordering and stacking need the manual order, because status lanes pause dragging.
@@ -311,13 +311,6 @@ try {
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(await selected(), chip(beta), 'Discovery failure preserves selection');
   const alphaBefore = (await herdrSnapshot(target)).spaces.find(space => space.id === alpha);
-  await page.route('**/api/herdr/options*', route => route.fulfill({ json: { kinds: ['codex'] } }));
-  await hold(alpha); await treeAction('Split a pane in Alpha');
-  await page.locator('.herdr-space-action .form-error').filter({ hasText: 'Restart it with the current build' }).waitFor();
-  assert.equal(await page.getByRole('dialog').getByRole('button', { name: 'Split', exact: true }).isDisabled(), true, 'A stale backend cannot receive an unsupported split action');
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
-  assert.equal(await selected(), chip(beta), 'A version mismatch preserves selection');
-  await page.unroute('**/api/herdr/options*');
   await hold(alpha); await treeAction('Split a pane in Alpha');
   let splitRequests = 0;
   await page.route('**/api/herdr/action*', async route => {

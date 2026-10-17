@@ -22,7 +22,7 @@ try {
   await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'backend');
   const token = (await readFile(fixture.directory+'/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({args:['--use-gl=angle','--use-angle=gl']});
-  const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+  const context = await browser.newContext({viewport:{width:390,height:844},colorScheme:'dark',isMobile:true,hasTouch:true});
   await installWireObserver(context);
   await context.addInitScript(({first,second}) => {
     if (window === parent) {
@@ -30,7 +30,7 @@ try {
       // Folded status lanes would hide the idle tabs this test switches between.
       localStorage.setItem('libertty.herdrStripOrder', JSON.stringify('manual'));
       localStorage.setItem('libertty.hosts', JSON.stringify([{id:'herdr',name:'Herdr',kind:'herdr',backendId:'primary'}]));
-      localStorage.setItem('libertty.tabs', JSON.stringify([first,second].map((id,i)=>({id,session:'default',name:'Herdr '+(i+1),mode:'herdr',backendId:'primary',hostId:'herdr'}))));
+      localStorage.setItem('libertty.tabs', JSON.stringify([first,second].map((id,i)=>({id,session:'default',name:'Herdr '+(i+1),pluginId:'herdr',pluginVersion:'1',backendId:'primary',hostId:'herdr'}))));
       localStorage.setItem('libertty.activeTab', JSON.stringify(first));
       localStorage.setItem('libertty.shortcuts', JSON.stringify([{label:'Stop',kind:'keys',value:'Escape'},{label:'Ctrl',kind:'keys',value:'Ctrl'},{label:'Status',kind:'command',value:'pwd'}]));
       window.__holdRendered = []; window.__holdAllRendered = true; window.__visibleScreens = [];

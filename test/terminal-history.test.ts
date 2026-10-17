@@ -23,5 +23,5 @@ test('gaps and invalid offsets request one baseline before accepting more edits'
   history.reset();
   assert.equal(history.receive(delta), undefined);
   assert.equal(requests, 3);
-  assert.equal(history.receive({ type: 'screen', text: 'legacy' }), 'legacy');
+  assert.equal(history.receive({ type: 'screen', version: 5, text: 'baseline' }), 'baseline');
 });

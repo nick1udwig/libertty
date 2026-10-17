@@ -4,7 +4,7 @@
   <base href="/" data-libertty-base>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0b0f0d"><meta name="description" content="A mobile terminal with inline dictation and command alternatives.">
-  <script>/* Apply the saved theme before first paint, matching src/theme.ts. */try{let t=JSON.parse(localStorage.getItem('libertty.theme')??localStorage.getItem('termai.theme')??'null');if(t==='auto')t=matchMedia('(prefers-color-scheme: light)').matches?'paper':'ink';if(t==='paper'||t==='ink'||t==='1776'||t==='flag')document.documentElement.dataset.theme=t}catch(e){}</script>
+  <script>/* Apply the saved theme before first paint, matching src/theme.ts. */try{let t=JSON.parse(localStorage.getItem('libertty.theme')??'"auto"');if(!['forest','paper','ink','1776','flag','auto'].includes(t))t='auto';if(t==='auto')t=matchMedia('(prefers-color-scheme: light)').matches?'paper':'ink';if(t==='paper'||t==='ink'||t==='1776'||t==='flag')document.documentElement.dataset.theme=t}catch(e){}</script>
   <link rel="manifest" href="./manifest.webmanifest"><link rel="icon" href="./icon.svg" type="image/svg+xml">
   <title>libertty · your shell, within reach</title>
 </head>

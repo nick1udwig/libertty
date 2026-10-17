@@ -1,3 +1,4 @@
+import { decodeWire } from '../src/wire.ts';
 import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { installBackgroundGrace } from './support/background-grace.mjs';
@@ -477,7 +478,7 @@ try {
   const cookie = login.headers.get('set-cookie').split(';')[0];
   const socket = new WebSocket(base.replace('http:', 'ws:') + '/ws?after=0', { headers: { Origin: origin, Cookie: cookie } });
   const messages = []; let lastState; let allOutput = '';
-  socket.on('message', raw => { const m = JSON.parse(raw.toString()); messages.push(m); if (m.type === 'state') lastState = m.state; if (m.type === 'output') { allOutput += m.data; socket.send(JSON.stringify({ type: 'ack', seq: m.seq })); } });
+  socket.on('message', async raw => { const m = await decodeWire(new Uint8Array(raw).buffer); messages.push(m); if (m.type === 'state') lastState = m.state; if (m.type === 'output') { allOutput += m.data; socket.send(JSON.stringify({ type: 'ack', seq: m.seq })); } });
   await until(() => lastState?.ready);
   const editPrompt = lastState.prompt, revision = lastState.inputRevision;
   socket.send(JSON.stringify({ type: 'replace', text: 'echo draft', id: 'draft', prompt: editPrompt, revision }));

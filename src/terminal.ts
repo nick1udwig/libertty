@@ -1,4 +1,3 @@
-import './brand-storage.ts';
 import { requestJSON } from './api.ts';
 import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
 import { fileClient, saveDownload } from './file-client.ts';
@@ -33,12 +32,10 @@ const baseURL = new URL(params.get('backend') || document.baseURI);
 const session = params.get('session') || 'default';
 const herdrTerminal = params.get('herdrTerminal');
 let herdrReady = false;
-let herdrParkable = false, herdrParked = false;
+let herdrParked = false;
 // A parked Herdr pane that loses its connection waits until it is shown, so the visible pane reconnects alone.
 let herdrDormant = false;
 let herdrPresentation = '';
-let offeredWire: string[] | undefined;
-let supportsHeartbeat = false, supportsInputContexts = false;
 let accessToken: string | undefined = backendAccess(baseURL.href);
 let authorized = false, directAttempt = false;
 const backgroundGrace = 20000;
@@ -55,8 +52,7 @@ if (embedded) document.documentElement.classList.add('embedded-terminal');
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const transport = new ReconnectingSocket({
   available: () => (keepingGeometry() || dictation.active) && (herdrTerminal ? tabVisible && !(herdrParked && herdrDormant) : tabVisible || !tabExpired || dictation.active) && navigator.onLine,
-  protocols: () => wireProtocols(offeredWire),
-  heartbeat: () => supportsHeartbeat,
+  protocols: wireProtocols,
   stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
   prepare: prepareConnection, open: socketOpened, message: socketMessage, close: socketClosed, error: connectionError,
 });
@@ -132,7 +128,7 @@ function send(message: ClientMessage): boolean {
     try { message.readingPhrases = readingPhrases(JSON.parse(localStorage.getItem('libertty.readingPhrases') || 'null')); } catch { message.readingPhrases = ['look at']; }
   }
   if (transport.socket?.readyState !== WebSocket.OPEN) return false;
-  transport.socket.send(encodeWire(message, transport.socket.protocol)); return true;
+  transport.socket.send(encodeWire(message)); return true;
 }
 // Ghostty fixes its ANSI palette when the terminal is created, so a theme change reloads this document and replays the session.
 const terminalTheme = applyTheme();
@@ -188,7 +184,7 @@ function inputContext(): InputContext | undefined {
 }
 function synchronizeInput() {
   if (!replayState || presentation.pending || queue.length || !herdrTerminal && after < (replayTarget ?? after)
-    || herdrTerminal && (!herdrReady || herdrLayout.pending || herdrParked || supportsInputContexts && state.inputContext === undefined)) return;
+    || herdrTerminal && (!herdrReady || herdrLayout.pending || herdrParked || state.inputContext === undefined)) return;
   if (unsentInput.length) {
     const context = inputContext();
     if (!context) return;
@@ -328,7 +324,7 @@ const inline = new InlineSuggestions(term, { state: () => state, replace: replac
   },
   raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, context: inputContext, key: baseURL.href,
-  audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data, transport.socket.protocol)); return true; },
+  audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data)); return true; },
   prepare: () => inline.prepareExternalPaste(), waiting: active => { dictationWaiting = active; inline.dictationPending(active); updateRun(); }, notice: toast, focus: () => term.focus() });
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
@@ -424,11 +420,10 @@ async function socketURL(signal: AbortSignal) {
   socketSeq = ackedSeq = 0;
   if (herdrTerminal) {
     sizeTerminal();
-    const geometry = { historyDelta: true, frameAck: true, cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && keepingGeometry() };
+    const geometry = { cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && keepingGeometry() };
     herdrLayout.rendered = false; herdrLayout.set({ pending: geometry.mobile, preserve: false, cover: geometry.mobile && !herdrParked });
-    const result = await requestJSON<{ redrawBarrier?: boolean; parkViews?: boolean; ticket: string; inputContexts?: boolean; heartbeat?: boolean; wire?: string[] }>(herdrEndpoint('api/herdr/ticket'), geometry, { token: () => accessToken, signal });
-    supportsInputContexts = result.inputContexts === true; herdrLayout.barrier = result.redrawBarrier === true; herdrLayout.barrierReady = !herdrLayout.barrier; herdrParkable = result.parkViews === true;
-    socketURL.searchParams.set('ticket', result.ticket); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
+    const result = await requestJSON<{ ticket: string }>(herdrEndpoint('api/herdr/ticket'), geometry, { token: () => accessToken, signal });
+    socketURL.searchParams.set('ticket', result.ticket);
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
   socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:'; socketURL.searchParams.set('after', String(Math.max(after, received)));
   socketURL.searchParams.set('client', inputClient);
@@ -438,8 +433,8 @@ async function socketURL(signal: AbortSignal) {
 async function prepareConnection(signal: AbortSignal, token?: string) {
   directAttempt = !token && (herdrTerminal ? !!accessToken : authorized && baseURL.origin === location.origin);
   if (directAttempt) return socketURL(signal);
-  const result = await api<{ state?: ShellState; accessToken: string; heartbeat?: boolean; wire?: string[] }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
-  signal.throwIfAborted(); offeredWire = result.wire; supportsHeartbeat = result.heartbeat === true;
+  const result = await api<{ state?: ShellState; accessToken: string }>('/api/connect', { ...(herdrTerminal ? { noSession: true } : { session }), ...(token ? { token } : {}) }, signal);
+  signal.throwIfAborted();
   authorized = true;
   if (result.state) state = result.state; accessToken = result.accessToken; notify('terminal-authorized', { accessToken });
   rememberBackendAccess(baseURL.href, accessToken);
@@ -454,7 +449,7 @@ function socketOpened() {
   if (herdrTerminal) { herdrReady = false; state.inputRevision = 0; state.inputTarget = undefined; connection('Connecting'); }
   else { connection('Connected', true); notify('terminal-ready'); }
   sizeTerminal();
-  if (herdrParked && herdrParkable) send({ type:'herdr-active', active:false });
+  if (herdrParked) send({ type:'herdr-active', active:false });
 }
 function revealHerdrLayout() {
   if (!herdrLayout.ready) return;
@@ -493,7 +488,7 @@ function socketMessage(event: MessageEvent) {
       if (projection?.frame(message) && !herdrLayout.pending) scheduleHerdrRendered();
       revealHerdrLayout();
       if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
-    } finally { echo.output(); if (message.seq !== undefined) send({ type: 'ack', seq: message.seq }); }
+    } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
   }
   if (message.type === 'screen' || message.type === 'screen-delta') {
     const text = history.receive(message);
@@ -562,7 +557,7 @@ function socketMessage(event: MessageEvent) {
     const pending = sentInput.settle(message.seq);
     if (pending && (!pending.complete || !unsentInput.prepend(pending.data, pending.context || disconnectedContext))) toast('Keys typed before the connection dropped were not delivered.');
   } else if (message.type === 'hello') {
-    replayTarget = message.lastSeq ?? after;
+    replayTarget = message.lastSeq;
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
@@ -579,7 +574,7 @@ function socketMessage(event: MessageEvent) {
     const initial = !replayState;
     replayState = true;
     transport.ready();
-    if (herdrTerminal) { herdrReady = true; sizeTerminal(); connection('Connected', true); notify('terminal-ready', { retainGeometry: herdrParkable }); }
+    if (herdrTerminal) { herdrReady = true; sizeTerminal(); connection('Connected', true); notify('terminal-ready'); }
     // A state acknowledgement can arrive after newer local keystrokes were
     // sent. Keep their optimistic revision until the backend catches up.
     if (!initial) message.state.inputRevision = Math.max(state.inputRevision, message.state.inputRevision);
@@ -710,7 +705,7 @@ if (embedded) {
       herdrParked = parked; dictation.visibility(!parked && tabVisible);
       // The tab-visibility message that follows an unpark reconnects a dormant pane.
       if (!parked) herdrDormant = false;
-      if (herdrParkable) send({ type:'herdr-active', active:!parked });
+      send({ type:'herdr-active', active:!parked });
       if (!parked) {
         const cols = term.cols, rows = term.rows; sizeTerminal();
         const preserve = event.data.preserve === true && cols === term.cols && rows === term.rows;

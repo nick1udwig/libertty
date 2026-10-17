@@ -12,7 +12,6 @@
     "build:backend": "cargo build --locked -p libertty-server --bin libertty",
     "test:rust": "cargo test --workspace --locked",
     "test:contracts": "node --test test/migration-contracts.test.mjs",
-    "test:rust-state": "node test/rust-state-compat.mjs",
     "test:rust-herdr": "node test/rust-herdr.mjs",
     "postinstall": "node scripts/prepare-dependencies.mjs",
     "dev": "node scripts/dev.mjs",

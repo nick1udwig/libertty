@@ -36,11 +36,9 @@ function fixture(t: TestContext) {
     prepare: async (_signal: AbortSignal, _token?: string) => url,
     close: (_event?: CloseEvent) => true,
     stalled: [] as number[],
-    heartbeat: true,
     error: (_error: unknown) => true,
   };
   const connection = new ReconnectingSocket({
-    heartbeat: () => behavior.heartbeat,
     stalled: seconds => behavior.stalled.push(seconds),
     available: () => available,
     prepare: (signal, token) => { signals.push(signal); tokens.push(token); return behavior.prepare(signal, token); },
@@ -261,14 +259,6 @@ test('typing or tapping retries immediately during backoff without overlapping a
   f.connection.activity(); f.connection.activity(); await flush();
   assert.equal(f.sockets.length, 1);
   t.mock.timers.tick(1000); await flush();
-  assert.equal(f.sockets.length, 1);
-});
-
-test('older servers without heartbeat support never receive unsupported messages', async t => {
-  const f = fixture(t); f.behavior.heartbeat = false;
-  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state');
-  t.mock.timers.tick(60000); await flush();
-  assert.deepEqual(socket.sent, []);
   assert.equal(f.sockets.length, 1);
 });
 

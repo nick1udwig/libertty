@@ -34,9 +34,9 @@ export type ServerMessage =
   | { type: 'screen'; text: string; version?: number }
   | { type: 'screen-delta'; base: number; version: number; drop: number; from: number; tail: number; text: string }
   | { type: 'herdr-layout'; cols: number; rows: number; ready: boolean }
-  | { type: 'herdr-frame'; seq?: number; width: number; height: number; full: boolean; bytes: string }
+  | { type: 'herdr-frame'; seq: number; width: number; height: number; full: boolean; bytes: string }
   | { type: 'state'; state: ShellState }
-  | { type: 'hello'; engine: EngineMode; reset: boolean; truncated: boolean; firstSeq: number; lastSeq?: number; streamId: string }
+  | { type: 'hello'; engine: EngineMode; reset: boolean; truncated: boolean; firstSeq: number; lastSeq: number; streamId: string }
   | { type: 'edit-result'; id: string; accepted: boolean; revision: number }
   /** The last numbered key the backend delivered for this browser terminal, absent when it does not know it. */
   | { type: 'input-ack'; seq?: number }

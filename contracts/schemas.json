@@ -633,7 +633,8 @@
             "width",
             "height",
             "full",
-            "bytes"
+            "bytes",
+            "seq"
           ],
           "additionalProperties": true
         },
@@ -688,7 +689,8 @@
             "reset",
             "truncated",
             "firstSeq",
-            "streamId"
+            "streamId",
+            "lastSeq"
           ],
           "additionalProperties": true
         },
@@ -1556,7 +1558,9 @@
       "required": [
         "version",
         "protocol",
-        "agents"
+        "agents",
+        "terminals",
+        "spaces"
       ],
       "additionalProperties": true
     },

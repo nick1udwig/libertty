@@ -108,7 +108,6 @@ Exact executable names take precedence, quoted text and free-form arguments are 
 The [shared repair library](shared-engine.md) runs on the backend with direct filesystem and subprocess access.
 `/api/suggest` provides suggestions for tools, while terminal repair and dictation use the existing WebSocket.
 Local and SSH sessions use this same native engine.
-The retired `LIBERTTY_ENGINE` setting is ignored for compatibility with installed configurations.
 
 The browser uses Ghostty’s native terminal input textarea for dictation, a Ghostty canvas for terminal output, and a direct WebSocket connection.
 Output bypasses UI state and is drained in bounded animation-frame batches.

@@ -9,7 +9,7 @@ globalThis.requestAnimationFrame = (callback => setTimeout(callback, 0)) as type
 globalThis.cancelAnimationFrame = (handle => clearTimeout(handle)) as typeof cancelAnimationFrame;
 
 test('a mobile layout stays covered until its barrier passes and a full frame at the new size paints', async () => {
-  const layout = new HerdrLayout(viewport); layout.barrier = true;
+  const layout = new HerdrLayout(viewport);
   layout.set({ pending: true });
   assert.ok(covered.has('awaiting-herdr-layout')); assert.equal(layout.barrierReady, false);
   assert.equal(layout.accept(false, true), false, 'A frame at another size never matches');
@@ -23,7 +23,7 @@ test('a mobile layout stays covered until its barrier passes and a full frame at
   assert.deepEqual([revealed, layout.pending, layout.rendered, covered.size], [1, false, true, 0]);
 });
 test('preserved pictures stay visible, stale reveals are dropped and desktop layouts need no handshake', async () => {
-  const layout = new HerdrLayout(viewport); layout.barrier = true;
+  const layout = new HerdrLayout(viewport);
   layout.set({ pending: true, preserve: true });
   assert.equal(covered.size, 0, 'A preserved picture is not covered'); assert.equal(layout.holding, true);
   layout.set({ pending: true, barrierReady: true }); layout.accept(true, true);

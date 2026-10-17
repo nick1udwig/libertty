@@ -1,9 +1,5 @@
 # libertty
 
-Previously named Termai, libertty keeps existing pairing data, SSH keys, hosts and browser settings when upgraded at the same URL.
-Use the `libertty` executable and `LIBERTTY_*` settings for new installations.
-Existing `TERMAI_*` settings remain accepted, with `LIBERTTY_*` values taking precedence.
-
 A webterm designed for modern mobile.
 
 Run the server on your Linux machine, connect from your phone over Tailscale, and dictate commands.
@@ -100,9 +96,8 @@ Keep libertty running; Tailscale Serve does not start it for you.
 - [Technical reference](docs/reference.md): shell integration, command repair, deployment and testing.
 - [Herdr details](docs/herdr.md): sessions, mobile sizing and notifications.
 - [Runtime plugin experiment](docs/plugins.md): loading packages, plugin API and connection lifetimes.
-- [Workspace architecture](docs/workspace.md), [shared engine](docs/shared-engine.md), and [historical client architecture](docs/client-architecture.md).
+- [Workspace architecture](docs/workspace.md) and [shared engine](docs/shared-engine.md).
 - [Pairing security review](docs/pairing-security.md).
-- [Rust migration](docs/rust-migration.md): contracts, active regression coverage and platform verification.
 
 ## License
 
