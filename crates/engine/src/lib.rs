@@ -190,6 +190,21 @@ pub async fn dispatch_with_discovery(
             )
             .await?,
         ),
+        "alternatives" => {
+            let text: String = argument(request, 0)?;
+            let catalog: types::Catalog = argument(request, 2)?;
+            let environment: validation::Environment = argument(request, 3)?;
+            let (catalog, environment) = (&catalog, &environment);
+            value(
+                alternatives::prepare(&text, &argument(request, 1)?, |query| async move {
+                    let stage = std::cell::RefCell::new(None);
+                    suggestions::suggest(&query, catalog, environment, discovery, host, &stage)
+                        .await
+                        .map(|candidates| json!({ "candidates": candidates }))
+                })
+                .await?,
+            )
+        }
         "repairDirectory" => value(
             path_repair::repair_directory(
                 &argument::<String>(request, 0)?,
@@ -226,6 +241,10 @@ pub fn dispatch(request: &Request) -> Result<Value, String> {
             &argument(request, 1)?,
             optional::<Vec<types::Flag>>(request, 2)?.as_deref(),
             &optional(request, 3)?.unwrap_or_default(),
+        )),
+        "detectIntent" => value(alternatives::Intent::detect(
+            &text()?,
+            &optional(request, 1)?.unwrap_or(Value::Null),
         )),
         "expandSymbols" => value(speech::expand_symbols(
             &text()?,

@@ -11,6 +11,8 @@ Historical TypeScript revisions remain in Git for benchmark comparisons.
 All repairs execute beside local or SSH host facts on the backend.
 The retired `LIBERTTY_ENGINE` setting is ignored, and the hello message always announces `server`.
 The former browser worker, Wasm bridge, `/api/context` and `/api/facts` endpoints have been removed.
+`crates/engine-wasm` exposes the same cooperative runtime to WebAssembly for the project site's in-browser demo only, where its host facts come from a snapshot of the repository.
+Its `alternatives` and `detectIntent` operations run the backend's dictation alternatives code.
 Tools can request suggestions through `/api/suggest`.
 
 `crates/server/src/engine.rs` supplies native host facts and delegates to the library's bounded asynchronous runtime.
