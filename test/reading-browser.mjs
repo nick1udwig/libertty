@@ -14,7 +14,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const fixture = await mkdtemp(path.join(os.tmpdir(), 'libertty-reading-'));
 const port = fixturePort3167, origin = `http://127.0.0.1:${port}`, mount = process.env.TEST_BASE_PATH || '', base = origin + mount, token = 'reading-test-token-123456789';
 await writeFile(path.join(fixture, 'note.txt'), 'A quiet place to read.\nSecond line.\n');
-await writeFile(path.join(fixture, 'README.md'), '# Reader heading\n\nA **formatted** paragraph.\n\n![Pixel](image.png)\n\n[Open note](note.txt)\n\n<script>window.markdownRan = true</script>\n\n<p align=\"center\">\n  <img src=\"image.png\" width=\"40\" alt=\"Raw pixel\" onerror=\"window.markdownRan = true\">\n</p>\n');
+await writeFile(path.join(fixture, 'README.md'), '# Reader heading\n\nA **formatted** paragraph.\n\n![Pixel](image.png)\n\n[Open note](note.txt)\n\n<script>window.markdownRan = true</script>\n\n```sh\necho copied\n```\n\n<p align=\"center\">\n  <img src=\"image.png\" width=\"40\" alt=\"Raw pixel\" onerror=\"window.markdownRan = true\">\n</p>\n');
 await mkdir(path.join(fixture, 'docs'));
 await writeFile(path.join(fixture, 'docs', 'Guide.md'), '# Nested guide\n');
 await writeFile(path.join(fixture, 'image.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL+WQAAAABJRU5ErkJggg==', 'base64'));
@@ -83,6 +83,8 @@ try {
   assert.equal(await page.evaluate(() => window.markdownRan), undefined);
   await page.waitForFunction(() => document.querySelector('.reading-markdown img')?.naturalWidth === 1);
   await page.waitForFunction(() => document.querySelector('.reading-markdown img[alt="Raw pixel"]')?.naturalWidth === 1);
+  await page.locator('.reading-copy').click();
+  await page.locator('.reading-copy').filter({ hasText: /^(Copied|Selected)$/ }).waitFor();
   assert.deepEqual(await page.locator('.reading-markdown img[alt="Raw pixel"]').evaluate(image => [image.width, image.hasAttribute('onerror')]), [40, false]);
   await page.locator('.reading-markdown a').click();
   await page.locator('.reading-view .reading-text').waitFor();

@@ -44,6 +44,22 @@ function sanitize(html: string): DocumentFragment {
   return template.content;
 }
 
+/** Wrap a code block with a button that copies its text. */
+function copyable(block: HTMLPreElement) {
+  const wrapper = document.createElement('div'); wrapper.className = 'reading-code'; block.before(wrapper);
+  const button = document.createElement('button'); button.type = 'button'; button.className = 'reading-copy'; button.textContent = 'Copy';
+  button.setAttribute('aria-label', 'Copy code');
+  let timer = 0;
+  const label = (text: string) => { button.textContent = text; clearTimeout(timer); timer = window.setTimeout(() => { button.textContent = 'Copy'; }, 1600); };
+  button.addEventListener('click', () => {
+    const text = block.textContent?.replace(/\n$/, '') || '';
+    const select = () => { getSelection()?.selectAllChildren(block); label('Selected'); };
+    if (!navigator.clipboard) { select(); return; }
+    void navigator.clipboard.writeText(text).then(() => label('Copied'), select);
+  });
+  wrapper.append(block, button);
+}
+
 function localLink(file: string, href: string): string | undefined {
   if (!href || href.startsWith('#') || href.startsWith('//') || /^[a-z][a-z\d+.-]*:/i.test(href)) return undefined;
   try {
@@ -67,6 +83,7 @@ export function readingView(file: string, blob: Blob, resources?: ReadingResourc
     void blob.text().then(value => {
       if (disposed) return;
       paper.replaceChildren(sanitize(markdown.render(value)));
+      for (const block of paper.querySelectorAll('pre')) copyable(block);
       for (const image of paper.querySelectorAll<HTMLImageElement>('img[data-reading-src]')) {
         const src = image.dataset.readingSrc || '';
         const path = localLink(file, src);
