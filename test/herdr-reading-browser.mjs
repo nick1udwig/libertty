@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/libertty-herdr-reading-');
 const target = { session: '', socketPath: dir + '/herdr.sock' }, port = await freePort(), sshPort = await freePort();
 const base = 'http://127.0.0.1:' + port + '/reading-test/', origin = new URL(base).origin;
-const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
+const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 const processes = [];
 let browser, logs = '';
 const start = (binary, args, options = {}) => {
@@ -38,6 +38,8 @@ try {
   browser = await launchBrowser(); const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await installWireObserver(context);
   await context.addInitScript(() => {
+    // Dictation setup help is a modal that would capture typed reading commands.
+    localStorage.setItem('libertty.voxtype:' + location.origin + '/reading-test/', 'dismissed');
     const Original = WebSocket;
     window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'state') window.__state = message.state; }); } };
     if (!localStorage.getItem('libertty.tabs')) {
@@ -101,7 +103,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS Herdr reader: typed and dictated files, relative links, prefix and piped command output, reloads, source navigation and SSH context.');
 } catch (error) {
-  for (const page of browser?.contexts().flatMap(context => context.pages()) || []) console.error(await page.evaluate(() => ({ url: location.href, state: window.__state, notice: document.querySelector('#toast')?.textContent, text: document.body.innerText.slice(0, 1000) })).catch(() => ({})));
+  for (const frame of browser?.contexts().flatMap(context => context.pages()).flatMap(page => page.frames()) || []) console.error(await frame.evaluate(() => ({ url: location.href, state: window.__state, notice: document.querySelector('#toast')?.textContent, text: document.body.innerText.slice(0, 1000) })).catch(() => ({})));
   console.error(logs); throw error;
 }
 finally {
