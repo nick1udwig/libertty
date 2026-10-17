@@ -67,8 +67,9 @@
       body { padding: 0; background: var(--bg); overflow: hidden; }
       .band, .copy { display: none; }
       main { display: block; padding: 0; }
-      .phone { position: fixed; inset: 0; padding: 0; border-radius: 0; box-shadow: none; background: var(--app); }
-      .screen { height: var(--viewport-height, 100%); aspect-ratio: auto; border-radius: 0; }
+      /* The app inside the frame cannot see the notch or home indicator, so the page keeps it clear of them. */
+      .phone { position: fixed; inset: 0 0 auto; height: var(--viewport-height, 100%); justify-self: stretch; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); border-radius: 0; box-shadow: none; background: var(--app); }
+      .screen { width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; }
       .status, .home { display: none; }
     }
   </style>
