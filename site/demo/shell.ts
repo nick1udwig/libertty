@@ -35,6 +35,8 @@ This shell runs in your browser on a copy of the libertty repository.
 
 Try ${green('ls')}, ${green('vi README.md')} or ${green('look at README.md')}. Tap the mic and say a command, or type ${green('help')}.
 
+\x1b[2mDictation here runs a small speech model in your browser, so it is slow and less accurate. The real app transcribes on your computer running libertty, with a larger model that is far faster and more accurate.\x1b[0m
+
 `, this.cols).replace(/\n/g, '\r\n'));
     this.prompt();
   }
