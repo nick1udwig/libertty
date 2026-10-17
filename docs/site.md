@@ -20,7 +20,8 @@ Set `LIBERTTY_SITE_BASE=/path/` when the site is not served from the root of its
 ## How the demo works
 
 The workspace and terminal documents are the app's own `index.html` and `terminal.html`, built with demo entries that run first.
-`site/demo/boot-app.ts` seeds a fresh workspace on every visit with a terminal, Herdr, files and a README reader, and installs an in-page backend.
+`site/demo/boot-app.ts` seeds a fresh workspace on every visit with a terminal, Herdr, files and a reader, and installs an in-page backend.
+On desktops the reader shows the README last, and on phones it opens first on `site/welcome.md`, which repeats the landing page.
 Terminal and Herdr pane frames reach that backend through `site/demo/shim.ts`, which replaces `fetch` and `WebSocket` for backend URLs only.
 Everything the visitor sees and touches inside the phone is the real frontend.
 

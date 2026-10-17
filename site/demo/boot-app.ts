@@ -10,16 +10,16 @@ const save = (key: string, value: unknown) => localStorage.setItem('libertty.' +
 try {
   for (const key of Object.keys(localStorage)) if (key.startsWith('libertty.') || key.startsWith('termai.')) localStorage.removeItem(key);
   const shell = crypto.randomUUID(), common = { backendId: 'primary', hostId: 'local', lastUsed: Date.now(), pluginVersion: '1' };
-  const tabs = [
+  const tabs: object[] = [
     { ...common, id: crypto.randomUUID(), name: 'monticello', session: shell, pluginId: 'terminal', ownsSession: true },
     { ...common, id: crypto.randomUUID(), name: 'Herdr · monticello', session: crypto.randomUUID(), pluginId: 'herdr', mode: 'herdr', herdrSession: '' },
     { ...common, id: crypto.randomUUID(), name: 'Files · monticello', session: crypto.randomUUID(), pluginId: 'files', mode: 'files', ownsSession: true, directory: repo },
-    { ...common, id: crypto.randomUUID(), name: 'README.md', session: shell, pluginId: 'reading', ownsSession: false, readPath: repo + '/README.md' },
   ];
-  // Phones open on the README, since the page around the phone is not there to introduce the project.
-  if (reader) tabs.unshift(tabs.pop()!);
+  // Phones open on a welcome page, since the landing page around the phone is not there to introduce the project.
+  const read = (file: string) => ({ ...common, id: crypto.randomUUID(), name: file.split('/').pop()!, session: shell, pluginId: 'reading', ownsSession: false, readPath: repo + '/' + file });
+  if (reader) tabs.unshift(read('site/welcome.md')); else tabs.push(read('README.md'));
   save('hosts', [{ id: 'local', name: 'monticello', kind: 'http', backendId: 'primary' }]);
-  save('tabs', tabs); save('activeTab', tabs[0].id);
+  save('tabs', tabs); save('activeTab', (tabs[0] as { id: string }).id);
   save('theme', dark.matches ? '1776' : 'flag');
   // Herdr opens the libertty repository on the 1776 theme worktree, where an agent is waiting for approval.
   save('herdr.' + new URL('.', document.baseURI).href + '##', { order: [], repoSpaces: { 'repo:libertty': 'w-1776' } });
