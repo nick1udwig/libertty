@@ -1,4 +1,6 @@
 import type { Terminal } from 'ghostty-web';
+import { OutputScheduler } from './output-scheduler.ts';
+import { isPreservingScrollback } from './terminal-viewport.ts';
 
 /** Rendering hooks for the pinned Ghostty adapter. */
 type NativeTerminal = {
@@ -14,7 +16,7 @@ type NativeRenderer = Pick<NonNullable<Terminal['renderer']>, 'render' | 'setHov
 
 /** Paint changed terminal content once, then let the browser sleep. */
 export class TerminalRendering {
-  private frame = 0;
+  private scheduler: OutputScheduler;
   private blink?: ReturnType<typeof setTimeout>;
   private visible = true;
   private disposed = false;
@@ -22,6 +24,7 @@ export class TerminalRendering {
   private term: Terminal;
   constructor(term: Terminal) {
     this.term = term;
+    this.scheduler = new OutputScheduler(() => this.paint(), () => !this.disposed && this.visible && !document.hidden);
     (term as unknown as NativeTerminal).startRenderLoop = () => this.refresh();
   }
   attach() {
@@ -36,33 +39,39 @@ export class TerminalRendering {
       const original = renderer[name].bind(renderer) as (...args: unknown[]) => void;
       (renderer[name] as (...args: unknown[]) => void) = (...args) => { original(...args); this.refresh(); };
     }
-    term.onSelectionChange(() => this.refresh());
-    term.onScroll(() => this.refresh());
-    const focus = () => { renderer.cursorVisible = true; this.refresh(); };
+    term.onSelectionChange(() => this.activity());
+    term.onScroll(() => { if (isPreservingScrollback(term)) this.refresh(); else this.activity(); });
+    const focus = () => this.activity();
     for (const name of ['focusin', 'focusout']) term.element!.addEventListener(name, focus, { signal: this.events.signal });
     for (const name of ['focus', 'blur']) window.addEventListener(name, focus, { signal: this.events.signal });
-    document.addEventListener('visibilitychange', () => this.refresh(), { signal: this.events.signal });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.refresh(); else this.activity(); }, { signal: this.events.signal });
     window.addEventListener('pagehide', event => { if (!event.persisted) this.dispose(); }, { signal: this.events.signal });
     this.refresh();
   }
   setVisible(visible: boolean) { this.visible = visible; this.refresh(); }
+  activity() {
+    const renderer = this.term.renderer as unknown as NativeRenderer | undefined;
+    if (renderer) renderer.cursorVisible = true;
+    this.scheduler.activity(); this.refresh();
+  }
   refresh() {
     clearTimeout(this.blink);
-    if (this.disposed || !this.visible || document.hidden) { cancelAnimationFrame(this.frame); this.frame = 0; return; }
-    if (!this.frame) this.frame = requestAnimationFrame(() => this.paint());
+    if (this.disposed || !this.visible || document.hidden) { this.scheduler.cancel(); return; }
+    this.scheduler.request();
   }
   private paint() {
-    this.frame = 0;
     if (this.disposed || !this.visible || document.hidden) return;
     const term = this.term, native = term as unknown as NativeTerminal, renderer = term.renderer as unknown as NativeRenderer;
-    renderer.render(term.wasmTerm!, false, term.getViewportY(), term, 0);
     const cursor = term.wasmTerm!.getCursor();
+    const blinking = this.scheduler.interactive && term.options.cursorBlink && cursor.visible && term.getViewportY() === 0 && document.hasFocus() && term.element!.contains(document.activeElement);
+    if (!blinking) renderer.cursorVisible = true;
+    renderer.render(term.wasmTerm!, false, term.getViewportY(), term, 0);
     if (cursor.y !== native.lastCursorY) { native.lastCursorY = cursor.y; native.cursorMoveEmitter.fire(); }
-    if (term.options.cursorBlink && cursor.visible && term.getViewportY() === 0 && document.hasFocus() && term.element!.contains(document.activeElement)) {
+    if (blinking) {
       this.blink = setTimeout(() => { renderer.cursorVisible = !renderer.cursorVisible; this.refresh(); }, 530);
-    } else renderer.cursorVisible = true;
+    }
   }
   dispose() {
-    this.disposed = true; this.events.abort(); clearTimeout(this.blink); cancelAnimationFrame(this.frame); this.frame = 0;
+    this.disposed = true; this.events.abort(); clearTimeout(this.blink); this.scheduler.cancel();
   }
 }

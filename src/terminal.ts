@@ -22,6 +22,8 @@ import { TerminalHistory } from './terminal-history.ts';
 import { TerminalProjection } from './terminal-projection.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
 import { TerminalRendering } from './terminal-rendering.ts';
+import { OutputScheduler } from './output-scheduler.ts';
+import { mergeHerdrFrames, type HerdrFrameMessage } from './terminal-frame-batch.ts';
 import { DictationControl } from './dictation.ts';
 import { InlineSuggestions } from './inline-suggestions.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
@@ -98,6 +100,8 @@ let frameQueued = false;
 let tabVisible = true, outputFrame = 0;
 // A workspace tab connects when first shown and keeps its socket for the background grace after it is hidden.
 let tabSeen = !embedded, tabExpired = false, tabTimer: ReturnType<typeof setTimeout> | undefined;
+const pendingFrames = new Queue<{ socket: WebSocket | undefined; frame: HerdrFrameMessage }>();
+const frameScheduler = new OutputScheduler(drainHerdrFrames, () => tabVisible && !document.hidden && !herdrParked, true);
 function scheduleDrain() { if (!tabVisible || document.hidden || herdrParked) return; frameQueued = true; outputFrame = requestAnimationFrame(drain); }
 function toast(message: string) {
   if (embedded) { notify('terminal-notice', { message }); return; }
@@ -255,6 +259,7 @@ function sizeTerminal() {
     const dimensions = fit.proposeDimensions();
     const nextCols = wide ? projection?.nativeColumns || 80 : dimensions?.cols;
     if (dimensions && nextCols && (term.cols !== nextCols || term.rows !== dimensions.rows)) {
+      discardHerdrFrames();
       if (mobileTerminal()) {
         // Keep a certified mobile view and its focused textarea visible while
         // keyboard geometry redraws; hiding the input would dismiss the IME.
@@ -283,7 +288,7 @@ mobileViewport.addEventListener('change', sizeTerminal);
 function viewport() { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height || window.innerHeight}px`); }
 window.visualViewport?.addEventListener('resize', viewport); window.addEventListener('resize', viewport); viewport();
 function rawInput(data: string) {
-  transport.activity();
+  terminalActivity();
   if (['\x1b[I', '\x1b[O'].includes(data)) { if (!presentation.pending) send({ type: 'input', data }); return; }
   if (capturedConnection) { toast('Finish opening the connection first.'); return; }
   if (ctrl) { if (/^[a-zA-Z]$/.test(data)) data = String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64); setCtrl(false); }
@@ -452,6 +457,7 @@ async function prepareConnection(signal: AbortSignal, token?: string) {
   return socketURL(signal);
 }
 function socketOpened() {
+  discardHerdrFrames();
   connectionEpoch++; synchronizedConnection = false; numberedInput = false;
   history.reset();
   deferredScreen = undefined;
@@ -488,22 +494,42 @@ function applyDeferredScreen() {
   if (deferredScreen === undefined || herdrLayout.pending || herdrParked || !tabVisible || document.hidden) return;
   projection?.update(deferredScreen); deferredScreen = undefined;
 }
+function discardHerdrFrames() {
+  frameScheduler.cancel();
+  for (const pending of pendingFrames) if (pending.socket === transport.socket) send({ type: 'ack', seq: pending.frame.seq });
+  pendingFrames.clear();
+}
+function drainHerdrFrames() {
+  if (herdrLayout.pending || presentation.pending) { discardHerdrFrames(); return; }
+  const frames = [...pendingFrames].filter(pending => pending.socket === transport.socket).map(pending => pending.frame);
+  pendingFrames.clear();
+  try { for (const frame of mergeHerdrFrames(frames)) paintHerdrFrame(frame); }
+  catch (error) { connectionError(error); transport.socket?.close(4002, 'Invalid terminal frame'); }
+}
+function paintHerdrFrame(message: HerdrFrameMessage) {
+  try {
+    if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) return;
+    if (herdrLayout.pending && !herdrLayout.accept(message.width === term.cols && message.height === term.rows, message.full)) return;
+    if (projection?.frame(message) && !herdrLayout.pending) scheduleHerdrRendered();
+    revealHerdrLayout();
+    if (fullWidth()) sizeTerminal(); refreshHerdrFrame();
+  } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
+}
 function socketMessage(event: MessageEvent) {
   const message: ServerMessage = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
   if (message.type === 'herdr-layout') {
+    discardHerdrFrames();
     if (herdrParked) return;
     if (message.cols !== term.cols || message.rows !== term.rows || !mobileTerminal()) return;
     herdrLayout.set({ pending: true, barrierReady: message.ready });
     return;
   }
   if (message.type === 'herdr-frame') {
-    try {
-      if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) return;
-      if (herdrLayout.pending && !herdrLayout.accept(message.width === term.cols && message.height === term.rows, message.full)) return;
-      if (projection?.frame(message) && !herdrLayout.pending) scheduleHerdrRendered();
-      revealHerdrLayout();
-      if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); return;
-    } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
+    if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) { send({ type: 'ack', seq: message.seq }); return; }
+    if (herdrLayout.pending || presentation.pending || !herdrReady) { discardHerdrFrames(); paintHerdrFrame(message); return; }
+    pendingFrames.push({ socket: transport.socket, frame: message });
+    if (pendingFrames.length > 2) { frameScheduler.cancel(); drainHerdrFrames(); } else frameScheduler.request();
+    return;
   }
   if (message.type === 'screen' || message.type === 'screen-delta') {
     const text = history.receive(message);
@@ -613,6 +639,7 @@ function socketMessage(event: MessageEvent) {
 
 }
 function socketClosed(event?: CloseEvent) {
+  discardHerdrFrames();
   if (directAttempt && !replayState) authorized = false;
   herdrDormant = herdrParked;
   disconnectedContext = inputContext() || disconnectedContext;
@@ -652,15 +679,19 @@ document.addEventListener('terminal-can-evict', event => {
   (event as CustomEvent<{ allowed: boolean }>).detail.allowed = !unsentInput.length && !sentInput.pending && !uploadingImage
     && !dictation.active && !pendingCommand && !capturedConnection && !repairs.size && !edits.size && !inputLines.size && !document.querySelector('dialog[open]');
 });
-document.addEventListener('pointerdown', () => transport.activity(), { passive: true });
+function terminalActivity() { transport.activity(); rendering.activity(); frameScheduler.activity(); }
+document.addEventListener('pointerdown', terminalActivity, { passive: true });
+document.addEventListener('wheel', terminalActivity, { passive: true });
 $('login-form').onsubmit = e => { e.preventDefault(); void connect($<HTMLInputElement>('token').value); };
 transport.follow({ grace: backgroundGrace, hidden: () => {
   echo.cancel(); cancelAnimationFrame(outputFrame); frameQueued = false;
+  discardHerdrFrames();
   if (herdrTerminal && !herdrParked) {
     herdrLayout.set({ pending: mobileTerminal(), preserve: true, barrierReady: herdrLayout.barrierReady });
     send({ type: 'herdr-active', active: false });
   }
 }, shown: () => {
+  rendering.activity(); frameScheduler.activity();
   if (herdrTerminal && tabVisible && !herdrParked) send({ type: 'herdr-active', active: true });
   sizeTerminal(); if (queue.length && !frameQueued) scheduleDrain(); revealReplay();
 },
@@ -724,6 +755,7 @@ if (embedded) {
     if (event.data?.type === 'terminal-return' && tabVisible && !herdrParked) sendReturn();
     if (event.data?.type === 'terminal-images' && tabVisible && !herdrParked && Array.isArray(event.data.files) && event.data.files.every((file: unknown) => file instanceof File)) void attachImages(event.data.files);
     if (event.data?.type === 'herdr-present' && herdrTerminal && typeof event.data.presentation === 'string') {
+      discardHerdrFrames(); rendering.activity(); frameScheduler.activity();
       presentation.freeze();
       herdrPresentation = event.data.presentation; herdrLayout.cancel();
       notifyHerdrSizing();
@@ -735,6 +767,7 @@ if (embedded) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;
       herdrParked = parked; dictation.visibility(!parked && tabVisible);
+      if (parked) discardHerdrFrames();
       rendering.setVisible(!parked && tabVisible);
       clearTimeout(parkTimer);
       if (parked) parkTimer = setTimeout(() => { if (herdrParked) { herdrDormant = true; transport.suspend(); } }, inactiveGrace);
@@ -749,7 +782,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) presentation.freeze(); rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);

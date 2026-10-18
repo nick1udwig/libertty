@@ -46,6 +46,7 @@ const tests = [
   'input-line.test.ts',
   'lossy-link.test.mjs',
   'paste-mode.test.ts',
+  'output-scheduler.test.ts',
   'plugin-file.test.ts',
   'plugins.test.ts',
   'push-worker.test.ts',

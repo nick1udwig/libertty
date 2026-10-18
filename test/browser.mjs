@@ -107,6 +107,9 @@ try {
   assert.ok((await suggestAtPrompt('Fresh binary')).some(candidate => candidate.command === 'freshbinary' && !candidate.literal));
   assert.ok((await suggestAtPrompt('cat new context file dot txt')).some(candidate => candidate.command === 'cat new-context-file.txt'));
   assert.ok(await page.evaluate(() => [...document.fonts].some(font => font.family === 'JetBrains Mono' && font.status === 'loaded')));
+  await focusTerminal(page); await delay(6000);
+  await page.evaluate(() => window.__paint = []); await delay(800);
+  assert.equal(await page.evaluate(() => window.__paint.length), 0, 'A focused terminal settles to a steady cursor while reading');
   await page.locator('#terminal textarea').evaluate(el => el.blur());
   await delay(800); await page.evaluate(() => window.__paint = []); await delay(800);
   assert.equal(await page.evaluate(() => window.__paint.length), 0, 'An unfocused stationary prompt stops painting');

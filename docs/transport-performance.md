@@ -303,11 +303,14 @@ Live output is sent immediately without a batching timer, and an existing oversi
 
 The browser parses terminal writes synchronously and schedules one paint for changed output, scrolling, selection or links.
 The pinned Ghostty adapter's continuous animation loop is disabled.
-The cursor blinks only while its terminal has focus and is at the live viewport.
+The cursor blinks only during recent interaction while its terminal has focus and is at the live viewport.
 A stationary unfocused prompt or history view does not schedule terminal paints.
 Hidden terminal views suspend parsing and direct canvas paints immediately.
 Inactive tabs and parked Herdr panes release their connections after two seconds, retaining their picture for replay on return.
 Mobile Herdr views cache one previous pane, while the workspace caches up to four ordinary terminal renderers.
+After five seconds without interaction, output-driven paints run at most twenty times per second and the cursor becomes steady.
+Herdr batches preserve ordered ANSI deltas and complete baselines within the existing acknowledgement window, with a 512 KiB merge limit.
+Input, scrolling and layout handshakes retain immediate processing, while native output parsing keeps its existing throughput.
 Dictation availability is checked on connection, microphone use and visible prompt changes, with a one-minute cache instead of periodic polling.
 
 Herdr history projections append safe text, color and hyperlink sequences without resetting the parsed history or visible terminal.

@@ -94,6 +94,7 @@ try {
   const pane = await herdrRequest(target, 'pane.get', { pane_id: terminal.paneId }); assert.equal(pane.pane.scroll.max_offset_from_bottom, 0);
   assert.equal(await page.evaluate(() => window.__terminal.buffer.active.length), await page.evaluate(() => window.__terminal.rows));
   await page.waitForFunction(() => window.__screens > 1 && window.__historyDeltas > 0 && window.__lastScreen.text.includes('TICK:'));
+  await delay(5500);
   // Prove text uses native deltas, not the 150 ms snapshot loop: withhold all
   // history messages while sampling the displayed animation on browser paints.
   const animation = await page.evaluate(async () => {
@@ -111,6 +112,7 @@ try {
     return { paints: values.size, frames: window.__frames - frames, deltas: window.__deltas - deltas };
   });
   assert.ok(animation.paints >= 15, 'Live text keeps animating faster than the snapshot ceiling: ' + JSON.stringify(animation));
+  assert.ok(animation.paints <= 31, 'Passive native output stays within twenty updates per second: ' + JSON.stringify(animation));
   assert.ok(animation.deltas > 0, 'Incremental native frames render without needing a new full snapshot');
   await page.evaluate(() => { window.__holdAcks = true; });
   await delay(250);
