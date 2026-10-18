@@ -5,6 +5,15 @@ The [Screen Wake Lock specification](https://www.w3.org/TR/screen-wake-lock/) re
 Embedded ordinary terminals and Herdr panes request from the same-origin outer document, falling back to their own document for other embeds with delegated permissions.
 This prevents automatic screen timeout where supported and permitted, but cannot override an explicit device lock.
 
+## Deployment checks
+
+On 2026-10-18, a deleted development worktree left `libertty.service` running with no frontend files.
+The health API still returned `ok: true`, while `/t/dictation-worklet.js` returned HTTP 404.
+Rebuild an existing checkout and remove the stale branch override before restarting the service.
+The restart ends live standalone terminal sessions.
+Check the worklet URL locally and through the phone's HTTPS route.
+Both checks must return JavaScript with HTTP 200.
+
 ## Automated results
 
 Run `node --test test/dictation-wake-lock.test.ts`, `node test/dictation-browser.mjs`, and `node test/herdr-browser.mjs` after building.

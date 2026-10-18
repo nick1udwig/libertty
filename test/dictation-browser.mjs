@@ -167,6 +167,31 @@ try {
   await page.reload(); await page.waitForFunction(() => window.__state?.ready);
   await page.waitForTimeout(300); assert.equal(await page.locator('#dictation-install').isVisible(), false);
   capabilities = true;
+  await page.locator('#terminal textarea').focus(); await page.keyboard.type('node ' + path.join(fixture, 'program.mjs')); await page.keyboard.press('Enter');
+  await page.waitForFunction(() => window.__state?.inputTarget === 'program');
+  for (const outage of ['request', 'daemon']) {
+    let statusReads = 0;
+    capabilities = outage !== 'daemon';
+    await page.route('**/api/dictation', async route => {
+      statusReads++;
+      if (outage === 'request' && statusReads <= 3) await route.fulfill({ status: 503, json: { error: 'Temporary outage' } });
+      else await route.continue();
+    });
+    const initialStatus = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/api/dictation') && (outage !== 'request' || statusReads === 3));
+    await page.reload(); await page.waitForFunction(() => window.__state?.inputTarget === 'program');
+    const status = await initialStatus;
+    if (outage === 'request') assert.equal(status.status(), 503);
+    else assert.equal((await status.json()).available, false);
+    await status.finished();
+    assert.equal(await page.locator('#libertty-dictation').isVisible(), false);
+    capabilities = true;
+    await page.locator('#libertty-dictation').waitFor({ state: 'visible' });
+    assert.ok(statusReads >= (outage === 'request' ? 4 : 2), 'Dictation recovers from a temporary ' + outage + ' outage without a reload or shell prompt');
+    console.log('PASS dictation availability recovery after a temporary ' + outage + ' outage');
+    await page.unroute('**/api/dictation');
+  }
+  await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+c');
+  await page.waitForFunction(() => window.__state?.ready);
   await page.reload(); await page.locator('#libertty-dictation').waitFor({ state: 'visible' });
   assert.equal(await page.evaluate(base => localStorage.getItem('libertty.voxtype:' + base + '/'), base), 'dismissed');
   // A healthy daemon suppresses the offer even without a stored preference.
@@ -502,7 +527,7 @@ try {
   await outer.waitForFunction(() => window.__wakeLocks.every(lock => lock.released));
   await outer.close();
   assert.deepEqual(errors, []);
-  console.log('PASS: daemon discovery, microphone Opus, offline capture/checkpoint resume/cached finals, simulated lock transport, wake lock lifecycle, paused/ended capture, shell alternatives, literal program dictation, paste modes, stale transcripts' + (process.env.TEST_CODEX ? ', Codex CLI with and without alternate screen' : ''));
+  console.log('PASS: daemon discovery and outage recovery, microphone Opus, offline capture/checkpoint resume/cached finals, simulated lock transport, wake lock lifecycle, paused/ended capture, shell alternatives, literal program dictation, paste modes, stale transcripts' + (process.env.TEST_CODEX ? ', Codex CLI with and without alternate screen' : ''));
 } catch (error) { console.error(logs); if (browser) console.error(await browser.contexts()[0]?.pages()[0]?.evaluate(() => ({ messages: window.__messages, out: window.__out, paint: window.__paint?.slice(-40) }))); throw error; }
 finally {
   await browser?.close();
