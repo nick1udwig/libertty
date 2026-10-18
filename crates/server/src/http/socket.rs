@@ -45,7 +45,17 @@ impl Input<'_> {
         if let ClientMessage::Ack { seq } = &message {
             pressure.acknowledge(*seq, std::time::Instant::now());
         }
-        if matches!(message, ClientMessage::Ping) {
+        if let ClientMessage::Ping { checkpoint } = &message {
+            if *checkpoint {
+                match self {
+                    Self::Native {
+                        session,
+                        attachment,
+                    } => session.checkpoint(*attachment),
+                    Self::Herdr(view) => view.checkpoint(),
+                    Self::Metadata { .. } => {}
+                }
+            }
             return Ok(true);
         }
         match self {

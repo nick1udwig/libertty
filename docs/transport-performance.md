@@ -305,6 +305,9 @@ The browser parses terminal writes synchronously and schedules one paint for cha
 The pinned Ghostty adapter's continuous animation loop is disabled.
 The cursor blinks only while its terminal has focus and is at the live viewport.
 A stationary unfocused prompt or history view does not schedule terminal paints.
+Hidden terminal views suspend parsing and direct canvas paints immediately.
+Inactive tabs and parked Herdr panes release their connections after two seconds, retaining their picture for replay on return.
+Mobile Herdr views cache one previous pane, while the workspace caches up to four ordinary terminal renderers.
 Dictation availability is checked on connection, microphone use and visible prompt changes, with a one-minute cache instead of periodic polling.
 
 Herdr history projections append safe text, color and hyperlink sequences without resetting the parsed history or visible terminal.

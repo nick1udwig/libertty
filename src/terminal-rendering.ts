@@ -28,6 +28,8 @@ export class TerminalRendering {
     const term = this.term, renderer = term.renderer as unknown as NativeRenderer;
     renderer.stopCursorBlink();
     renderer.cursorBlink = true;
+    const paint = renderer.render.bind(renderer);
+    renderer.render = (...args) => { if (!this.disposed && this.visible && !document.hidden) paint(...args); };
     const write = term.wasmTerm!.write.bind(term.wasmTerm);
     term.wasmTerm!.write = data => { write(data); this.refresh(); };
     for (const name of ['setHoveredHyperlinkId', 'setHoveredLinkRange'] as const) {

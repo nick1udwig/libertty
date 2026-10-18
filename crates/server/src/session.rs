@@ -872,6 +872,17 @@ impl Session {
             }
         });
     }
+    pub fn checkpoint(&self, attachment: u64) {
+        let inner = self.inner.lock().unwrap();
+        if inner
+            .socket
+            .as_ref()
+            .is_some_and(|socket| socket.id == attachment)
+            && let Some((_, seq)) = &inner.input_client
+        {
+            inner.send(ServerMessage::InputAck { seq: Some(*seq) });
+        }
+    }
     pub fn receive(self: &Arc<Self>, attachment: u64, message: impl TryInto<ClientMessage>) {
         let Ok(message) = message.try_into() else {
             return;
@@ -1703,6 +1714,8 @@ mod tests {
         for (seq, data) in [(1, "a"), (2, "b")] {
             session.receive(first, json!({"type":"input","data":data,"seq":seq}));
         }
+        session.checkpoint(first);
+        assert_eq!(input_ack(&mut receive)["seq"], 2);
         // The replacement learns which keys arrived, and the browser resends the rest with their numbers.
         let (second, mut receive) = session.attach(0, None, Some("tab"));
         assert_eq!(input_ack(&mut receive)["seq"], 2);

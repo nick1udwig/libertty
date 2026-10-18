@@ -320,6 +320,8 @@ export function createWorkspaceNavigation(options: Options) {
     const visible = page === 'terminal' && !document.hidden,
       target = pluginViews.get(workspace.active),
       tab = workspace.tabs.find((tab) => tab.id === workspace.active);
+    if (page === 'terminal' && tab && !target)
+      void mount(tab).catch((error) => notice(error.message));
     target?.setHeld?.(false);
     target?.setVisible(
       tab && ['terminal', 'herdr'].includes(tabPluginId(tab)) ? page === 'terminal' : visible,
@@ -616,6 +618,17 @@ export function createWorkspaceNavigation(options: Options) {
       pluginViews.set(tab.id, view);
       $('terminal-stack').append(view.element);
       renderTabs();
+      const cached = workspace.tabs
+        .filter((item) => tabPluginId(item) === 'terminal' && pluginViews.has(item.id))
+        .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+      for (const item of cached.slice(4)) {
+        if (
+          item.id !== workspace.active &&
+          item.id !== presentedTab &&
+          pluginViews.get(item.id)?.canEvict?.() !== false
+        )
+          unmount(item);
+      }
     })();
     mounting.set(tab.id, work);
     try {

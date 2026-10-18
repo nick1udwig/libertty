@@ -187,9 +187,16 @@ impl View {
         view.send_state();
         let weak = Arc::downgrade(&view);
         let lifetime = view.cancel.clone();
+        let mut active = view.active.subscribe();
         tokio::spawn(async move {
             loop {
                 let Some(view) = weak.upgrade() else { break };
+                let viewing = *active.borrow_and_update();
+                if !viewing {
+                    drop(view);
+                    tokio::select! { biased; _=lifetime.cancelled()=>break, changed=active.changed()=>if changed.is_err(){break;} }
+                    continue;
+                }
                 let started = tokio::time::Instant::now();
                 let (shell, context) = tokio::select! { biased; _=lifetime.cancelled()=>break, result=view.target.input_state(&view.agent.pane_id)=>result.unwrap_or_default() };
                 let changed = {
@@ -383,6 +390,13 @@ impl View {
             view.confirm_layout(size, revision, view.begin_layout());
         }
         Ok(view)
+    }
+    pub fn checkpoint(&self) {
+        if let Some((ledger, _)) = &self.ledger {
+            self.send(ServerMessage::InputAck {
+                seq: Some(ledger.delivered()),
+            });
+        }
     }
     async fn report_error(&self, message: &str) -> bool {
         // A pane can close before its metadata event reaches the viewer.

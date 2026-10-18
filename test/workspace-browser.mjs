@@ -177,9 +177,26 @@ try {
   page.on('websocket', socket => { const url = new URL(socket.url()); if (url.pathname.endsWith('/ws')) terminalSockets.add(url.searchParams.get('session') || 'default'); });
   await page.reload(); frame = await activeFrame(page); assert.equal(await page.locator('[role=tab]').count(), 2); await command(frame, "printf '%s' \"$TAB_ID\" > restored-tab.txt"); assert.equal(await readFile(fixture + '/restored-tab.txt', 'utf8'), 'first');
   assert.deepEqual([...terminalSockets], [firstSession], 'Hidden tabs wait to connect until they are shown');
-  // A background terminal must keep draining output while another tab is visible.
+  await page.waitForTimeout(2300);
+  assert.equal(await page.locator('#terminal-stack>iframe').count(), 1, 'Unused terminals do not allocate background renderers');
+  await frame.waitForFunction(() => {
+    const state = { allowed: false }; document.dispatchEvent(new CustomEvent('terminal-can-evict', { detail: state })); return state.allowed;
+  });
+  assert.equal(await frame.evaluate(() => {
+    const dialog = document.createElement('dialog'); document.body.append(dialog); dialog.showModal();
+    const state = { allowed: true }; document.dispatchEvent(new CustomEvent('terminal-can-evict', { detail: state })); dialog.remove(); return state.allowed;
+  }), false, 'A pending browser dialog protects its terminal from eviction');
+  // A background program keeps running after its viewer stops parsing and disconnects.
   await command(frame, `python3 -c 'import time; time.sleep(1); print("background line\\n" * 30000); open("background-done", "w").write("ok")' &`);
-  await page.locator('[role=tab]').nth(1).click(); await until(async () => (await readFile(fixture + '/background-done', 'utf8').catch(() => '')) === 'ok');
+  const hiddenFrame = frame;
+  await page.locator('[role=tab]').nth(1).click();
+  await hiddenFrame.evaluate(() => {
+    window.__hiddenParses = 0;
+    const write = window.__testTerminal.wasmTerm.write.bind(window.__testTerminal.wasmTerm);
+    window.__testTerminal.wasmTerm.write = (...args) => { window.__hiddenParses++; return write(...args); };
+  });
+  await until(async () => (await readFile(fixture + '/background-done', 'utf8').catch(() => '')) === 'ok');
+  assert.equal(await hiddenFrame.evaluate(() => window.__hiddenParses), 0, 'Hidden terminals do not parse output');
   await activeFrame(page); assert.deepEqual([...terminalSockets].sort(), [firstSession, secondSession].sort(), 'Showing a tab connects it');
   await page.locator('#terminal-back').click(); await page.locator('#library-add').click(); await page.locator('#host-name').fill('Build server'); await page.locator('#host-backend').selectOption('new'); await page.locator('#host-url').fill(secondary + '/'); await page.getByRole('button', { name: 'Save host', exact: true }).click();
   await page.getByRole('button', { name: 'Build server HTTP' }).click(); await page.locator('#backend-token').fill('test-backend-token-123456789'); await page.locator('#backend-login-form button[type=submit]').click(); frame = await activeFrame(page);
@@ -500,6 +517,10 @@ try {
   const currentToken = await page.evaluate(url => localStorage.getItem('libertty.access:' + url + '/'), secondary);
   const replaced = await request(secondary, 'sessions', currentToken, { name: 'changed reference', ssh: { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, keyId: lockedReference.id, passphrase: 'existing-pass' } });
   assert.equal(replaced.status, 400); assert.match((await replaced.json()).error, /referenced SSH key has changed/);
+  const idleRenderers = await page.locator('#terminal-stack>iframe[id^="frame-"]').evaluateAll(frames => frames.filter(frame => {
+    const state = { allowed: false }; frame.contentDocument?.dispatchEvent(new CustomEvent('terminal-can-evict', { detail: state })); return state.allowed;
+  }).length);
+  assert.ok(idleRenderers <= 4, 'The idle terminal renderer cache stays bounded');
   assert.deepEqual(errors, []);
   console.log('PASS workspace: Readline SSH capture (typing/history/search/completion/paste), remote alternatives, backend key references, recovered handoffs, clean prompt after nested SSH exit, terminal-first, settings pane and shared preferences, 10 pt, persistent isolated tabs, host reuse/count/menu, explicit new terminals, automatic ended-shell replacement, background output, direct cross-origin backend, local encrypted IndexedDB vault, offline backup restore, unlocked private export, explicit multi-device backups, backend restore, transient browser SSH keys, verified OpenSSH, automatic routing, remote directory/Python repair, SSH reconnect and close, CORS, owner isolation, single-use tickets, changed-host rejection and remembered pairing after backend and browser restarts');
 } catch (error) { console.error(logs.join('')); console.error(error); if (browser) { const pages = browser.contexts()[0]?.pages(); if (pages?.[0]) { await pages[0].screenshot({ path: root + '/.test-artifacts/workspace-failure.png' }); console.error(await pages[0].locator('body').innerText()); } } process.exitCode = 1; }

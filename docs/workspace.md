@@ -9,10 +9,12 @@ It builds on the single repair library at `2a99127`; master and the former exper
 `workspace-storage.ts` validates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
 These modules share one live workspace state so replacing saved hosts, backends or tabs is visible to pending actions.
 Each terminal uses a same-origin `terminal.html` frame running the existing renderer and input pipeline.
-Frames stay mounted when switching tabs.
-A terminal tab connects when it is first shown or selected, keeps draining output for twenty seconds after it is hidden, and then releases its socket.
+The workspace caches four recently used terminal renderers and restores evicted views through session replay.
+Views with unacknowledged input, retained recordings or pending browser operations remain mounted while that work is pending.
+Aware clients request input checkpoints with existing heartbeats, retaining newer keys until the backend confirms them.
+A terminal tab mounts when selected, stops parsing and painting when hidden, and releases its socket after two seconds.
 A shell without a connected viewer is never paused by flow control, so a released tab's programs keep running.
-After a reload, the selected tab mounts first and hidden tabs mount once the browser is idle.
+After a reload, the selected tab mounts first and hidden Herdr metadata views mount once the browser is idle for notifications.
 The tab header supplies new-tab and back controls.
 Connection actions and terminal/file/Herdr tab lifecycles now register through the [runtime plugin registry](plugins.md).
 User packages load from Settings into isolated frames with a scoped file-read bridge; the built-ins retain their existing trusted views.

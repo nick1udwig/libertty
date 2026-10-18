@@ -11,6 +11,7 @@ interface ReconnectingSocketOptions {
   error(error: unknown, token?: string): boolean;
   stalled?(seconds: number): void;
   probe?(): void;
+  checkpoint?(): boolean;
 }
 /** How a connection follows the page into and out of the background. */
 export interface BackgroundOptions {
@@ -157,7 +158,7 @@ export class ReconnectingSocket {
       this.options.stalled?.(Math.floor((Date.now() - this.lastContact) / 1000));
     } else if (this.socket?.readyState === WebSocket.OPEN && this.pingAt === undefined && Date.now() - this.lastContact >= this.heartbeatInterval()) {
       this.pingAt = Date.now();
-      this.socket.send(JSON.stringify({ type: 'ping' }));
+      this.socket.send(JSON.stringify({ type: 'ping', ...(this.options.checkpoint?.() ? { checkpoint: true } : {}) }));
       this.options.probe?.();
     }
     this.armHeartbeat();

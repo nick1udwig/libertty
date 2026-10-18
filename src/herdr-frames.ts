@@ -1,6 +1,7 @@
 import { node } from './dom.ts';
 import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
+import { terminalCanEvict } from './terminal-retention.ts';
 
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
 export interface FramesHost {
@@ -16,7 +17,7 @@ export interface FramesHost {
   painted(): void;
   ended(): void;
 }
-/** A Herdr view's agent terminal iframes: the selected one, the one still displayed during a handoff, and up to four parked ones on phones. */
+/** Keep the selected terminal and one previous pane on phones or during a handoff. */
 export class HerdrFrames {
   frame?: HTMLIFrameElement;
   displayed?: HTMLIFrameElement;
@@ -44,7 +45,7 @@ export class HerdrFrames {
       entry.frame.contentWindow?.postMessage({ type: 'shortcut-host' }, location.origin);
       entry.frame.contentWindow?.postMessage({ type:'herdr-present', presentation:entry.presentation },location.origin);
       entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
-      entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible:this.host.visible() },location.origin);
+      entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible:this.host.visible() && active },location.origin);
     }
     const geometry = event.data.cols + 'x' + event.data.rows;
     if (event.data.type === 'terminal-sizing' && active && event.data.presentation === entry.presentation) entry.geometry = geometry;
@@ -77,7 +78,7 @@ export class HerdrFrames {
     const id = frame.dataset.terminal!, entry = this.entries.get(id);
     if (!entry || entry.frame !== frame) { frame.remove(); return; }
     frame.inert = true;
-    if (keepVisible || matchMedia('(pointer: coarse) and (max-width: 1024px)').matches && entry.rendered) {
+    if (keepVisible || matchMedia('(pointer: coarse) and (max-width: 1024px)').matches && entry.rendered || !terminalCanEvict(frame)) {
       frame.className = keepVisible ? 'herdr-terminal-previous' : 'herdr-terminal-cached'; frame.style.visibility = keepVisible ? '' : 'hidden';
       frame.contentWindow?.postMessage({type:'herdr-park',parked:true},location.origin);
     } else { frame.remove(); this.entries.delete(id); }
@@ -120,7 +121,7 @@ export class HerdrFrames {
       frame.src = url.href; this.frame = frame;
       const entry = {frame,session,pane:agent.paneId,rendered:false}; this.entries.set(selected,entry); this.screen.append(frame); this.prepare(entry);
     }
-    while (this.entries.size > 4) { const candidate = [...this.entries].find(([,entry]) => entry.frame !== this.frame && entry.frame !== this.displayed); if (!candidate) break; const [id, entry] = candidate; entry.frame.remove(); this.entries.delete(id); }
+    while (this.entries.size > 2) { const candidate = [...this.entries].find(([,entry]) => entry.frame !== this.frame && entry.frame !== this.displayed && terminalCanEvict(entry.frame)); if (!candidate) break; const [id, entry] = candidate; entry.frame.remove(); this.entries.delete(id); }
   }
   /** Park every frame except the selected one when the view hides. */
   hide() {
