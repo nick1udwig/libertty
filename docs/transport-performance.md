@@ -304,6 +304,10 @@ The pinned Ghostty adapter's continuous animation loop is disabled.
 The cursor blinks only while its terminal has focus and is at the live viewport.
 A stationary unfocused prompt or history view does not schedule terminal paints.
 
+Herdr history projections append safe text, color and hyperlink sequences without resetting the parsed history or visible terminal.
+Changed earlier text, rolling history, geometry changes and other terminal controls retain full reconstruction.
+Projected cursor placement reuses the visible terminal's scrollback count instead of parsing the same history again.
+
 ## Adaptive outgoing compression
 
 Negotiated gzip-fast connections temporarily use the 2 KiB bulk threshold when output is queued, a socket write takes at least 50 ms, or terminal frame acknowledgements take at least 100 ms.
