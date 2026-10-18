@@ -107,6 +107,15 @@ try {
   assert.ok((await suggestAtPrompt('Fresh binary')).some(candidate => candidate.command === 'freshbinary' && !candidate.literal));
   assert.ok((await suggestAtPrompt('cat new context file dot txt')).some(candidate => candidate.command === 'cat new-context-file.txt'));
   assert.ok(await page.evaluate(() => [...document.fonts].some(font => font.family === 'JetBrains Mono' && font.status === 'loaded')));
+  await page.locator('#terminal textarea').evaluate(el => el.blur());
+  await delay(800); await page.evaluate(() => window.__paint = []); await delay(800);
+  assert.equal(await page.evaluate(() => window.__paint.length), 0, 'An unfocused stationary prompt stops painting');
+  await command(page, "printf 'idle-history-%s\\n' {1..100}");
+  await page.locator('#terminal canvas').hover(); await page.mouse.wheel(0, -1000);
+  await page.locator('#terminal textarea').evaluate(el => el.blur());
+  await delay(2000); await page.evaluate(() => window.__paint = []); await delay(800);
+  assert.equal(await page.evaluate(() => window.__paint.length), 0, 'Stationary scrollback stops painting');
+  await focusTerminal(page); await page.keyboard.type(' '); await page.keyboard.press('Backspace');
   const originalSize = await page.evaluate(() => window.__terminalSize);
   await page.locator('#menu-button').click();
   const fontSize = page.getByLabel('Terminal font size (pt)');

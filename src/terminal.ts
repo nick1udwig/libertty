@@ -21,6 +21,7 @@ import { TerminalEcho } from './predicted-echo.ts';
 import { TerminalHistory } from './terminal-history.ts';
 import { TerminalProjection } from './terminal-projection.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
+import { TerminalRendering } from './terminal-rendering.ts';
 import { DictationControl } from './dictation.ts';
 import { InlineSuggestions } from './inline-suggestions.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
@@ -146,7 +147,9 @@ const [ghostty] = await Promise.all([Ghostty.load(), document.fonts.load(`14px $
 const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 / 3, fontFamily,
   scrollback: 5000, cursorBlink: true, smoothScrollDuration: 0,
   theme: terminalThemes[terminalTheme] });
+const rendering = new TerminalRendering(term);
 term.open($('terminal'));
+rendering.attach();
 if (terminalTheme === 'paper' || terminalTheme === 'flag') adaptDarkAppColors(term.renderer as unknown as Parameters<typeof adaptDarkAppColors>[0], terminalThemes[terminalTheme]);
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
