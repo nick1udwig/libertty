@@ -243,12 +243,37 @@ test('measured slow round trips extend the reply deadline on quiet links', async
   t.mock.timers.tick(1000); await flush(); pong();
   t.mock.timers.tick(2000); await flush();
   t.mock.timers.tick(2500); await flush(); pong();
+  f.connection.activity();
   t.mock.timers.tick(2500); await flush();
   assert.equal(socket.sent.length, 3);
   t.mock.timers.tick(4000); await flush(); pong();
   assert.deepEqual(f.behavior.stalled, [], 'a four-second reply matches this link');
   assert.equal(f.sockets.length, 1);
   assert.deepEqual(f.messages, ['state'], 'replies stay internal');
+});
+
+test('quiet connections reduce probes and activity restores fast failure detection', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state');
+  for (let i = 0; i < 60; i++) { t.mock.timers.tick(1000); await flush(); }
+  assert.ok(socket.sent.length <= 6, 'A quiet minute needs at most six probes including startup');
+  const before = socket.sent.length;
+  socket.autoPong = false; f.connection.activity();
+  t.mock.timers.tick(1); await flush();
+  assert.equal(socket.sent.length, before + 1, 'User activity probes a stale idle connection immediately');
+  t.mock.timers.tick(2000); await flush();
+  assert.equal(f.sockets.length, 2, 'Input restores fast failure detection');
+});
+
+test('acknowledged input avoids redundant probes but cannot clear a pending heartbeat', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state');
+  for (let i = 0; i < 20; i++) { t.mock.timers.tick(1000); f.connection.confirmed(); await flush(); }
+  assert.deepEqual(socket.sent, [], 'Confirmed input does not need additional heartbeats');
+  socket.autoPong = false; f.connection.activity();
+  t.mock.timers.tick(2000); await flush();
+  f.connection.confirmed(); t.mock.timers.tick(2000); await flush();
+  assert.equal(f.sockets.length, 2, 'An outstanding probe still requires its own reply');
 });
 
 test('typing or tapping retries immediately during backoff without overlapping attempts', async t => {

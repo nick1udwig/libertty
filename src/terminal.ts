@@ -72,6 +72,7 @@ const unsentInput = new UnsentInput();
 const inputClient = crypto.randomUUID(), sentInput = new SentInput();
 // Only a backend that reports delivered keys accepts numbered ones.
 let inputSeq = 0, numberedInput = false;
+let confirmedInput = 0;
 let disconnectedContext: InputContext | undefined;
 let connectionEpoch = 0, synchronizedConnection = false;
 let shortcuts: Shortcut[] = structuredClone(defaults);
@@ -555,6 +556,7 @@ function socketMessage(event: MessageEvent) {
   } else if (message.type === 'ssh-released') {
     if (capturedConnection === message.id) capturedConnection = undefined;
   } else if (message.type === 'input-ack') {
+    if (typeof message.seq === 'number' && message.seq > confirmedInput) { confirmedInput = message.seq; transport.confirmed(); }
     // Keys the previous connection never delivered rejoin the unsent queue under the context they were typed in.
     numberedInput = true;
     const pending = sentInput.settle(message.seq);

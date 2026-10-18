@@ -166,7 +166,7 @@ impl Policy {
         Self {
             cancel: CancellationToken::new(),
             slow: CancellationToken::new(),
-            heartbeat: Some(Duration::from_secs(5)),
+            heartbeat: Some(Duration::from_secs(30)),
             send_timeout: Some(Duration::from_secs(20)),
         }
     }
@@ -284,6 +284,7 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                 }
             }
             Event::Input(Some(Ok(message))) => {
+                heartbeat.reset();
                 // Any client traffic proves the viewer is alive, including queued audio ahead of a pong.
                 alive = true;
                 let result = match message {

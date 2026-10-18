@@ -1,5 +1,6 @@
 import { decodeWire } from './wire.ts';
 const minimumReply = 2000, maximumReply = 8000, activeDownlink = 1000;
+const activeHeartbeat = 2000, idleHeartbeat = 25000, activityWindow = 10000;
 interface ReconnectingSocketOptions {
   prepare(signal: AbortSignal, token?: string): Promise<URL>;
   available(): boolean;
@@ -9,6 +10,7 @@ interface ReconnectingSocketOptions {
   close(event?: CloseEvent): boolean;
   error(error: unknown, token?: string): boolean;
   stalled?(seconds: number): void;
+  probe?(): void;
 }
 /** How a connection follows the page into and out of the background. */
 export interface BackgroundOptions {
@@ -30,10 +32,12 @@ export class ReconnectingSocket {
   private stopped = false;
   private retained?: WebSocket;
   private heartbeat?: ReturnType<typeof setTimeout>;
+  private heartbeatAt = 0;
   private lastContact = 0;
   private established?: WebSocket;
   private pingAt?: number;
   private lastMessage = 0;
+  private lastActivity = -Infinity;
   private rtt?: { smoothed: number; variance: number };
   private stalled = false;
   private background?: ReturnType<typeof setTimeout>;
@@ -64,8 +68,13 @@ export class ReconnectingSocket {
 
   /** User activity bypasses retry backoff without competing with a handshake. */
   activity() {
+    this.lastActivity = Date.now();
     if (!this.attempt && (this.stalled || this.socket?.readyState !== WebSocket.OPEN)) void this.resume(this.stalled);
+    else this.armHeartbeat();
   }
+
+  /** Acknowledged input proves that the return path worked without an extra probe. */
+  confirmed() { if (this.pingAt === undefined) { this.lastContact = Date.now(); this.armHeartbeat(); } }
 
   get healthy() { return !this.stalled && this.socket?.readyState === WebSocket.OPEN; }
   /** The page has stayed hidden past its background grace. */
@@ -100,8 +109,23 @@ export class ReconnectingSocket {
     this.attempt = undefined;
     this.delay = 1000;
     this.lastContact = Date.now(); this.pingAt = undefined; this.stalled = false;
-    clearTimeout(this.heartbeat);
-    this.heartbeat = setTimeout(() => this.checkHeartbeat(), 2000);
+    this.armHeartbeat();
+  }
+
+  private heartbeatInterval() {
+    return Date.now() - Math.max(this.lastActivity, this.lastMessage) < activityWindow ? activeHeartbeat : idleHeartbeat;
+  }
+
+  private armHeartbeat() {
+    if (this.stopped || this.established !== this.socket || this.socket?.readyState !== WebSocket.OPEN) {
+      clearTimeout(this.heartbeat); this.heartbeat = undefined; return;
+    }
+    const wait = this.pingAt === undefined ? this.lastContact + this.heartbeatInterval() - Date.now()
+      : Math.min(1000, this.pingAt + this.replyDeadline() - Date.now());
+    const at = Date.now() + Math.max(1, wait);
+    if (this.heartbeat && (at === this.heartbeatAt || this.pingAt !== undefined && at >= this.heartbeatAt)) return;
+    clearTimeout(this.heartbeat); this.heartbeatAt = at;
+    this.heartbeat = setTimeout(() => { this.heartbeat = undefined; this.checkHeartbeat(); }, Math.max(1, wait));
   }
 
   /** Allow a reply the link's measured round trip, and the full maximum while output still arrives ahead of it. */
@@ -120,6 +144,7 @@ export class ReconnectingSocket {
       this.rtt.smoothed = 0.875 * this.rtt.smoothed + 0.125 * sample;
     }
     this.lastContact = Date.now(); this.pingAt = undefined;
+    this.armHeartbeat();
   }
 
   private checkHeartbeat() {
@@ -130,11 +155,12 @@ export class ReconnectingSocket {
         void this.begin(undefined, true);
       }
       this.options.stalled?.(Math.floor((Date.now() - this.lastContact) / 1000));
-    } else if (this.socket?.readyState === WebSocket.OPEN && this.pingAt === undefined && Date.now() - this.lastContact >= 2000) {
+    } else if (this.socket?.readyState === WebSocket.OPEN && this.pingAt === undefined && Date.now() - this.lastContact >= this.heartbeatInterval()) {
       this.pingAt = Date.now();
       this.socket.send(JSON.stringify({ type: 'ping' }));
+      this.options.probe?.();
     }
-    this.heartbeat = setTimeout(() => this.checkHeartbeat(), 1000);
+    this.armHeartbeat();
   }
 
   private release(event?: CloseEvent, retain = false) {
@@ -144,6 +170,8 @@ export class ReconnectingSocket {
     const attempt = this.attempt;
     this.attempt = undefined;
     clearTimeout(this.deadline);
+    clearTimeout(this.heartbeat);
+    this.heartbeat = undefined;
     attempt?.abort();
     // Detach before closing: a delayed close must not affect its replacement.
     if (retain && socket?.readyState === WebSocket.OPEN) {
@@ -202,6 +230,7 @@ export class ReconnectingSocket {
           }
           this.lastMessage = Date.now();
           this.options.message(new MessageEvent('message', { data: value }));
+          this.armHeartbeat();
         };
         if (!socket.protocol?.startsWith('libertty.')) { deliver(event.data); return; }
         decoded = decoded.then(async () => {
