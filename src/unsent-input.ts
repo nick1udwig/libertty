@@ -45,6 +45,12 @@ export class SentInput {
   private bytes = 0;
   /** The newest key dropped to bound memory, which a reconnect can no longer resend. */
   private evicted = 0;
+  get pending() { return this.entries.length > 0; }
+  confirm(delivered: number) {
+    this.entries = this.entries.filter(entry => entry.seq > delivered);
+    this.bytes = this.entries.reduce((bytes, entry) => bytes + entry.data.length, 0);
+    if (delivered >= this.evicted) this.evicted = 0;
+  }
   add(seq: number, data: string, context?: InputContext) {
     this.entries.push({ seq, data, context }); this.bytes += data.length;
     while (this.bytes > 65536 && this.entries.length > 1) {

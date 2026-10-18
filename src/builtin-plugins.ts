@@ -6,6 +6,7 @@ import { herdrSession } from './herdr-protocol.ts';
 import type { HerdrView } from './herdr-view.ts';
 import { BUILTIN_VERSION, type TabPlugin } from './plugins.ts';
 import { readingPlugin, type ReadingServices } from './reading-plugin.ts';
+import { terminalCanEvict } from './terminal-retention.ts';
 
 export interface BuiltinServices extends ReadingServices {
   active(tab: TerminalTab): boolean;
@@ -41,6 +42,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
           focus() { frame.contentWindow?.postMessage({ type: 'focus-terminal' }, location.origin); },
           applySettings() { frame.contentWindow?.postMessage({ type: 'settings-changed' }, location.origin); },
           copySelection() { frame.contentWindow?.postMessage({ type: 'settings-action', action: 'copy-selection' }, location.origin); },
+          canEvict: () => terminalCanEvict(frame),
           dispose() { frame.remove(); s.frame(tab); } };
       },
       async close(tab) { if (!confirm('Close ' + tab.name + '? Running programs in this terminal will stop.')) return false; await s.closeSession(tab); return true; },

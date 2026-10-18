@@ -1286,6 +1286,9 @@
             "type": {
               "const": "ping",
               "type": "string"
+            },
+            "checkpoint": {
+              "type": "boolean"
             }
           },
           "required": [

@@ -42,6 +42,8 @@ export class DictationControl {
   private daemonAvailable?: boolean;
   private unavailableReason?: string;
   private polling = false;
+  private lastPoll = -Infinity;
+  private installPrompt?: number;
   private audioTimer?: ReturnType<typeof setTimeout>;
   private readyTimer?: ReturnType<typeof setTimeout>;
   private uploadTimer?: ReturnType<typeof setTimeout>;
@@ -78,6 +80,7 @@ export class DictationControl {
         this.host.prepare();
         const state = this.host.state();
         await this.host.api('/api/dictation/install', { prompt: state.prompt, revision: state.inputRevision });
+        this.installPrompt = state.prompt;
         dismiss(); this.host.focus(); this.host.notice('Install command pasted. Review it, then press Enter to run it.');
       } catch (error) { this.host.notice((error as Error).message); } finally { button.disabled = false; }
     };
@@ -117,7 +120,6 @@ export class DictationControl {
         }
       }
     });
-    setInterval(() => void this.poll(), 15000);
   }
   private save(value: string) { try { localStorage.setItem('libertty.voxtype:' + this.host.key, value); } catch {} }
   get active() { return this.phase !== 'idle'; }
@@ -133,7 +135,7 @@ export class DictationControl {
     this.online = online;
     if (!online) { if (!this.active) this.available = false; this.dialog.close(); }
     else if (this.needsResume && this.active && this.phase !== 'starting') this.resume();
-    else if (changed) void this.poll();
+    else if (changed) void this.poll(true);
     this.render();
   }
   private resume() {
@@ -165,10 +167,18 @@ export class DictationControl {
     this.id = crypto.randomUUID(); this.inputContext = this.host.context(); this.retryAfterFlush = false;
     this.phase = 'finishing'; this.host.prepare(); this.host.waiting?.(true); this.sendStart(); this.render();
   }
-  prompt() { this.offer(); }
+  prompt() {
+    const state = this.host.state();
+    const installed = this.installPrompt !== undefined && state.ready && state.prompt !== this.installPrompt;
+    if (installed) this.installPrompt = undefined;
+    if (state.ready) void this.poll(installed);
+    this.offer();
+  }
   visibility(visible: boolean) { this.visible = visible; if (!visible) { this.cancel(); this.dialog.close(); } else void this.poll(); this.render(); }
-  private async poll() {
+  private async poll(force = false) {
     if (!this.online || !this.visible || document.hidden || this.polling || this.phase !== 'idle') return;
+    if (!force && Date.now() - this.lastPoll < 60000) return;
+    this.lastPoll = Date.now();
     this.polling = true;
     try {
       const status = await this.host.api<{ installed: boolean; available: boolean; reason?: string }>('/api/dictation');
@@ -194,6 +204,7 @@ export class DictationControl {
   }
   private render() { this.view.update(this.phase, (this.active || this.available && this.online) && this.visible, this.capturePaused); }
   private async start() {
+    void this.poll(true);
     if (!this.online || !this.available || !dictationTarget(this.host.state())) { this.host.notice('Wait for terminal input before dictating.'); return; }
     const generation = ++this.generation; this.id = crypto.randomUUID(); this.inputContext = this.host.context(); this.retryAfterFlush = false; this.phase = 'starting'; this.finishPending = false; this.render();
     this.wakeLock.start();

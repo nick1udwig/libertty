@@ -362,7 +362,7 @@ async fn a_silent_viewer_neither_pauses_the_shell_nor_stays_attached() {
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     // Reading would answer pings, so wait until the heartbeat must have released the socket.
-    tokio::time::sleep_until(connected + Duration::from_secs(12)).await;
+    tokio::time::sleep_until(connected + Duration::from_secs(62)).await;
     let closed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.next().await {

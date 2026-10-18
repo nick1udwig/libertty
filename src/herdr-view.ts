@@ -61,7 +61,7 @@ export class HerdrView {
   private quietSnapshot = true;
   private selected = '';
   private requestedTerminal = '';
-  private presenceTimer?: ReturnType<typeof setInterval>;
+  private presenceAt = 0;
   private presenceDevice = '';
   private terminals: HerdrAgent[] = [];
   private spaces: HerdrSpace[] = [];
@@ -147,7 +147,6 @@ export class HerdrView {
     const presence = () => this.updatePresence();
     document.addEventListener('visibilitychange', presence); window.addEventListener('focus', presence); window.addEventListener('blur', presence);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', presence), () => window.removeEventListener('focus', presence), () => window.removeEventListener('blur', presence));
-    this.presenceTimer = setInterval(presence, 15000);
     const outside = (event: PointerEvent) => { if (!this.menu.contains(event.target as Node) && !(event.target as HTMLElement).closest('.herdr-agent-tab')) this.closeMenu(); };
     document.addEventListener('pointerdown', outside); this.unsubscribers.push(() => document.removeEventListener('pointerdown', outside));
     const escape = (event: KeyboardEvent) => {
@@ -193,6 +192,7 @@ export class HerdrView {
         return url;
       },
       stalled: seconds => { this.status.textContent = `Connection stalled · last contact ${seconds}s ago`; },
+      probe: () => { if (Date.now() - this.presenceAt >= 20000) this.updatePresence(); },
       open: () => { this.quietSnapshot = true; this.updatePresence(); },
       message: event => {
         try { this.receive(typeof event.data === 'string' ? JSON.parse(event.data) : event.data); }
@@ -870,6 +870,7 @@ export class HerdrView {
   updatePresence() {
     const device = this.host.notificationDevice?.();
     if (device && this.ws?.readyState === WebSocket.OPEN) {
+      this.presenceAt = Date.now();
       this.ws.send(JSON.stringify({ type: 'notification-presence', device, focused: !document.hidden && document.hasFocus() }));
       if (device !== this.presenceDevice) { this.presenceDevice = device; this.acknowledge(this.currentNotifications()); }
     }
@@ -880,7 +881,7 @@ export class HerdrView {
     if (this.disposed) return; this.disposed = true;
     this.writeCache(); this.actionDialog?.close();
     this.dropIndicator.remove(); this.treeBridge.remove();
-    clearTimeout(this.recoveryRetry); this.transport.suspend(); clearInterval(this.presenceTimer); this.frames.dispose(); this.strip.remove(); this.element.remove();
+    clearTimeout(this.recoveryRetry); this.transport.suspend(); this.frames.dispose(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
   }
 }

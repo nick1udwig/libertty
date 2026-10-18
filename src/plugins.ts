@@ -11,6 +11,7 @@ export interface PluginView {
   focus?(): void;
   applySettings?(): void;
   copySelection?(): void;
+  canEvict?(): boolean;
 }
 export interface TabPlugin {
   id: string;

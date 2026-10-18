@@ -113,6 +113,9 @@ try {
   await page.waitForFunction(() => window.__state?.ready);
   await page.locator('#dictation-install').waitFor({ state: 'visible' });
   await page.locator('#dictation-install input').check();
+  let installStatusReads = 0;
+  const installStatus = request => { if (new URL(request.url()).pathname.endsWith('/api/dictation')) installStatusReads++; };
+  page.on('request', installStatus);
   await page.locator('[data-install]').click();
   await page.locator('#dictation-install').waitFor({ state: 'hidden' });
   await page.waitForFunction(() => window.__out.includes('/scripts/install'));
@@ -120,6 +123,8 @@ try {
   let prompt = await page.evaluate(() => window.__state.prompt);
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+e'); await page.keyboard.press('Control+u'); await page.keyboard.press('Enter');
   await page.waitForFunction(previous => window.__state?.ready && window.__state.prompt > previous, prompt);
+  await until(() => installStatusReads > 0, 'Availability refresh after the install prompt');
+  page.off('request', installStatus);
   await page.reload(); await page.waitForFunction(() => window.__state?.ready);
   await page.waitForTimeout(300); assert.equal(await page.locator('#dictation-install').isVisible(), false);
   prompt = await page.evaluate(() => window.__state.prompt);
@@ -169,6 +174,10 @@ try {
   await page.reload(); await page.locator('#libertty-dictation').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#dictation-install').isVisible(), false);
   const mic = page.locator('#libertty-dictation'), micPosition = await mic.boundingBox();
+  let idleStatusReads = 0;
+  const statusRead = request => { if (new URL(request.url()).pathname.endsWith('/api/dictation')) idleStatusReads++; };
+  page.on('request', statusRead); await page.waitForTimeout(16000); page.off('request', statusRead);
+  assert.equal(idleStatusReads, 0, 'An idle terminal does not poll dictation availability');
   assert.equal(await mic.evaluate(el => getComputedStyle(el).borderRadius), '14px');
   assert.equal(await mic.locator('.dictation-microphone-icon').isVisible(), true);
   assert.equal(await mic.textContent(), '');

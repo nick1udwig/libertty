@@ -304,7 +304,10 @@ pub fn dictation_target(value: &Value) -> Option<&str> {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ClientMessage {
-    Ping,
+    Ping {
+        #[serde(default)]
+        checkpoint: bool,
+    },
     Repair(Repair),
     RepairCancel {
         #[serde(deserialize_with = "id")]

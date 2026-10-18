@@ -31,8 +31,11 @@ test('Herdr reconnects require the same process and shell picture while retainin
 });
 test('numbered keys resend only what the backend did not deliver, ahead of later unsent keys', () => {
   const sent = new SentInput();
+  assert.equal(sent.pending, false);
   for (const [seq, data] of [[1, 'a'], [2, 'b'], [3, 'c']] as const) sent.add(seq, data, { ...context, revision: 4 + seq });
+  assert.equal(sent.pending, true, 'Unacknowledged keys protect a cached view');
   assert.deepEqual(sent.settle(1), { data: ['b', 'c'], context: { ...context, revision: 6 }, complete: true });
+  assert.equal(sent.pending, false);
   assert.equal(sent.settle(1), undefined, 'Settling consumes the retained keys');
   const queue = new UnsentInput(); queue.add('d', { ...context, revision: 9 });
   assert.equal(queue.prepend(['b', 'c'], { ...context, revision: 6 }), true);
@@ -44,4 +47,15 @@ test('numbered keys resend only what the backend did not deliver, ahead of later
   assert.equal(sent.settle(4)?.complete, false);
   sent.add(7, 'x'.repeat(65536), context); sent.add(8, 'g', context);
   assert.deepEqual(sent.settle(7)?.data, ['g']);
+});
+
+test('live checkpoints discard only confirmed keys without resending newer input', () => {
+  const sent = new SentInput();
+  sent.add(1, 'a', context); sent.add(2, 'b', context);
+  sent.confirm(1);
+  assert.equal(sent.pending, true);
+  assert.deepEqual(sent.settle(1)?.data, ['b']);
+  sent.add(3, 'c', context); sent.confirm(3);
+  assert.equal(sent.pending, false);
+  assert.equal(sent.settle(3), undefined);
 });

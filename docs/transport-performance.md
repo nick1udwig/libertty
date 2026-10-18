@@ -44,13 +44,15 @@ Without browser decompression support, raw binary remains available.
 Input, acknowledgements and geometry use compact binary fields, terminal output retains its sequence, and Herdr frames carry their original ANSI bytes directly.
 The backend decodes Herdr's base64 once per frame and encodes terminal output and frames from typed messages, so neither passes through an intermediate JSON value or a second base64 round trip.
 Decoding remains ordered across asynchronous decompression and discards results from replaced sockets.
-Two seconds after the last confirmed reply, browsers ping the terminal or metadata socket and expect an application reply.
+Browsers probe every two seconds during recent interaction or incoming output, then every twenty-five seconds while quiet.
+Confirmed input acknowledgements postpone redundant probes without clearing an outstanding heartbeat.
+Notification presence renewals share heartbeat wakeups, while focus changes are sent immediately.
 The reply deadline is two seconds or the smoothed round-trip time plus four deviations, whichever is longer, up to eight seconds.
 While messages are still arriving, a reply that may be queued behind them gets the full eight seconds.
 Live output and repeated state updates never reset the deadline, so a working downlink can delay but not conceal a failed return path.
 A replacement handshake keeps the previous socket alive and the last painted screen visible until takeover, and user activity bypasses reconnect backoff.
 Older servers without the heartbeat capability retain their existing reconnect behavior.
-The backend also pings native terminal sockets every five seconds and detaches a viewer that sends nothing for two intervals.
+The backend pings native terminal sockets after thirty seconds without client traffic and detaches a viewer that sends nothing for two intervals.
 A phone that loses its network without closing the socket therefore cannot hold the shell's acknowledgement window closed and pause its program.
 Any client message counts as a reply, so queued audio ahead of a protocol pong does not disconnect dictation.
 Audio retains its existing Opus bytes inside a distinct four-byte envelope and is never compressed.
@@ -296,6 +298,24 @@ Reloads and reconnects missing more than 256 KiB, or output no longer in history
 A smaller catch-up replay may use 256 KiB of credit until it is acknowledged, so it arrives in one round trip while input waits for it.
 A viewer whose window stays closed for five seconds is resynchronized with a snapshot, so a slow phone no longer pauses the shell's programs.
 Live output is sent immediately without a batching timer, and an existing oversized chunk remains whole.
+
+## Terminal paint scheduling
+
+The browser parses terminal writes synchronously and schedules one paint for changed output, scrolling, selection or links.
+The pinned Ghostty adapter's continuous animation loop is disabled.
+The cursor blinks only during recent interaction while its terminal has focus and is at the live viewport.
+A stationary unfocused prompt or history view does not schedule terminal paints.
+Hidden terminal views suspend parsing and direct canvas paints immediately.
+Inactive tabs and parked Herdr panes release their connections after two seconds, retaining their picture for replay on return.
+Mobile Herdr views cache one previous pane, while the workspace caches up to four ordinary terminal renderers.
+After five seconds without interaction, output-driven paints run at most twenty times per second and the cursor becomes steady.
+Herdr batches preserve ordered ANSI deltas and complete baselines within the existing acknowledgement window, with a 512 KiB merge limit.
+Input, scrolling and layout handshakes retain immediate processing, while native output parsing keeps its existing throughput.
+Dictation availability is checked on connection, microphone use and visible prompt changes, with a one-minute cache instead of periodic polling.
+
+Herdr history projections append safe text, color and hyperlink sequences without resetting the parsed history or visible terminal.
+Changed earlier text, rolling history, geometry changes and other terminal controls retain full reconstruction.
+Projected cursor placement reuses the visible terminal's scrollback count instead of parsing the same history again.
 
 ## Adaptive outgoing compression
 

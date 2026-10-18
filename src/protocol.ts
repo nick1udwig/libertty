@@ -42,7 +42,7 @@ export type ServerMessage =
   | { type: 'input-ack'; seq?: number }
   | { type: 'result'; id: string; accepted: boolean; message?: string };
 export type ClientMessage =
-  | { type: 'ping' }
+  | { type: 'ping'; checkpoint?: boolean }
   | { type: 'repair'; id: string; text: string; prompt: number; revision: number; intent?: RepairIntent }
   | { type: 'repair-cancel'; id: string }
   | { type: 'input-line'; id: string; prompt: number; revision: number }

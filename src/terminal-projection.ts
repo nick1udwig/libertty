@@ -3,6 +3,7 @@ import { preserveScrollback } from './terminal-viewport.ts';
 
 const tokens = (text: string) => text.match(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][\s\S]*?(?:\x07|\x1b\\)|.)|[^\x1b]/gu) || [];
 const absoluteRow = (terminal: GhosttyTerminal) => terminal.getScrollbackLength() + terminal.getCursor().y;
+const appendSafe = (text: string) => !/[\x00-\x08\x0a-\x1f\x7f]/.test(text.replace(/\x1b\[[0-9;:]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replaceAll('\r\n', ''));
 const rowText = (terminal: GhosttyTerminal, row: number) => {
   const history = terminal.getScrollbackLength();
   const cells = row < history ? terminal.getScrollbackLine(row) : terminal.getLine(row - history);
@@ -10,6 +11,7 @@ const rowText = (terminal: GhosttyTerminal, row: number) => {
     ? terminal.getScrollbackGraphemeString(row, col) || ' ' : terminal.getGraphemeString(row - history, col) || ' ').join('').replaceAll('\0', ' ').trimEnd();
 };
 const viewportText = (terminal: GhosttyTerminal) => {
+  terminal.update();
   const cells = terminal.getViewport(), rows: string[] = [];
   for (let row = 0; row < terminal.rows; row++) {
     let text = '';
@@ -46,6 +48,12 @@ export class TerminalProjection {
   private awaitingNativeResize = false;
   private columns: number;
   private rows: number;
+  private parsed = '';
+  private parsedSafe = false;
+  private painted = '';
+  private paintedSafe = false;
+  private paintedCols = 0;
+  private paintedRows = 0;
   constructor(term: Terminal, ghostty: Ghostty) {
     this.term = term; this.ghostty = ghostty; this.columns = term.cols; this.rows = term.rows;
     term.write('\x1b[?25l');
@@ -85,6 +93,7 @@ export class TerminalProjection {
       if (!this.canRenderLive()) this.paint();
     }
     if (this.canRenderLive() && (this.live || frame.full)) {
+      this.painted = '';
       preserveScrollback(this.term, () => {
         // Reset only when entering the stream. Subsequent full frames and
         // deltas retain the shared terminal's selection and hyperlink state.
@@ -125,20 +134,38 @@ export class TerminalProjection {
     if (!columns || !this.initialized) return;
     const rows = this.native?.rows || 24;
     this.history ||= this.ghostty.createTerminal(columns, rows, { scrollbackLimit: 10000 });
-    this.history.resize(columns, rows);
-    this.history.write('\x1bc\x1b[3J\x1b[2J\x1b[H');
-    this.lines = this.previous.split('\r\n'); this.starts = [];
-    for (let i = 0; i < this.lines.length; i++) {
-      this.starts.push(absoluteRow(this.history)); if (this.lines[i]) this.history.write(this.lines[i]);
-      if (i < this.lines.length - 1) this.history.write('\r\n');
+    const append = this.parsed && this.parsedSafe && this.history.cols === columns && this.history.rows === rows
+      && this.history.getScrollbackLength() < 9000 && this.previous.startsWith(this.parsed) && appendSafe(this.previous.slice(this.parsed.length));
+    if (append) {
+      const parts = this.previous.slice(this.parsed.length).split('\r\n');
+      this.lines[this.lines.length - 1] += parts[0];
+      if (parts[0]) this.history.write(parts[0]);
+      for (const line of parts.slice(1)) {
+        this.history.write('\r\n'); this.starts.push(absoluteRow(this.history)); this.lines.push(line);
+        if (line) this.history.write(line);
+      }
+    } else {
+      this.history.resize(columns, rows);
+      this.history.write('\x1bc\x1b[3J\x1b[2J\x1b[H');
+      this.lines = this.previous.split('\r\n'); this.starts = [];
+      for (let i = 0; i < this.lines.length; i++) {
+        this.starts.push(absoluteRow(this.history));
+        this.history.write(this.lines[i] + (i < this.lines.length - 1 ? '\r\n' : ''));
+      }
     }
+    this.parsed = this.previous; this.parsedSafe = !!append || appendSafe(this.previous);
   }
   private paint() {
     if (this.historyDirty) this.rebuild();
     this.live = false;
     if (!this.initialized) { this.hide(); return; }
     const point = this.nativePosition();
-    preserveScrollback(this.term, () => this.term.write('\x1bc\x1b[3J\x1b[2J\x1b[H\x1b[?25l' + this.previous + '\x1b[?25l'));
+    const append = this.painted && this.paintedSafe && this.paintedCols === this.term.cols && this.paintedRows === this.term.rows
+      && this.previous.startsWith(this.painted) && appendSafe(this.previous.slice(this.painted.length));
+    preserveScrollback(this.term, () => this.term.write((append ? '\x1b8' + this.previous.slice(this.painted.length)
+      : '\x1bc\x1b[3J\x1b[2J\x1b[H\x1b[?25l' + this.previous) + '\x1b7\x1b[?25l'));
+    this.painted = this.previous; this.paintedSafe = !!append || appendSafe(this.previous);
+    this.paintedCols = this.term.cols; this.paintedRows = this.term.rows;
     this.cursorControl = '\x1b[?25l';
     this.cursor(point);
   }
@@ -212,9 +239,14 @@ export class TerminalProjection {
       // text. This also handles a wide or combining glyph immediately after it.
       local.write(' ');
       if (absoluteRow(local) > position.row) { position.row = absoluteRow(local); position.x = 0; }
-      local.write('\x1bc\x1b[3J\x1b[2J\x1b[H');
-      if (this.previous) local.write(this.previous);
-      const y = position.row - local.getScrollbackLength();
+      let scrollback: number;
+      if (this.painted === this.previous && this.paintedCols === this.term.cols && this.paintedRows === this.term.rows) scrollback = this.term.wasmTerm!.getScrollbackLength();
+      else {
+        local.write('\x1bc\x1b[3J\x1b[2J\x1b[H');
+        if (this.previous) local.write(this.previous);
+        scrollback = local.getScrollbackLength();
+      }
+      const y = position.row - scrollback;
       this.writeCursor(y >= 0 && y < this.term.rows
         ? '\x1b[' + (y + 1) + ';' + (position.x + 1) + 'H\x1b[?25h' : '\x1b[?25l');
     }

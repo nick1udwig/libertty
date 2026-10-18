@@ -17,7 +17,8 @@ export class TerminalScrollbar {
     // owns a separate mouse-only hit test. Disable both in the pinned adapter.
     const renderer = term.renderer!;
     (renderer as unknown as { renderScrollbar: () => void }).renderScrollbar = () => {};
-    const native = term as unknown as { handleMouseDown: EventListener };
+    const native = term as unknown as { handleMouseDown: EventListener; showScrollbar(): void };
+    native.showScrollbar = () => {};
     element.removeEventListener('mousedown', native.handleMouseDown, true);
 
     this.track.className = 'terminal-scrollbar'; this.track.tabIndex = 0;
