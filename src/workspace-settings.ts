@@ -101,6 +101,7 @@ export function createWorkspaceSettings(options: Options) {
     input('auto-alternatives').checked =
       saved('autoAlternatives', true) && !saved('justRun', false);
     input('tap-alternate-send').checked = saved('tapAlternateSend', true);
+    input('bluetooth-microphone').checked = saved('bluetoothMicrophone', false);
     $<HTMLTextAreaElement>('reading-phrases').value = readingPhrases(
       saved('readingPhrases', defaultReadingPhrases),
     ).join('\n');
@@ -247,6 +248,8 @@ export function createWorkspaceSettings(options: Options) {
   };
   input('tap-alternate-send').onchange = () =>
     preferencesChanged('tapAlternateSend', input('tap-alternate-send').checked);
+  input('bluetooth-microphone').onchange = () =>
+    preferencesChanged('bluetoothMicrophone', input('bluetooth-microphone').checked);
   $('save-reading-phrases').onclick = () => {
     const lines = $<HTMLTextAreaElement>('reading-phrases')
       .value.split('\n')

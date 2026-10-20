@@ -265,6 +265,10 @@ A capable daemon enables a draggable microphone in secure browser contexts (HTTP
 Its 48px microphone, checkmark, cancel button, audio meter, and transcribing indicator match Voxtype Mobile.
 Tap to start/finish, hold and release, or use × to cancel.
 Drag to reposition the controls.
+By default, dictation records from a phone, wired or USB microphone, so Bluetooth headphones keep playing audio instead of switching to call mode.
+libertty treats an input with an unrecognized name as Bluetooth and reports when no other input is available.
+Turn on **Allow Bluetooth microphones** in settings to let the browser choose any input, including a Bluetooth headset.
+Browsers hide input names until microphone permission is granted, so the first recording on a device can briefly open the default input before it switches.
 The browser encodes mono 16 kHz capture to Opus at target 24 kbit/s in a WebAssembly worker.
 Only framed Opus packets cross the authenticated terminal connection and its loopback connection to the daemon.
 libertty requires Voxtype mobile protocol 2 (`opus_v1`); legacy PCM daemons need a coordinated update.

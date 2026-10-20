@@ -36,6 +36,7 @@ const tests = [
   'dictation-audio.test.ts',
   'dictation-alternatives.test.ts',
   'dictation-layout.test.ts',
+  'dictation-microphone.test.ts',
   'dictation-wake-lock.test.ts',
   'dictation.test.ts',
   'file-options.test.ts',

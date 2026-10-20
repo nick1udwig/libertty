@@ -1,6 +1,7 @@
 import { launchBrowser, freePort, startBackend, delay, until } from './support/browser.mjs';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { installWireObserver } from './wire-observer.mjs';
+import { installMicrophoneRoutes } from './support/microphone.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -79,6 +80,7 @@ try {
     assert.notEqual(body, original); assert.ok(body.includes('window.__testProjection')); await route.fulfill({ response, body });
   });
   await installWireObserver(context);
+  await installMicrophoneRoutes(context);
   await context.addInitScript(() => {
     const delayedPaints = new WeakSet();
     window.addEventListener('message', event => {
