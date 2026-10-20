@@ -593,14 +593,19 @@ export class HerdrView {
     anchor.classList.add('herdr-tree-anchor');
     // Phones get a full-width tree; wider screens keep it beside its chip.
     const parent = this.element.getBoundingClientRect(), rect = anchor.getBoundingClientRect(), width = parent.width > 560 ? 420 : parent.width - 16;
-    this.menu.style.width = width + 'px';
-    this.menu.style.left = Math.max(8, Math.min(rect.left - parent.left, parent.width - width - 8)) + 'px';
+    const preferredLeft = Math.max(8, Math.min(rect.left - parent.left, parent.width - width - 8));
+    const bridgeLeft = Math.max(parent.left, rect.left), bridgeRight = Math.min(parent.right, rect.right);
+    const left = Math.min(preferredLeft, bridgeLeft - parent.left), right = Math.max(preferredLeft + width, bridgeRight - parent.left);
+    this.menu.style.width = right - left + 'px';
+    this.menu.style.left = left + 'px';
     this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 6) + 'px';
     // Without overflow the whole tree can be swiped away; otherwise only its grab bar can.
     this.menu.style.touchAction = this.menu.scrollHeight > this.menu.clientHeight ? '' : 'none';
     // The bridge joins the tree to its chip so it reads as that chip's own panel.
     const menu = this.menu.getBoundingClientRect();
-    Object.assign(this.treeBridge.style, { left: rect.left + 'px', width: rect.width + 'px', top: menu.bottom - 1 + 'px', height: Math.max(0, rect.top - menu.bottom + 3) + 'px' });
+    this.menu.style.setProperty('--herdr-tree-left-gap', Math.max(0, bridgeLeft - menu.left) + 'px');
+    this.menu.style.setProperty('--herdr-tree-right-gap', Math.max(0, menu.right - bridgeRight) + 'px');
+    Object.assign(this.treeBridge.style, { left: bridgeLeft + 'px', width: bridgeRight - bridgeLeft + 'px', top: menu.bottom - 1 + 'px', height: Math.max(0, rect.top - menu.bottom + 3) + 'px' });
     this.treeBridge.hidden = false;
   }
   private buildTree(repo: SpaceRepo) {
