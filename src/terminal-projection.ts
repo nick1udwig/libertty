@@ -59,6 +59,25 @@ export class TerminalProjection {
     term.write('\x1b[?25l');
   }
   get nativeColumns() { return this.native?.cols; }
+  get clickable() { return this.live && !this.awaitingNativeResize && this.canRenderLive(); }
+  nativeCell(column: number, row: number) {
+    const native = this.native;
+    if (!this.mobile || !this.complete || this.awaitingNativeResize || native?.cols !== this.term.cols || native.rows !== this.term.rows
+      || this.term.getViewportY() > 0 || column < 0 || column >= this.term.cols || row < 0 || row >= this.term.rows) return;
+    if (this.live) return { column, row };
+    const displayed = viewportText(this.term.wasmTerm!), original = viewportText(native);
+    let lastDisplayed = displayed.length - 1, lastOriginal = original.length - 1;
+    while (lastDisplayed >= 0 && !displayed[lastDisplayed]) lastDisplayed--;
+    while (lastOriginal >= 0 && !original[lastOriginal]) lastOriginal--;
+    if (lastDisplayed < 0 || lastOriginal < 0) return;
+    const origin = lastDisplayed - lastOriginal, target = row - origin;
+    if (target < 0 || target >= native.rows) return;
+    for (let at = 0; at < native.rows; at++) {
+      const mapped = origin + at;
+      if (mapped >= 0 && mapped < displayed.length && displayed[mapped] !== original[at]) return;
+    }
+    return { column, row: target };
+  }
   update(text: string, reflow = false) {
     // Exported rows end with a delimiter; it is not an additional terminal row.
     const normalized = text.replace(/\r?\n/g, '\r\n').replace(/\r\n$/, '');

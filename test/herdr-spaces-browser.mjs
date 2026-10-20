@@ -473,6 +473,31 @@ try {
     return strip.querySelector('.herdr-tabs-toggle').getBoundingClientRect().right <= strip.getBoundingClientRect().left;
   });
   assert.equal(scrolled, true, 'The up/down button scrolls offscreen with the Herdr tabs');
+  const wideTabs = await page.addStyleTag({ content: '.herdr-agent-strip .herdr-agent-tab { min-width: 240px; }' });
+  for (const width of [390, 960]) {
+    await page.setViewportSize({ width, height: 844 });
+    for (const edge of ['left', 'right']) {
+      const id = navigationSpaces[edge === 'left' ? 0 : 5];
+      await tab(id).evaluate((tab, edge) => {
+        const strip = tab.closest('.herdr-agent-strip'), area = strip.getBoundingClientRect(), rect = tab.getBoundingClientRect();
+        strip.scrollLeft += edge === 'left' ? rect.left - area.left : rect.right - area.right;
+      }, edge);
+      await hold(id);
+      const connection = await page.evaluate(() => {
+        const tree = document.querySelector('.herdr-tree'), bridge = document.querySelector('.herdr-tree-bridge'), anchor = document.querySelector('.herdr-tree-anchor');
+        const panel = tree.getBoundingClientRect(), connector = bridge.getBoundingClientRect(), chip = anchor.getBoundingClientRect(), style = getComputedStyle(tree);
+        return { left: panel.left, right: panel.right, bridgeLeft: connector.left, bridgeRight: connector.right, chipLeft: chip.left, chipRight: chip.right, leftRadius: parseFloat(style.borderBottomLeftRadius), rightRadius: parseFloat(style.borderBottomRightRadius) };
+      });
+      assert.ok(Math.abs(connection[edge === 'left' ? 'chipLeft' : 'chipRight'] - (edge === 'left' ? 0 : width)) < 1, 'The chip reaches the ' + edge + ' screen edge at width ' + width);
+      assert.ok(connection.left >= 0 && connection.right <= width, 'The tree stays within the viewport');
+      assert.ok(connection.left <= connection.bridgeLeft && connection.right >= connection.bridgeRight, 'The tree contains the connector at the ' + edge + ' screen edge');
+      assert.ok(connection.leftRadius <= connection.bridgeLeft - connection.left && connection.rightRadius <= connection.right - connection.bridgeRight, 'The tree corners stop before the connector at the ' + edge + ' screen edge');
+      await page.screenshot({ path: root + '.test-artifacts/herdr-space-tree-' + width + '-' + edge + '.png' });
+      await page.keyboard.press('Escape');
+    }
+  }
+  await wideTabs.evaluate(style => style.remove());
+  await page.setViewportSize({ width: 390, height: 844 });
   for (const id of navigationSpaces) await herdrRequest(target, 'workspace.close', { workspace_id: id, close_group: false });
   await page.getByRole('button', { name: 'Show terminal tabs', exact: true }).click();
   await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();

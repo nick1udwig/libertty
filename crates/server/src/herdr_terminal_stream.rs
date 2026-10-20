@@ -48,6 +48,13 @@ enum Command {
         u16,
         tokio::sync::oneshot::Sender<Result<(), String>>,
     ),
+    Click(
+        u64,
+        Size,
+        u16,
+        u16,
+        tokio::sync::oneshot::Sender<Result<(), String>>,
+    ),
 }
 struct Handle {
     send: mpsc::Sender<Command>,
@@ -113,6 +120,16 @@ impl Hub {
     }
 }
 impl Subscription {
+    pub async fn click(&self, size: Size, column: u16, row: u16) -> Result<(), String> {
+        let (send, receive) = tokio::sync::oneshot::channel();
+        self.handle
+            .send
+            .try_send(Command::Click(self.id, size, column, row, send))
+            .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
+        receive
+            .await
+            .map_err(|_| "The Herdr terminal controller is not ready for clicks.".to_owned())?
+    }
     pub fn resize(&self, size: Option<Size>) -> Result<(), String> {
         self.handle
             .send
@@ -467,6 +484,28 @@ async fn run(
                     result
                 } else {
                     Err("The Herdr terminal controller is not ready for scrolling.".into())
+                };
+                let _ = send.send(result);
+            }
+            Command::Click(id, size, column, row, send) => {
+                let valid = column < size.cols
+                    && row < size.rows
+                    && viewers.iter().any(|v| v.id == id && v.size == Some(size))
+                    && desired(&viewers) == Some(size);
+                let result = if valid
+                    && let Some(stream) = running.as_mut()
+                    && stream.size == Some(size)
+                {
+                    let mut result = Ok(());
+                    for action in ["down", "up"] {
+                        if let Err(error) = stream.write(&json!({"type":"terminal.mouse","action":action,"button":"left","column":column,"row":row})).await {
+                            result = Err(error);
+                            break;
+                        }
+                    }
+                    result
+                } else {
+                    Ok(())
                 };
                 let _ = send.send(result);
             }

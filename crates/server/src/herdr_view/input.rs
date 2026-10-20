@@ -134,6 +134,7 @@ mod tests {
     use tokio::sync::Semaphore;
     fn key(text: &str, capacity: &Arc<Semaphore>) -> Input {
         Input {
+            click: None,
             text: text.into(),
             paste: false,
             guard: None,
