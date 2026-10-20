@@ -368,6 +368,12 @@ pub enum ClientMessage {
         column: u16,
         row: u16,
     },
+    TerminalClick {
+        column: u16,
+        row: u16,
+        cols: u16,
+        rows: u16,
+    },
     DictationPaste {
         #[serde(deserialize_with = "repair_text")]
         text: String,

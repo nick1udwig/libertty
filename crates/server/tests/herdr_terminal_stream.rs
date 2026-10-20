@@ -90,6 +90,63 @@ async fn frame(
 }
 
 #[tokio::test]
+async fn clicks_keep_down_and_up_together_and_drop_stale_or_observer_coordinates() {
+    let fixture = Fixture::new(false);
+    let hub = Hub::default();
+    let (send, mut frames) = mpsc::channel(128);
+    let view = hub
+        .subscribe(fixture.target.clone(), "term_0".into(), send)
+        .unwrap();
+    frame(&mut frames, 80, true).await;
+    let size = Size { cols: 40, rows: 30 };
+    view.click(size, 2, 3).await.unwrap();
+    assert!(fixture.events("command").is_empty());
+    view.resize(Some(size)).unwrap();
+    frame(&mut frames, 40, true).await;
+    view.click(size, 12, 5).await.unwrap();
+    view.click(size, 40, 5).await.unwrap();
+    view.click(Size { cols: 41, rows: 30 }, 12, 5)
+        .await
+        .unwrap();
+    let (send, mut other_frames) = mpsc::channel(128);
+    let other = hub
+        .subscribe_sized(
+            fixture.target.clone(),
+            "term_0".into(),
+            send,
+            Some(Size { cols: 60, rows: 20 }),
+        )
+        .unwrap();
+    frame(&mut other_frames, 60, true).await;
+    view.click(size, 12, 5).await.unwrap();
+    view.resize(None).unwrap();
+    view.click(Size { cols: 60, rows: 20 }, 12, 5)
+        .await
+        .unwrap();
+    until(|| {
+        fixture
+            .events("command")
+            .iter()
+            .any(|e| e["message"]["action"] == "up")
+    })
+    .await;
+    let events: Vec<_> = fixture
+        .events("command")
+        .into_iter()
+        .filter(|e| e["message"]["type"] == "terminal.mouse")
+        .map(|e| e["message"].clone())
+        .collect();
+    assert_eq!(
+        events,
+        vec![
+            json!({"type":"terminal.mouse","action":"down","button":"left","column":12,"row":5}),
+            json!({"type":"terminal.mouse","action":"up","button":"left","column":12,"row":5}),
+        ]
+    );
+    drop((view, other));
+}
+
+#[tokio::test]
 async fn observers_ignoring_stdin_do_not_delay_mobile_control_or_disposal() {
     let mut fixture = Fixture::new(false);
     fixture

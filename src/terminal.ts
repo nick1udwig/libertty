@@ -425,7 +425,16 @@ const gestures = new TerminalGestures(term, {
       send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
     },
   },
-  tap: (x, y) => { transport.activity(); if (!presentation.pending && !queue.length && !capturedConnection) inline.moveCursor(x, y); }, copy: copyTerminalText,
+  tap: (x, y) => {
+    transport.activity();
+    if (presentation.pending || queue.length || capturedConnection) return;
+    if (!herdrTerminal || state.ready) { inline.moveCursor(x, y); return; }
+    if (!herdrReady || !mobileTerminal() || !projection?.clickable || herdrLayout.pending || herdrParked || !tabVisible || document.hidden || term.getViewportY() > 0) return;
+    const bounds = term.element!.querySelector('canvas')!.getBoundingClientRect();
+    const column = Math.floor((x - bounds.left) * term.cols / bounds.width), row = Math.floor((y - bounds.top) * term.rows / bounds.height);
+    if (column < 0 || column >= term.cols || row < 0 || row >= term.rows) return;
+    if (send({ type: 'terminal-click', column, row, cols: term.cols, rows: term.rows })) state.inputRevision++;
+  }, copy: copyTerminalText,
 });
 
 async function socketURL(signal: AbortSignal) {

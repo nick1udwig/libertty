@@ -22,24 +22,40 @@ try {
   // the terminal's alternate buffer has no scrollback. No Codex heuristics.
   await writeFile(dir + '/app.mjs', `
     import { writeFileSync } from 'node:fs';
-    let offset = 0, wheels = 0, tick = 0, pending = '';
+    let offset = 0, wheels = 0, tick = 0, pending = '', text = 'type 界😀 here', cursor = 0, mouse = [], reporting = true;
+    const width = value => Array.from(value).reduce((n, char) => n + (char.codePointAt(0) > 127 ? 2 : 1), 0);
+    const caret = () => width(Array.from(text).slice(0, cursor).join('')) + 5;
     const title = () => 'Application transcript TICK:' + String(tick).padStart(6, '0');
     const draw = () => { const cols = process.stdout.columns, rows = process.stdout.rows;
-      writeFileSync(${JSON.stringify(dir + '/state.json')}, JSON.stringify({ cols, rows, offset, wheels }));
+      writeFileSync(${JSON.stringify(dir + '/state.json')}, JSON.stringify({ cols, rows, offset, wheels, text, cursor, mouse, reporting }));
       let screen = '\\x1b[2J\\x1b[H' + title() + '\\r\\n';
       for (let row = 0; row < rows - 7; row++) screen += (row === 1 ? '\\x1b]8;;https://example.com/help\\x07Open help\\x1b]8;;\\x07'
         : row === 2 ? 'https://example.com/tui' : 'ROW-' + (100 - offset + row) + ' alpha beta gamma') + '\\r\\n';
-      screen += '╭' + '─'.repeat(cols - 2) + '╮\\r\\n│ › type here' + ' '.repeat(Math.max(0, cols - 14)) + '│\\r\\n╰' + '─'.repeat(cols - 2) + '╯';
-      process.stdout.write(screen + '\\x1b[' + (rows - 4) + ';5H\\x1b[?25h'); };
+      screen += '╭' + '─'.repeat(cols - 2) + '╮\\r\\n│ › ' + text + ' '.repeat(Math.max(0, cols - width(text) - 5)) + '│\\r\\n╰' + '─'.repeat(cols - 2) + '╯';
+      process.stdout.write(screen + '\\x1b[' + (rows - 4) + ';' + caret() + 'H\\x1b[?25h'); };
     process.stdout.write('\\x1b[?1049h\\x1b[?1000h\\x1b[?1006h');
     process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.on('data', data => {
       pending += data; const events = [...pending.matchAll(/\\x1b\\[<(\\d+);(\\d+);(\\d+)[Mm]/g)];
-      for (const event of events) { const button = Number(event[1]); if (button === 64) offset = Math.min(90, offset + 1); if (button === 65) offset = Math.max(0, offset - 1); wheels++; }
+      for (const event of events) { const button = Number(event[1]);
+        if (button === 64 || button === 65) { offset = button === 64 ? Math.min(90, offset + 1) : Math.max(0, offset - 1); wheels++; }
+        else { mouse.push({ button, column: Number(event[2]) - 1, row: Number(event[3]) - 1, action: event[0].at(-1) });
+          if (button === 0 && event[0].endsWith('M') && Number(event[3]) === process.stdout.rows - 4) {
+            const column = Math.max(0, Number(event[2]) - 5); cursor = 0;
+            while (cursor < Array.from(text).length && width(Array.from(text).slice(0, cursor + 1).join('')) <= column) cursor++;
+          }
+        }
+      }
       if (events.length) { pending = pending.slice(events.at(-1).index + events.at(-1)[0].length); draw(); }
       if (pending.includes('\\x03')) process.exit();
+      if (pending === '\\x0e' || pending === '\\x0f') {
+        reporting = pending === '\\x0f'; process.stdout.write(reporting ? '\\x1b[?1000h' : '\\x1b[?1000l'); pending = ''; draw();
+      }
+      if (pending && !pending.includes('\\x1b') && !/[\\x00-\\x1f]/.test(pending)) {
+        const chars = Array.from(text); chars.splice(cursor, 0, pending); cursor += Array.from(pending).length; text = chars.join(''); pending = ''; draw();
+      }
     });
     draw(); process.on('SIGWINCH', () => setImmediate(draw));
-    setInterval(() => { tick++; process.stdout.write('\\x1b[1;1H' + title() + '\\x1b[' + (process.stdout.rows - 4) + ';5H'); }, 30);
+    setInterval(() => { tick++; process.stdout.write('\\x1b[1;1H' + title() + '\\x1b[' + (process.stdout.rows - 4) + ';' + caret() + 'H'); }, 30);
   `);
   herdr = spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server'], { cwd: dir, env, stdio: 'ignore' });
   await wait(async () => { try { await herdrSnapshot(target); return true; } catch { return false; } }, 'isolated Herdr');
@@ -59,6 +75,7 @@ try {
   await context.addInitScript(() => {
     window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0; window.__historyDeltas = 0;
     window.WebSocket = class extends WebSocket {
+      constructor(...args) { super(...args); window.__socket = this; }
       send(data) {
         if (window.__holdAcks && window.__wireSent(data).type === 'ack') {
           window.__releaseFrames = () => super.send(data);
@@ -151,6 +168,52 @@ try {
   assert.equal((await state()).offset, older.offset, 'Selecting does not scroll the app');
   await drag(300, 180); await wait(async () => (await state()).offset < older.offset, 'reverse drag scrolls toward latest output');
   assert.equal(await page.locator('#terminal textarea').evaluate(el => el === document.activeElement), false);
+  assert.deepEqual((await state()).mouse, [], 'Links, scrolling and hold-to-copy send no clicks');
+  const tapCell = async (column, row) => {
+    const point = await page.evaluate(({ column, row }) => {
+      const t = window.__terminal, r = document.querySelector('#terminal canvas').getBoundingClientRect();
+      return { x: r.x + (column + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows };
+    }, { column, row });
+    await touch('touchStart', point.x, point.y); await touch('touchEnd');
+  };
+  const editRow = (await state()).rows - 5;
+  await tapCell(11, editRow);
+  await page.keyboard.type('X');
+  await wait(async () => (await state()).text === 'type 界X😀 here', 'typing follows the tapped cell after a wide character');
+  assert.deepEqual((await state()).mouse, [
+    { button: 0, column: 11, row: editRow, action: 'M' },
+    { button: 0, column: 11, row: editRow, action: 'm' },
+  ], 'A touch sends exactly one native down/up pair');
+  await page.waitForFunction(() => window.__terminal.buffer.active.cursorX === 12);
+  const clicks = (await state()).mouse.length;
+  await page.evaluate(() => {
+    const t = window.__terminal;
+    window.__socket.send(JSON.stringify({ type: 'terminal-click', column: 0, row: 0, cols: t.cols + 1, rows: t.rows }));
+  });
+  await page.keyboard.press('Control+n');
+  await wait(async () => (await state()).reporting === false, 'application disables mouse reporting');
+  await tapCell(5, editRow);
+  await page.keyboard.type('Y');
+  await wait(async () => (await state()).text === 'type 界XY😀 here', 'disabled mouse reporting leaves the cursor unchanged');
+  assert.equal((await state()).mouse.length, clicks, 'Stale grids and disabled mouse reporting deliver no mouse bytes');
+  await page.keyboard.press('Control+o');
+  await wait(async () => (await state()).reporting === true, 'application restores mouse reporting');
+  const portrait = await state();
+  await page.setViewportSize({ width: 844, height: 390 });
+  await wait(async () => (await state()).cols > portrait.cols, 'rotation resizes the native application');
+  await page.waitForFunction(() => {
+    const t = window.__terminal;
+    return t.buffer.active.cursorY === t.rows - 5 && t.buffer.active.getLine(t.rows - 5)?.translateToString(true).includes('type 界XY😀 here');
+  });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await tapCell(6, (await state()).rows - 5);
+  await page.keyboard.type('Z');
+  await wait(async () => (await state()).text === 'tyZpe 界XY😀 here', 'taps use the rotated terminal grid');
+  assert.equal((await state()).mouse.length, clicks + 2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await wait(async () => (await state()).cols === portrait.cols && (await state()).rows === portrait.rows, 'portrait geometry returns');
+  const deliveredClicks = (await state()).mouse.length;
+  await page.evaluate(() => document.activeElement.blur());
   // Join the already-running controller at the same size, after its cached
   // full frame has been superseded by deltas. The new pane must obtain its own
   // complete baseline without changing the existing mobile owner's geometry.
@@ -187,6 +250,7 @@ try {
   await page.waitForFunction(() => window.__terminal?.buffer.active.getLine(0)?.translateToString(true).includes('Application transcript') && document.querySelector('#connection-label').textContent === 'Connected');
   await page.reload();
   await page.waitForFunction(() => window.__terminal?.buffer.active.getLine(0)?.translateToString(true).includes('Application transcript') && document.querySelector('#connection-label').textContent === 'Connected');
+  assert.equal((await state()).mouse.length, deliveredClicks, 'Reopening does not replay old clicks');
   const tick = await page.evaluate(() => window.__terminal.buffer.active.getLine(0).translateToString(true));
   await page.waitForFunction(before => window.__terminal.buffer.active.getLine(0).translateToString(true) !== before, tick);
   if (process.env.TEST_LINK === 'lossy') {
@@ -218,7 +282,7 @@ try {
     console.log('PASS lossy gzip Herdr: ordered retransmission delays, retained picture during a silent outage, replacement connection, and fresh-screen catch-up in ' + recoveryMs + ' ms.');
   }
   assert.deepEqual(errors, []);
-  console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; shell-to-TUI/joining baselines, incremental frames, stale snapshots, cursor, native touch scrolling, hold/copy, plain/OSC-8 links and keyboard behavior and fullscreen background/reopen recovery passed.');
+  console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; native tap/edit ordering, wide cells, rotation, mouse mode, reconnects, scrolling, hold/copy, links and fullscreen recovery passed.');
 } finally {
   await browser?.close(); if (backend) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
   const stopped = herdr && herdr.exitCode === null && herdr.signalCode === null ? once(herdr, 'exit') : null;

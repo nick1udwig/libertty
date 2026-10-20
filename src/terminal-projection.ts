@@ -59,6 +59,7 @@ export class TerminalProjection {
     term.write('\x1b[?25l');
   }
   get nativeColumns() { return this.native?.cols; }
+  get clickable() { return this.live && !this.awaitingNativeResize && this.canRenderLive(); }
   update(text: string, reflow = false) {
     // Exported rows end with a delimiter; it is not an additional terminal row.
     const normalized = text.replace(/\r?\n/g, '\r\n').replace(/\r\n$/, '');
