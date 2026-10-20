@@ -429,11 +429,11 @@ const gestures = new TerminalGestures(term, {
     transport.activity();
     if (presentation.pending || queue.length || capturedConnection) return;
     if (!herdrTerminal || state.ready) { inline.moveCursor(x, y); return; }
-    if (!herdrReady || !mobileTerminal() || !projection?.clickable || herdrLayout.pending || herdrParked || !tabVisible || document.hidden || term.getViewportY() > 0) return;
+    if (!herdrReady || !mobileTerminal() || herdrLayout.pending || herdrParked || !tabVisible || document.hidden) return;
     const bounds = term.element!.querySelector('canvas')!.getBoundingClientRect();
     const column = Math.floor((x - bounds.left) * term.cols / bounds.width), row = Math.floor((y - bounds.top) * term.rows / bounds.height);
-    if (column < 0 || column >= term.cols || row < 0 || row >= term.rows) return;
-    if (send({ type: 'terminal-click', column, row, cols: term.cols, rows: term.rows })) state.inputRevision++;
+    const cell = projection?.nativeCell(column, row);
+    if (cell && send({ type: 'terminal-click', ...cell, cols: term.cols, rows: term.rows })) state.inputRevision++;
   }, copy: copyTerminalText,
 });
 

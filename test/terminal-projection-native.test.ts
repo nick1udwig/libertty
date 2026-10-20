@@ -8,6 +8,34 @@ import { mergeHerdrFrames, type HerdrFrameMessage } from '../src/terminal-frame-
 const wasm = await WebAssembly.instantiate(await readFile(new URL('../node_modules/ghostty-web/ghostty-vt.wasm', import.meta.url)), { env: { log() {} } });
 const ghostty = new Ghostty(wasm.instance);
 
+test('history taps use native rows and reject older history, stale text and different geometry', () => {
+  const display = ghostty.createTerminal(12, 6, { scrollbackLimit: 5000 });
+  let viewport = 0;
+  const term = {
+    cols: 12, rows: 6, wasmTerm: display, getViewportY: () => viewport,
+    buffer: { active: { type: 'normal' } }, write: (text: string) => display.write(text),
+  };
+  const projection = new TerminalProjection(term as unknown as Terminal, ghostty);
+  const screen = ['header', '╭──────────╮', '> a界b', '╰──────────╯'].join('\r\n');
+  const history = Array.from({ length: 20 }, (_, i) => 'old ' + i).join('\r\n') + '\r\n';
+  try {
+    projection.resize(true);
+    projection.frame({ width: 12, height: 6, full: true, bytes: new TextEncoder().encode(screen + '\x1b[3;4H') });
+    assert.deepEqual(projection.nativeCell(3, 2), { column: 3, row: 2 });
+    projection.update(history + screen);
+    assert.ok(display.getScrollbackLength() > 0);
+    assert.deepEqual(projection.nativeCell(3, 4), { column: 3, row: 2 }, 'Trimmed native blank rows shift the displayed editor');
+    assert.equal(projection.nativeCell(3, 0), undefined, 'Rows above the native viewport are history');
+    viewport = 1;
+    assert.equal(projection.nativeCell(3, 4), undefined);
+    viewport = 0;
+    projection.frame({ width: 12, height: 6, full: false, bytes: new TextEncoder().encode('\x1b[3;3Hnew') });
+    assert.equal(projection.nativeCell(3, 4), undefined, 'A stale snapshot cannot move the native cursor');
+    term.cols = 10; display.resize(10, 6); projection.resize(true);
+    assert.equal(projection.nativeCell(3, 4), undefined);
+  } finally { projection.dispose(); display.free(); }
+});
+
 test('incremental history matches full ANSI reconstruction through appends, edits, rolling history and reflow', () => {
   const display = ghostty.createTerminal(20, 6, { scrollbackLimit: 5000 });
   const native = ghostty.createTerminal(20, 6); native.write('\x1b[?25l');

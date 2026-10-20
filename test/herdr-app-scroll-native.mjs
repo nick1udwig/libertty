@@ -22,12 +22,12 @@ try {
   // the terminal's alternate buffer has no scrollback. No Codex heuristics.
   await writeFile(dir + '/app.mjs', `
     import { writeFileSync } from 'node:fs';
-    let offset = 0, wheels = 0, tick = 0, pending = '', text = 'type 界😀 here', cursor = 0, mouse = [], reporting = true;
+    let offset = 0, wheels = 0, tick = 0, pending = '', text = 'type 界😀 here', cursor = 0, mouse = [], reporting = true, normal = false;
     const width = value => Array.from(value).reduce((n, char) => n + (char.codePointAt(0) > 127 ? 2 : 1), 0);
     const caret = () => width(Array.from(text).slice(0, cursor).join('')) + 5;
-    const title = () => 'Application transcript TICK:' + String(tick).padStart(6, '0');
+    const title = () => (normal ? 'Host scrollback' : 'Application transcript') + ' TICK:' + String(tick).padStart(6, '0');
     const draw = () => { const cols = process.stdout.columns, rows = process.stdout.rows;
-      writeFileSync(${JSON.stringify(dir + '/state.json')}, JSON.stringify({ cols, rows, offset, wheels, text, cursor, mouse, reporting }));
+      writeFileSync(${JSON.stringify(dir + '/state.json')}, JSON.stringify({ cols, rows, offset, wheels, text, cursor, mouse, reporting, normal }));
       let screen = '\\x1b[2J\\x1b[H' + title() + '\\r\\n';
       for (let row = 0; row < rows - 7; row++) screen += (row === 1 ? '\\x1b]8;;https://example.com/help\\x07Open help\\x1b]8;;\\x07'
         : row === 2 ? 'https://example.com/tui' : 'ROW-' + (100 - offset + row) + ' alpha beta gamma') + '\\r\\n';
@@ -50,12 +50,13 @@ try {
       if (pending === '\\x0e' || pending === '\\x0f') {
         reporting = pending === '\\x0f'; process.stdout.write(reporting ? '\\x1b[?1000h' : '\\x1b[?1000l'); pending = ''; draw();
       }
+      if (pending === '\\x10') { normal = true; pending = ''; process.stdout.write('\\x1b[?1049l\\x1b[?1000h\\x1b[?1006h'); draw(); }
       if (pending && !pending.includes('\\x1b') && !/[\\x00-\\x1f]/.test(pending)) {
         const chars = Array.from(text); chars.splice(cursor, 0, pending); cursor += Array.from(pending).length; text = chars.join(''); pending = ''; draw();
       }
     });
     draw(); process.on('SIGWINCH', () => setImmediate(draw));
-    setInterval(() => { tick++; process.stdout.write('\\x1b[1;1H' + title() + '\\x1b[' + (process.stdout.rows - 4) + ';' + caret() + 'H'); }, 30);
+    setInterval(() => { if (!normal) { tick++; process.stdout.write('\\x1b[1;1H' + title() + '\\x1b[' + (process.stdout.rows - 4) + ';' + caret() + 'H'); } }, 30);
   `);
   herdr = spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server'], { cwd: dir, env, stdio: 'ignore' });
   await wait(async () => { try { await herdrSnapshot(target); return true; } catch { return false; } }, 'isolated Herdr');
@@ -87,7 +88,7 @@ try {
         window.__receive = message => handler.call(this, { data: JSON.stringify(message) });
         super.onmessage = async event => {
           const message = await window.__wireMessage(event.data, this);
-          if (message.type === 'herdr-frame') { window.__frames++; if (!message.full) window.__deltas++; }
+          if (message.type === 'herdr-frame') { window.__frames++; if (!message.full) window.__deltas++; if (atob(message.bytes).includes('Host scrollback')) window.__nativeHistoryFrame = true; }
           if (message.type === 'screen') { if (message.delta) window.__historyDeltas++; window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }
           handler.call(this, event);
         };
@@ -281,6 +282,34 @@ try {
     await writeFile(root + '.test-artifacts/herdr-lossy-link.json', JSON.stringify({ ...link, outageMs: 5500, recoveryMs }, null, 2));
     console.log('PASS lossy gzip Herdr: ordered retransmission delays, retained picture during a silent outage, replacement connection, and fresh-screen catch-up in ' + recoveryMs + ' ms.');
   }
+  await herdrRequest(target, 'pane.send_text', { pane_id: terminal.paneId, text: '\x10' });
+  await wait(async () => (await state()).normal, 'application keeps host scrollback in the normal buffer');
+  await page.waitForFunction(() => {
+    const t = window.__terminal;
+    const rows = Array.from({ length: t.rows }, (_, row) => t.buffer.active.getLine(t.buffer.active.length - t.rows + row)?.translateToString(true));
+    return window.__nativeHistoryFrame && t.buffer.active.length > t.rows && rows.some(line => line?.includes('Host scrollback')) && rows.some(line => line?.includes('tyZpe 界XY😀 here'));
+  });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const normalRow = await page.evaluate(() => {
+    const t = window.__terminal;
+    return Array.from({ length: t.rows }, (_, row) => t.buffer.active.getLine(t.buffer.active.length - t.rows + row)?.translateToString(true)).findIndex(line => line?.includes('tyZpe 界XY😀 here'));
+  });
+  const beforeNormalClick = (await state()).mouse.length;
+  await tapCell(6, normalRow);
+  await page.keyboard.type('N');
+  await wait(async () => (await state()).text === 'tyNZpe 界XY😀 here', 'taps map projected history back to the native composer').catch(async error => {
+    console.error({ application: await state(), observer: await page.evaluate(() => ({ frames: window.__frames, historyFrame: window.__nativeHistoryFrame, screen: window.__lastScreen.text })) });
+    throw error;
+  });
+  assert.equal((await state()).mouse.length, beforeNormalClick + 2);
+  const nativeClick = (await state()).mouse.at(-2);
+  assert.equal(nativeClick.column, 6);
+  assert.equal(nativeClick.row, (await state()).rows - 5, 'Trailing native blank rows do not shift the delivered click');
+  const normalClicks = (await state()).mouse.length;
+  await page.evaluate(() => window.__terminal.scrollLines(-4));
+  await tapCell(7, 4);
+  await delay(200);
+  assert.equal((await state()).mouse.length, normalClicks, 'Reading older local history sends no clicks');
   assert.deepEqual(errors, []);
   console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; native tap/edit ordering, wide cells, rotation, mouse mode, reconnects, scrolling, hold/copy, links and fullscreen recovery passed.');
 } finally {

@@ -72,9 +72,10 @@ Only the selected terminal is resized.
 Terminal scrollback and selection remain local.
 When the mobile viewport has no local scrollback, vertical drags send `terminal.scroll` wheel events through its scoped controller.
 Herdr routes these to the app’s own scroll handler or native terminal history.
-Tapping a matching live mobile TUI sends a native left click at that terminal cell.
+Tapping a matching mobile TUI sends a native left click at that terminal cell.
 Claude, Codex and other apps move their cursor where their desktop mouse support permits it.
-Reflowed history and pending layouts do not send clicks, and apps without mouse reporting receive no mouse input.
+Views with retained terminal history map taps back to native rows only while their visible text matches the native grid.
+Older history, different column counts and pending layouts do not send clicks, and apps without mouse reporting receive no mouse input.
 Apps that own their history share that scroll position with the desktop.
 The shared gesture code also preserves momentum and hold-to-copy.
 Typing uses `pane.send_text`; dictation uses `pane.send_input` to respect the application's paste mode without submitting it.
