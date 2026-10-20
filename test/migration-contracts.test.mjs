@@ -124,6 +124,7 @@ test('the Rust client parser accepts every declared client message and rejects m
     { type: 'command', id, command: 'echo', prompt: 1 },
     { type: 'resize', cols: 80, rows: 24, mobile: true },
     { type: 'terminal-scroll', lines: -2, column: 0, row: 0 },
+    { type: 'terminal-click', column: 3, row: 4, cols: 80, rows: 24 },
     { type: 'herdr-frame-request' }, { type: 'herdr-active', active: true }, { type: 'ack', seq: Number.MAX_SAFE_INTEGER },
   ];
   const declared = schemas.$defs.ClientMessage.anyOf.map(variant => variant.properties.type.const).sort();

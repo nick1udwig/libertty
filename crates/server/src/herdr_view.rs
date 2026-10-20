@@ -51,6 +51,7 @@ pub(crate) struct DictationGuard {
     shell: bool,
 }
 struct Input {
+    click: Option<(Size, u16, u16, u64)>,
     text: String,
     paste: bool,
     guard: Option<(u64, String)>,
@@ -247,6 +248,11 @@ impl View {
                 };
                 let Some(mut input) = input else { break };
                 let Some(view) = weak.upgrade() else { break };
+                if let Some((size, column, row, epoch)) = input.click {
+                    let result = view.click_serial(size, column, row, epoch).await;
+                    view.input_complete(None, result);
+                    continue;
+                }
                 let permits = input::coalesce(&mut input, &mut inputs, &mut deferred);
                 // Numbered keys wait for an older connection's send and keep only what it never delivered.
                 let delivery = match &view.ledger {
@@ -547,6 +553,7 @@ impl View {
         let (complete, result) = tokio::sync::oneshot::channel();
         self.pending_input
             .try_send(Input {
+                click: None,
                 text: text.into(),
                 paste,
                 guard: guard.map(|(revision, id)| (revision, id.into())),
@@ -578,6 +585,7 @@ impl View {
             }
         };
         if let Err(error) = self.pending_input.try_send(Input {
+            click: None,
             seqs: seq.map(|seq| (seq, text.len())).into_iter().collect(),
             text,
             paste,
@@ -605,6 +613,32 @@ impl View {
                 message: (message).to_string(),
             });
         }
+    }
+    async fn click_serial(
+        &self,
+        size: Size,
+        column: u16,
+        row: u16,
+        epoch: u64,
+    ) -> Result<(), String> {
+        let current = || {
+            let active = *self.active.borrow();
+            let layout = *self.layout.borrow();
+            let geometry = self.geometry.lock().unwrap();
+            !self.cancel.is_cancelled()
+                && active
+                && layout == epoch
+                && geometry.size == Some(size)
+                && geometry.baseline == Some(size)
+        };
+        if !current() {
+            return Ok(());
+        }
+        self.target.validate_terminal(&self.agent).await?;
+        if !current() {
+            return Ok(());
+        }
+        self.terminal.click(size, column, row).await
     }
     /// Send input in receive order; numbered keys finish their send even if this connection closes meanwhile.
     async fn input_serial(
@@ -876,6 +910,44 @@ impl View {
                         });
                     }
                 });
+                Ok(())
+            }
+            ClientMessage::TerminalClick {
+                column,
+                row,
+                cols,
+                rows,
+            } => {
+                if cols == 0
+                    || rows == 0
+                    || cols > 1000
+                    || rows > 1000
+                    || column >= cols
+                    || row >= rows
+                {
+                    return Err("Invalid terminal click".into());
+                }
+                let permit = self
+                    .capacity
+                    .clone()
+                    .try_acquire_owned()
+                    .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
+                self.pending_input
+                    .try_send(Input {
+                        click: Some((Size { cols, rows }, column, row, *self.layout.borrow())),
+                        text: String::new(),
+                        paste: false,
+                        guard: None,
+                        command: None,
+                        complete: None,
+                        _permit: permit,
+                        replacement: None,
+                        seqs: Vec::new(),
+                    })
+                    .map_err(|_| "Terminal input exceeded its limit.".to_owned())?;
+                let mut inner = self.inner.lock().unwrap();
+                inner.revision += 1;
+                inner.editable = None;
                 Ok(())
             }
             ClientMessage::Input { data: text, seq } => {

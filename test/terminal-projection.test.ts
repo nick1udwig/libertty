@@ -11,14 +11,18 @@ test('mobile native resizing keeps stale polled history out of the visible appli
     previous: 'old application', history: { getScrollbackLength: () => 0 },
     rebuild() {}, paint() { historyPaints.push(this.previous); }, cursor() {},
   });
+  assert.equal(projection.clickable, true, 'A matching live screen accepts clicks');
   term.rows = 27; assert.equal(projection.resize(true), false, 'A pending native resize has not painted yet');
+  assert.equal(projection.clickable, false, 'A pending resize rejects clicks');
   projection.update('stale poll during the first resize');
   term.rows = 26; projection.resize(true);
   projection.update('stale poll during a reversed toggle');
   projection.frame({ width: 80, height: 27, full: true, bytes: new Uint8Array([65]) });
+  assert.equal(projection.clickable, false, 'An obsolete baseline cannot enable clicks');
   assert.deepEqual(writes, [], 'An obsolete native size cannot repaint the terminal');
   assert.deepEqual(historyPaints, [], 'Neither resize nor delayed history may restore the old layout');
   projection.frame({ width: 80, height: 26, full: true, bytes: new Uint8Array([66]) });
+  assert.equal(projection.clickable, true, 'The matching baseline enables clicks again');
   assert.deepEqual(writes.at(-1), new Uint8Array([66]), 'The matching native baseline restores live rendering');
   projection.update('a delayed history read after the native redraw');
   assert.deepEqual(historyPaints, [], 'Polled history cannot replace the resized live application');

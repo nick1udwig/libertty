@@ -1235,6 +1235,35 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "terminal-click",
+              "type": "string"
+            },
+            "column": {
+              "type": "number"
+            },
+            "row": {
+              "type": "number"
+            },
+            "cols": {
+              "type": "number"
+            },
+            "rows": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "column",
+            "row",
+            "cols",
+            "rows"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "herdr-frame-request",
               "type": "string"
             }
@@ -7751,6 +7780,35 @@
             "lines",
             "column",
             "row"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "terminal-click",
+              "type": "string"
+            },
+            "column": {
+              "type": "number"
+            },
+            "row": {
+              "type": "number"
+            },
+            "cols": {
+              "type": "number"
+            },
+            "rows": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "type",
+            "column",
+            "row",
+            "cols",
+            "rows"
           ],
           "additionalProperties": true
         },
