@@ -22,7 +22,7 @@ try {
     await delay(100);
   }
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'], serviceWorkers: 'block' });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Opened terminal link</title>' }));
   await context.route('**/assets/terminal-*.js', async route => {
