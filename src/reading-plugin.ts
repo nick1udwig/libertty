@@ -1,4 +1,5 @@
 import { request } from './api.ts';
+import { icon } from './icons.ts';
 import type { BackendProfile, TerminalTab } from './connections.ts';
 import { BUILTIN_VERSION, type PluginView, type TabPlugin } from './plugins.ts';
 import { readingMessage, readingView, type ReadingView } from './reading-view.ts';
@@ -12,7 +13,7 @@ export interface ReadingServices {
 
 export function readingPlugin(s: ReadingServices): TabPlugin {
   return { id: 'reading', version: BUILTIN_VERSION, name: 'Reading Mode', connectLabel: 'Look at', icon: '',
-    iconHTML: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+    iconHTML: icon('<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/>', 17),
     panelPrefix: 'reading-', available: () => false,
     async connect() { throw new Error('Use a reading phrase in a terminal to open a file or command output.'); },
     async mount(tab) { return mountReading(tab, s); },

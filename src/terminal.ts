@@ -1,4 +1,5 @@
 import { requestJSON } from './api.ts';
+import { saved } from './persistence.ts';
 import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
 import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
@@ -83,8 +84,8 @@ let disconnectedContext: InputContext | undefined;
 let connectionEpoch = 0, synchronizedConnection = false;
 let shortcuts: Shortcut[] = structuredClone(defaults);
 try {
-  const saved = localStorage.getItem('libertty.shortcuts');
-  if (saved) shortcuts = validateShortcuts(JSON.parse(saved));
+  const stored = localStorage.getItem('libertty.shortcuts');
+  if (stored) shortcuts = validateShortcuts(JSON.parse(stored));
 } catch { /* Use defaults when storage is unavailable or stale. */ }
 function persist(key: string, value: unknown) {
   try { localStorage.setItem('libertty.' + key, JSON.stringify(value)); } catch { toast('Browser storage is unavailable. ' +
@@ -135,7 +136,7 @@ async function api<T>(url: string, data?: unknown, signal?: AbortSignal): Promis
 function send(message: ClientMessage): boolean {
   if (['paste', 'replace', 'command', 'dictation-paste', 'input-line', 'repair'].includes(message.type)) echo.cancel();
   if ((message.type === 'dictation' && message.action === 'start') || message.type === 'dictation-paste') {
-    try { message.readingPhrases = readingPhrases(JSON.parse(localStorage.getItem('libertty.readingPhrases') || 'null')); } catch { message.readingPhrases = ['look at']; }
+    message.readingPhrases = readingPhrases(saved<unknown>('readingPhrases', null));
   }
   if (transport.socket?.readyState !== WebSocket.OPEN) return false;
   transport.socket.send(encodeWire(message)); return true;
@@ -146,8 +147,8 @@ function applyTerminalTheme() { if (applyTheme() !== terminalTheme) location.rel
 watchSystemTheme(applyTerminalTheme);
 const fontSizeInput = $<HTMLInputElement>('font-size');
 try {
-  const saved = JSON.parse(localStorage.getItem('libertty.fontSizePt') || 'null');
-  if (typeof saved === 'number') fontSizeInput.value = String(saved);
+  const stored = JSON.parse(localStorage.getItem('libertty.fontSizePt') || 'null');
+  if (typeof stored === 'number') fontSizeInput.value = String(stored);
 } catch { /* Use the default when storage is unavailable or stale. */ }
 if (!fontSizeInput.checkValidity()) fontSizeInput.value = fontSizeInput.defaultValue;
 const fontFamily = getComputedStyle(document.documentElement).fontFamily;
@@ -217,7 +218,9 @@ function mobileTerminal() { return !!herdrTerminal && mobileViewport.matches; }
 function refreshHerdrFrame() {
   if (herdrReady && transport.socket?.readyState === WebSocket.OPEN && projection?.requestFrame()) send({ type: 'herdr-frame-request' });
 }
-function fullWidth() { try { return !!herdrTerminal && !mobileTerminal() && JSON.parse(localStorage.getItem('libertty.herdrLayout') || 'null') === 'full-width'; } catch { return false; } }
+// Resizes and screen updates check the layout often, so it is read again only when settings change.
+let fullWidthLayout = saved<string>('herdrLayout', '') === 'full-width';
+function fullWidth() { return !!herdrTerminal && !mobileTerminal() && fullWidthLayout; }
 // Keep output outside UI state. Ghostty parses synchronously; its callback is an rAF.
 function drain() {
   frameQueued = false;
@@ -395,6 +398,7 @@ const prepareEditor = shortcutEditor(() => shortcuts, value => { shortcuts = val
 $('customize-shortcuts').onclick = () => { $<HTMLDialogElement>('options-dialog').close(); prepareEditor(); $<HTMLDialogElement>('shortcuts-dialog').showModal(); };
 renderShortcuts();
 function applySettings() {
+  fullWidthLayout = saved<string>('herdrLayout', '') === 'full-width';
   try {
     applyTerminalTheme();
     const font = JSON.parse(localStorage.getItem('libertty.fontSizePt') || '10');
@@ -404,7 +408,7 @@ function applySettings() {
     }
     const next = validateShortcuts(JSON.parse(localStorage.getItem('libertty.shortcuts') || JSON.stringify(defaults)));
     if (JSON.stringify(next) !== JSON.stringify(shortcuts)) { shortcuts = next; setCtrl(false); renderShortcuts(); }
-    inline.setReadingPhrases(JSON.parse(localStorage.getItem('libertty.readingPhrases') || 'null'));
+    inline.setReadingPhrases(saved<unknown>('readingPhrases', null));
     sizeTerminal();
   } catch { /* Keep valid settings if stored data is unavailable or malformed. */ }
 }
@@ -526,35 +530,49 @@ function paintHerdrFrame(message: HerdrFrameMessage) {
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame();
   } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
 }
-function socketMessage(event: MessageEvent) {
-  const message: ServerMessage = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-  if (message.type === 'herdr-layout') {
+type Handlers = { [K in ServerMessage['type']]: (message: Extract<ServerMessage, { type: K }>) => void };
+function screenMessage(message: Extract<ServerMessage, { type: 'screen' | 'screen-delta' }>) {
+  const text = history.receive(message);
+  if (text === undefined) return;
+  deferredScreen = text;
+  if (document.hidden || !tabVisible || herdrLayout.pending || herdrParked) return;
+  applyDeferredScreen(); echo.output(); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered();
+}
+function capturedMessage(message: Extract<ServerMessage, { type: 'ssh-command' | 'herdr-command' }>) {
+  capturedConnection = message.id; inline.disconnect();
+  if (embedded) notify(message.type, { id: message.id, command: message.command });
+  else if (message.type === 'herdr-command') {
+    const workspace = new URL('.', document.baseURI);
+    try {
+      sessionStorage.setItem('libertty.pendingHerdr:' + workspace.pathname, JSON.stringify({ id: message.id, session, backendUrl: baseURL.href }));
+      location.assign(workspace.href);
+    } catch {
+      void api('/api/herdr/captured', { id: message.id, action: 'native' }).then(() => api('/api/herdr/captured', { id: message.id, action: 'ack' })).catch(error => toast(error.message));
+    }
+  }
+  else void api('/api/ssh/captured', { id: message.id, action: 'native' }).then(() => api('/api/ssh/captured', { id: message.id, action: 'ack' })).catch(error => toast(error.message));
+}
+const handlers: Handlers = {
+  'herdr-layout': message => {
     discardHerdrFrames();
     if (herdrParked) return;
     if (message.cols !== term.cols || message.rows !== term.rows || !mobileTerminal()) return;
     herdrLayout.set({ pending: true, barrierReady: message.ready });
-    return;
-  }
-  if (message.type === 'herdr-frame') {
+  },
+  'herdr-frame': message => {
     if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) { send({ type: 'ack', seq: message.seq }); return; }
     if (herdrLayout.pending || presentation.pending || !herdrReady) { discardHerdrFrames(); paintHerdrFrame(message); return; }
     pendingFrames.push({ socket: transport.socket, frame: message });
     if (pendingFrames.length > 2) { frameScheduler.cancel(); drainHerdrFrames(); } else frameScheduler.request();
-    return;
-  }
-  if (message.type === 'screen' || message.type === 'screen-delta') {
-    const text = history.receive(message);
-    if (text === undefined) return;
-    deferredScreen = text;
-    if (document.hidden || !tabVisible || herdrLayout.pending || herdrParked) return;
-    applyDeferredScreen(); echo.output(); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered(); return;
-  }
-  if (message.type === 'input-line') {
+  },
+  'screen': screenMessage,
+  'screen-delta': screenMessage,
+  'input-line': message => {
     const intact = message.prompt === state.prompt && message.revision === state.inputRevision && state.ready;
     inputLines.get(message.id)?.(intact && typeof message.text === 'string' && typeof message.cursor === 'number' ? { text: message.text, cursor: message.cursor } : undefined);
-    inputLines.delete(message.id); return;
-  }
-  if (message.type === 'repair-result') {
+    inputLines.delete(message.id);
+  },
+  'repair-result': message => {
     const intact = message.prompt === state.prompt && state.ready && !state.exited;
     if (intact && message.accepted && [state.inputRevision, state.inputRevision + 1].includes(message.revision)) state.inputRevision = message.revision;
     else if (message.accepted) message.accepted = false;
@@ -562,9 +580,8 @@ function socketMessage(event: MessageEvent) {
       if (intact && message.revision === state.inputRevision) inline.backendResult(message);
     } else repairs.get(message.id)?.(message);
     if (message.accepted) term.scrollToBottom();
-    return;
-  }
-  if (message.type === 'pasted') {
+  },
+  'pasted': message => {
     if (message.prompt === state.prompt && message.revision === state.inputRevision + 1) {
       state.inputRevision = message.revision;
       term.scrollToBottom();
@@ -572,47 +589,30 @@ function socketMessage(event: MessageEvent) {
       else inline.externalPaste(message.text, message.replace, message.source === 'dictation', !!herdrTerminal);
     }
     else inline.disconnect();
-    return;
-  }
-  if (message.type === 'transfer') {
+  },
+  'transfer': message => {
     if (transfersSeen.has(message.request.id)) return;
     transfersSeen.add(message.request.id); if (transfersSeen.size > 256) transfersSeen.delete(transfersSeen.values().next().value!);
     transferView(message.request, fileClient(baseURL.href, session, () => accessToken, async () => { throw new Error('Reconnect to this backend and try again.'); }),
       () => api('/api/files/transfer', { id: message.request.id, action: 'ack' }),
       () => saveDownload(baseURL.href, () => api('/api/files/transfer', { id: message.request.id, action: 'download' }), message.request.name));
-    return;
-  }
-  if (message.type === 'dictation') { dictation.event(message.id, message.state, message.message, message.resume); return; }
-  if (message.type === 'reading-file') {
-    showReading({ path: message.path });
-  } else if (message.type === 'reading-capture') {
-    showReading({ capture: message.id, name: message.name, exitCode: message.exitCode });
-  } else if (message.type === 'reading-error') {
-    inline.dictationPending(false);
-    toast(message.message);
-  } else if (message.type === 'ssh-command' || message.type === 'herdr-command') {
-    capturedConnection = message.id; inline.disconnect();
-    if (embedded) notify(message.type, { id: message.id, command: message.command });
-    else if (message.type === 'herdr-command') {
-      const workspace = new URL('.', document.baseURI);
-      try {
-        sessionStorage.setItem('libertty.pendingHerdr:' + workspace.pathname, JSON.stringify({ id: message.id, session, backendUrl: baseURL.href }));
-        location.assign(workspace.href);
-      } catch {
-        void api('/api/herdr/captured', { id: message.id, action: 'native' }).then(() => api('/api/herdr/captured', { id: message.id, action: 'ack' })).catch(error => toast(error.message));
-      }
-    }
-    else void api('/api/ssh/captured', { id: message.id, action: 'native' }).then(() => api('/api/ssh/captured', { id: message.id, action: 'ack' })).catch(error => toast(error.message));
-  } else if (message.type === 'ssh-released') {
-    if (capturedConnection === message.id) capturedConnection = undefined;
-  } else if (message.type === 'input-ack') {
+  },
+  'dictation': message => dictation.event(message.id, message.state, message.message, message.resume),
+  'reading-file': message => showReading({ path: message.path }),
+  'reading-capture': message => showReading({ capture: message.id, name: message.name, exitCode: message.exitCode }),
+  'reading-error': message => { inline.dictationPending(false); toast(message.message); },
+  'ssh-command': capturedMessage,
+  'herdr-command': capturedMessage,
+  'ssh-released': message => { if (capturedConnection === message.id) capturedConnection = undefined; },
+  'input-ack': message => {
     if (typeof message.seq === 'number' && message.seq > confirmedInput) { confirmedInput = message.seq; transport.confirmed(); }
     if (numberedInput) { if (typeof message.seq === 'number') sentInput.confirm(message.seq); return; }
     // Keys the previous connection never delivered rejoin the unsent queue under the context they were typed in.
     numberedInput = true;
     const pending = sentInput.settle(message.seq);
     if (pending && (!pending.complete || !unsentInput.prepend(pending.data, pending.context || disconnectedContext))) toast('Keys typed before the connection dropped were not delivered.');
-  } else if (message.type === 'hello') {
+  },
+  'hello': message => {
     replayTarget = message.lastSeq;
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
@@ -622,11 +622,13 @@ function socketMessage(event: MessageEvent) {
       term.write('\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n');
       toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.');
     }
-  } else if (message.type === 'output') {
+  },
+  'output': message => {
     socketSeq = Math.max(socketSeq, message.seq);
     if (message.seq > received) { queue.push(message); received = message.seq; }
     if (!frameQueued) scheduleDrain();
-  } else if (message.type === 'state') {
+  },
+  'state': message => {
     const initial = !replayState;
     replayState = true;
     transport.ready();
@@ -639,15 +641,22 @@ function socketMessage(event: MessageEvent) {
     updateRun();
     inline.onState(state); echo.state(state);
     revealReplay(); synchronizeInput();
-  } else if (message.type === 'edit-result') {
+  },
+  'edit-result': message => {
     edits.get(message.id)?.(message.accepted); edits.delete(message.id);
     if (!message.accepted) state.inputRevision = message.revision;
-  } else if (message.type === 'result' && pendingCommand?.id === message.id) {
+  },
+  'result': message => {
+    if (pendingCommand?.id !== message.id) return;
     pendingCommand = undefined;
     if (!message.accepted) toast(message.message || 'Command was not sent.');
     updateRun();
-  }
-
+  },
+  'pong': () => {},
+};
+function socketMessage(event: MessageEvent) {
+  const message: ServerMessage = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+  (handlers[message.type] as ((message: ServerMessage) => void) | undefined)?.(message);
 }
 function socketClosed(event?: CloseEvent) {
   discardHerdrFrames();
