@@ -487,7 +487,7 @@ async fn run(
                         ready=true;deadline=tokio::time::Instant::now()+Duration::from_secs(480);
                         if let Some(callback) = &resume.ready { callback(Checkpoint { accepted_frames: accepted, finished }); } else { status("ready",None); }
                     } else if event["type"]=="final" {
-                        let text=event["text"].as_str().filter(|s|utf16_len(s)<=16000).filter(|_|finishing).ok_or("Invalid Voxtype result.")?;
+                        let text=event["text"].as_str().filter(|s|utf16_len(s)<=crate::protocol::MAX_TEXT).filter(|_|finishing).ok_or("Invalid Voxtype result.")?;
                         let text=breaks.replace_all(text," ").into_owned();
                         if text.chars().any(|c|c<'\x20'||('\x7f'..='\u{9f}').contains(&c)){return Err("Voxtype returned terminal control characters.".into())}
                         result(text).await?;

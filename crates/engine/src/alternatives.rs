@@ -102,8 +102,8 @@ pub async fn prepare<F: Future<Output = Result<Vec<Candidate>, String>>>(
         Intent::Shell => "",
         Intent::ReadingFile { phrase, .. } | Intent::ReadingPipeline { phrase, .. } => phrase,
     };
-    if utf16_len(text) > 2000
-        || utf16_len(&query) > 2000
+    if utf16_len(text) > crate::MAX_COMMAND
+        || utf16_len(&query) > crate::MAX_COMMAND
         || text.chars().chain(query.chars()).any(char::is_control)
         || phrase.len() > 50
         || phrase.chars().any(char::is_control)

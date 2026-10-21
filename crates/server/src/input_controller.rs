@@ -1,10 +1,16 @@
 //! Lifecycle and stale-result guards shared by shell and Herdr input adapters.
 use crate::{
     dictation::Recording,
-    protocol::{ClientMessage, Dictation, DictationAction},
+    protocol::{ClientMessage, Dictation, DictationAction, DictationState, DictationTarget},
 };
 use tokio_util::sync::CancellationToken;
 
+/// The terminal input a new recording must match, absent while no input can accept text.
+pub struct Line {
+    pub target: Option<DictationTarget>,
+    pub prompt: u64,
+    pub revision: u64,
+}
 #[derive(Default)]
 pub struct Controller {
     pub repair: Option<(String, CancellationToken)>,
@@ -60,6 +66,24 @@ impl Controller {
         }
         true
     }
+    /// Claim the next recording serial for a start that matches the terminal's input line.
+    pub fn begin_dictation(
+        &mut self,
+        request: &Dictation,
+        line: Option<Line>,
+    ) -> Result<u64, &'static str> {
+        let Some(line) = line.filter(|line| line.target.is_some()) else {
+            return Err("Wait for terminal input before dictating.");
+        };
+        if request.target() != line.target
+            || request.prompt != Some(line.prompt)
+            || request.revision != Some(line.revision)
+        {
+            return Err("Terminal input changed. Try dictating again.");
+        }
+        self.serial += 1;
+        Ok(self.serial)
+    }
     pub fn current(&self, id: &str, serial: u64) -> bool {
         self.serial == serial
             && self
@@ -67,11 +91,11 @@ impl Controller {
                 .as_ref()
                 .is_some_and(|(current, _)| current == id)
     }
-    pub fn status(&mut self, id: &str, serial: u64, state: &str) -> bool {
+    pub fn status(&mut self, id: &str, serial: u64, state: DictationState) -> bool {
         if !self.current(id, serial) {
             return false;
         }
-        if state != "ready" {
+        if !matches!(state, DictationState::Ready) {
             self.dictation.take();
         }
         true
@@ -95,7 +119,7 @@ mod tests {
             dictation: Some((id.into(), Recording::dormant())),
             repair: None,
         };
-        assert!(!controller.status(id, 1, "error"));
+        assert!(!controller.status(id, 1, DictationState::Error));
         assert!(controller.current(id, 2));
         let request: Dictation = serde_json::from_value(
             json!({"id":"22222222-2222-2222-2222-222222222222","action":"cancel"}),
@@ -103,7 +127,7 @@ mod tests {
         .unwrap();
         assert!(controller.control_dictation(&request));
         assert!(controller.current(id, 2));
-        assert!(controller.status(id, 2, "done"));
+        assert!(controller.status(id, 2, DictationState::Done));
         assert!(!controller.current(id, 2));
     }
     #[test]

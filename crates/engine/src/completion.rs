@@ -63,7 +63,7 @@ pub async fn complete_arguments(
         return Ok(vec![]);
     }
     let words = tokens(input);
-    if words.len() > 64 || utf16_len(input) > 2000 {
+    if words.len() > 64 || utf16_len(input) > crate::MAX_COMMAND {
         return Ok(vec![]);
     }
     let mut learned = metadata.clone();

@@ -58,7 +58,7 @@ pub async fn open(
     cwd: &str,
     cancel: &CancellationToken,
 ) -> Result<Opened, String> {
-    if utf16_len(command) > 16000
+    if utf16_len(command) > crate::protocol::MAX_TEXT
         || crate::protocol::controls(command)
         || matches!(
             crate::alternatives::Intent::detect(command, &serde_json::Value::Null),

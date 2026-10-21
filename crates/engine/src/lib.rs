@@ -18,7 +18,7 @@ pub mod suggestions;
 pub mod transfer_command;
 pub mod types;
 mod util;
-pub use util::{truncate_utf16, utf16_len};
+pub use util::{MAX_COMMAND, truncate_utf16, utf16_len};
 pub mod validation;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};

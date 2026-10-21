@@ -104,7 +104,7 @@ pub(crate) trait RecordingTarget: Send + Sync + 'static {
         guard: &Self::Guard,
         id: &str,
         serial: u64,
-        state: &str,
+        state: crate::protocol::DictationState,
         reply: crate::protocol::ServerMessage,
     );
 }
@@ -148,7 +148,7 @@ pub(crate) fn recording<T: RecordingTarget>(
                     state: status,
                     message,
                 };
-                target.recording_status(&guard, &id, serial, state, reply);
+                target.recording_status(&guard, &id, serial, status, reply);
             }
         },
     );

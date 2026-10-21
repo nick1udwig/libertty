@@ -1,7 +1,7 @@
 mod frames;
 mod history;
 mod input;
-use crate::protocol::{DictationSource, DictationState, ServerMessage};
+use crate::protocol::{DictationSource, DictationTarget, MAX_TEXT, ServerMessage};
 use crate::{
     herdr::Target,
     herdr_terminal_stream::{Hub, Size, Subscription},
@@ -539,7 +539,7 @@ impl View {
         guard: Option<(u64, &str)>,
         replacement: Option<Replacement>,
     ) -> Result<(), String> {
-        if utf16_len(text) > 16000 {
+        if utf16_len(text) > MAX_TEXT {
             return Err("Terminal input exceeded its limit.".into());
         }
         let permit = self
@@ -646,7 +646,7 @@ impl View {
         replacement: Option<&Replacement>,
         delivery: Option<(&Ledger, u64)>,
     ) -> Result<(), String> {
-        if utf16_len(text) > 16000 {
+        if utf16_len(text) > MAX_TEXT {
             return Err("Terminal input exceeded its limit.".into());
         }
         let work = async {
@@ -865,23 +865,10 @@ impl View {
                 Ok(())
             }
             ClientMessage::Resize { cols, rows, mobile } => {
-                if !cols.is_finite()
-                    || !rows.is_finite()
-                    || cols.fract() != 0.0
-                    || rows.fract() != 0.0
-                    || !(1.0..=1000.0).contains(&cols)
-                    || !(1.0..=1000.0).contains(&rows)
-                {
+                if !(1..=1000).contains(&cols) || !(1..=1000).contains(&rows) {
                     return Err("Invalid terminal size".into());
                 }
-                let size = if mobile == Some(true) {
-                    Some(Size {
-                        cols: cols as u16,
-                        rows: rows as u16,
-                    })
-                } else {
-                    None
-                };
+                let size = (mobile == Some(true)).then_some(Size { cols, rows });
                 let changed =
                     std::mem::replace(&mut self.geometry.lock().unwrap().size, size) != size;
                 let epoch = if changed {
@@ -949,7 +936,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Input { data: text, seq } => {
-                if utf16_len(&text) > 16000 {
+                if utf16_len(&text) > MAX_TEXT {
                     return Err("Invalid input".into());
                 }
                 // A reconnecting browser resends keys it could not confirm, so skip the ones already delivered.
@@ -968,7 +955,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Paste { text } => {
-                if text.is_empty() || utf16_len(&text) > 16000 || controls(&text) {
+                if text.is_empty() || utf16_len(&text) > MAX_TEXT || controls(&text) {
                     return Err("Invalid paste".into());
                 }
                 self.inner.lock().unwrap().revision += 1;
@@ -981,7 +968,10 @@ impl View {
                 prompt,
                 revision,
             } => {
-                if text.is_empty() || utf16_len(&text) > 2000 || controls(&text) {
+                if text.is_empty()
+                    || utf16_len(&text) > libertty_engine::MAX_COMMAND
+                    || controls(&text)
+                {
                     return Err("Invalid replacement".into());
                 }
                 let replacement = {
@@ -1014,7 +1004,8 @@ impl View {
                 Ok(())
             }
             ClientMessage::Command { command, id, .. } => {
-                if command.trim().is_empty() || utf16_len(&command) > 16000 || controls(&command) {
+                if command.trim().is_empty() || utf16_len(&command) > MAX_TEXT || controls(&command)
+                {
                     return Err("Invalid command".into());
                 }
                 let replacement = {
@@ -1043,32 +1034,26 @@ impl View {
                     inner.dictation_id.clear();
                 }
                 if !inner.input.control_dictation(&request) {
-                    let revision = inner.revision;
-                    if request.target()
-                        != Some(if inner.shell.is_some() {
-                            "shell"
+                    let (prompt, revision, shell) =
+                        (inner.prompt, inner.revision, inner.shell.is_some());
+                    let line = crate::input_controller::Line {
+                        target: Some(if shell {
+                            DictationTarget::Shell
                         } else {
-                            "program"
-                        })
-                        || request.prompt != Some(inner.prompt)
-                        || request.revision != Some(revision)
-                    {
-                        self.send(ServerMessage::Dictation {
-                            resume: None,
-                            id: (id).to_string(),
-                            state: DictationState::Error,
-                            message: Some(
-                                ("Terminal input changed. Try dictating again.").to_string(),
-                            ),
-                        });
-                        return Ok(());
-                    }
+                            DictationTarget::Program
+                        }),
+                        prompt,
+                        revision,
+                    };
+                    let serial = match inner.input.begin_dictation(&request, Some(line)) {
+                        Ok(serial) => serial,
+                        Err(message) => {
+                            self.send(ServerMessage::dictation_error(&id, message));
+                            return Ok(());
+                        }
+                    };
                     inner.dictation_id = id.clone();
-                    inner.input.serial += 1;
-                    let serial = inner.input.serial;
                     inner.editable = None;
-                    let prompt = inner.prompt;
-                    let shell = inner.shell.is_some();
                     let guard = DictationGuard {
                         prompt,
                         revision,
@@ -1341,9 +1326,9 @@ impl crate::input_coordinator::RecordingTarget for View {
             prompt,
             revision: new_revision,
             source: Some(DictationSource::Dictation),
-            repairing: Some(shell && utf16_len(&text) <= 2000),
+            repairing: Some(shell && utf16_len(&text) <= libertty_engine::MAX_COMMAND),
         });
-        if shell && utf16_len(&text) <= 2000 {
+        if shell && utf16_len(&text) <= libertty_engine::MAX_COMMAND {
             let intent = crate::alternatives::Intent::detect(&text, &phrases);
             self.start_repair(
                 crate::storage::random_hex(16),
@@ -1361,7 +1346,7 @@ impl crate::input_coordinator::RecordingTarget for View {
         _guard: &DictationGuard,
         id: &str,
         serial: u64,
-        state: &str,
+        state: crate::protocol::DictationState,
         reply: ServerMessage,
     ) {
         if self.inner.lock().unwrap().input.status(id, serial, state) {

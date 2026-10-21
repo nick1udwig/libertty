@@ -1,11 +1,11 @@
-use libertty_engine::utf16_len;
+use libertty_engine::{MAX_COMMAND, utf16_len};
 mod handoffs;
 #[path = "session/history.rs"]
 mod history_cache;
 mod output;
 mod screen;
 use crate::protocol::{
-    DictationSource, DictationState, DictationTarget, EngineMode, ServerMessage,
+    DictationSource, DictationTarget, EngineMode, MAX_LINE, MAX_TEXT, ServerMessage,
 };
 use crate::{
     context,
@@ -14,8 +14,9 @@ use crate::{
     help::HelpProvider,
     history,
     host::{HostServices, NativeHost},
+    input_controller::Line,
     markers::{Event, Markers},
-    paste_mode::PasteMode,
+    paste_mode::{PasteMode, bracketed},
     protocol::{ClientMessage, controls as control},
     reading::{self, Captures},
     storage,
@@ -42,6 +43,16 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) const RC: &str = include_str!("../assets/bashrc.sh");
+/// Ring the bell and clear Readline's line before writing its replacement.
+const CLEAR_LINE: &str = "\x07\x05\x15";
+/// Pasted and dictated text must be one line of printable characters.
+fn pasteable(text: &str) -> bool {
+    !text.is_empty()
+        && utf16_len(text) <= MAX_TEXT
+        && !text
+            .chars()
+            .any(|c| c < '\x20' || ('\x7f'..='\u{9f}').contains(&c))
+}
 #[derive(Serialize)]
 pub struct Suggestions {
     pub candidates: Vec<Candidate>,
@@ -66,6 +77,19 @@ pub struct ShellState {
     pub input_target: Option<DictationTarget>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_scroll: Option<bool>,
+}
+impl ShellState {
+    /// Where dictated text would go now: the shell prompt or a running program.
+    pub fn dictation_target(&self) -> Option<DictationTarget> {
+        if self.exited {
+            None
+        } else if self.ready {
+            Some(DictationTarget::Shell)
+        } else {
+            self.input_target
+                .filter(|target| *target == DictationTarget::Program)
+        }
+    }
 }
 #[derive(Clone)]
 pub enum Transport {
@@ -114,7 +138,7 @@ pub(crate) struct LineGuard {
 #[derive(Clone)]
 pub(crate) struct DictationGuard {
     line: LineGuard,
-    target: String,
+    target: DictationTarget,
 }
 struct Attachment {
     id: u64,
@@ -764,10 +788,7 @@ impl Session {
         let capture = inner.handoffs.release(id, value)?;
         inner.send(ServerMessage::SshReleased { id: id.into() });
         if native && let Some(pty) = &inner.pty {
-            pty.write(&format!(
-                "\x07\x05\x15\x1b[200~{}\x1b[201~\n",
-                capture.command
-            ));
+            pty.write(&format!("{CLEAR_LINE}{}\n", bracketed(&capture.command)));
         }
         Ok(())
     }
@@ -812,20 +833,14 @@ impl Session {
             || inner.handoffs.active()
             || inner.state.prompt != prompt
             || inner.state.input_revision != revision
-            || text.is_empty()
-            || utf16_len(text) > 16000
-            || text
-                .chars()
-                .any(|c| c < '\x20' || ('\x7f'..='\u{9f}').contains(&c))
+            || !pasteable(text)
         {
             return false;
         }
         inner.state.input_revision += 1;
         if let Some(pty) = &inner.pty {
-            pty.write(&format!(
-                "{}\x1b[200~{text}\x1b[201~",
-                if replace { "\x07\x05\x15" } else { "" }
-            ));
+            let clear = if replace { CLEAR_LINE } else { "" };
+            pty.write(&format!("{clear}{}", bracketed(text)));
         }
         inner.send(ServerMessage::Pasted {
             text: text.into(),
@@ -937,41 +952,22 @@ impl Session {
             ClientMessage::Dictation(request) => {
                 let id = request.id.as_str();
                 if !inner.input.control_dictation(&request) {
-                    let target = if inner.state.exited {
-                        None
-                    } else if inner.state.ready {
-                        Some("shell")
-                    } else if inner.state.input_target == Some(DictationTarget::Program) {
-                        Some("program")
-                    } else {
-                        None
-                    };
-                    if target.is_none()
-                        || inner.handoffs.active()
-                        || request.prompt != Some(inner.state.prompt)
-                        || request.revision != Some(inner.state.input_revision)
-                        || request.target() != target
-                    {
-                        inner.send(ServerMessage::Dictation {
-                            resume: None,
-                            id: (id).to_string(),
-                            state: DictationState::Error,
-                            message: Some(
-                                (if target.is_some() && !inner.handoffs.active() {
-                                    "Terminal input changed. Try dictating again."
-                                } else {
-                                    "Wait for terminal input before dictating."
-                                })
-                                .to_string(),
-                            ),
-                        });
-                        return;
-                    }
-                    let target = target.unwrap().to_owned();
+                    let target = inner.state.dictation_target();
                     let prompt = inner.state.prompt;
                     let revision = inner.state.input_revision;
-                    inner.input.serial += 1;
-                    let serial = inner.input.serial;
+                    let line = (!inner.handoffs.active()).then_some(Line {
+                        target,
+                        prompt,
+                        revision,
+                    });
+                    let serial = match inner.input.begin_dictation(&request, line) {
+                        Ok(serial) => serial,
+                        Err(message) => {
+                            inner.send(ServerMessage::dictation_error(id, message));
+                            return;
+                        }
+                    };
+                    let target = target.expect("dictation target");
                     let guard = DictationGuard {
                         line: LineGuard {
                             prompt,
@@ -1000,15 +996,10 @@ impl Session {
                 }
             }
             ClientMessage::Resize { cols, rows, .. } => {
-                if cols.is_finite()
-                    && rows.is_finite()
-                    && cols.fract() == 0.0
-                    && rows.fract() == 0.0
-                    && !inner.state.exited
+                if !inner.state.exited
                     && let Some(pty) = &inner.pty
                 {
-                    let (cols, rows) =
-                        (cols.clamp(2.0, 300.0) as u16, rows.clamp(2.0, 120.0) as u16);
+                    let (cols, rows) = (cols.clamp(2, 300), rows.clamp(2, 120));
                     pty.resize(cols, rows);
                     inner.screen.resize(rows, cols);
                 }
@@ -1033,15 +1024,14 @@ impl Session {
             ClientMessage::Replace {
                 text, id, revision, ..
             } => {
-                let accepted = utf16_len(&id) <= 100
-                    && same
+                let accepted = same
                     && revision == inner.state.input_revision
-                    && utf16_len(&text) <= 4000
+                    && utf16_len(&text) <= MAX_LINE
                     && !control(&text);
                 if accepted {
                     inner.state.input_revision += 1;
                     if let Some(pty) = &inner.pty {
-                        pty.write(&format!("\x07\x05\x15\x1b[200~{text}\x1b[201~"));
+                        pty.write(&format!("{CLEAR_LINE}{}", bracketed(&text)));
                     }
                     if text.is_empty() {
                         inner.state.prompt_revision = inner.state.input_revision;
@@ -1063,7 +1053,7 @@ impl Session {
                     }
                     let accepted = same
                         && !command.is_empty()
-                        && utf16_len(&command) <= 4000
+                        && utf16_len(&command) <= MAX_LINE
                         && !control(&command);
                     let result = ServerMessage::Result { id: id.clone(), accepted, message: (!accepted).then(|| "The shell is not at the same prompt. Review the command and try again.".into()) };
                     inner.remember_command(&id, result.clone());
@@ -1073,7 +1063,7 @@ impl Session {
                         inner.state.input_target = None;
                         inner.state();
                         if let Some(pty) = &inner.pty {
-                            pty.write(&format!("\x07\x05\x15\x1b[200~{command}\x1b[201~\r"));
+                            pty.write(&format!("{CLEAR_LINE}{}\r", bracketed(&command)));
                         }
                     }
                     inner.send(result);
@@ -1193,39 +1183,27 @@ impl Session {
         text: &str,
         prompt: u64,
         revision: u64,
-        target: &str,
+        target: DictationTarget,
         attachment: u64,
         serial: u64,
     ) -> bool {
         let mut inner = self.inner.lock().unwrap();
-        let actual = if inner.state.exited {
-            None
-        } else if inner.state.ready {
-            Some("shell")
-        } else if inner.state.input_target == Some(DictationTarget::Program) {
-            Some("program")
-        } else {
-            None
-        };
-        if actual != Some(target)
+        if inner.state.dictation_target() != Some(target)
             || inner.socket.as_ref().is_none_or(|s| s.id != attachment)
             || inner.input.serial != serial
             || inner.input.dictation.is_none()
             || inner.handoffs.active()
             || inner.state.prompt != prompt
             || inner.state.input_revision != revision
-            || text.is_empty()
-            || utf16_len(text) > 16000
-            || text
-                .chars()
-                .any(|c| c < '\x20' || ('\x7f'..='\u{9f}').contains(&c))
+            || !pasteable(text)
         {
             return false;
         }
         inner.state.input_revision += 1;
+        let shell = target == DictationTarget::Shell;
         if let Some(pty) = &inner.pty {
-            pty.write(&if target == "shell" {
-                format!("\x1b[200~{text}\x1b[201~")
+            pty.write(&if shell {
+                bracketed(text)
             } else {
                 inner.paste.paste(text)
             });
@@ -1234,7 +1212,7 @@ impl Session {
             text: (text).to_string(),
             replace: false,
             source: Some(DictationSource::Dictation),
-            repairing: Some(target == "shell" && utf16_len(text) <= 2000),
+            repairing: Some(shell && utf16_len(text) <= MAX_COMMAND),
             prompt,
             revision: inner.state.input_revision,
         });
@@ -1546,8 +1524,8 @@ impl crate::input_coordinator::RepairTarget for Session {
             inner.state.input_revision += 1;
             if let Some(pty) = &inner.pty {
                 pty.write(&format!(
-                    "\x07\x05\x15\x1b[200~{}\x1b[201~",
-                    reply.prepared.selected
+                    "{CLEAR_LINE}{}",
+                    bracketed(&reply.prepared.selected)
                 ));
             }
         }
@@ -1577,10 +1555,10 @@ impl crate::input_coordinator::RecordingTarget for Session {
             return Ok(());
         }
         let empty = session.state().input_revision == session.state().prompt_revision;
-        if !session.paste_dictation(&text, prompt, revision, &guard.target, attachment, serial) {
+        if !session.paste_dictation(&text, prompt, revision, guard.target, attachment, serial) {
             return Err(Self::CHANGED.into());
         }
-        if guard.target == "shell" && utf16_len(&text) <= 2000 {
+        if guard.target == DictationTarget::Shell && utf16_len(&text) <= MAX_COMMAND {
             tokio::spawn(async move {
                 let original = if empty {
                     Some(text)
@@ -1614,7 +1592,7 @@ impl crate::input_coordinator::RecordingTarget for Session {
         guard: &DictationGuard,
         id: &str,
         serial: u64,
-        state: &str,
+        state: crate::protocol::DictationState,
         reply: ServerMessage,
     ) {
         let mut inner = self.inner.lock().unwrap();
@@ -1921,25 +1899,60 @@ mod tests {
             inner.input.dictation = Some(("current".into(), Recording::dormant()));
             inner.input.serial = 1;
         }
-        assert!(session.paste_dictation("Get in it.", 1, 0, "program", attachment, 1));
+        assert!(session.paste_dictation(
+            "Get in it.",
+            1,
+            0,
+            DictationTarget::Program,
+            attachment,
+            1
+        ));
         assert_eq!(*stub.writes.lock().unwrap(), ["Get in it."]);
         match receive.try_recv().unwrap().value() {
             Some(message) => assert_eq!(message["source"], "dictation"),
             _ => panic!(),
         }
         session.inner.lock().unwrap().paste.feed("\x1b[?2004h");
-        assert!(session.paste_dictation("More words.", 1, 1, "program", attachment, 1));
+        assert!(session.paste_dictation(
+            "More words.",
+            1,
+            1,
+            DictationTarget::Program,
+            attachment,
+            1
+        ));
         assert_eq!(
             stub.writes.lock().unwrap()[1],
             "\x1b[200~More words.\x1b[201~"
         );
         for (text, prompt, revision, target, owner, serial) in [
-            ("stale", 1, 1, "program", attachment, 1),
-            ("new prompt", 2, 2, "program", attachment, 1),
-            ("shell recording", 1, 2, "shell", attachment, 1),
-            ("evil\r", 1, 2, "program", attachment, 1),
-            ("old attachment", 1, 2, "program", attachment + 1, 1),
-            ("old recording", 1, 2, "program", attachment, 0),
+            ("stale", 1, 1, DictationTarget::Program, attachment, 1),
+            ("new prompt", 2, 2, DictationTarget::Program, attachment, 1),
+            (
+                "shell recording",
+                1,
+                2,
+                DictationTarget::Shell,
+                attachment,
+                1,
+            ),
+            ("evil\r", 1, 2, DictationTarget::Program, attachment, 1),
+            (
+                "old attachment",
+                1,
+                2,
+                DictationTarget::Program,
+                attachment + 1,
+                1,
+            ),
+            (
+                "old recording",
+                1,
+                2,
+                DictationTarget::Program,
+                attachment,
+                0,
+            ),
         ] {
             assert!(!session.paste_dictation(text, prompt, revision, target, owner, serial));
         }
@@ -1947,19 +1960,33 @@ mod tests {
             let mut inner = session.inner.lock().unwrap();
             inner.handoffs.begin(CaptureKind::Ssh, "ssh host".into());
         }
-        assert!(!session.paste_dictation("captured", 1, 2, "program", attachment, 1));
+        assert!(!session.paste_dictation(
+            "captured",
+            1,
+            2,
+            DictationTarget::Program,
+            attachment,
+            1
+        ));
         {
             let mut inner = session.inner.lock().unwrap();
             inner.handoffs = Handoffs::default();
             inner.state.ready = true;
         }
-        assert!(!session.paste_dictation("returned to Bash", 1, 2, "program", attachment, 1));
+        assert!(!session.paste_dictation(
+            "returned to Bash",
+            1,
+            2,
+            DictationTarget::Program,
+            attachment,
+            1
+        ));
         {
             let mut inner = session.inner.lock().unwrap();
             inner.state.ready = false;
             inner.state.exited = true;
         }
-        assert!(!session.paste_dictation("exited", 1, 2, "program", attachment, 1));
+        assert!(!session.paste_dictation("exited", 1, 2, DictationTarget::Program, attachment, 1));
         assert_eq!(stub.writes.lock().unwrap().len(), 2);
     }
     #[tokio::test]
@@ -1992,7 +2019,10 @@ mod tests {
             }
         }
         for target in [Value::Null, json!(false), json!(0), json!("")] {
-            assert_eq!(crate::protocol::dictation_target(&target), Some("shell"));
+            assert_eq!(
+                crate::protocol::dictation_target(&target),
+                Some(DictationTarget::Shell)
+            );
         }
     }
 }

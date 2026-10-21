@@ -1117,7 +1117,7 @@ fn repair_one(
         return vec![literal];
     }
     let words = command_tokens(input, catalog);
-    if words.is_empty() || words.len() > 64 || utf16_len(input) > 2000 {
+    if words.is_empty() || words.len() > 64 || utf16_len(input) > crate::MAX_COMMAND {
         return vec![literal];
     }
     let name_index = match_index(&catalog.commands, Some(&catalog.commands));

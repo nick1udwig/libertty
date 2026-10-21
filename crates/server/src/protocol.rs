@@ -174,6 +174,14 @@ impl ServerMessage {
     pub fn value(&self) -> Value {
         serde_json::to_value(self).expect("server message")
     }
+    pub fn dictation_error(id: &str, message: &str) -> Self {
+        Self::Dictation {
+            resume: None,
+            id: id.into(),
+            state: DictationState::Error,
+            message: Some(message.into()),
+        }
+    }
 }
 #[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields, rename = "RepairResult"))]
@@ -252,10 +260,14 @@ fn id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     bounded::<D, 100, false>(d)
 }
 fn repair_text<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    bounded::<D, 2000, true>(d)
+    bounded::<D, { libertty_engine::MAX_COMMAND }, true>(d)
 }
-/// The longest terminal input or paste, in UTF-16 code units.
+/// The longest raw terminal input frame, in UTF-16 code units.
 pub const MAX_INPUT: usize = 65536;
+/// The longest typed, pasted or dictated text a terminal accepts at once, in UTF-16 code units.
+pub const MAX_TEXT: usize = 16000;
+/// The longest line libertty writes into the shell's line editor, in UTF-16 code units.
+pub const MAX_LINE: usize = 4000;
 fn input_text<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     bounded::<D, MAX_INPUT, false>(d)
 }
@@ -323,16 +335,20 @@ pub struct Dictation {
     pub reading_phrases: Value,
 }
 impl Dictation {
-    pub fn target(&self) -> Option<&str> {
+    pub fn target(&self) -> Option<DictationTarget> {
         dictation_target(&self.target)
     }
 }
-pub fn dictation_target(value: &Value) -> Option<&str> {
+/// Older clients name the shell with any falsy target.
+pub fn dictation_target(value: &Value) -> Option<DictationTarget> {
     match value {
-        Value::Null | Value::Bool(false) => Some("shell"),
-        Value::Number(number) if number.as_f64() == Some(0.0) => Some("shell"),
-        Value::String(text) if text.is_empty() => Some("shell"),
-        Value::String(text) if matches!(text.as_str(), "shell" | "program") => Some(text),
+        Value::Null | Value::Bool(false) => Some(DictationTarget::Shell),
+        Value::Number(number) if number.as_f64() == Some(0.0) => Some(DictationTarget::Shell),
+        Value::String(text) => match text.as_str() {
+            "" | "shell" => Some(DictationTarget::Shell),
+            "program" => Some(DictationTarget::Program),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -356,8 +372,8 @@ pub enum ClientMessage {
         seq: u64,
     },
     Resize {
-        cols: f64,
-        rows: f64,
+        cols: u16,
+        rows: u16,
         #[serde(default)]
         mobile: Option<bool>,
     },

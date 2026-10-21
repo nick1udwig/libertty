@@ -174,7 +174,7 @@ fn parse(record: &[&str]) -> Option<Event> {
         }
     } else if ["ssh", "herdr"].contains(&kind) && record.len() == 2 {
         let command = decode(record[1]);
-        if utf16_len(&command) <= 4000 && !control(&command) {
+        if utf16_len(&command) <= crate::protocol::MAX_LINE && !control(&command) {
             return Some(if kind == "herdr" {
                 Event::Herdr { command }
             } else {
@@ -184,7 +184,10 @@ fn parse(record: &[&str]) -> Option<Event> {
     } else if kind == "input-line" && record.len() == 3 {
         let text = decode(record[2]);
         let prefix = decode(record[1]);
-        if utf16_len(&text) <= 16000 && text.starts_with(&prefix) && !control(&text) {
+        if utf16_len(&text) <= crate::protocol::MAX_TEXT
+            && text.starts_with(&prefix)
+            && !control(&text)
+        {
             return Some(Event::InputLine {
                 text,
                 cursor: utf16_len(&prefix),

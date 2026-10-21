@@ -134,7 +134,7 @@ pub fn decode(bytes: &[u8]) -> Result<Incoming, String> {
             Err("Invalid wire integer.".into())
         }
     };
-    let size = |data: &[u8]| f64::from(u16::from_le_bytes([data[0], data[1]]));
+    let size = |data: &[u8]| u16::from_le_bytes([data[0], data[1]]);
     Ok(Incoming::Message(match bytes[3] {
         0 => serde_json::from_slice(payload).map_err(|e| e.to_string())?,
         3 => ClientMessage::Input {
@@ -282,8 +282,8 @@ mod tests {
         assert!(matches!(
             decode(&[b'T', b'M', 1, 5, 80, 0, 24, 0, 1]).unwrap(),
             Incoming::Message(ClientMessage::Resize {
-                cols: 80.0,
-                rows: 24.0,
+                cols: 80,
+                rows: 24,
                 mobile: Some(true)
             })
         ));

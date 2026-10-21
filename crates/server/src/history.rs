@@ -21,7 +21,7 @@ pub fn history_lines(raw: &str, partial: bool) -> Vec<String> {
                 && !(line.starts_with('#')
                     && line.len() > 1
                     && line[1..].bytes().all(|c| c.is_ascii_digit()))
-                && utf16_len(line) <= 2000
+                && utf16_len(line) <= libertty_engine::MAX_COMMAND
         })
         .map(str::to_owned)
         .collect();

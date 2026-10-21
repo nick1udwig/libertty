@@ -144,6 +144,8 @@ macro_rules! replace {
     };
 }
 
+/// The longest command text a repair accepts, in UTF-16 code units.
+pub const MAX_COMMAND: usize = 2000;
 /// Count JavaScript UTF-16 code units rather than bytes or Unicode scalars.
 #[inline]
 pub fn utf16_len(text: &str) -> usize {
