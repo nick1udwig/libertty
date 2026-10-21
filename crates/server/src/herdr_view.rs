@@ -815,6 +815,7 @@ impl View {
         let message = message
             .try_into()
             .map_err(|error| format!("Invalid terminal action: {error}"))?;
+        let edits_input = message.edits_input();
         if self.inner.lock().unwrap().input.intercept(&message) {
             return Ok(());
         }
@@ -961,7 +962,7 @@ impl View {
                 {
                     return Ok(());
                 }
-                {
+                if edits_input {
                     let mut inner = self.inner.lock().unwrap();
                     inner.revision += 1;
                     inner.editable = None;

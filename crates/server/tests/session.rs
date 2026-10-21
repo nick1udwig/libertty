@@ -336,7 +336,12 @@ async fn pty_contract_child() {
     assert!(catalog.paths.contains(&"subfolder/".into()));
 
     let repair_state = session.state();
+    for data in ["\x1b[I", "\x1b[O"] {
+        browser.send(json!({"type":"input","data":data}));
+        assert_eq!(session.state().input_revision, repair_state.input_revision);
+    }
     browser.send(json!({"type":"repair","id":"fused","text":"Get in it.","prompt":repair_state.prompt,"revision":repair_state.input_revision}));
+    browser.send(json!({"type":"input","data":"\x1b[I"}));
     let repaired = browser
         .until(|value| value["type"] == "repair-result" && value["id"] == "fused")
         .await;

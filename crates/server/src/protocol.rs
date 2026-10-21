@@ -406,10 +406,11 @@ impl ClientMessage {
         }
     }
     pub fn edits_input(&self) -> bool {
-        matches!(
-            self,
-            Self::Input { .. } | Self::Paste { .. } | Self::Replace { .. } | Self::Command { .. }
-        )
+        match self {
+            Self::Input { data, .. } => !matches!(data.as_str(), "\x1b[I" | "\x1b[O"),
+            Self::Paste { .. } | Self::Replace { .. } | Self::Command { .. } => true,
+            _ => false,
+        }
     }
 }
 

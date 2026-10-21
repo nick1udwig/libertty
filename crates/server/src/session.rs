@@ -908,6 +908,7 @@ impl Session {
             && !inner.state.exited
             && !inner.handoffs.active()
             && message.prompt() == Some(inner.state.prompt);
+        let edits_input = message.edits_input();
         if inner.input.intercept(&message) {
             return;
         }
@@ -1002,7 +1003,9 @@ impl Session {
             }
             ClientMessage::Input { data, .. } => {
                 if !inner.state.exited && !inner.handoffs.active() {
-                    inner.state.input_revision += 1;
+                    if edits_input {
+                        inner.state.input_revision += 1;
+                    }
                     if data.contains(['\r', '\n', '\x03']) {
                         if inner.state.ready {
                             inner.state.input_target = None;

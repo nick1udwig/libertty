@@ -121,4 +121,20 @@ mod tests {
         controller.cancel_repair(Some("second"));
         assert!(second.is_cancelled());
     }
+    #[test]
+    fn focus_reports_preserve_repairs_but_mixed_input_cancels_them() {
+        let mut controller = Controller::default();
+        let cancel = CancellationToken::new();
+        controller.replace_repair("repair".into(), cancel.clone());
+        for data in ["\x1b[I", "\x1b[O"] {
+            let message = ClientMessage::try_from(json!({"type":"input","data":data})).unwrap();
+            assert!(!message.edits_input());
+            assert!(!controller.intercept(&message));
+            assert!(!cancel.is_cancelled());
+        }
+        let message = ClientMessage::try_from(json!({"type":"input","data":"\x1b[Ix"})).unwrap();
+        assert!(message.edits_input());
+        assert!(!controller.intercept(&message));
+        assert!(cancel.is_cancelled());
+    }
 }

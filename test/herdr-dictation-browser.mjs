@@ -36,18 +36,23 @@ try {
   await installWireObserver(context);
   await context.addInitScript(() => {
     window.__messages = []; window.__sent = []; const Original = WebSocket;
-    window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); window.__messages.push(message); if (message.type === 'state') window.__state = message.state; }); } send(data) { window.__sent.push(window.__wireSent(data)); super.send(data); } };
+    window.WebSocket = class extends Original { constructor(...args) { super(...args); window.__socket = this; this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); window.__messages.push(message); if (message.type === 'state') window.__state = message.state; }); } send(data) { window.__sent.push(window.__wireSent(data)); super.send(data); } };
   });
   const page = await context.newPage(); page.setDefaultTimeout(15000); const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(base + 'terminal.html?herdrTerminal=' + pane.terminal_id);
   await page.locator('#token').fill(token); await page.locator('#login-form button').click();
   await page.waitForFunction(() => window.__state?.ready);
+  const reportFocus = () => page.evaluate(() => {
+    for (const data of ['\x1b[I', '\x1b[O']) window.__socket.send(JSON.stringify({ type: 'input', data }));
+  });
+  await reportFocus();
   const mic = page.locator('#libertty-dictation'); await mic.waitFor();
   async function dictate(text, reconnect = false) {
     transcript = text;
     await page.evaluate(() => window.__messages = []);
     // Lifecycle starts must not turn into hold-to-finish gestures on busy runners.
     await mic.press('Enter'); await page.waitForFunction(() => window.__messages.some(message => message.type === 'dictation' && message.state === 'ready'));
+    await reportFocus();
     await delay(250);
     if (reconnect) {
       const id = voice.currentId, before = voice.resumptions;
@@ -66,6 +71,7 @@ try {
   assert.ok(await page.locator('.alternative-choice .choice-command').filter({ hasText: /^C D work space$/ }).isVisible());
   let info = await herdrRequest(target, 'pane.process_info', { pane_id: pane.pane_id });
   assert.equal(info.process_info.foreground_processes.find(process => process.pid === info.process_info.shell_pid).cwd, directory, 'Dictation does not execute cd');
+  await reportFocus();
   await page.locator('.alternative-choice.selected').click();
   await until(async () => { const reply = await herdrRequest(target, 'pane.process_info', { pane_id: pane.pane_id }); return reply.process_info.foreground_processes.some(process => process.cwd === directory + '/work-space'); }, 'selected alternate executes once');
   await page.waitForFunction(() => window.__state.ready && window.__state.cwd.endsWith('/work-space'));
@@ -104,7 +110,7 @@ try {
   await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
   await page.waitForFunction(() => document.querySelector('#terminal-enter').disabled);
   assert.deepEqual(errors, []);
-  console.log('PASS Herdr shell dictation: real process detection, retained microphone audio through reconnect, microphone and keyboard C D alternatives, scoped repair, preserved prefix/suffix, rejected external edits, selected command execution, literal foreground input');
+  console.log('PASS Herdr shell dictation: real process detection, focus reports before and during dictation and before selection, retained microphone audio through reconnect, microphone and keyboard C D alternatives, scoped repair, preserved prefix/suffix, rejected external edits, selected command execution, literal foreground input');
 } catch (error) {
   for (const page of browser?.contexts().flatMap(context => context.pages()) || []) console.error(await page.evaluate(() => ({ messages: window.__messages, state: window.__state, choices: [...document.querySelectorAll('.choice-command')].map(item => item.textContent), notice: document.querySelector('#toast')?.textContent })));
   throw error;
