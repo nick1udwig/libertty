@@ -822,7 +822,7 @@ export class HerdrView {
         const result = await this.host.api<{ workspaceId: string; terminalId?: string }>('api/herdr/action', { action, workspaceId: space.id, ...(action === 'split' ? { terminalId, direction: picker.value } : action === 'new-worktree' ? { branch: herdrName(input.value) } : { path: picker.value }) });
         const snapshot = await this.host.api<import('./herdr-protocol.ts').HerdrSnapshot>('api/herdr/snapshot');
         if (this.disposed) return;
-        if (action !== 'split') this.selected = result.terminalId || snapshot.spaces?.find(space => space.id === result.workspaceId)?.selectedTerminalId || this.selected;
+        this.selected = result.terminalId || snapshot.spaces?.find(space => space.id === result.workspaceId)?.selectedTerminalId || this.selected;
         this.receive({ type: 'snapshot', snapshot }); modal.close();
       } catch (reason: any) { if (modal.open) error.textContent = reason.message; }
       finally { busy = false; submit.disabled = cancel.disabled = input.disabled = picker.disabled = false; progress.textContent = ''; updateBranches?.(); }

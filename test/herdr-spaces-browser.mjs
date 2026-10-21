@@ -332,11 +332,9 @@ try {
   await page.unroute('**/api/herdr/action*');
   const alphaSplit = (await herdrSnapshot(target)).spaces.find(space => space.id === alpha);
   assert.equal(alphaSplit.terminalIds.length, alphaBefore.terminalIds.length + 1, 'A real split is created in the held space');
-  assert.equal(await selected(), chip(beta), 'Splitting an inactive held space preserves selection');
-  await tab(alpha).click(); await tab(alpha).click(); await tree.waitFor();
+  assert.equal(await selected(), chip(alpha), 'Splitting an inactive held space selects its space');
   const newPane = alphaSplit.terminalIds.find(id => !alphaBefore.terminalIds.includes(id));
-  await tree.locator('.herdr-pane[data-terminal="' + newPane + '"] .herdr-pane-focus').click();
-  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === newPane, 'new split is accessible in the tree');
+  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === newPane, 'new split opens automatically');
   await tab(beta).click(); await hold(alpha); await treeAction('New worktree');
   await page.getByLabel('Branch', { exact: true }).fill('mobile-review');
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
@@ -360,10 +358,9 @@ try {
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
   const worktreeSplit = (await herdrSnapshot(target)).spaces.find(space => space.id === worktreeSpace.id);
   assert.equal(worktreeSplit.terminalIds.length, worktreeSpace.terminalIds.length + 1, 'A real split is created in the worktree space');
-  assert.equal(await selected(), alphaRepo, 'Splitting preserves the active repository');
+  assert.equal(await selected(), alphaRepo, 'Splitting selects the worktree repository');
   const worktreePane = worktreeSplit.terminalIds.find(id => !worktreeSpace.terminalIds.includes(id));
-  await tab(alpha).click(); await tree.locator('.herdr-pane[data-terminal="' + worktreePane + '"] .herdr-pane-focus').click();
-  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === worktreePane, 'worktree split is accessible in the tree');
+  await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === worktreePane, 'worktree split opens automatically');
   // Closing a pane keeps the tree open and the selection in the same space.
   await tab(alpha).click(); await tree.locator('.herdr-pane[data-terminal="' + worktreePane + '"] .herdr-pane-close').click();
   await wait(async () => !(await herdrSnapshot(target)).spaces.find(space => space.id === worktreeSpace.id).terminalIds.includes(worktreePane), 'pane closed on the server');
