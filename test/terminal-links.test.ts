@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { Ghostty, Terminal } from 'ghostty-web';
 import { terminalLinkAt } from '../src/terminal-links.ts';
+
+const wasm = await WebAssembly.instantiate(await readFile(new URL('../node_modules/ghostty-web/ghostty-vt.wasm', import.meta.url)), { env: { log() {} } });
+const ghostty = new Ghostty(wasm.instance);
 
 function terminal(rows: { text: string; wrapped?: boolean; uri?: string }[]) {
   const lines = rows.map(row => ({
@@ -39,6 +44,30 @@ test('every wrapped URL segment resolves to the complete link without joining ha
   for (const [col, row] of [[0, 0], [10, 0], [3, 1], [4, 2]])
     assert.equal(terminalLinkAt(term, col, row), 'https://example.com/a/long/path?q=1#fragment');
   assert.equal(terminalLinkAt(term, 0, 3), undefined);
+});
+
+test('real terminal URLs remain complete when wrapped rows enter scrollback', () => {
+  const url = 'https://example.com/a/long/path?q=1#fragment';
+  for (const cols of [7, 20, 40]) for (const trailing of ['', '\r\nnext', '\r\nnext\r\nend', '\r\n'.repeat(8)]) {
+    const term = new Terminal({ ghostty, cols, rows: 3 });
+    term.wasmTerm = ghostty.createTerminal(cols, 3);
+    try {
+      term.wasmTerm.write(url + trailing);
+      for (let offset = 0; offset < url.length; offset++)
+        assert.equal(terminalLinkAt(term, offset % cols, Math.floor(offset / cols)), url, `URL cell ${offset} at width ${cols} with ${JSON.stringify(trailing)}`);
+    } finally { term.wasmTerm.free(); }
+  }
+});
+
+test('short hard lines in real terminal history do not extend a URL', () => {
+  const term = new Terminal({ ghostty, cols: 40, rows: 3 });
+  term.wasmTerm = ghostty.createTerminal(40, 3);
+  try {
+    term.wasmTerm.write('before\r\nhttps://example.com/path\r\nseparate-output\r\n' + '\r\n'.repeat(5));
+    assert.equal(terminalLinkAt(term, 0, 0), undefined);
+    assert.equal(terminalLinkAt(term, 0, 1), 'https://example.com/path');
+    assert.equal(terminalLinkAt(term, 0, 2), undefined);
+  } finally { term.wasmTerm.free(); }
 });
 
 test('wide-cell padding and emoji before a link preserve cell coordinates', () => {

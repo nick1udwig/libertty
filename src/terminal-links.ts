@@ -17,10 +17,18 @@ export function terminalLinkAt(term: Pick<Terminal, 'buffer' | 'wasmTerm'>, col:
   });
   if (explicit !== undefined) return browserLink(explicit);
 
-  // Ghostty's regex provider scans one row. Join only soft-wrapped rows so a
-  // narrow screen can open the entire URL without merging separate output lines.
+  const continues = (at: number) => {
+    const next = buffer.getLine(at);
+    if (next?.isWrapped) return true;
+    if (at <= 0 || at >= (term.wasmTerm?.getScrollbackLength() ?? 0) || buffer.type === 'alternate') return false;
+    // The pinned adapter omits scrollback wrap flags, so check occupied row edges there.
+    const previous = buffer.getLine(at - 1);
+    return (previous?.getCell(previous.length - 1)?.getCodepoint() ?? 0) > 32 && (next?.getCell(0)?.getCodepoint() ?? 0) > 32;
+  };
+
+  // Ghostty's regex provider scans one row, so join wrapped rows before detecting URLs.
   let first = row;
-  while (first > 0 && buffer.getLine(first)?.isWrapped) first--;
+  while (first > 0 && continues(first)) first--;
   const codepoints: number[] = [];
   let offset = col;
   for (let at = first; ; at++) {
@@ -29,11 +37,10 @@ export function terminalLinkAt(term: Pick<Terminal, 'buffer' | 'wasmTerm'>, col:
     if (at === row) offset += codepoints.length;
     for (let x = 0; x < part.length; x++) {
       const codepoint = part.getCell(x)?.getCodepoint() || 32;
-      // The regex uses UTF-16 offsets. Keep one character per terminal cell,
-      // including wide-cell padding and emoji before a URL.
+      // Keep one UTF-16 character per cell, including wide-cell padding and emoji before a URL.
       codepoints.push(codepoint > 0xffff ? 32 : codepoint);
     }
-    if (!buffer.getLine(at + 1)?.isWrapped) break;
+    if (!continues(at + 1)) break;
   }
   const logicalLine = {
     length: codepoints.length,

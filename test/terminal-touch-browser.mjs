@@ -10,8 +10,9 @@ import { herdrFixture } from './herdr-fixture.ts';
 const fixturePort3183 = await freePort();
 
 const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pathname;
+const wrappedURL = 'https://example.com/' + 'wrapped/'.repeat(12) + 'end?q=1';
 const base = 'http://127.0.0.1:' + fixturePort3183, history = Array.from({ length: 160 }, (_, i) => `ROW-${i} alpha beta gamma`).join('\n')
-  + '\nRead https://example.com/touch\n\x1b]8;;https://example.com/help\x07Open help\x1b]8;;\x07\n';
+  + '\nRead https://example.com/touch\nWRAPPED ' + wrappedURL + '\n\x1b]8;;https://example.com/help\x07Open help\x1b]8;;\x07\n';
 fixture.setScreen(0, history);
 const server = spawn(new URL('../target/debug/libertty', import.meta.url).pathname, [], { cwd: root, stdio: 'ignore', env: { ...process.env,
   NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3183), LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base,
@@ -145,11 +146,16 @@ try {
     await touch('touchstart', handle, endHandle); await touch('touchmove', { ...handle, x: handle.x + 6 * word.cell }, endHandle); await touch('touchend', { ...handle, x: handle.x + 6 * word.cell }, endHandle);
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta gamma');
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
-    for (const [needle, expected] of [['https://example.com/touch', 'https://example.com/touch'], ['Open help', 'https://example.com/help']]) {
-      const linkPoint = () => frame.evaluate(needle => {
+    for (const [needle, expected, offset = 0] of [
+      ['https://example.com/touch', 'https://example.com/touch'],
+      ['WRAPPED https://', wrappedURL, 8],
+      ['wrapped/', wrappedURL],
+      ['Open help', 'https://example.com/help'],
+    ]) {
+      const linkPoint = () => frame.evaluate(({ needle, offset }) => {
         const t = window.__testTerminal, b = t.buffer.active, r = document.querySelector('#terminal canvas').getBoundingClientRect(), top = b.length - t.rows;
-        for (let row = 0; row < t.rows; row++) { const col = b.getLine(top + row)?.translateToString(true).indexOf(needle) ?? -1; if (col >= 0) return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; } throw new Error('Missing link');
-      }, needle);
+        for (let row = 0; row < t.rows; row++) { const col = b.getLine(top + row)?.translateToString(true).indexOf(needle) ?? -1; if (col >= 0) return { x: r.x + (col + offset + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; } throw new Error('Missing link');
+      }, { needle, offset });
       const point = await linkPoint();
       await touch('touchstart', point); await touch('touchend', point);
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected, 'Touch-only taps activate terminal links');
