@@ -86,6 +86,7 @@ pub fn valid_name(name: &str) -> bool {
             .any(|c| c == '/' || c == '\\' || c < '\x20' || c == '\x7f')
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "FileEntry"))]
 pub struct Entry {
     pub name: String,
     pub directory: bool,
@@ -95,6 +96,7 @@ pub struct Entry {
     pub mode: u32,
 }
 #[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "FileListing"))]
 pub struct Listing {
     pub path: String,
     pub parent: String,

@@ -10,6 +10,7 @@ use serde_json::Value;
 use std::future::Future;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "RepairIntent"))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Intent {
     #[default]
@@ -85,6 +86,7 @@ impl Intent {
     }
 }
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub struct Prepared {
     pub original: String,
     pub selected: String,

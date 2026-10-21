@@ -490,14 +490,11 @@ impl View {
                     .map(|shell| shell.cwd.clone())
                     .unwrap_or_else(|| self.agent.cwd.clone()),
                 ready: inner.shell.is_some(),
-                input_target: Some(
-                    if inner.shell.is_some() {
-                        "shell"
-                    } else {
-                        "program"
-                    }
-                    .into(),
-                ),
+                input_target: Some(if inner.shell.is_some() {
+                    crate::protocol::DictationTarget::Shell
+                } else {
+                    crate::protocol::DictationTarget::Program
+                }),
                 terminal_scroll: Some(true),
                 exited: false,
                 prompt: inner.prompt,

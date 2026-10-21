@@ -17,9 +17,8 @@ function agent(value: unknown): HerdrAgent | undefined {
 function space(value: unknown): HerdrSpace | undefined {
   if (!record(value) || !text(value.id) || !value.id || !text(value.name) || !Array.isArray(value.terminalIds)
     || value.terminalIds.length > 256 || !value.terminalIds.every(id => text(id))) return;
-  const result: HerdrSpace = { id: value.id, name: value.name, terminalIds: [...value.terminalIds] };
+  const result: HerdrSpace = { id: value.id, name: value.name, terminalIds: [...value.terminalIds], cwd: text(value.cwd) ? value.cwd : '' };
   if (text(value.selectedTerminalId)) result.selectedTerminalId = value.selectedTerminalId;
-  if (text(value.cwd)) result.cwd = value.cwd;
   if (text(value.checkoutPath)) result.checkoutPath = value.checkoutPath;
   if (typeof value.linkedWorktree === 'boolean') result.linkedWorktree = value.linkedWorktree;
   if (text(value.repoKey) && value.repoKey) result.repoKey = value.repoKey;

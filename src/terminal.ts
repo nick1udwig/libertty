@@ -325,7 +325,7 @@ const inline = new InlineSuggestions(term, { state: () => state, replace: replac
       const cancel = () => send({ type: 'repair-cancel', id });
       const finish = (result: RepairResult) => { signal.removeEventListener('abort', cancel); repairs.delete(id); resolve(result); };
       repairs.set(id, finish); signal.addEventListener('abort', cancel, { once: true });
-      if (!send({ type: 'repair', id, text, intent, prompt, revision })) finish({ accepted: false, candidates: [], original: text, selected: text, prompt, revision });
+      if (!send({ type: 'repair', id, text, intent, prompt, revision })) finish({ id, accepted: false, candidates: [], original: text, selected: text, prompt, revision });
     });
   },
   ...(herdrTerminal ? { dictate: (text: string, applied: boolean, replace: boolean) => { if (!send({ type: 'dictation-paste', text, applied, replace, prompt: state.prompt, revision: state.inputRevision })) inline.disconnect(); } } : {}),
@@ -661,7 +661,7 @@ function socketClosed(event?: CloseEvent) {
   if (event?.code === 4001 || state.exited) inline.disconnect(); else inline.suspend();
   for (const resolve of edits.values()) resolve(false); edits.clear();
   for (const resolve of inputLines.values()) resolve(); inputLines.clear();
-  for (const resolve of repairs.values()) resolve({ accepted: false, candidates: [], original: '', selected: '', prompt: state.prompt, revision: state.inputRevision }); repairs.clear();
+  for (const [id, resolve] of repairs) resolve({ id, accepted: false, candidates: [], original: '', selected: '', prompt: state.prompt, revision: state.inputRevision }); repairs.clear();
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) { pendingCommand = undefined; toast('Connection lost before acknowledgement. Check the terminal before running again.'); }
   if (event?.code === 4001) { unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason); return false; }

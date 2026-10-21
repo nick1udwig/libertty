@@ -273,6 +273,7 @@ enum Control {
     Finish,
 }
 #[derive(Clone, Copy, serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DictationCheckpoint"))]
 #[serde(rename_all = "camelCase")]
 pub struct Checkpoint {
     pub accepted_frames: u64,

@@ -80,6 +80,7 @@ where
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct Flag {
     pub name: String,
@@ -99,6 +100,7 @@ pub struct Flag {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum ValueKind {
     #[default]
@@ -110,6 +112,7 @@ pub enum ValueKind {
     Choice,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct ValueSchema {
     pub minimum: usize,
@@ -140,17 +143,22 @@ impl Flag {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct Catalog {
     pub cwd: String,
+    #[cfg_attr(feature = "ts", ts(as = "Vec<String>"))]
     pub commands: SharedList<String>,
+    #[cfg_attr(feature = "ts", ts(as = "Vec<String>"))]
     pub paths: SharedList<String>,
+    #[cfg_attr(feature = "ts", ts(as = "Vec<String>"))]
     pub history: SharedList<String>,
     #[serde(
         default,
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
+    #[cfg_attr(feature = "ts", ts(as = "Option<Vec<String>>"))]
     pub functions: Option<SharedList<String>>,
     #[serde(
         default,
@@ -161,9 +169,12 @@ pub struct Catalog {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields))]
 pub struct Candidate {
     pub command: String,
     pub score: f64,
+    /// User-facing explanations of each change.
+    #[cfg_attr(feature = "ts", ts(type = "string[]"))]
     pub changes: Vec<Change>,
     #[serde(skip)]
     pub evidence: Evidence,

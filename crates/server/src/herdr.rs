@@ -799,7 +799,7 @@ pub(crate) fn truthy(value: &Value) -> bool {
         _ => true,
     }
 }
-pub use crate::herdr_snapshot::{Snapshot, Space, Terminal, normalize};
+pub use crate::herdr_snapshot::{Snapshot, Space, Status, Terminal, normalize};
 
 pub fn response_preview(screen: &str) -> String {
     static COMPOSER: LazyLock<Regex> =
@@ -850,6 +850,7 @@ pub fn notification_body(cwd: &str, preview: &str) -> String {
 }
 
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "HerdrMessage"))]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Metadata {
     Snapshot { snapshot: Arc<Snapshot> },

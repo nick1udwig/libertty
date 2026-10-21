@@ -1,4 +1,4 @@
-use libertty_server::herdr::{Target, metadata};
+use libertty_server::herdr::{Status, Target, metadata};
 use serde_json::json;
 use std::{sync::atomic::Ordering, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -81,7 +81,7 @@ async fn independent_targets_share_subscriptions_and_cache_until_last_listener_l
     assert_eq!(count(&fixture, "session.snapshot"), requests);
     assert_eq!(
         independent.snapshot().await.unwrap().agents[0].status,
-        "done"
+        Status::Done
     );
     let (send, mut reopened) = tokio::sync::mpsc::channel(16);
     let cancel = CancellationToken::new();
@@ -112,11 +112,11 @@ async fn separate_sockets_never_share_cached_metadata() {
     next(&mut receive).await;
     assert_eq!(
         first.target.snapshot().await.unwrap().agents[0].status,
-        "working"
+        Status::Working
     );
     assert_eq!(
         second.target.snapshot().await.unwrap().agents[0].status,
-        "idle"
+        Status::Idle
     );
     cancel.cancel();
     task.await.unwrap();

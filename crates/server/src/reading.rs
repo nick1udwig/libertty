@@ -115,6 +115,7 @@ pub fn strip_vt(text: &str) -> String {
         .into_owned()
 }
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ReadingCapture"))]
 #[serde(rename_all = "camelCase")]
 pub struct Descriptor {
     pub id: String,

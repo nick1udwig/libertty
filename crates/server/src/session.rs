@@ -4,7 +4,9 @@ mod handoffs;
 mod history_cache;
 mod output;
 mod screen;
-use crate::protocol::{DictationSource, DictationState, EngineMode, ServerMessage};
+use crate::protocol::{
+    DictationSource, DictationState, DictationTarget, EngineMode, ServerMessage,
+};
 use crate::{
     context,
     engine::NativeEngine,
@@ -38,6 +40,7 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) const RC: &str = include_str!("../assets/bashrc.sh");
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
 pub struct ShellState {
     pub cwd: String,
@@ -51,7 +54,7 @@ pub struct ShellState {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exit_code: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_target: Option<String>,
+    pub input_target: Option<DictationTarget>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_scroll: Option<bool>,
 }
@@ -271,7 +274,7 @@ impl Inner {
                         prompt: self.state.prompt + 1,
                         exited: false,
                         exit_code: Some(code),
-                        input_target: Some("shell".into()),
+                        input_target: Some(DictationTarget::Shell),
                         terminal_scroll: None,
                     };
                     self.history.observe(had_prompt, history, command_cwd);
@@ -279,7 +282,7 @@ impl Inner {
                 }
                 Event::Busy => {
                     self.state.ready = false;
-                    self.state.input_target = Some("program".into());
+                    self.state.input_target = Some(DictationTarget::Program);
                     self.state();
                 }
                 Event::InputLine { text, cursor } => {
@@ -929,7 +932,7 @@ impl Session {
                         None
                     } else if inner.state.ready {
                         Some("shell")
-                    } else if inner.state.input_target.as_deref() == Some("program") {
+                    } else if inner.state.input_target == Some(DictationTarget::Program) {
                         Some("program")
                     } else {
                         None
@@ -1190,7 +1193,7 @@ impl Session {
             None
         } else if inner.state.ready {
             Some("shell")
-        } else if inner.state.input_target.as_deref() == Some("program") {
+        } else if inner.state.input_target == Some(DictationTarget::Program) {
             Some("program")
         } else {
             None
@@ -1820,16 +1823,16 @@ mod tests {
         {
             let mut inner = session.inner.lock().unwrap();
             inner.state.ready = false;
-            inner.state.input_target = Some("program".into());
+            inner.state.input_target = Some(DictationTarget::Program);
         }
         for data in ["\x1b[1;1R", "\r", "\x03"] {
             session.receive(attachment, json!({"type":"input","data":data}));
-            assert_eq!(session.state().input_target.as_deref(), Some("program"));
+            assert_eq!(session.state().input_target, Some(DictationTarget::Program));
         }
         {
             let mut inner = session.inner.lock().unwrap();
             inner.state.ready = true;
-            inner.state.input_target = Some("shell".into());
+            inner.state.input_target = Some(DictationTarget::Shell);
         }
         session.receive(attachment, json!({"type":"input","data":"\r"}));
         assert!(!session.state().ready);
@@ -1867,10 +1870,10 @@ mod tests {
     #[tokio::test]
     async fn control_d_keeps_the_prompt_and_input_snapshots_reject_stale_revisions() {
         let (session, stub, attachment, mut receive) = fixture().await;
-        session.inner.lock().unwrap().state.input_target = Some("shell".into());
+        session.inner.lock().unwrap().state.input_target = Some(DictationTarget::Shell);
         session.receive(attachment, json!({"type":"input","data":"\x04"}));
         assert!(session.state().ready);
-        assert_eq!(session.state().input_target.as_deref(), Some("shell"));
+        assert_eq!(session.state().input_target, Some(DictationTarget::Shell));
         session.receive(
             attachment,
             json!({"type":"input-line","id":"stale","prompt":1,"revision":0}),
@@ -1893,7 +1896,7 @@ mod tests {
         {
             let mut inner = session.inner.lock().unwrap();
             inner.state.ready = false;
-            inner.state.input_target = Some("program".into());
+            inner.state.input_target = Some(DictationTarget::Program);
             inner.input.dictation = Some(("current".into(), Recording::dormant()));
             inner.input.serial = 1;
         }

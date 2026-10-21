@@ -6,8 +6,10 @@ use std::{
     time::{Duration, Instant},
 };
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TransferRequest"))]
 pub struct Request {
     pub id: String,
+    #[cfg_attr(test, ts(type = "'upload' | 'download'"))]
     pub action: String,
     pub path: String,
     pub name: String,

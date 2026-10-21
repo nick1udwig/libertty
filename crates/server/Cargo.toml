@@ -44,4 +44,6 @@ name = "libertty"
 path = "src/main.rs"
 
 [dev-dependencies]
+libertty-engine = { path = "../engine", features = ["ts"] }
 tempfile = "3.27.0"
+ts-rs.workspace = true

@@ -2,7 +2,7 @@ import { button } from './dom.ts';
 import './file-browser.css';
 import { uploadIcon, downloadIcon, moreIcon, searchIcon, chevronIcon, folderIcon, fileOptionIcons, closeIcon } from './icons.ts';
 import { fileBreadcrumbs, sortedFiles, type FileOptions, type FileSort } from './file-options.ts';
-import type { FileListing, FileEntry } from './file-protocol.ts';
+import type { FileListing, FileEntry } from './generated/protocol.ts';
 
 export interface FileClient {
   action(input: Record<string, unknown>): Promise<{ text?: string; version?: string }>;

@@ -1,4 +1,4 @@
-use crate::protocol::integer;
+use crate::{herdr::Status, protocol::integer};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 
@@ -51,12 +51,14 @@ impl Tracker {
             if let Some(seen) = old.and_then(|s| s.get("seen")) {
                 state["seen"] = seen.clone();
             }
-            if agent.status == "working" {
+            if agent.status == Status::Working {
                 state["working"] = json!(true);
             }
-            if agent.status == "idle" || agent.status == "done" {
+            if matches!(agent.status, Status::Idle | Status::Done) {
                 let completion = agent.completion.or_else(|| {
-                    if agent.status == "done" || old.is_some_and(|state| state["working"] == true) {
+                    if agent.status == Status::Done
+                        || old.is_some_and(|state| state["working"] == true)
+                    {
                         Some(agent.sequence)
                     } else {
                         old.and_then(|state| state["completion"].as_f64())
@@ -77,13 +79,13 @@ impl Tracker {
             }
             if self.initialized
                 && let Some(old) = old
-                && agent.status == "blocked"
+                && agent.status == Status::Blocked
                 && (old["raw"] != "blocked" || old["sequence"] != agent.sequence)
             {
                 notifications
                     .push(json!({"terminalId":id,"kind":"request","sequence":agent.sequence}));
             }
-            if agent.status == "unknown" {
+            if agent.status == Status::Unknown {
                 state["working"] = json!(false);
             }
             self.states.insert(id.into(), state);
@@ -105,7 +107,7 @@ impl Tracker {
         state["seen"] = state["completion"].clone();
         true
     }
-    pub fn status(&self, agent: &crate::herdr::Terminal) -> String {
+    pub fn status(&self, agent: &crate::herdr::Terminal) -> Status {
         if let Some(state) = self.states.get(&agent.terminal_id)
             && (state["raw"] == "idle" || state["raw"] == "done")
         {
@@ -113,18 +115,17 @@ impl Tracker {
                 .as_f64()
                 .is_some_and(|n| state["seen"].as_f64().unwrap_or(-1.0) < n)
             {
-                "done"
+                Status::Done
             } else {
-                "idle"
-            }
-            .into();
+                Status::Idle
+            };
         }
-        agent.status.clone()
+        agent.status
     }
     pub fn attention(&self) -> usize {
         self.agents
             .iter()
-            .filter(|a| ["done", "blocked"].contains(&self.status(a).as_str()))
+            .filter(|a| matches!(self.status(a), Status::Done | Status::Blocked))
             .count()
     }
 }
