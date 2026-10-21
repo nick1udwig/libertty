@@ -15,6 +15,7 @@ import { adaptDarkAppColors } from './terminal-colors.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { HerdrLayout } from './herdr-layout.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
+import { terminalLinkAt } from './terminal-links.ts';
 import { TerminalFocus } from './terminal-focus.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
 import { TerminalEcho } from './predicted-echo.ts';
@@ -415,6 +416,7 @@ function copyTerminalText(text: string) {
 }
 const gestures = new TerminalGestures(term, {
   focus,
+  link: (col, row) => terminalLinkAt(term, col, row, projection?.clickable),
   pan: { enabled: () => fullWidth() && terminalViewport.scrollWidth > terminalViewport.clientWidth, move: pixels => { terminalViewport.scrollLeft += pixels; } },
   scroll: {
     enabled: () => mobileTerminal() && herdrReady && state.terminalScroll === true && tabVisible && !document.hidden && term.buffer.active.length <= term.rows,

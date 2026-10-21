@@ -70,6 +70,26 @@ test('short hard lines in real terminal history do not extend a URL', () => {
   } finally { term.wasmTerm.free(); }
 });
 
+test('native screen repaints resolve wrapped GitHub links without wrap flags', () => {
+  const url = 'https://github.com/nick1udwig/libertty/pull/new/feat/links-work-across-linebreaks';
+  const prefix = 'remote:      ', text = prefix + url;
+  for (const cols of [40, 52, 70]) {
+    const term = new Terminal({ ghostty, cols, rows: 12 });
+    term.wasmTerm = ghostty.createTerminal(cols, 12);
+    try {
+      for (let offset = 0; offset < text.length; offset += cols)
+        term.wasmTerm.write('\x1b[' + (Math.floor(offset / cols) + 1) + ';1H' + text.slice(offset, offset + cols));
+      assert.equal(term.wasmTerm.getScrollbackLength(), 0);
+      for (let offset = prefix.length; offset < text.length; offset++) {
+        const row = Math.floor(offset / cols);
+        assert.equal(term.buffer.active.getLine(row)?.isWrapped, false);
+        assert.equal(terminalLinkAt(term, offset % cols, row, true), url, `Native URL cell ${offset} at width ${cols}`);
+      }
+      assert.equal(terminalLinkAt(term, 0, 0, true), undefined);
+    } finally { term.wasmTerm.free(); }
+  }
+});
+
 test('wide-cell padding and emoji before a link preserve cell coordinates', () => {
   const term = terminal([{ text: '界\0😀\0 https://example.com' }]);
   assert.equal(terminalLinkAt(term, 5, 0), 'https://example.com/');

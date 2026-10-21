@@ -8,7 +8,7 @@ function browserLink(text: string): string | undefined {
 }
 
 /** Resolve a web link synchronously so opening it retains the tap's user activation. */
-export function terminalLinkAt(term: Pick<Terminal, 'buffer' | 'wasmTerm'>, col: number, row: number): string | undefined {
+export function terminalLinkAt(term: Pick<Terminal, 'buffer' | 'wasmTerm'>, col: number, row: number, nativeFrame = false): string | undefined {
   const buffer = term.buffer.active, line = buffer.getLine(row);
   if (!line || col < 0 || col >= line.length) return;
   let explicit: string | undefined;
@@ -20,8 +20,8 @@ export function terminalLinkAt(term: Pick<Terminal, 'buffer' | 'wasmTerm'>, col:
   const continues = (at: number) => {
     const next = buffer.getLine(at);
     if (next?.isWrapped) return true;
-    if (at <= 0 || at >= (term.wasmTerm?.getScrollbackLength() ?? 0) || buffer.type === 'alternate') return false;
-    // The pinned adapter omits scrollback wrap flags, so check occupied row edges there.
+    if (at <= 0 || !nativeFrame && (at >= (term.wasmTerm?.getScrollbackLength() ?? 0) || buffer.type === 'alternate')) return false;
+    // Native screen painting and the scrollback adapter omit wrap flags, so check occupied row edges there.
     const previous = buffer.getLine(at - 1);
     return (previous?.getCell(previous.length - 1)?.getCodepoint() ?? 0) > 32 && (next?.getCell(0)?.getCodepoint() ?? 0) > 32;
   };

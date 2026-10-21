@@ -15,6 +15,8 @@ const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp
 const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:' + fixturePort3173;
 const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
 const state = async () => { try { return JSON.parse(await readFile(dir + '/state.json', 'utf8')); } catch { return {}; } };
+const wrappedURL = 'https://github.com/nick1udwig/libertty/pull/new/feat/links-work-across-linebreaks';
+const wrappedPrefix = 'remote:      ';
 let herdr, desktop, backend, browser;
 try {
   await mkdir(dir + '/config', { recursive: true });
@@ -26,11 +28,13 @@ try {
     const width = value => Array.from(value).reduce((n, char) => n + (char.codePointAt(0) > 127 ? 2 : 1), 0);
     const caret = () => width(Array.from(text).slice(0, cursor).join('')) + 5;
     const title = () => (normal ? 'Host scrollback' : 'Application transcript') + ' TICK:' + String(tick).padStart(6, '0');
+    const wrapped = ${JSON.stringify(wrappedPrefix + wrappedURL)};
     const draw = () => { const cols = process.stdout.columns, rows = process.stdout.rows;
       writeFileSync(${JSON.stringify(dir + '/state.json')}, JSON.stringify({ cols, rows, offset, wheels, text, cursor, mouse, reporting, normal }));
       let screen = '\\x1b[2J\\x1b[H' + title() + '\\r\\n';
       for (let row = 0; row < rows - 7; row++) screen += (row === 1 ? '\\x1b]8;;https://example.com/help\\x07Open help\\x1b]8;;\\x07'
-        : row === 2 ? 'https://example.com/tui' : 'ROW-' + (100 - offset + row) + ' alpha beta gamma') + '\\r\\n';
+        : row === 2 ? 'https://example.com/tui' : row >= 3 && row < 3 + Math.ceil(wrapped.length / cols)
+          ? wrapped.slice((row - 3) * cols, (row - 2) * cols) : 'ROW-' + (100 - offset + row) + ' alpha beta gamma') + '\\r\\n';
       screen += '╭' + '─'.repeat(cols - 2) + '╮\\r\\n│ › ' + text + ' '.repeat(Math.max(0, cols - width(text) - 5)) + '│\\r\\n╰' + '─'.repeat(cols - 2) + '╯';
       process.stdout.write(screen + '\\x1b[' + (rows - 4) + ';' + caret() + 'H\\x1b[?25h'); };
     process.stdout.write('\\x1b[?1049h\\x1b[?1000h\\x1b[?1006h');
@@ -96,6 +100,7 @@ try {
     };
   });
   await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Native terminal link</title>' }));
+  await context.route('https://github.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Wrapped GitHub link</title>' }));
   await context.route('**/assets/terminal-*.js', async route => {
     const response = await route.fetch(), original = await response.text(), body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
@@ -149,8 +154,12 @@ try {
     { x: 4, y: await page.evaluate(() => window.__terminal.rows - 5) }, 'Live deltas retain the native composer cursor');
   await page.evaluate(() => { window.__dropScreens = false; });
   const cdp = await context.newCDPSession(page), touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: ['touchEnd', 'touchCancel'].includes(type) ? [] : [{ x, y, id: 1 }] });
-  for (const [row, url] of [[2, 'https://example.com/help'], [3, 'https://example.com/tui']]) {
-    const point = await page.evaluate(row => { const t = window.__terminal, r = document.querySelector('#terminal canvas').getBoundingClientRect(); return { x: r.x + 1.5 * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; }, row);
+  const linkPoints = [[2, 'https://example.com/help', 1], [3, 'https://example.com/tui', 1]];
+  const linkColumns = await page.evaluate(() => window.__terminal.cols);
+  for (let row = 0; row < Math.ceil((wrappedPrefix.length + wrappedURL.length) / linkColumns); row++)
+    linkPoints.push([4 + row, wrappedURL, row ? 0 : wrappedPrefix.length]);
+  for (const [row, url, col] of linkPoints) {
+    const point = await page.evaluate(({ row, col }) => { const t = window.__terminal, r = document.querySelector('#terminal canvas').getBoundingClientRect(); return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; }, { row, col });
     const opened = context.waitForEvent('page'); await touch('touchStart', point.x, point.y); await touch('touchEnd');
     const popup = await opened; await popup.waitForLoadState(); assert.equal(popup.url(), url);
     assert.equal(await popup.evaluate(() => window.opener), null, 'Opened links cannot access the terminal');
