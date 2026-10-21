@@ -8,6 +8,7 @@ import { terminalContact } from './terminal-contact.ts';
 interface Point { row: number; col: number }
 interface Host {
   tap(x: number, y: number): void; copy(text: string): Promise<void>; focus: TerminalFocus;
+  link?(col: number, row: number): string | undefined;
   pan?: { enabled(): boolean; move(pixels: number): void };
   scroll?: { enabled(): boolean; move(lines: number, x: number, y: number): void };
 }
@@ -119,7 +120,7 @@ export class TerminalGestures {
           const bounds = this.canvas.getBoundingClientRect();
           const inside = press.x >= bounds.left && press.x < bounds.right && press.y >= bounds.top && press.y < bounds.bottom;
           const point = this.point(press.x, press.y);
-          const link = inside ? terminalLinkAt(term, point.col, point.row) : undefined;
+          const link = inside ? (host.link ? host.link(point.col, point.row) : terminalLinkAt(term, point.col, point.row)) : undefined;
           if (link) window.open(link, '_blank', 'noopener,noreferrer');
           else { host.tap(press.x, press.y); host.focus.focus(); }
         }

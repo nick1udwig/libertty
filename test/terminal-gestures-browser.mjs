@@ -76,26 +76,27 @@ try {
     }, longURL);
     const snapshot = () => scope.evaluate(() => ({ focus: window.__inputFocusCalls, input: window.__sent.filter(m => m.type === 'input').length }));
     const before = await snapshot();
-    async function pointFor(needle, wrapped = false) {
-      const point = await scope.evaluate(({ needle, wrapped }) => {
+    async function pointFor(needle, wrapped = false, offset = 0) {
+      const point = await scope.evaluate(({ needle, wrapped, offset }) => {
         const term = window.__testTerminal, bounds = document.querySelector('#terminal canvas').getBoundingClientRect();
         const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
         for (let row = 0; row < term.rows; row++) {
           const line = term.buffer.active.getLine(top + row), col = line?.translateToString(true).indexOf(needle) ?? -1;
           if (col >= 0 && (!wrapped || line.isWrapped))
-            return { x: (col + .5) * bounds.width / term.cols, y: (row + .5) * bounds.height / term.rows };
+            return { x: (col + offset + .5) * bounds.width / term.cols, y: (row + .5) * bounds.height / term.rows };
         }
         throw new Error('Missing visible link: ' + needle);
-      }, { needle, wrapped });
+      }, { needle, wrapped, offset });
       const bounds = await scope.locator('#terminal canvas').boundingBox();
       return { x: bounds.x + point.x, y: bounds.y + point.y };
     }
-    for (const [needle, url, wrapped] of [
+    for (const [needle, url, wrapped, offset] of [
       ['https://example.com/tapped', 'https://example.com/tapped?q=1', false],
+      ['WRAPPED https://', longURL, false, 8],
       ['wrapped/', longURL, true],
       ['Labeled link', 'https://example.com/labeled', false],
     ]) {
-      const target = await pointFor(needle, wrapped), popupPromise = context.waitForEvent('page');
+      const target = await pointFor(needle, wrapped, offset), popupPromise = context.waitForEvent('page');
       await touch('touchStart', target); await touch('touchEnd');
       const popup = await popupPromise;
       await popup.waitForLoadState('domcontentloaded');
@@ -120,15 +121,23 @@ try {
     await touch('touchStart', await pointFor('Unsafe link')); await touch('touchEnd');
     assert.equal(context.pages().length, pages, 'Non-web terminal hyperlinks must not be activated');
     await scope.locator('#terminal textarea').evaluate(el => el.blur());
+    const beforeScrollback = await snapshot();
     // Resolve the same URL from actual scrollback, rather than live output.
     await scope.evaluate(() => { window.__testTerminal.write('\r\n'.repeat(50)); window.__testTerminal.scrollLines(-50); });
-    const older = await pointFor('Labeled link'), popupPromise = context.waitForEvent('page');
     const scrolled = await scope.evaluate(() => window.__testTerminal.getViewportY());
-    await touch('touchStart', older); await touch('touchEnd');
-    const popup = await popupPromise;
-    await popup.waitForLoadState('domcontentloaded'); assert.equal(popup.url(), 'https://example.com/labeled');
-    assert.equal(await scope.evaluate(() => window.__testTerminal.getViewportY()), scrolled, 'Opening a scrollback link must preserve the history position');
-    await popup.close(); await page.bringToFront();
+    for (const [needle, url, offset] of [
+      ['WRAPPED https://', longURL, 8],
+      ['wrapped/', longURL],
+      ['Labeled link', 'https://example.com/labeled'],
+    ]) {
+      const older = await pointFor(needle, false, offset), popupPromise = context.waitForEvent('page');
+      await touch('touchStart', older); await touch('touchEnd');
+      const popup = await popupPromise;
+      await popup.waitForLoadState('domcontentloaded'); assert.equal(popup.url(), url);
+      assert.equal(await scope.evaluate(() => window.__testTerminal.getViewportY()), scrolled, 'Opening a scrollback link must preserve the history position');
+      await popup.close(); await page.bringToFront();
+      assert.deepEqual(await snapshot(), beforeScrollback, 'A scrollback link tap must not focus input or send cursor movement');
+    }
   }
   await page.locator('#terminal textarea').evaluate(el => el.blur());
   async function checkScrollbar(scope) {
