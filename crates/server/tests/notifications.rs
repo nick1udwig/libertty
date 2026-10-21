@@ -43,7 +43,7 @@ async fn initialized(directory: &std::path::Path) {
 #[test]
 fn only_browser_services_with_valid_encryption_keys_are_accepted_and_delivery_is_encrypted() {
     let input = subscription();
-    assert_eq!(notifications::subscription(&input).unwrap(), input);
+    assert_eq!(json!(notifications::subscription(&input).unwrap()), input);
     for endpoint in [
         "http://fcm.googleapis.com/test",
         "https://127.0.0.1/test",
@@ -64,7 +64,7 @@ fn only_browser_services_with_valid_encryption_keys_are_accepted_and_delivery_is
         let mut valid = input.clone();
         valid["endpoint"] = json!(endpoint);
         assert_eq!(
-            notifications::subscription(&valid).unwrap()["endpoint"],
+            notifications::subscription(&valid).unwrap().endpoint,
             endpoint
         );
     }
@@ -79,7 +79,9 @@ fn only_browser_services_with_valid_encryption_keys_are_accepted_and_delivery_is
     let directory = tempfile::tempdir().unwrap();
     let push = Push::open(directory.path(), "https://example.com/libertty").unwrap();
     let text = "Private agent response";
-    let message = push.message(&input, text).unwrap();
+    let message = push
+        .message(&notifications::subscription(&input).unwrap(), text)
+        .unwrap();
     assert_eq!(message.ttl, 3600);
     assert_eq!(message.urgency, Some(web_push::Urgency::High));
     assert_eq!(
@@ -139,15 +141,15 @@ async fn alerts_preserve_ownership_focus_acknowledgements_previews_and_restart_w
         "https://example.com/libertty",
     )
     .unwrap();
-    let device = json!(manager.subscribe(&owner, &subscription()).unwrap());
-    let tab = json!("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    let device = manager.subscribe(&owner, &subscription()).unwrap();
+    let tab = "cccccccc-cccc-cccc-cccc-cccccccccccc";
     assert!(
         manager
-            .add_view(&other, &device, &tab, "", &fixture.target)
+            .add_view(&other, &device, tab, "", &fixture.target)
             .is_err()
     );
     manager
-        .add_view(&owner, &device, &tab, "", &fixture.target)
+        .add_view(&owner, &device, tab, "", &fixture.target)
         .unwrap();
     initialized(&directory).await;
     assert!(sent.lock().unwrap().is_empty());
@@ -177,7 +179,10 @@ async fn alerts_preserve_ownership_focus_acknowledgements_previews_and_restart_w
     tokio::time::sleep(Duration::from_millis(180)).await;
     fixture.update("blocked");
     tokio::time::sleep(Duration::from_millis(180)).await;
-    manager.acknowledge(&owner,&device,"",&fixture.target,&json!({"terminalId":"term_0","kind":"request","sequence":fixture.snapshot.lock().unwrap()["agents"][0]["state_change_seq"]})).unwrap();
+    let event = serde_json::from_value(json!({"terminalId":"term_0","kind":"request","sequence":fixture.snapshot.lock().unwrap()["agents"][0]["state_change_seq"]})).unwrap();
+    manager
+        .acknowledge(&owner, &device, "", &fixture.target, &event)
+        .unwrap();
     assert_eq!(sent.lock().unwrap().len(), 1);
     manager.presence("socket", &owner, &device, false).unwrap();
     fixture.update("working");
@@ -226,7 +231,7 @@ async fn alerts_preserve_ownership_focus_acknowledgements_previews_and_restart_w
     tokio::time::sleep(Duration::from_millis(180)).await;
     fixture.update("idle");
     until(|| sent.lock().unwrap().len() == 4).await;
-    manager.remove_view(&owner, &device, &tab).unwrap();
+    manager.remove_view(&owner, &device, tab).unwrap();
     fixture.update("working");
     tokio::time::sleep(Duration::from_millis(180)).await;
     fixture.update("idle");
@@ -261,23 +266,23 @@ async fn expired_devices_and_revoked_pairings_stop_deliveries_and_recycled_panes
         "https://example.com/libertty",
     )
     .unwrap();
-    let device = json!(manager.subscribe(&owner, &subscription()).unwrap());
-    let tab = json!("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    let device = manager.subscribe(&owner, &subscription()).unwrap();
+    let tab = "cccccccc-cccc-cccc-cccc-cccccccccccc";
     manager
-        .add_view(&owner, &device, &tab, "", &fixture.target)
+        .add_view(&owner, &device, tab, "", &fixture.target)
         .unwrap();
     initialized(&directory).await;
     fixture.update("idle");
     until(|| sends.load(Ordering::SeqCst) == 1).await;
     until(|| {
         manager
-            .add_view(&owner, &device, &tab, "", &fixture.target)
+            .add_view(&owner, &device, tab, "", &fixture.target)
             .is_err()
     })
     .await;
-    let next = json!(manager.subscribe(&owner, &subscription()).unwrap());
+    let next = manager.subscribe(&owner, &subscription()).unwrap();
     manager
-        .add_view(&owner, &next, &tab, "", &fixture.target)
+        .add_view(&owner, &next, tab, "", &fixture.target)
         .unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
     valid.store(false, Ordering::SeqCst);

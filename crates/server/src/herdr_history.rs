@@ -28,7 +28,7 @@ struct Resource {
 }
 #[derive(Default, Clone)]
 pub struct Hub {
-    resources: Arc<Mutex<HashMap<String, Arc<Resource>>>>,
+    resources: Arc<Mutex<HashMap<crate::herdr::ResourceKey, Arc<Resource>>>>,
 }
 pub struct Subscription {
     pub receive: watch::Receiver<Update>,
@@ -44,24 +44,17 @@ impl Drop for Subscription {
         }
     }
 }
-fn key(target: &Target, pane: &str) -> Result<String, String> {
-    let transport = target
-        .remote
-        .as_ref()
-        .map(|host| format!("{:p}", Arc::as_ptr(host)));
-    Ok(json!([transport, target.path()?, pane]).to_string())
-}
 impl Hub {
     /// A terminal frame means the pane's history may have changed; an empty reset frame means its stream stopped.
     pub fn activity(&self, target: &Target, pane: &str, streaming: bool) {
-        let Ok(key) = key(target, pane) else { return };
+        let Ok(key) = target.key(pane) else { return };
         if let Some(resource) = self.resources.lock().unwrap().get(&key) {
             resource.streaming.store(streaming, Ordering::Release);
             resource.activity.notify_one();
         }
     }
     pub fn subscribe(&self, target: Target, pane: String) -> Result<Subscription, String> {
-        let key = key(&target, &pane)?;
+        let key = target.key(&pane)?;
         let mut resources = self.resources.lock().unwrap();
         resources.retain(|_, resource| !resource.cancel.is_cancelled());
         if let Some(resource) = resources.get(&key) {

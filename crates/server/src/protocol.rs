@@ -214,8 +214,14 @@ impl RepairReply {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ViewerMessage {
     Ping,
-    NotificationPresence { device: String, focused: bool },
-    NotificationAck { device: String, event: Value },
+    NotificationPresence {
+        device: String,
+        focused: bool,
+    },
+    NotificationAck {
+        device: String,
+        event: crate::herdr_state::Event,
+    },
 }
 pub mod requests;
 
@@ -248,8 +254,10 @@ fn id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
 fn repair_text<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     bounded::<D, 2000, true>(d)
 }
+/// The longest terminal input or paste, in UTF-16 code units.
+pub const MAX_INPUT: usize = 65536;
 fn input_text<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    bounded::<D, 65536, false>(d)
+    bounded::<D, MAX_INPUT, false>(d)
 }
 fn safe<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     unsigned(&Value::deserialize(d)?)

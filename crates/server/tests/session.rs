@@ -170,13 +170,13 @@ async fn native_suggestions_refresh_paths_and_honor_cancellation() {
     let cancel = tokio_util::sync::CancellationToken::new();
     // A light directory repair must not poison the next full script catalog.
     let candidates = session.suggest("cd work space", &cancel).await.unwrap();
-    assert_eq!(candidates["candidates"][0]["command"], "cd Workspace");
+    assert_eq!(candidates.candidates[0].command, "cd Workspace");
     let python = session
         .suggest("Python three hello world dot py myarg food", &cancel)
         .await
         .unwrap();
     assert_eq!(
-        python["candidates"][0]["command"],
+        python.candidates[0].command,
         "python3 hello_world.py --myarg food"
     );
     cancel.cancel();
@@ -518,7 +518,7 @@ async fn pty_contract_child() {
             .unwrap()
         {
             Some(Transport::Close(4001, _)) => break,
-            Some(Transport::Server(_) | Transport::Message(_)) => {}
+            Some(Transport::Server(_) | Transport::Metadata(_)) => {}
             other => panic!(
                 "Expected the previous attachment to close: {}",
                 other.is_some()

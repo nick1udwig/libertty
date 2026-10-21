@@ -54,7 +54,7 @@ struct WireSnapshot {
     version: Option<Value>,
     protocol: Option<Value>,
 }
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "HerdrStatus"))]
 #[serde(rename_all = "lowercase")]
 pub enum Status {

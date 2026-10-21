@@ -88,18 +88,14 @@ impl Input<'_> {
                 match message {
                     ViewerMessage::Ping => return Ok(true),
                     ViewerMessage::NotificationPresence { device, focused } => {
-                        let _ =
-                            app.notifications
-                                .presence(connection, owner, &json!(device), focused);
+                        let _ = app
+                            .notifications
+                            .presence(connection, owner, &device, focused);
                     }
                     ViewerMessage::NotificationAck { device, event } => {
-                        let _ = app.notifications.acknowledge(
-                            owner,
-                            &json!(device),
-                            source,
-                            target,
-                            &event,
-                        );
+                        let _ = app
+                            .notifications
+                            .acknowledge(owner, &device, source, target, &event);
                     }
                 }
             }
@@ -123,7 +119,7 @@ impl Input<'_> {
         if matches!(self, Self::Metadata { .. }) {
             return Ok(false);
         }
-        match wire::decode_as::<ClientMessage>(bytes).map_err(|_| "Invalid wire message")? {
+        match wire::decode(bytes).map_err(|_| "Invalid wire message")? {
             wire::Incoming::Audio(audio) => {
                 self.audio(audio);
                 Ok(false)
@@ -220,7 +216,7 @@ async fn close(sender: &mut Sender, code: u16, reason: &str, deadline: Option<Du
 fn encode(message: &Transport, mode: wire::Mode) -> Message {
     let encoded = match message {
         Transport::Server(message) => wire::encode_server(message, mode),
-        Transport::Message(value) => wire::encode(value, mode),
+        Transport::Metadata(message) => wire::encode_json(message, mode),
         Transport::Close(..) => unreachable!("close frames are sent separately"),
     };
     if encoded.binary {

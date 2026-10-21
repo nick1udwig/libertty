@@ -67,17 +67,21 @@ impl Pressure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::protocol::ServerMessage;
     #[test]
     fn queue_pressure_compresses_bulk_without_changing_negotiated_compatibility() {
         let mut pressure = Pressure::default();
         let now = Instant::now();
-        let message = json!({"type":"output","seq":1,"data":"log line\r\n".repeat(700)});
+        let data = "log line\r\n".repeat(700);
+        let message = ServerMessage::Output {
+            seq: 1,
+            data: data.as_str().into(),
+        };
         let fast = pressure.mode(wire::Mode::GzipFast, false, now);
-        assert_eq!(wire::encode(&message, fast).bytes[3] & 128, 0);
+        assert_eq!(wire::encode_server(&message, fast).bytes[3] & 128, 0);
         let slow = pressure.mode(wire::Mode::GzipFast, true, now);
         assert_eq!(slow, wire::Mode::Gzip);
-        let encoded = wire::encode(&message, slow);
+        let encoded = wire::encode_server(&message, slow);
         assert_ne!(encoded.bytes[3] & 128, 0);
         use std::io::Read;
         let mut decoded = Vec::new();
@@ -85,7 +89,7 @@ mod tests {
             .read_to_end(&mut decoded)
             .unwrap();
         assert_eq!(f64::from_le_bytes(decoded[..8].try_into().unwrap()), 1.0);
-        assert_eq!(&decoded[8..], message["data"].as_str().unwrap().as_bytes());
+        assert_eq!(&decoded[8..], data.as_bytes());
         for mode in [wire::Mode::Json, wire::Mode::Binary, wire::Mode::Gzip] {
             assert_eq!(pressure.mode(mode, true, now), mode);
         }

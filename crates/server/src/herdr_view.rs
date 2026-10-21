@@ -1212,7 +1212,11 @@ impl crate::input_coordinator::RepairTarget for View {
         inner.input.replace_repair(reply.id.clone(), cancel);
         true
     }
-    async fn suggest(&self, text: &str, cancel: &CancellationToken) -> Result<Value, String> {
+    async fn suggest(
+        &self,
+        text: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<libertty_engine::types::Candidate>, String> {
         self.target
             .suggest(&self.agent.terminal_id, text, self.services.clone(), cancel)
             .await

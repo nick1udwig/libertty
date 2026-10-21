@@ -23,7 +23,10 @@ use crate::{
 };
 use handoffs::{Handoffs, Kind as CaptureKind};
 use history_cache::History;
-use libertty_engine::{Request, path, types::Catalog};
+use libertty_engine::{
+    Request, path,
+    types::{Candidate, Catalog},
+};
 use output::Replay;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -39,6 +42,12 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 pub(crate) const RC: &str = include_str!("../assets/bashrc.sh");
+#[derive(Serialize)]
+pub struct Suggestions {
+    pub candidates: Vec<Candidate>,
+    pub source: &'static str,
+    pub cwd: String,
+}
 #[derive(Clone, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[serde(rename_all = "camelCase")]
@@ -62,7 +71,7 @@ pub struct ShellState {
 pub enum Transport {
     /// Typed messages keep terminal output and Herdr frames out of JSON until a JSON client needs them.
     Server(ServerMessage),
-    Message(Value),
+    Metadata(crate::herdr::Metadata),
     Close(u16, String),
 }
 impl Transport {
@@ -70,7 +79,7 @@ impl Transport {
     pub fn value(&self) -> Option<Value> {
         match self {
             Self::Server(message) => Some(message.value()),
-            Self::Message(value) => Some(value.clone()),
+            Self::Metadata(message) => Some(message.value()),
             Self::Close(..) => None,
         }
     }
@@ -91,7 +100,7 @@ impl Transport {
                 ServerMessage::Screen { text, .. } | ServerMessage::ScreenDelta { text, .. },
             ) => text.len() + 64,
             Self::Server(message) => crate::wire::json_len(message),
-            Self::Message(value) => crate::wire::json_len(value),
+            Self::Metadata(message) => crate::wire::json_len(message),
             Self::Close(_, reason) => reason.len() + 2,
         }
     }
@@ -1231,7 +1240,11 @@ impl Session {
         });
         true
     }
-    pub async fn suggest(&self, text: &str, cancel: &CancellationToken) -> Result<Value, String> {
+    pub async fn suggest(
+        &self,
+        text: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Suggestions, String> {
         let (catalog, env, prompt) = self.snapshot(false).await?;
         let key = facts::context_key(prompt, &catalog, &env);
         let mut host = NativeHost::new(
@@ -1258,9 +1271,11 @@ impl Session {
         {
             return Err("Shell context changed. Try again.".into());
         }
-        Ok(
-            json!({"candidates":candidates,"source":"Commands, paths, history & syntax checks","cwd":catalog.cwd}),
-        )
+        Ok(Suggestions {
+            candidates,
+            source: "Commands, paths, history & syntax checks",
+            cwd: catalog.cwd,
+        })
     }
     async fn internal_line(&self, prompt: u64, revision: u64, attachment: u64) -> Option<String> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
@@ -1500,8 +1515,14 @@ impl crate::input_coordinator::RepairTarget for Session {
         inner.input.replace_repair(reply.id.clone(), cancel);
         true
     }
-    async fn suggest(&self, text: &str, cancel: &CancellationToken) -> Result<Value, String> {
-        Session::suggest(self, text, cancel).await
+    async fn suggest(
+        &self,
+        text: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<Candidate>, String> {
+        Session::suggest(self, text, cancel)
+            .await
+            .map(|suggestions| suggestions.candidates)
     }
     async fn complete_repair(
         &self,

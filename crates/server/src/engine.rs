@@ -2,6 +2,7 @@ use crate::{host::NativeHost, probes::ABORTED};
 use libertty_engine::{
     Request,
     runtime::{Call, Reply, Runtime, Step},
+    types::Candidate,
 };
 use serde_json::Value;
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
@@ -188,17 +189,19 @@ impl NativeEngine {
         input: &str,
         host: &NativeHost,
         cancel: &CancellationToken,
-    ) -> Result<Value, String> {
-        self.run(
-            Call::Suggest {
-                input: input.into(),
-                catalog: Arc::new(host.catalog.clone()),
-                environment: host.environment.clone(),
-            },
-            host,
-            cancel,
-        )
-        .await
+    ) -> Result<Vec<Candidate>, String> {
+        let value = self
+            .run(
+                Call::Suggest {
+                    input: input.into(),
+                    catalog: Arc::new(host.catalog.clone()),
+                    environment: host.environment.clone(),
+                },
+                host,
+                cancel,
+            )
+            .await?;
+        serde_json::from_value(value).map_err(|error| error.to_string())
     }
     async fn run(
         &self,

@@ -92,7 +92,7 @@ pub struct Prepared {
     pub selected: String,
     pub candidates: Vec<Candidate>,
 }
-pub async fn prepare<F: Future<Output = Result<Value, String>>>(
+pub async fn prepare<F: Future<Output = Result<Vec<Candidate>, String>>>(
     text: &str,
     intent: &Intent,
     mut suggest: impl FnMut(String) -> F,
@@ -110,9 +110,7 @@ pub async fn prepare<F: Future<Output = Result<Value, String>>>(
     {
         return Err("Expected command text under 2,000 characters.".into());
     }
-    let result = suggest(query).await?;
-    let mut candidates: Vec<Candidate> = serde::Deserialize::deserialize(&result["candidates"])
-        .map_err(|error| error.to_string())?;
+    let mut candidates = suggest(query).await?;
     candidates.retain(|candidate| !candidate.is_literal());
     let mut fallback = false;
     if let Intent::ReadingFile { operand, .. } = intent {
@@ -121,9 +119,7 @@ pub async fn prepare<F: Future<Output = Result<Value, String>>>(
                 .is_some_and(|words| words.len() == 2 && words[0].value == "cat")
         });
         if candidates.is_empty() {
-            let result = suggest(operand.clone()).await?;
-            candidates = serde::Deserialize::deserialize(&result["candidates"])
-                .map_err(|error| error.to_string())?;
+            candidates = suggest(operand.clone()).await?;
             candidates.retain(|candidate| !candidate.is_literal());
             fallback = true;
         }
@@ -178,9 +174,20 @@ mod tests {
         let result = ready(prepare("look at get diff", &intent, |query| {
             queries.push(query.clone());
             async move {
-                Ok(json!({"candidates":if query.starts_with("cat ") { vec![Candidate::literal(&query)] } else { vec![Candidate { command: "git diff".into(), score: 100.0, changes: vec![], literal: None, evidence: Default::default() }] }}))
+                Ok(if query.starts_with("cat ") {
+                    vec![Candidate::literal(&query)]
+                } else {
+                    vec![Candidate {
+                        command: "git diff".into(),
+                        score: 100.0,
+                        changes: vec![],
+                        literal: None,
+                        evidence: Default::default(),
+                    }]
+                })
             }
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(queries, ["cat get diff", "get diff"]);
         assert_eq!(result.selected, "look at git diff");
         assert_eq!(result.original, "look at get diff");

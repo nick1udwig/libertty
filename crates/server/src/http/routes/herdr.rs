@@ -16,14 +16,7 @@ pub(super) async fn api_herdr_connect(
         .map(|t| t.session.clone())
         .filter(|s| s.files_only)
         .ok_or_else(|| fail("Open a dedicated connection before connecting Herdr."))?;
-    let session_name = herdr::session(
-        input
-            .session
-            .as_ref()
-            .map(|session| json!(session))
-            .as_ref(),
-    )
-    .map_err(fail)?;
+    let session_name = herdr::session(input.session.as_deref()).map_err(fail)?;
     let target = herdr::Target::from_source(&source, &session_name)
         .await
         .map_err(fail)?;
@@ -137,13 +130,7 @@ pub(super) async fn api_herdr_notifications(
     let source = ctx.source.as_str();
     let input: crate::protocol::requests::Watch = typed_body(&mut req, 16384).await?;
     app.notifications
-        .add_view(
-            owner,
-            &json!(input.device),
-            &json!(input.tab_id),
-            source,
-            &target,
-        )
+        .add_view(owner, &input.device, &input.tab_id, source, &target)
         .map_err(fail)?;
     ok(json!({"ok":true}))
 }

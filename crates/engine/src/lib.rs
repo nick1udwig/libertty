@@ -200,7 +200,6 @@ pub async fn dispatch_with_discovery(
                     let stage = std::cell::RefCell::new(None);
                     suggestions::suggest(&query, catalog, environment, discovery, host, &stage)
                         .await
-                        .map(|candidates| json!({ "candidates": candidates }))
                 })
                 .await?,
             )

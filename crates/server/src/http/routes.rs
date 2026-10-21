@@ -133,7 +133,7 @@ impl FromRequestParts<Arc<App>> for HerdrContext {
     async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
         let OwnerContext { owner, query, .. } =
             OwnerContext::from_request_parts(parts, app).await?;
-        let session_name = herdr::session(query.get("herdrSession").map(|s| json!(s)).as_ref())
+        let session_name = herdr::session(query.get("herdrSession").map(String::as_str))
             .map_err(|error| ApiError(fail(error)))?;
         let source = query
             .get("herdrSource")

@@ -924,8 +924,8 @@ async fn herdr_websocket(
     query: &HashMap<String, String>,
 ) -> Result<Response<Body>, Failure> {
     let denied = || (StatusCode::FORBIDDEN, "Forbidden".into());
-    let session_name = herdr::session(query.get("herdrSession").map(|s| json!(s)).as_ref())
-        .map_err(|_| denied())?;
+    let session_name =
+        herdr::session(query.get("herdrSession").map(String::as_str)).map_err(|_| denied())?;
     let ticket = query
         .get("ticket")
         .and_then(|s| app.herdr_tickets.lock().unwrap().remove(s))
@@ -1015,7 +1015,7 @@ async fn herdr_socket_session(
                     message = receive.recv() => message,
                 };
                 let Some(message) = message else { break };
-                if !send.send(Transport::Message(message.value())) {
+                if !send.send(Transport::Metadata(message)) {
                     break;
                 }
             }

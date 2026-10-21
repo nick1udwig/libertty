@@ -18,7 +18,7 @@ pub(super) async fn api_notifications_unsubscribe(
     let owner = ctx.owner;
     let input: crate::protocol::requests::Device = typed_body(&mut req, 16384).await?;
     app.notifications
-        .unsubscribe(&owner, &json!(input.device))
+        .unsubscribe(&owner, &input.device)
         .map_err(fail)?;
     ok(json!({"ok":true}))
 }
@@ -31,7 +31,7 @@ pub(super) async fn api_notifications_unwatch(
     let owner = ctx.owner;
     let input: crate::protocol::requests::Watch = typed_body(&mut req, 16384).await?;
     app.notifications
-        .remove_view(&owner, &json!(input.device), &json!(input.tab_id))
+        .remove_view(&owner, &input.device, &input.tab_id)
         .map_err(fail)?;
     ok(json!({"ok":true}))
 }
