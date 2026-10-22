@@ -78,19 +78,19 @@ mod tests {
             data: data.as_str().into(),
         };
         let fast = pressure.mode(wire::Mode::GzipFast, false, now);
-        assert_eq!(wire::encode_server(&message, fast).bytes[3] & 128, 0);
+        assert_eq!(wire::encode_server(&message, fast)[3] & 128, 0);
         let slow = pressure.mode(wire::Mode::GzipFast, true, now);
         assert_eq!(slow, wire::Mode::Gzip);
         let encoded = wire::encode_server(&message, slow);
-        assert_ne!(encoded.bytes[3] & 128, 0);
+        assert_ne!(encoded[3] & 128, 0);
         use std::io::Read;
         let mut decoded = Vec::new();
-        flate2::read::GzDecoder::new(&encoded.bytes[4..])
+        flate2::read::GzDecoder::new(&encoded[4..])
             .read_to_end(&mut decoded)
             .unwrap();
         assert_eq!(f64::from_le_bytes(decoded[..8].try_into().unwrap()), 1.0);
         assert_eq!(&decoded[8..], data.as_bytes());
-        for mode in [wire::Mode::Json, wire::Mode::Binary, wire::Mode::Gzip] {
+        for mode in [wire::Mode::Binary, wire::Mode::Gzip] {
             assert_eq!(pressure.mode(mode, true, now), mode);
         }
         assert_eq!(

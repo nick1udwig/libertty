@@ -10,10 +10,8 @@ pub const GZIP_FAST: &str = "libertty.gzip-fast.v1";
 pub const MAX_DECODED: usize = 2 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
-    Json,
     Binary,
     Gzip,
-    JsonGzip,
     GzipFast,
 }
 impl Mode {
@@ -25,10 +23,6 @@ impl Mode {
             _ => Self::Binary,
         }
     }
-}
-pub struct Encoded {
-    pub binary: bool,
-    pub bytes: Vec<u8>,
 }
 pub fn gzip(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
@@ -52,16 +46,16 @@ pub fn json_len<T: serde::Serialize + ?Sized>(value: &T) -> usize {
     count.0
 }
 /// Typed messages place terminal text and raw frame bytes directly in their envelope.
-pub fn encode_server(message: &crate::protocol::ServerMessage, mode: Mode) -> Encoded {
+pub fn encode_server(message: &crate::protocol::ServerMessage, mode: Mode) -> Vec<u8> {
     use crate::protocol::ServerMessage;
     let mut bytes = vec![b'T', b'M', 1, 0];
     match message {
-        ServerMessage::Output { seq, data } if !matches!(mode, Mode::Json | Mode::JsonGzip) => {
+        ServerMessage::Output { seq, data } => {
             bytes[3] = 1;
             bytes.extend_from_slice(&(*seq as f64).to_le_bytes());
             bytes.extend_from_slice(data.as_bytes());
         }
-        ServerMessage::HerdrFrame(frame) if !matches!(mode, Mode::Json | Mode::JsonGzip) => {
+        ServerMessage::HerdrFrame(frame) => {
             bytes[3] = 7;
             bytes.extend_from_slice(&(frame.seq.expect("acknowledged frame") as f64).to_le_bytes());
             bytes.extend_from_slice(&frame.width.to_le_bytes());
@@ -73,19 +67,13 @@ pub fn encode_server(message: &crate::protocol::ServerMessage, mode: Mode) -> En
     }
     compress(bytes, mode)
 }
-/// Any other message travels as JSON, inside a compressible envelope unless the client negotiated plain JSON.
-pub fn encode_json<T: serde::Serialize + ?Sized>(message: &T, mode: Mode) -> Encoded {
-    if mode == Mode::Json {
-        return Encoded {
-            binary: false,
-            bytes: serde_json::to_vec(message).expect("wire message"),
-        };
-    }
+/// Any other message travels as JSON inside a compressible envelope.
+pub fn encode_json<T: serde::Serialize + ?Sized>(message: &T, mode: Mode) -> Vec<u8> {
     let mut bytes = vec![b'T', b'M', 1, 0];
     serde_json::to_writer(&mut bytes, message).expect("wire message");
     compress(bytes, mode)
 }
-fn compress(mut bytes: Vec<u8>, mode: Mode) -> Encoded {
+fn compress(mut bytes: Vec<u8>, mode: Mode) -> Vec<u8> {
     // Compress only negotiated bulk traffic; individual messages have no shared
     // dictionary, and incompressible payloads retain the simpler representation.
     let threshold = if mode == Mode::GzipFast {
@@ -93,7 +81,7 @@ fn compress(mut bytes: Vec<u8>, mode: Mode) -> Encoded {
     } else {
         2048
     };
-    if matches!(mode, Mode::Gzip | Mode::JsonGzip | Mode::GzipFast)
+    if mode != Mode::Binary
         && bytes.len() >= threshold
         && let Some(compressed) = gzip(&bytes[4..])
         && compressed.len() + 4 < bytes.len() * 7 / 8
@@ -102,10 +90,7 @@ fn compress(mut bytes: Vec<u8>, mode: Mode) -> Encoded {
         bytes[3] |= 128;
         bytes.extend_from_slice(&compressed);
     }
-    Encoded {
-        binary: true,
-        bytes,
-    }
+    bytes
 }
 pub enum Incoming {
     Message(ClientMessage),
@@ -164,12 +149,12 @@ mod tests {
     use crate::protocol::{HerdrFrame, ServerMessage};
     use serde_json::Value;
     use std::io::Read;
-    fn payload(wire: &Encoded) -> Vec<u8> {
-        if wire.bytes[3] & 128 == 0 {
-            return wire.bytes[4..].to_vec();
+    fn payload(wire: &[u8]) -> Vec<u8> {
+        if wire[3] & 128 == 0 {
+            return wire[4..].to_vec();
         }
         let mut payload = vec![];
-        flate2::read::GzDecoder::new(&wire.bytes[4..])
+        flate2::read::GzDecoder::new(&wire[4..])
             .read_to_end(&mut payload)
             .unwrap();
         payload
@@ -181,17 +166,10 @@ mod tests {
             seq: 9_007_199_254_740_991,
             data: data.as_str().into(),
         };
-        for mode in [Mode::Json, Mode::Binary, Mode::Gzip, Mode::JsonGzip] {
+        for mode in [Mode::Binary, Mode::Gzip] {
             let wire = encode_server(&output, mode);
-            if mode == Mode::Json {
-                assert_eq!(
-                    serde_json::from_slice::<Value>(&wire.bytes).unwrap(),
-                    output.value()
-                );
-                continue;
-            }
             let payload = payload(&wire);
-            if wire.bytes[3] & 127 == 0 {
+            if wire[3] & 127 == 0 {
                 assert_eq!(
                     serde_json::from_slice::<Value>(&payload).unwrap(),
                     output.value()
@@ -212,7 +190,7 @@ mod tests {
             bytes: [0, 27, 128, 255].into(),
         });
         assert_eq!(
-            encode_server(&frame, Mode::Binary).bytes,
+            encode_server(&frame, Mode::Binary),
             [
                 b'T', b'M', 1, 7, 0, 0, 0, 0, 0, 0, 240, 63, 40, 0, 30, 0, 1, 0, 27, 128, 255
             ]
@@ -224,24 +202,23 @@ mod tests {
             seq: 42,
             data: "\u{1b}[32mhello 世界\r\n".repeat(20000).into(),
         };
-        let frame = ServerMessage::HerdrFrame(HerdrFrame {
-            seq: Some(7),
-            width: 40,
-            height: 30,
-            full: false,
-            bytes: [0, 27, 128, 255].repeat(50000).into(),
-        });
-        for message in [output, frame, ServerMessage::Pong] {
+        assert_eq!(json_len(&output.value()), output.value().to_string().len());
+        for message in [
+            ServerMessage::Pong,
+            ServerMessage::ReadingError {
+                message: "日本語 ".repeat(1000),
+            },
+        ] {
             let value = message.value();
             assert_eq!(json_len(&value), value.to_string().len());
-            let envelope = encode_server(&message, Mode::JsonGzip);
-            assert_eq!(
-                serde_json::from_slice::<Value>(&payload(&envelope)).unwrap(),
-                value
-            );
-            let json = encode_server(&message, Mode::Json);
-            assert!(!json.binary);
-            assert_eq!(serde_json::from_slice::<Value>(&json.bytes).unwrap(), value);
+            for mode in [Mode::Binary, Mode::Gzip] {
+                let envelope = encode_server(&message, mode);
+                assert_eq!(envelope[3] & 127, 0);
+                assert_eq!(
+                    serde_json::from_slice::<Value>(&payload(&envelope)).unwrap(),
+                    value
+                );
+            }
         }
     }
     #[test]
@@ -254,12 +231,9 @@ mod tests {
             bytes: [27, 0, 255].into(),
         });
         let encoded = encode_server(&frame, Mode::Binary);
-        assert_eq!(encoded.bytes[3], 7);
-        assert_eq!(
-            f64::from_le_bytes(encoded.bytes[4..12].try_into().unwrap()),
-            42.0
-        );
-        assert_eq!(&encoded.bytes[12..], &[40, 0, 30, 0, 0, 27, 0, 255]);
+        assert_eq!(encoded[3], 7);
+        assert_eq!(f64::from_le_bytes(encoded[4..12].try_into().unwrap()), 42.0);
+        assert_eq!(&encoded[12..], &[40, 0, 30, 0, 0, 27, 0, 255]);
     }
     #[test]
     fn compact_inputs_keep_audio_separate_and_reject_invalid_messages() {

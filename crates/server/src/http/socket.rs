@@ -214,16 +214,14 @@ async fn close(sender: &mut Sender, code: u16, reason: &str, deadline: Option<Du
     .await;
 }
 fn encode(message: &Transport, mode: wire::Mode) -> Message {
-    let encoded = match message {
-        Transport::Server(message) => wire::encode_server(message, mode),
-        Transport::Metadata(message) => wire::encode_json(message, mode),
-        Transport::Close(..) => unreachable!("close frames are sent separately"),
-    };
-    if encoded.binary {
-        Message::Binary(encoded.bytes.into())
-    } else {
-        Message::Text(String::from_utf8(encoded.bytes).expect("wire UTF-8").into())
-    }
+    Message::Binary(
+        match message {
+            Transport::Server(message) => wire::encode_server(message, mode),
+            Transport::Metadata(message) => wire::encode_json(message, mode),
+            Transport::Close(..) => unreachable!("close frames are sent separately"),
+        }
+        .into(),
+    )
 }
 
 pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output, policy: Policy) {

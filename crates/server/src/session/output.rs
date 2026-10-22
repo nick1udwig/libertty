@@ -310,7 +310,7 @@ mod tests {
             crate::wire::Mode::Gzip,
         );
         assert_ne!(
-            encoded.bytes[3] & 128,
+            encoded[3] & 128,
             0,
             "Small replay chunks should share one compressible message"
         );

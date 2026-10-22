@@ -13,7 +13,7 @@ Run commands from the repository root and select validation from the actual chan
 The browser frontend is TypeScript in `src/`, the native backend is Rust in `crates/server/`, and the shared native engine is Rust in `crates/engine/`.
 Browser wire types are generated from the Rust types into `src/generated/protocol.ts`; run `npm run bindings` after changing them.
 Asset checksums and the engine vocabulary live in `contracts/`, and `scripts/engine-vocabulary.mjs` maintains the canonical command and speech vocabulary.
-Read [docs/client-architecture.md](../../../docs/client-architecture.md) for frontend changes, [docs/shared-engine.md](../../../docs/shared-engine.md) for engine changes, and [docs/workspace.md](../../../docs/workspace.md) for workspace changes.
+Read [docs/shared-engine.md](../../../docs/shared-engine.md) for engine changes and [docs/workspace.md](../../../docs/workspace.md) for frontend and workspace changes.
 Use [docs/ci.md](../../../docs/ci.md) for harness details and historical benchmark references.
 Use [the ops skill](../libertty-ops/SKILL.md) for deployment, version bumps, and release procedures.
 

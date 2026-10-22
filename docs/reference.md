@@ -204,7 +204,6 @@ Bash completions and optional Voxtype Mobile dictation are described in the [usa
 Directory repair now tries complete exact paths first, filters regular files before fuzzy ranking, and reuses prepared directory-name indexes.
 Host listings have bounded caches with metadata checks and filesystem-watch invalidation.
 Directory requests skip unrelated general path collection, and independent branches and validation checks run concurrently.
-See [the optimization report](directory-optimizations.md) for limits, tests and measurements.
 
 ## Sessions and reconnects
 

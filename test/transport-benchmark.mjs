@@ -14,7 +14,7 @@ const peer = spawn(new URL('../target/release/examples/wire', import.meta.url).p
 const replies = [], lines = createInterface({ input: peer.stdout });
 lines.on('line', line => replies.shift()?.(JSON.parse(line)));
 const encode = (value, mode) => new Promise(resolve => { replies.push(resolve); peer.stdin.write(JSON.stringify({ value, mode }) + '\n'); });
-const variants = process.env.WIRE_VARIANTS?.split(',') || ['json', 'pmd-json', 'json-gzip', 'binary', 'gzip', 'gzip-fast'];
+const variants = process.env.WIRE_VARIANTS?.split(',') || ['json', 'pmd-json', 'binary', 'gzip', 'gzip-fast'];
 const profiles = [{ name: 'fast', rtt: 2, mbps: 100, cpu: 1 }, { name: 'mobile', rtt: 150, mbps: 1, cpu: 6 }, LOSSY_PROFILE].filter(p => !process.env.WIRE_PROFILES || process.env.WIRE_PROFILES.split(',').includes(p.name));
 const samples = Number(process.env.WIRE_SAMPLES || 15);
 const payloads = {

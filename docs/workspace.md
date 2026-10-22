@@ -1,7 +1,6 @@
 # Terminal workspace
 
-The `feature/hosts-tabs-ssh` branch adds a terminal-first workspace, saved direct and SSH hosts, backend selection, and a browser keychain with optional backend backups.
-It builds on the single repair library at `2a99127`; master and the former experiment branch are unchanged.
+The workspace is terminal-first, with saved direct and SSH hosts, backend selection, and a browser keychain with optional backend backups.
 
 ## Runtime boundaries
 

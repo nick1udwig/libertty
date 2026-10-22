@@ -27,22 +27,23 @@ fn main() {
     let mut output = io::stdout().lock();
     for line in io::stdin().lock().lines() {
         let request: Value = serde_json::from_str(&line.unwrap()).unwrap();
+        // Plain JSON text is the uncompressed baseline that the negotiated encodings are measured against.
         let mode = match request["mode"].as_str().unwrap() {
-            "json" => Mode::Json,
-            "binary" => Mode::Binary,
-            "gzip" => Mode::Gzip,
-            "gzip-fast" => Mode::GzipFast,
-            "json-gzip" => Mode::JsonGzip,
+            "json" => None,
+            "binary" => Some(Mode::Binary),
+            "gzip" => Some(Mode::Gzip),
+            "gzip-fast" => Some(Mode::GzipFast),
             _ => panic!("mode"),
         };
         let typed = message(&request["value"]);
         let start = std::time::Instant::now();
-        let encoded = match &typed {
-            Some(message) => wire::encode_server(message, mode),
-            None => wire::encode_json(&request["value"], mode),
+        let encoded = match (&typed, mode) {
+            (_, None) => serde_json::to_vec(&request["value"]).unwrap(),
+            (Some(message), Some(mode)) => wire::encode_server(message, mode),
+            (None, Some(mode)) => wire::encode_json(&request["value"], mode),
         };
         let elapsed = start.elapsed().as_secs_f64() * 1000.0;
-        writeln!(output,"{}",json!({"binary":encoded.binary,"bytes":STANDARD.encode(&encoded.bytes),"length":encoded.bytes.len(),"encodeMs":elapsed})).unwrap();
+        writeln!(output,"{}",json!({"binary":mode.is_some(),"bytes":STANDARD.encode(&encoded),"length":encoded.len(),"encodeMs":elapsed})).unwrap();
         output.flush().unwrap();
     }
 }
