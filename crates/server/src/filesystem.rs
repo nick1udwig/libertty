@@ -6,7 +6,7 @@ use russh_sftp::{
     client::error::Error as SftpError,
     protocol::{FileAttributes, OpenFlags, Packet, StatusCode},
 };
-use std::{os::unix::fs::MetadataExt, sync::Arc, time::Duration};
+use std::{ffi::CString, os::unix::fs::MetadataExt, sync::Arc, time::Duration};
 use tokio::{
     fs,
     io::{AsyncRead, AsyncSeekExt, AsyncWrite},
@@ -99,6 +99,25 @@ impl Drop for DirectoryGuard {
                 let _ = host.raw.close(handle).await;
             });
         }
+    }
+}
+fn rename_exclusive(from: CString, to: CString) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    let result = unsafe {
+        libc::renameat2(
+            libc::AT_FDCWD,
+            from.as_ptr(),
+            libc::AT_FDCWD,
+            to.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    #[cfg(target_os = "macos")]
+    let result = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
 }
 impl FileSystem {
@@ -310,8 +329,14 @@ impl FileSystem {
             } else {
                 call(host.files.rename(from, to)).await?;
             }
-        } else {
+        } else if overwrite {
             fs::rename(from, to).await?;
+        } else {
+            let from = CString::new(from).map_err(|_| Error::new("Invalid file path.", 400))?;
+            let to = CString::new(to).map_err(|_| Error::new("Invalid file path.", 400))?;
+            tokio::task::spawn_blocking(move || rename_exclusive(from, to))
+                .await
+                .map_err(|error| Error::new(error.to_string(), 400))??;
         }
         Ok(())
     }
