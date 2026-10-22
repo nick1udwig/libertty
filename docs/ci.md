@@ -32,7 +32,8 @@ npm run verify:local
 [scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native Clippy, Rust tests, the complete build, JavaScript and contract tests, installer fixtures and browser checks in sequence.
 [scripts/check-browser.mjs](../scripts/check-browser.mjs) contains the single explicit browser list used by both local validation and the Linux release checking job.
 It covers native repairs, SSH, reading, Herdr, plugins, pairing, reconnects, gestures, touch, dictation, files and workspace behavior.
-It also downloads and verifies the pinned Herdr release before running dictation, spaces, resize, flash and fullscreen scrolling against the real native integration.
+It first downloads and verifies the pinned Herdr release, which the dictation, spaces, resize, flash and fullscreen scrolling harnesses use as the real native integration.
+It runs three harnesses at a time and reports every failure at the end; set `BROWSER_JOBS` to change the number.
 Every existing application harness remains available through its original npm command or `node test/<harness>.mjs`.
 Use `npm run format:workspace` to format the workspace entry point and modules with the configured 100-column width, or `npm run check:workspace-format` to check them without editing.
 `npm run verify:package -- release/libertty-vVERSION-PLATFORM.tar.gz` retains packaged browser coverage locally by running both smoke checks and the browser suite against the extracted archive.
