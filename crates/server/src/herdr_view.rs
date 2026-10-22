@@ -11,10 +11,7 @@ use crate::{
 pub use input::{Ledger, Ledgers};
 use libertty_engine::utf16_len;
 use serde_json::{Value, json};
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{Semaphore, mpsc};
 use tokio_util::sync::CancellationToken;
 
@@ -86,7 +83,7 @@ pub struct View {
     pending_input: mpsc::Sender<Input>,
     send: crate::viewer_queue::Sender,
     terminal: Subscription,
-    history: crate::herdr_history::Hub,
+    polls: crate::herdr_poll::Polls,
     active: tokio::sync::watch::Sender<bool>,
     geometry: Mutex<Geometry>,
     /// Advances with every layout change, so stale confirmations stop.
@@ -99,9 +96,6 @@ pub struct View {
     recording_scope: Mutex<String>,
     /// The layout epoch at which the pane last proved it still hosts this terminal.
     validated: Mutex<Option<u64>>,
-    /// Frames signal possible foreground changes; without a live stream the shell is polled.
-    output: tokio::sync::Notify,
-    streaming: AtomicBool,
     /// The browser terminal's delivered keys, and this connection's claim on delivering more.
     ledger: Option<(Arc<Ledger>, u64)>,
 }
@@ -110,7 +104,7 @@ impl View {
         target: Target,
         agent: crate::herdr::Terminal,
         hub: &Hub,
-        history: &crate::herdr_history::Hub,
+        polls: &crate::herdr_poll::Polls,
         initial: Option<(Size, Option<u64>)>,
         viewer: Viewer,
     ) -> Result<Arc<Self>, String> {
@@ -128,7 +122,9 @@ impl View {
             frames,
             initial_size,
         )?;
-        let subscription = history.subscribe(target.clone(), agent.pane_id.clone())?;
+        let subscription = polls
+            .history
+            .subscribe(target.clone(), agent.pane_id.clone())?;
         let (active, _) = tokio::sync::watch::channel(true);
         let (layout, _) = tokio::sync::watch::channel(0);
         let (pending_input, mut inputs) = mpsc::channel::<Input>(128);
@@ -152,15 +148,13 @@ impl View {
             services: crate::host::HostServices::new(),
             recording_scope: Mutex::new(crate::storage::random_hex(16)),
             validated: Mutex::new(None),
-            output: tokio::sync::Notify::new(),
-            streaming: AtomicBool::new(false),
             ledger: ledger
                 .as_ref()
                 .map(|(ledger, _)| (ledger.clone(), generation)),
             pending_input,
             send,
             terminal,
-            history: history.clone(),
+            polls: polls.clone(),
             active,
             geometry: Mutex::new(Geometry {
                 size: initial_size,
@@ -189,49 +183,28 @@ impl View {
         let weak = Arc::downgrade(&view);
         let lifetime = view.cancel.clone();
         let mut active = view.active.subscribe();
+        // Only a shown viewer follows the pane's shared shell check.
         tokio::spawn(async move {
+            let mut inputs = None;
             loop {
-                let Some(view) = weak.upgrade() else { break };
-                let viewing = *active.borrow_and_update();
-                if !viewing {
-                    drop(view);
-                    tokio::select! { biased; _=lifetime.cancelled()=>break, changed=active.changed()=>if changed.is_err(){break;} }
-                    continue;
+                if !*active.borrow_and_update() {
+                    inputs = None;
+                } else if inputs.is_none() {
+                    let Some(view) = weak.upgrade() else { break };
+                    inputs = view
+                        .polls
+                        .inputs
+                        .subscribe(view.target.clone(), view.agent.pane_id.clone())
+                        .ok();
                 }
-                let started = tokio::time::Instant::now();
-                let (shell, context) = tokio::select! { biased; _=lifetime.cancelled()=>break, result=view.target.input_state(&view.agent.pane_id)=>result.unwrap_or_default() };
-                let changed = {
-                    let mut inner = view.inner.lock().unwrap();
-                    let moved = inner.shell != shell
-                        || inner
-                            .context
-                            .as_ref()
-                            .is_some_and(|before| before != &context);
-                    let changed = moved || inner.context.is_none();
-                    if changed {
-                        inner.shell = shell;
-                        inner.context = Some(context);
-                        if moved {
-                            inner.editable = None;
-                            inner.revision += 1;
-                            inner.prompt += 1;
-                            inner.prompt_revision = inner.revision;
-                        }
-                    }
-                    changed
-                };
-                if changed {
-                    view.send_state();
+                if let Some(Ok((shell, context))) = inputs
+                    .as_mut()
+                    .and_then(|inputs| inputs.receive.borrow_and_update().clone())
+                {
+                    let Some(view) = weak.upgrade() else { break };
+                    view.input_state(shell, context);
                 }
-                // Starting or finishing a program redraws the pane, so a quiet live stream needs only occasional checks.
-                let interval = std::time::Duration::from_millis(300);
-                let idle = if view.streaming.load(Ordering::Acquire) {
-                    std::time::Duration::from_secs(2)
-                } else {
-                    interval
-                };
-                tokio::select! { biased; _=lifetime.cancelled()=>break, _=view.output.notified()=>{}, _=tokio::time::sleep(idle)=>{} }
-                tokio::select! { biased; _=lifetime.cancelled()=>break, _=tokio::time::sleep_until(started + interval)=>{} }
+                tokio::select! { biased; _=lifetime.cancelled()=>break, changed=active.changed()=>if changed.is_err(){break;}, changed=async { match &mut inputs {Some(inputs)=>inputs.receive.changed().await, None=>std::future::pending().await} }=>if changed.is_err(){break;} }
             }
         });
         let weak = Arc::downgrade(&view);
@@ -311,9 +284,7 @@ impl View {
                 if let ServerMessage::HerdrFrame(frame) = &frame {
                     // An empty reset frame means the stream stopped, so history and shell checks resume polling.
                     let streaming = frame.width > 0;
-                    view.streaming.store(streaming, Ordering::Release);
-                    view.output.notify_one();
-                    view.history
+                    view.polls
                         .activity(&view.target, &view.agent.pane_id, streaming);
                 }
                 if let ServerMessage::HerdrFrame(frame) = &frame
@@ -360,6 +331,7 @@ impl View {
                 } else if history.is_none() {
                     let Some(view) = weak.upgrade() else { break };
                     history = view
+                        .polls
                         .history
                         .subscribe(view.target.clone(), view.agent.pane_id.clone())
                         .ok();
@@ -369,12 +341,10 @@ impl View {
                     if let Some(message) = message {
                         let Some(view) = weak.upgrade() else { break };
                         match message {
-                            Ok(message) => {
-                                if let ServerMessage::Screen { text, .. } = message.as_ref() {
-                                    let mut delivery = view.history_delta.lock().unwrap();
-                                    if let Some(message) = delivery.next(text.clone()) {
-                                        view.send(message);
-                                    }
+                            Ok(text) => {
+                                let mut delivery = view.history_delta.lock().unwrap();
+                                if let Some(message) = delivery.next(text) {
+                                    view.send(message);
                                 }
                             }
                             Err(message) => {
@@ -396,6 +366,32 @@ impl View {
             view.confirm_layout(size, revision, view.begin_layout());
         }
         Ok(view)
+    }
+    /// A new foreground process or shell starts a new input line.
+    fn input_state(&self, shell: Option<crate::herdr::ShellInput>, context: String) {
+        let changed = {
+            let mut inner = self.inner.lock().unwrap();
+            let moved = inner.shell != shell
+                || inner
+                    .context
+                    .as_ref()
+                    .is_some_and(|before| before != &context);
+            let changed = moved || inner.context.is_none();
+            if changed {
+                inner.shell = shell;
+                inner.context = Some(context);
+                if moved {
+                    inner.editable = None;
+                    inner.revision += 1;
+                    inner.prompt += 1;
+                    inner.prompt_revision = inner.revision;
+                }
+            }
+            changed
+        };
+        if changed {
+            self.send_state();
+        }
     }
     pub fn checkpoint(&self) {
         if let Some((ledger, _)) = &self.ledger {
@@ -840,6 +836,7 @@ impl View {
                 self.terminal.refresh();
                 // Subscribe briefly to refresh the shared active resource.
                 if let Ok(history) = self
+                    .polls
                     .history
                     .subscribe(self.target.clone(), self.agent.pane_id.clone())
                 {
