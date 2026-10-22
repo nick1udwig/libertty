@@ -12,6 +12,7 @@
 .file-search{margin:10px 12px 4px!important;width:calc(100% - 24px)!important}
 .file-status{margin:0;padding:8px 18px;color:var(--text-2);font-size:13px;flex:none;overflow-wrap:anywhere}.file-status:empty{display:none}.file-status.error{color:var(--danger)}
 .file-list{overflow:auto;min-height:0;flex:1;padding:4px 0 28px;overscroll-behavior:contain}
+.file-list-tail{height:1px}.file-row{content-visibility:auto;contain-intrinsic-size:auto 56px}
 .file-row{display:flex;align-items:center;gap:14px;width:100%;min-height:56px;padding:8px 16px;text-align:left;background:none;color:inherit;border:0;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y}
 .file-row:hover,.file-row:focus-visible{background:var(--surface)}.file-row:active{background:var(--raised)}
 .file-row[aria-pressed=true]{background:var(--accent-soft)}

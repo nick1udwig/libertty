@@ -181,6 +181,26 @@ try {
   await page.reload(); await view.getByRole('button', { name: 'Download device.txt', exact: true }).waitFor();
   await view.getByRole('button', { name: 'Search files', exact: true }).click(); await view.getByRole('searchbox').fill('device'); assert.equal(await view.locator('.file-row').count(), 2);
   await page.screenshot({ path: '/tmp/libertty-files-mobile.png' });
+  // Large directories render in batches, while searches can reach every entry.
+  const large = Array.from({ length: 10000 }, (_, i) => ({ name: `file-${String(i).padStart(4, '0')}.txt`, directory: false, symlink: false, size: i, modified: i, mode: 0o644 }));
+  await page.route('**/api/files/list?**', route => route.fulfill({ json: { path: fixture + '/local/docs', parent: fixture + '/local', entries: large, truncated: false } }));
+  await view.getByRole('searchbox').fill('');
+  await view.getByRole('button', { name: 'File options' }).click(); await view.getByRole('menuitem', { name: 'Refresh folder' }).click();
+  await view.getByRole('button', { name: 'Download file-0000.txt', exact: true }).waitFor();
+  assert.ok(await view.locator('.file-row').count() <= 201, 'Initial rendering is bounded');
+  await view.locator('.file-list').evaluate(list => { list.scrollTop = list.scrollHeight; });
+  await page.waitForFunction(() => document.querySelectorAll('.file-browser:not([hidden]) .file-row').length > 101);
+  assert.ok(await view.locator('.file-row').count() <= 301, 'Scrolling appends a bounded batch');
+  await view.getByRole('searchbox').fill('FILE-9999');
+  const last = view.getByRole('button', { name: 'Download file-9999.txt', exact: true });
+  await last.waitFor(); assert.equal(await view.locator('.file-row').count(), 2);
+  await last.evaluate(row => { window.__fileRow = row; });
+  await last.focus(); await page.keyboard.press('Shift+Space');
+  assert.equal(await last.getAttribute('aria-pressed'), 'true');
+  await view.getByRole('button', { name: 'Clear selection' }).click();
+  assert.equal(await last.evaluate(row => row === window.__fileRow), true, 'Selection preserves existing rows');
+  assert.equal(await last.getAttribute('aria-pressed'), 'false');
+  await page.unroute('**/api/files/list?**');
   // The same component uses bearer authentication against an independent backend.
   const secondOwner = (await (await request(second, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
   const secondSession = await (await request(second, 'api/sessions', secondOwner, { files: true })).json();
