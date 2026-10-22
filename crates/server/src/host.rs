@@ -1,6 +1,6 @@
 use crate::{
     catalog::CatalogHost,
-    completion::CompletionProvider,
+    completion::{CompletionProvider, completion_timeout},
     directories::Directories,
     help::HelpProvider,
     probes::{ABORTED, ProbePool},
@@ -8,7 +8,7 @@ use crate::{
 };
 use libertty_engine::types::Catalog;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
@@ -88,26 +88,18 @@ impl NativeHost {
         value: &libertty_engine::host::FactValue,
     ) {
         use libertty_engine::host::{FactValue, HostOperation};
-        if let HostOperation::Lookup { path } = operation {
-            let listing = match value {
-                FactValue::Lookup(value) => value.listing.clone(),
-                FactValue::Json(value) => serde_json::from_value::<
-                    libertty_engine::types::DirectoryLookup,
-                >(value.as_ref().clone())
-                .ok()
-                .and_then(|value| value.listing),
-                _ => None,
-            };
-            if let Some(listing) = listing {
-                self.remember_listing(
-                    std::path::Path::new(path)
-                        .parent()
-                        .and_then(|path| path.to_str())
-                        .unwrap_or("."),
-                    10000,
-                    &listing,
-                );
-            }
+        if let HostOperation::Lookup { path } = operation
+            && let FactValue::Lookup(value) = value
+            && let Some(listing) = &value.listing
+        {
+            self.remember_listing(
+                std::path::Path::new(path)
+                    .parent()
+                    .and_then(|path| path.to_str())
+                    .unwrap_or("."),
+                10000,
+                listing,
+            );
         }
     }
     pub async fn engine_operations(
@@ -221,14 +213,10 @@ impl NativeHost {
             self.remember_listing(path, *limit, &listing);
             return Ok(FactValue::Entries(listing.entries));
         }
-        if self.remote.is_some() {
-            let result = self
-                .fact(
-                    &serde_json::to_value(operation).map_err(|e| e.to_string())?,
-                    cancel,
-                )
-                .await
-                .map(Into::into)?;
+        if let Some(remote) = &self.remote {
+            let result = remote
+                .engine_operation(operation, &self.catalog, &self.environment, cancel)
+                .await?;
             self.remember_lookup(operation, &result);
             return Ok(result);
         }
@@ -283,32 +271,14 @@ impl NativeHost {
         self.remember_lookup(operation, &value);
         Ok(value)
     }
-    async fn complete(
-        &self,
-        operation: &Value,
-        cancel: &CancellationToken,
-    ) -> Result<Vec<String>, String> {
-        let words: Vec<String> = serde::Deserialize::deserialize(
-            operation.get("words").ok_or("Invalid completion words.")?,
-        )
-        .map_err(|e| e.to_string())?;
-        let timeout = operation
-            .get("timeoutMs")
-            .and_then(Value::as_f64)
-            .unwrap_or(1500.0);
-        self.complete_words(&words, timeout, cancel).await
-    }
     async fn complete_words(
         &self,
         words: &[String],
         timeout: f64,
         cancel: &CancellationToken,
     ) -> Result<Vec<String>, String> {
-        if !timeout.is_finite() || timeout < 0.0 {
-            return Err("Invalid completion timeout.".into());
-        }
         tokio::time::timeout(
-            Duration::from_secs_f64(timeout.min(1500.0) / 1000.0),
+            completion_timeout(timeout)?,
             self.services.completion.complete(
                 &self.services.pool,
                 words,
@@ -340,94 +310,7 @@ impl NativeHost {
         operation: &Value,
         cancel: &CancellationToken,
     ) -> Result<Value, String> {
-        if let Some(remote) = &self.remote {
-            return remote
-                .fact(operation, &self.catalog, &self.environment, cancel)
-                .await;
-        }
-        if cancel.is_cancelled() {
-            return Err(ABORTED.into());
-        }
-        let text = |field: &str| {
-            operation
-                .get(field)
-                .and_then(Value::as_str)
-                .ok_or_else(|| format!("Invalid host field {field}."))
-        };
-        let value = match text("kind")? {
-            "version" => json!(
-                self.help
-                    .version(text("command")?, &self.catalog, &self.environment)
-                    .await?
-            ),
-            "stat" => json!(
-                self.services
-                    .directories
-                    .stat(
-                        text("path")?,
-                        operation
-                            .get("executable")
-                            .and_then(Value::as_bool)
-                            .unwrap_or(true),
-                        cancel
-                    )
-                    .await?
-            ),
-            "lookup" => json!(
-                self.services
-                    .directories
-                    .lookup(text("path")?, cancel)
-                    .await?
-            ),
-            "entries" => json!(
-                self.services
-                    .directories
-                    .entries(
-                        text("path")?,
-                        operation
-                            .get("limit")
-                            .and_then(Value::as_u64)
-                            .ok_or("Invalid directory limit.")? as usize,
-                        cancel
-                    )
-                    .await?
-            ),
-            "syntax" => json!(
-                self.services
-                    .syntax
-                    .valid(text("command")?, &self.catalog.cwd, cancel)
-                    .await?
-            ),
-            "completion" => json!(self.complete(operation, cancel).await?),
-            "help" => {
-                let route: Vec<String> = serde::Deserialize::deserialize(
-                    operation.get("route").ok_or("Invalid help route.")?,
-                )
-                .map_err(|e| e.to_string())?;
-                json!(
-                    self.help
-                        .read_verified_route(
-                            text("command")?,
-                            &route,
-                            &self.catalog,
-                            &self.environment,
-                            cancel
-                        )
-                        .await?
-                )
-            }
-            "describe" => json!(
-                self.services
-                    .catalog
-                    .describe(text("command")?, &self.catalog.cwd, cancel)
-                    .await?
-            ),
-            _ => return Err("Unknown host operation.".into()),
-        };
-        if cancel.is_cancelled() {
-            return Err(ABORTED.into());
-        }
-        Ok(value)
+        serde_json::to_value(self.engine_fact(operation, cancel).await?).map_err(|e| e.to_string())
     }
     pub async fn snapshot(
         &self,

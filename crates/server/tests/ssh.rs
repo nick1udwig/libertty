@@ -13,6 +13,78 @@ use std::{net::SocketAddr, os::unix::fs::PermissionsExt, sync::Arc, time::Durati
 use tokio::{io::AsyncReadExt, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
+#[tokio::test]
+async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
+    use libertty_engine::{
+        host::{FactValue, HostOperation},
+        types::Catalog,
+    };
+    let fixture = Fixture::start().await;
+    let remote = fixture.connect(false).await;
+    let home = fixture.home();
+    let definitions = format!("{home}/completions");
+    tokio::fs::write(
+        &definitions,
+        "_slow(){ sleep 1; COMPREPLY=(late); }; complete -F _slow slow\n",
+    )
+    .await
+    .unwrap();
+    let services = HostServices::new();
+    let mut host = NativeHost::new(
+        services.clone(),
+        Catalog {
+            cwd: home.clone(),
+            ..Default::default()
+        },
+        std::collections::BTreeMap::from([
+            ("HOME".into(), home.clone()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+            ("LIBERTTY_COMPLETIONS_FILE".into(), definitions),
+        ]),
+        libertty_server::help::HelpProvider::new(services.pool.clone()),
+    );
+    let cancel = CancellationToken::new();
+    for transport in [None, Some(remote.clone())] {
+        host.remote = transport;
+        let lookup = HostOperation::Lookup {
+            path: format!("{home}/missing"),
+        };
+        let typed = host.engine_operation(&lookup, &cancel).await.unwrap();
+        assert!(matches!(typed, FactValue::Lookup(_)));
+        assert_eq!(
+            serde_json::to_value(typed).unwrap(),
+            host.fact(&serde_json::to_value(lookup).unwrap(), &cancel)
+                .await
+                .unwrap()
+        );
+        let completion = |timeout: f64| HostOperation::Completion {
+            words: vec!["slow".into(), "x".into()],
+            timeout: timeout.to_bits(),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_millis(500),
+            host.engine_operation(&completion(50.0), &cancel),
+        )
+        .await
+        .expect("Completion must honor the supplied budget");
+        match result {
+            Ok(FactValue::Completion(values)) => assert!(values.is_empty()),
+            Err(message) => assert_eq!(message, "Completion timed out."),
+            other => panic!("Unexpected completion: {other:?}"),
+        }
+        for invalid in [-1.0, f64::INFINITY, f64::NAN] {
+            assert_eq!(
+                host.engine_operation(&completion(invalid), &cancel)
+                    .await
+                    .unwrap_err(),
+                "Invalid completion timeout."
+            );
+        }
+    }
+    remote.dispose().await;
+    fixture.stop().await;
+}
+
 async fn probe_sshd(socket: tokio::net::TcpSocket, address: SocketAddr) -> std::io::Result<()> {
     // A loopback socket can connect to itself while sshd has not bound its port.
     if socket.local_addr()? == address {

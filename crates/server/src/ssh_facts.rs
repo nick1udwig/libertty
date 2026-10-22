@@ -1,5 +1,8 @@
 use crate::{
-    completion::{COMPLETION_SCRIPT, completion_args, completion_values, valid_completion_words},
+    completion::{
+        COMPLETION_SCRIPT, completion_args, completion_timeout, completion_values,
+        valid_completion_words,
+    },
     probes::{ABORTED, SharedTask},
     ssh::{SSHHost, bounded},
 };
@@ -9,13 +12,17 @@ use libertty_engine::{
         commands_from_help, commands_from_manual, flags_from_help, has_command_slot,
         required_from_help,
     },
+    host::{FactValue, HostOperation},
     path,
     repair::{shell_quote, tokens},
-    types::{Catalog, CommandMetadata, DirectoryEntry, DirectorySnapshot, FileInfo, Help},
+    types::{
+        Catalog, CommandMetadata, DirectoryEntry, DirectoryLookup, DirectorySnapshot, FileInfo,
+        Help,
+    },
     validation::Environment,
 };
 use russh_sftp::{client::RawSftpSession, protocol::StatusCode};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -201,55 +208,43 @@ impl SSHHost {
             spelling: None,
         }))
     }
-    pub async fn fact(
+    pub(crate) async fn engine_operation(
         self: &Arc<Self>,
-        operation: &Value,
+        operation: &HostOperation,
         catalog: &Catalog,
         env: &Environment,
         cancel: &CancellationToken,
-    ) -> Result<Value, String> {
+    ) -> Result<FactValue, String> {
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }
-        let text = |key: &str| {
-            operation[key]
-                .as_str()
-                .ok_or_else(|| format!("Invalid host field {key}."))
-        };
-        match text("kind")? {
-            "version" => Ok(json!(
-                self.schema_version(text("command")?, catalog, env, cancel)
-                    .await?
-            )),
-            "stat" => Ok(json!(
-                self.stat(
-                    text("path")?,
-                    operation["executable"].as_bool().unwrap_or(true),
-                    cancel
-                )
-                .await?
-            )),
-            "entries" => Ok(json!(
-                self.snapshot(
-                    text("path")?,
-                    operation["limit"]
-                        .as_u64()
-                        .ok_or("Invalid directory limit.")? as usize,
-                    cancel
-                )
-                .await?
-                .entries
-            )),
-            "lookup" => {
-                let file = text("path")?;
-                Ok(if let Some(info) = self.stat(file, false, cancel).await? {
-                    json!({"info":info})
-                } else {
-                    json!({"listing":self.snapshot(&path::dirname(file),10000,cancel).await?})
-                })
+        match operation {
+            HostOperation::Scoped { .. } => {
+                unreachable!("Scoped operations are handled by NativeHost")
             }
-            "syntax" => {
-                let command = text("command")?;
+            HostOperation::Version { command } => Ok(FactValue::from(json!(
+                self.schema_version(command, catalog, env, cancel).await?
+            ))),
+            HostOperation::Stat { path, executable } => {
+                Ok(FactValue::Stat(self.stat(path, *executable, cancel).await?))
+            }
+            HostOperation::Entries { path, limit } => Ok(FactValue::Entries(
+                self.snapshot(path, *limit, cancel).await?.entries,
+            )),
+            HostOperation::Lookup { path: file } => Ok(FactValue::Lookup(Arc::new(
+                if let Some(info) = self.stat(file, false, cancel).await? {
+                    DirectoryLookup {
+                        info: Some(info),
+                        listing: None,
+                    }
+                } else {
+                    DirectoryLookup {
+                        info: None,
+                        listing: Some(self.snapshot(&path::dirname(file), 10000, cancel).await?),
+                    }
+                },
+            ))),
+            HostOperation::Syntax { command } => {
                 let key = serde_json::to_string(&(&catalog.cwd, command)).unwrap();
                 if let Some((_, value)) = self
                     .syntax_cache
@@ -258,7 +253,7 @@ impl SSHHost {
                     .iter()
                     .find(|(k, _)| k == &key)
                 {
-                    return Ok(json!(value));
+                    return Ok(FactValue::Syntax(*value));
                 }
                 let result = self.exec(&format!("cd {} && env -i PATH=/usr/bin:/bin BASH_ENV=/dev/null ENV=/dev/null bash --noprofile --norc -n -c {}",shell_quote(&catalog.cwd),shell_quote(command)),cancel).await?.code == 0;
                 let mut cache = self.syntax_cache.lock().unwrap();
@@ -266,13 +261,12 @@ impl SSHHost {
                     cache.pop_front();
                 }
                 cache.push_back((key, result));
-                Ok(json!(result))
+                Ok(FactValue::Syntax(result))
             }
-            "completion" => {
-                let words: Vec<String> = serde::Deserialize::deserialize(&operation["words"])
-                    .map_err(|e| e.to_string())?;
-                if !valid_completion_words(&words) {
-                    return Ok(json!([]));
+            HostOperation::Completion { words, timeout } => {
+                let timeout = completion_timeout(f64::from_bits(*timeout))?;
+                if !valid_completion_words(words) {
+                    return Ok(FactValue::Completion(Arc::default()));
                 }
                 let mut env = env.clone();
                 env.extend([
@@ -290,7 +284,7 @@ impl SSHHost {
                     .map(|(k, v)| format!("{k}={}", shell_quote(v)))
                     .collect::<Vec<_>>()
                     .join(" ");
-                let args = completion_args(&words)
+                let args = completion_args(words)
                     .iter()
                     .map(|s| shell_quote(s))
                     .collect::<Vec<_>>()
@@ -300,24 +294,20 @@ impl SSHHost {
                     shell_quote(&catalog.cwd),
                     shell_quote(COMPLETION_SCRIPT)
                 );
-                match tokio::time::timeout(Duration::from_millis(1200), self.exec(&command, cancel))
-                    .await
-                {
-                    Ok(Ok(output)) => Ok(json!(completion_values(&output.stdout))),
+                match tokio::time::timeout(timeout, self.exec(&command, cancel)).await {
+                    Ok(Ok(output)) => Ok(FactValue::Completion(Arc::new(completion_values(
+                        &output.stdout,
+                    )))),
                     _ if cancel.is_cancelled() => Err(ABORTED.into()),
-                    _ => Ok(json!([])),
+                    _ => Ok(FactValue::Completion(Arc::default())),
                 }
             }
-            "help" => {
-                let route: Vec<String> = serde::Deserialize::deserialize(&operation["route"])
-                    .map_err(|e| e.to_string())?;
-                Ok(json!(
-                    self.read_help(text("command")?, &route, catalog, env, true, cancel)
-                        .await?
-                ))
-            }
-            "describe" => {
-                let args = tokens(text("command")?);
+            HostOperation::Help { command, route } => Ok(FactValue::Help(Arc::new(
+                self.read_help(command, route, catalog, env, true, cancel)
+                    .await?,
+            ))),
+            HostOperation::Describe { command } => {
+                let args = tokens(command);
                 let script = libertty_engine::command_policy::script_operand(
                     &args.iter().map(|w| &w.value).collect::<Vec<_>>(),
                 );
@@ -325,7 +315,7 @@ impl SSHHost {
                     || !["python", "python3"].contains(&args[0].value.as_str())
                     || !script.is_some_and(|index| args[index].value.ends_with(".py"))
                 {
-                    return Ok(Value::Null);
+                    return Ok(FactValue::Describe(Arc::new(None)));
                 }
                 let file = path::resolve(&[&catalog.cwd, &args[script.unwrap()].value]);
                 if !bounded(cancel, async {
@@ -337,7 +327,7 @@ impl SSHHost {
                 })
                 .await?
                 {
-                    return Ok(Value::Null);
+                    return Ok(FactValue::Describe(Arc::new(None)));
                 }
                 let output = self
                     .exec(
@@ -349,13 +339,12 @@ impl SSHHost {
                         cancel,
                     )
                     .await?;
-                Ok(if output.code == 0 {
-                    serde_json::from_str(&output.stdout).unwrap_or(Value::Null)
+                Ok(FactValue::Describe(Arc::new(if output.code == 0 {
+                    serde_json::from_str(&output.stdout).unwrap_or(None)
                 } else {
-                    Value::Null
-                })
+                    None
+                })))
             }
-            _ => Err("Unknown host operation.".into()),
         }
     }
     pub async fn read_help(
