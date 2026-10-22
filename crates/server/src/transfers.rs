@@ -105,12 +105,6 @@ impl Transfers {
             .map(|e| e.request.clone())
             .collect()
     }
-    pub fn remove(&mut self, id: &str) {
-        if let Some(at) = self.entries.iter().position(|e| e.request.id == id) {
-            let entry = self.entries.remove(at).unwrap();
-            self.cleanup(entry);
-        }
-    }
     pub fn clear(&mut self) {
         while let Some(entry) = self.entries.pop_front() {
             self.cleanup(entry);

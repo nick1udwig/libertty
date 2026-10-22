@@ -171,22 +171,21 @@ struct Download {
     version: (u64, f64),
     started: bool,
 }
-/// Retires a download once its last byte leaves, because a sized body ends without polling for its end.
+/// Retains a completed download briefly because queued bytes can still be lost on the way to the browser.
 struct DownloadProgress {
     app: Arc<App>,
     ticket: String,
-    session: Arc<Session>,
-    transfer: Option<String>,
     remaining: u64,
 }
 impl DownloadProgress {
     fn sent(&mut self, bytes: usize) {
         self.remaining = self.remaining.saturating_sub(bytes as u64);
-        if self.remaining == 0 {
-            if let Some(id) = self.transfer.take() {
-                self.session.remove_transfer(&id);
-            }
-            self.app.downloads.lock().unwrap().remove(&self.ticket);
+        if self.remaining == 0
+            && let Some(download) = self.app.downloads.lock().unwrap().get_mut(&self.ticket)
+        {
+            download.until = download
+                .until
+                .min(Instant::now() + Duration::from_secs(120));
         }
     }
 }
@@ -605,7 +604,7 @@ impl App {
         );
         Ok(json!({"ticket":ticket,"name":name,"size":attrs.len()}))
     }
-    /// Stream a download, resuming from `offset` after an interruption; the ticket retires once a request reaches the end.
+    /// Stream a download, retaining its ticket for retries after a request reaches the end.
     async fn send_download(
         self: &Arc<Self>,
         ticket: &str,
@@ -682,8 +681,6 @@ impl App {
         let mut progress = DownloadProgress {
             app: self.clone(),
             ticket: ticket.to_owned(),
-            session,
-            transfer: download.transfer,
             remaining: size - offset,
         };
         progress.sent(0);

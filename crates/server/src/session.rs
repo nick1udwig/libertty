@@ -816,9 +816,6 @@ impl Session {
     pub fn acknowledge_transfer(&self, id: &str) {
         self.inner.lock().unwrap().transfers.acknowledge(id);
     }
-    pub fn remove_transfer(&self, id: &str) {
-        self.inner.lock().unwrap().transfers.remove(id);
-    }
     pub fn paste(
         &self,
         text: &str,

@@ -46,16 +46,19 @@ try {
     const part = (offset, body) => fetch(base + 'api/files/upload?' + new URLSearchParams({ session: id, path: folder, name: 'resumed.bin', upload: 'resume-' + dir, size: String(bytes.length), offset: String(offset) }), { method: 'POST', headers: { Origin: origin, Authorization: 'Bearer ' + owner, 'Content-Type': 'application/octet-stream' }, body });
     assert.deepEqual(await (await part(0, bytes.subarray(0, 3))).json(), { received: 3 });
     assert.deepEqual(await (await part(3, bytes.subarray(3))).json(), { name: 'resumed.bin', bytes: bytes.length });
+    assert.deepEqual(await (await part(0, new Blob())).json(), { name: 'resumed.bin', bytes: bytes.length });
     assert.deepEqual(await readFile(folder + '/resumed.bin'), bytes);
     assert.equal((await send('../escape')).status, 400); assert.equal((await send('uploaded.bin', 'overwrite')).ok, false); assert.deepEqual(await readFile(folder + '/uploaded.bin'), bytes);
     const ticket = await (await request(base, 'api/files/download?session=' + id, owner, { path: folder + '/uploaded.bin' })).json();
     const download = await fetch(base + 'api/files/download?ticket=' + ticket.ticket); assert.match(download.headers.get('content-disposition'), /attachment/); assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
-    assert.equal((await fetch(base + 'api/files/download?ticket=' + ticket.ticket)).status, 404);
-    // Local and SFTP files resume from an offset, and the resumed request completes the link.
+    const retry = await fetch(base + 'api/files/download?ticket=' + ticket.ticket, { headers: { Range: 'bytes=2-' } });
+    assert.equal(retry.status, 206); assert.deepEqual(Buffer.from(await retry.arrayBuffer()), bytes.subarray(2));
+    // Local and SFTP files can resume even after an earlier request queued all bytes.
     const resume = await (await request(base, 'api/files/download?session=' + id, owner, { path: folder + '/uploaded.bin' })).json();
     const rest = await fetch(base + 'api/files/download?ticket=' + resume.ticket, { headers: { Range: 'bytes=2-' } });
     assert.equal(rest.status, 206); assert.deepEqual(Buffer.from(await rest.arrayBuffer()), bytes.subarray(2));
-    assert.equal((await fetch(base + 'api/files/download?ticket=' + resume.ticket)).status, 404);
+    const retried = await fetch(base + 'api/files/download?ticket=' + resume.ticket);
+    assert.equal(retried.status, 200); assert.deepEqual(Buffer.from(await retried.arrayBuffer()), bytes);
     assert.equal((await request(base, 'api/files/download?session=' + id, owner, { path: folder })).status, 400);
   }
   browser = await launchBrowser({ });
@@ -203,6 +206,6 @@ try {
   const crossDownload = page.waitForEvent('download'); await view.getByRole('button', { name: 'Download cross-origin.txt', exact: true }).click();
   assert.equal(await readFile(await (await crossDownload).path(), 'utf8'), 'cross origin');
   assert.deepEqual(errors, []);
-  console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, resumed uploads and downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, links retired after one complete download, no shell in Files tabs, mobile menu and restored directory');
+  console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, resumed uploads and downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, retries after the final chunk, no shell in Files tabs, mobile menu and restored directory');
 } catch (e) { console.error(system.logs); throw e; }
 finally { await browser?.close(); await system.close(); }
