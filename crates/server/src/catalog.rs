@@ -1,12 +1,8 @@
 use crate::{
-    directories::{Directories, executable},
+    directories::executable,
     probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe},
 };
-use libertty_engine::{
-    path,
-    repair::tokens,
-    types::{Flag, SharedList},
-};
+use libertty_engine::{path, repair::tokens, types::Flag};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
@@ -16,25 +12,16 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 pub const AST_SCRIPT: &str = include_str!("../assets/describe.py");
 type FlagEntry = (String, String, SharedTask<Option<Vec<Flag>>>);
-struct Paths {
-    cwd: String,
-    versions: Vec<String>,
-    values: SharedList<String>,
-}
 #[derive(Clone, Default)]
 pub struct CatalogHost {
-    directories: Directories,
     pool: ProbePool,
     flags: Arc<Mutex<VecDeque<FlagEntry>>>,
-    paths: Arc<Mutex<VecDeque<Paths>>>,
 }
 impl CatalogHost {
-    pub fn new(directories: Directories, pool: ProbePool) -> Self {
+    pub fn new(pool: ProbePool) -> Self {
         Self {
-            directories,
             pool,
             flags: Arc::new(Mutex::new(VecDeque::new())),
-            paths: Arc::default(),
         }
     }
     pub async fn executable_names(
@@ -85,80 +72,6 @@ impl CatalogHost {
             Ok(names)
         });
         tokio::select! { biased; _ = cancel.cancelled() => Err(ABORTED.into()), result = scan => result.map_err(|e| e.to_string())? }
-    }
-    pub async fn paths_in(
-        &self,
-        cwd: &str,
-        cancel: &CancellationToken,
-    ) -> Result<SharedList<String>, String> {
-        let root = self.directories.snapshot(cwd, 10000, cancel).await?;
-        let entries = &root.entries;
-        let mut versions = vec![root.version];
-        let mut children = vec![];
-        let mut count = entries.len();
-        for dir in entries {
-            if count >= 4000 {
-                break;
-            }
-            if !dir.directory
-                || dir.name.starts_with('.')
-                || ["node_modules", ".git", ".venv", "venv", "dist", ".cache"]
-                    .contains(&dir.name.as_str())
-            {
-                continue;
-            }
-            let snapshot = self
-                .directories
-                .snapshot(&path::join(&[cwd, &dir.name]), 4000 - count, cancel)
-                .await?;
-            count += snapshot.entries.len();
-            versions.push(snapshot.version);
-            children.push((&dir.name, snapshot.entries));
-        }
-        let cacheable = versions.iter().all(|version| !version.is_empty());
-        if cacheable
-            && let Some(old) = self
-                .paths
-                .lock()
-                .await
-                .iter()
-                .find(|old| old.cwd == cwd && old.versions == versions)
-        {
-            return Ok(old.values.clone());
-        }
-        let mut paths: Vec<_> = entries
-            .iter()
-            .map(|e| format!("{}{}", e.name, if e.directory { "/" } else { "" }))
-            .collect();
-        for (dir, children) in children {
-            for child in &children {
-                if paths.len() >= 4000 {
-                    break;
-                }
-                paths.push(format!(
-                    "{}/{}{}",
-                    dir,
-                    child.name,
-                    if child.directory { "/" } else { "" }
-                ));
-            }
-        }
-        let paths: SharedList<String> = paths.into();
-        if cacheable {
-            let mut cache = self.paths.lock().await;
-            cache.retain(|old| old.cwd != cwd);
-            cache.push_back(Paths {
-                cwd: cwd.into(),
-                versions,
-                values: paths.clone(),
-            });
-            while cache.len() > 8
-                || cache.iter().map(|entry| entry.values.len()).sum::<usize>() > 40000
-            {
-                cache.pop_front();
-            }
-        }
-        Ok(paths)
     }
     pub async fn describe(
         &self,

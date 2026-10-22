@@ -83,7 +83,8 @@ fn deserialize_timeout<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Res
     f64::deserialize(deserializer).map(f64::to_bits)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
 pub enum FactValue {
     Json(Arc<Value>),
     Lookup(Arc<DirectoryLookup>),

@@ -116,41 +116,6 @@ impl Browser {
 }
 
 #[tokio::test]
-async fn light_catalog_does_not_poison_full_paths_and_nested_changes_refresh() {
-    let root = tempfile::tempdir().unwrap();
-    std::fs::create_dir(root.path().join("nested")).unwrap();
-    let session = Session::start(
-        root.path().to_str().unwrap().into(),
-        vec!["cd".into()],
-        true,
-        HostServices::new(),
-    )
-    .await
-    .unwrap();
-    assert!(session.snapshot(false).await.unwrap().0.paths.is_empty());
-    assert_eq!(
-        session.snapshot(true).await.unwrap().0.paths.as_slice(),
-        ["nested/"]
-    );
-    assert_eq!(
-        session.snapshot(true).await.unwrap().0.paths.as_slice(),
-        ["nested/"]
-    );
-    std::fs::write(root.path().join("nested/new-script.py"), "").unwrap();
-    assert!(session.snapshot(false).await.unwrap().0.paths.is_empty());
-    assert!(
-        session
-            .snapshot(true)
-            .await
-            .unwrap()
-            .0
-            .paths
-            .contains(&"nested/new-script.py".into())
-    );
-    session.dispose().await;
-}
-
-#[tokio::test]
 async fn native_suggestions_refresh_paths_and_honor_cancellation() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("Workspace")).unwrap();
@@ -287,7 +252,7 @@ async fn large_readline_and_private_utilities_child() {
         "echo 'upload | download | look at payload.txt'",
         "echo keep-after",
     ];
-    let catalog = session.snapshot(false).await.unwrap().0;
+    let catalog = session.snapshot().await.unwrap().0;
     assert_eq!(&catalog.history[catalog.history.len() - 3..], expected);
     let saved = std::fs::read_to_string(format!("{root}/utility-history")).unwrap();
     let history = saved
@@ -330,10 +295,9 @@ async fn pty_contract_child() {
     assert_eq!(hello["type"], "hello");
     assert_eq!(hello["reset"], true);
     browser.ready(0).await;
-    let catalog = session.snapshot(true).await.unwrap().0;
+    let catalog = session.snapshot().await.unwrap().0;
     assert!(catalog.history.contains(&"echo remembered-command".into()));
     assert!(catalog.history.contains(&"git init".into()));
-    assert!(catalog.paths.contains(&"subfolder/".into()));
 
     let repair_state = session.state();
     for data in ["\x1b[I", "\x1b[O"] {
@@ -546,7 +510,7 @@ async fn pty_contract_child() {
     assert!(newer.output.contains("LARGE_DONE"));
     assert!(
         session
-            .snapshot(false)
+            .snapshot()
             .await
             .unwrap()
             .0

@@ -13,6 +13,78 @@ use std::{net::SocketAddr, os::unix::fs::PermissionsExt, sync::Arc, time::Durati
 use tokio::{io::AsyncReadExt, sync::mpsc};
 use tokio_util::sync::CancellationToken;
 
+#[tokio::test]
+async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
+    use libertty_engine::{
+        host::{FactValue, HostOperation},
+        types::Catalog,
+    };
+    let fixture = Fixture::start().await;
+    let remote = fixture.connect(false).await;
+    let home = fixture.home();
+    let definitions = format!("{home}/completions");
+    tokio::fs::write(
+        &definitions,
+        "_slow(){ sleep 1; COMPREPLY=(late); }; complete -F _slow slow\n",
+    )
+    .await
+    .unwrap();
+    let services = HostServices::new();
+    let mut host = NativeHost::new(
+        services.clone(),
+        Catalog {
+            cwd: home.clone(),
+            ..Default::default()
+        },
+        std::collections::BTreeMap::from([
+            ("HOME".into(), home.clone()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+            ("LIBERTTY_COMPLETIONS_FILE".into(), definitions),
+        ]),
+        libertty_server::help::HelpProvider::new(services.pool.clone()),
+    );
+    let cancel = CancellationToken::new();
+    for transport in [None, Some(remote.clone())] {
+        host.remote = transport;
+        let lookup = HostOperation::Lookup {
+            path: format!("{home}/missing"),
+        };
+        let typed = host.engine_operation(&lookup, &cancel).await.unwrap();
+        assert!(matches!(typed, FactValue::Lookup(_)));
+        assert_eq!(
+            serde_json::to_value(typed).unwrap(),
+            host.fact(&serde_json::to_value(lookup).unwrap(), &cancel)
+                .await
+                .unwrap()
+        );
+        let completion = |timeout: f64| HostOperation::Completion {
+            words: vec!["slow".into(), "x".into()],
+            timeout: timeout.to_bits(),
+        };
+        let result = tokio::time::timeout(
+            Duration::from_millis(500),
+            host.engine_operation(&completion(50.0), &cancel),
+        )
+        .await
+        .expect("Completion must honor the supplied budget");
+        match result {
+            Ok(FactValue::Completion(values)) => assert!(values.is_empty()),
+            Err(message) => assert_eq!(message, "Completion timed out."),
+            other => panic!("Unexpected completion: {other:?}"),
+        }
+        for invalid in [-1.0, f64::INFINITY, f64::NAN] {
+            assert_eq!(
+                host.engine_operation(&completion(invalid), &cancel)
+                    .await
+                    .unwrap_err(),
+                "Invalid completion timeout."
+            );
+        }
+    }
+    remote.dispose().await;
+    fixture.stop().await;
+}
+
 async fn probe_sshd(socket: tokio::net::TcpSocket, address: SocketAddr) -> std::io::Result<()> {
     // A loopback socket can connect to itself while sshd has not bound its port.
     if socket.local_addr()? == address {
@@ -451,15 +523,29 @@ async fn remote_pty_and_sftp_share_session_guards_and_file_actions() {
     let (attachment, mut receive) = session.attach(0, None, None);
     ready(&session, attachment, &mut receive, 0).await;
     assert_eq!(session.state().cwd, fixture.home());
-    let snapshot = session.snapshot(true).await.unwrap();
+    let snapshot = session.snapshot().await.unwrap();
     assert!(snapshot.0.commands.contains(&"cd".into()));
     assert_eq!(snapshot.1["HOME"], fixture.home());
+    for cols in 2..=300 {
+        session.receive(attachment, json!({"type":"resize","cols":cols,"rows":24}));
+    }
+    session.receive(attachment, json!({"type":"resize","cols":101,"rows":42}));
+    let prompt = session.state().prompt;
+    session.receive(attachment, json!({"type":"command","id":"dimensions","command":"stty size > dimensions","prompt":prompt}));
+    ready(&session, attachment, &mut receive, prompt).await;
+    assert_eq!(
+        tokio::fs::read_to_string(format!("{}/dimensions", fixture.home()))
+            .await
+            .unwrap()
+            .trim(),
+        "42 101"
+    );
     let prompt = session.state().prompt;
     session.receive(attachment,json!({"type":"command","id":"remote-command","command":"printf remote-output","prompt":prompt}));
     ready(&session, attachment, &mut receive, prompt).await;
     assert!(
         session
-            .snapshot(false)
+            .snapshot()
             .await
             .unwrap()
             .0

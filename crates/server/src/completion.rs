@@ -22,6 +22,13 @@ use tokio_util::sync::CancellationToken;
 pub const COMPLETION_SCRIPT: &str = include_str!("../assets/completion.sh");
 pub const COMPLETION_SNAPSHOT: &str = include_str!("../assets/completion-snapshot.sh");
 
+pub(crate) fn completion_timeout(milliseconds: f64) -> Result<Duration, String> {
+    if !milliseconds.is_finite() || milliseconds < 0.0 {
+        return Err("Invalid completion timeout.".into());
+    }
+    Ok(Duration::from_secs_f64(milliseconds.min(1500.0) / 1000.0))
+}
+
 /// Reuse Bash itself, but execute each completion in an isolated subshell.
 /// Custom definitions stay fresh; the standard framework is prepared once.
 #[derive(Clone, Default)]

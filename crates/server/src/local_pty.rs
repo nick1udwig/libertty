@@ -1,5 +1,5 @@
 use crate::{
-    history,
+    history, pty_input,
     session::{ProcessEvent, RC, ShellProcess},
     shell::local_bash,
     storage,
@@ -13,13 +13,13 @@ use std::{
 use tokio::sync::mpsc;
 pub(crate) struct LocalPty {
     master: Mutex<Box<dyn MasterPty + Send>>,
-    write: std::sync::mpsc::Sender<Vec<u8>>,
+    write: pty_input::Sender,
     kill: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     paused: Arc<(Mutex<bool>, Condvar)>,
 }
 impl ShellProcess for LocalPty {
-    fn write(&self, text: &str) {
-        let _ = self.write.send(text.as_bytes().to_vec());
+    fn write(&self, text: &str) -> Result<(), &'static str> {
+        self.write.write(text)
     }
     fn pause(&self, paused: bool) {
         *self.paused.0.lock().unwrap() = paused;
@@ -103,10 +103,13 @@ impl LocalPty {
                 return Err(error);
             }
         };
-        let (write, input) = std::sync::mpsc::channel::<Vec<u8>>();
+        let (sender, receiver) = mpsc::channel(128);
+        let input_events = sender.clone();
+        let (write, mut input) = pty_input::channel();
         std::thread::spawn(move || {
-            while let Ok(data) = input.recv() {
-                if writer.write_all(&data).is_err() {
+            while let Some(data) = input.blocking_recv() {
+                if writer.write_all(&data.bytes).is_err() {
+                    let _ = input_events.blocking_send(ProcessEvent::WriteFailed);
                     break;
                 }
             }
@@ -118,7 +121,6 @@ impl LocalPty {
             kill: Mutex::new(kill),
             paused: paused.clone(),
         };
-        let (sender, receiver) = mpsc::channel(128);
         let output = sender.clone();
         std::thread::spawn(move || {
             let mut buffer = [0u8; 16384];

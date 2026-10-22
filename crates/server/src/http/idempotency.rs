@@ -12,23 +12,29 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 
 /// How long a finished reply stays available to retries.
 const RETAINED: Duration = Duration::from_secs(600);
-const ENTRIES: usize = 128;
-/// Larger replies are delivered once and never repeated.
+const ENTRIES: usize = 4096;
+const CACHE_BYTES: usize = 32 * 1024 * 1024;
+/// Replies beyond the per-response or cache byte limit are delivered once and never repeated.
 const REPLY_BYTES: u64 = 256 * 1024;
 
+struct StoredBody {
+    bytes: Bytes,
+    _reservation: OwnedSemaphorePermit,
+}
 #[derive(Clone)]
 struct Reply {
     status: StatusCode,
     headers: HeaderMap,
-    body: Option<Bytes>,
+    body: Option<Arc<StoredBody>>,
+    completed: Instant,
 }
 impl Reply {
     /// Keep a copy of a small reply for retries, and return the reply for the original request.
-    async fn keep(response: Response<Body>) -> (Self, Response<Body>) {
+    async fn keep(response: Response<Body>, capacity: &Arc<Semaphore>) -> (Self, Response<Body>) {
         let (parts, body) = response.into_parts();
         let small = body
             .size_hint()
@@ -36,7 +42,19 @@ impl Reply {
             .is_some_and(|size| size <= REPLY_BYTES);
         let (body, original) = if small {
             match axum::body::to_bytes(body, REPLY_BYTES as usize).await {
-                Ok(bytes) => (Some(bytes.clone()), Body::from(bytes)),
+                Ok(bytes) => {
+                    let stored = capacity
+                        .clone()
+                        .try_acquire_many_owned(bytes.len() as u32)
+                        .ok()
+                        .map(|reservation| {
+                            Arc::new(StoredBody {
+                                bytes: bytes.clone(),
+                                _reservation: reservation,
+                            })
+                        });
+                    (stored, Body::from(bytes))
+                }
                 Err(_) => (None, Body::empty()),
             }
         } else {
@@ -46,6 +64,7 @@ impl Reply {
             status: parts.status,
             headers: parts.headers.clone(),
             body,
+            completed: Instant::now(),
         };
         (reply, Response::from_parts(parts, original))
     }
@@ -56,7 +75,7 @@ impl Reply {
                 "This request already finished. Reload to see its result.",
             );
         };
-        let mut response = Response::new(Body::from(body));
+        let mut response = Response::new(Body::from(body.bytes.clone()));
         *response.status_mut() = self.status;
         *response.headers_mut() = self.headers;
         response
@@ -64,27 +83,32 @@ impl Reply {
 }
 /// A reply that is pending until its request finishes.
 type Slot = watch::Receiver<Option<Reply>>;
-#[derive(Default)]
-pub(crate) struct Replies(Mutex<HashMap<String, (Slot, Instant)>>);
+pub(crate) struct Replies {
+    slots: Mutex<HashMap<String, (Slot, Instant)>>,
+    capacity: Arc<Semaphore>,
+}
+impl Default for Replies {
+    fn default() -> Self {
+        Self {
+            slots: Mutex::default(),
+            capacity: Arc::new(Semaphore::new(CACHE_BYTES)),
+        }
+    }
+}
 impl Replies {
     /// The reply slot for a key, and the publisher when this request is the first to use it.
     fn slot(&self, scope: String) -> Option<(Slot, Option<watch::Sender<Option<Reply>>>)> {
-        let mut replies = self.0.lock().unwrap();
+        let mut replies = self.slots.lock().unwrap();
         let now = Instant::now();
-        // A reply that finished, or whose request ended without one, no longer coalesces retries.
-        let finished = |slot: &Slot| slot.borrow().is_some() || slot.has_changed().is_err();
-        replies
-            .retain(|_, (slot, opened)| !finished(slot) || now.duration_since(*opened) < RETAINED);
+        replies.retain(|_, (slot, opened)| match slot.borrow().as_ref() {
+            Some(reply) => now.duration_since(reply.completed) < RETAINED,
+            None => slot.has_changed().is_ok() || now.duration_since(*opened) < RETAINED,
+        });
         if let Some((slot, _)) = replies.get(&scope) {
             return Some((slot.clone(), None));
         }
         if replies.len() >= ENTRIES {
-            let oldest = replies
-                .iter()
-                .filter(|(_, (slot, _))| finished(slot))
-                .min_by_key(|(_, (_, opened))| *opened)
-                .map(|(scope, _)| scope.clone())?;
-            replies.remove(&oldest);
+            return None;
         }
         let (publish, slot) = watch::channel(None);
         replies.insert(scope, (slot.clone(), now));
@@ -116,13 +140,16 @@ pub(super) async fn idempotent(
         req.uri().path()
     );
     let Some((mut slot, first)) = app.replies.slot(scope) else {
-        return next.run(req).await;
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "The request limit has been reached. Try again shortly.",
+        );
     };
     if let Some(publish) = first {
         // The request finishes even if the browser abandons this connection, so its retry collects the reply.
         let (deliver, delivered) = oneshot::channel();
         tokio::spawn(async move {
-            let (reply, response) = Reply::keep(next.run(req).await).await;
+            let (reply, response) = Reply::keep(next.run(req).await, &app.replies.capacity).await;
             let _ = publish.send(Some(reply));
             let _ = deliver.send(response);
         });
@@ -133,5 +160,62 @@ pub(super) async fn idempotent(
     match slot.wait_for(Option::is_some).await {
         Ok(reply) => reply.clone().unwrap().response(),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "Request failed."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn saturation_preserves_pending_and_completed_keys_until_retention_expires() {
+        let replies = Replies::default();
+        let mut publishers = Vec::new();
+        for index in 0..ENTRIES {
+            let (_, publish) = replies.slot(index.to_string()).unwrap();
+            publishers.push(publish.unwrap());
+        }
+        assert!(replies.slot("overflow".into()).is_none());
+        assert!(replies.slot("0".into()).unwrap().1.is_none());
+        let (reply, _) = Reply::keep(Response::new(Body::from("done")), &replies.capacity).await;
+        let old = Instant::now() - RETAINED - Duration::from_secs(1);
+        replies.slots.lock().unwrap().get_mut("0").unwrap().1 = old;
+        publishers[0].send_replace(Some(reply.clone()));
+        assert!(
+            replies.slot("overflow".into()).is_none(),
+            "Retention starts when work completes"
+        );
+        let (slot, publish) = replies.slot("0".into()).unwrap();
+        assert!(publish.is_none());
+        assert_eq!(
+            slot.borrow().clone().unwrap().response().status(),
+            StatusCode::OK
+        );
+        publishers[0].send_replace(Some(Reply {
+            completed: old,
+            ..reply
+        }));
+        assert!(replies.slot("overflow".into()).unwrap().1.is_some());
+        assert_eq!(replies.slots.lock().unwrap().len(), ENTRIES);
+    }
+
+    #[tokio::test]
+    async fn reply_bytes_are_bounded_and_exhaustion_keeps_a_non_repeating_record() {
+        let capacity = Arc::new(Semaphore::new(3));
+        let (first, original) = Reply::keep(Response::new(Body::from("abc")), &capacity).await;
+        assert_eq!(capacity.available_permits(), 0);
+        assert_eq!(
+            axum::body::to_bytes(original.into_body(), 3).await.unwrap(),
+            "abc"
+        );
+        let (second, original) = Reply::keep(Response::new(Body::from("def")), &capacity).await;
+        assert_eq!(
+            axum::body::to_bytes(original.into_body(), 3).await.unwrap(),
+            "def"
+        );
+        assert_eq!(second.response().status(), StatusCode::CONFLICT);
+        assert_eq!(first.clone().response().status(), StatusCode::OK);
+        drop(first);
+        assert_eq!(capacity.available_permits(), 3);
     }
 }

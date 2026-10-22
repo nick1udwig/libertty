@@ -4,6 +4,79 @@ use serde_json::json;
 use std::os::unix::fs::{PermissionsExt, symlink};
 
 #[tokio::test]
+async fn exclusive_renames_preserve_existing_files_directories_and_links() {
+    let root = tempfile::tempdir().unwrap();
+    let fs = libertty_server::filesystem::FileSystem::default();
+    let source = root.path().join("source");
+    std::fs::write(&source, "source").unwrap();
+    std::fs::write(root.path().join("file"), "keep").unwrap();
+    std::fs::create_dir(root.path().join("directory")).unwrap();
+    symlink("missing", root.path().join("link")).unwrap();
+    for name in ["file", "directory", "link"] {
+        assert_eq!(
+            fs.rename(
+                source.to_str().unwrap(),
+                root.path().join(name).to_str().unwrap(),
+                false
+            )
+            .await
+            .unwrap_err()
+            .status,
+            409
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), b"source");
+    }
+    assert_eq!(std::fs::read(root.path().join("file")).unwrap(), b"keep");
+    assert!(root.path().join("directory").is_dir());
+    assert_eq!(
+        std::fs::read_link(root.path().join("link")).unwrap(),
+        std::path::Path::new("missing")
+    );
+    fs.rename(
+        source.to_str().unwrap(),
+        root.path().join("file").to_str().unwrap(),
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read(root.path().join("file")).unwrap(), b"source");
+}
+
+#[tokio::test]
+async fn concurrent_exclusive_renames_have_one_winner() {
+    let root = tempfile::tempdir().unwrap();
+    let fs = libertty_server::filesystem::FileSystem::default();
+    let first = root.path().join("first");
+    let second = root.path().join("second");
+    let destination = root.path().join("destination");
+    std::fs::write(&first, "first").unwrap();
+    std::fs::write(&second, "second").unwrap();
+    let (a, b) = tokio::join!(
+        fs.rename(
+            first.to_str().unwrap(),
+            destination.to_str().unwrap(),
+            false
+        ),
+        fs.rename(
+            second.to_str().unwrap(),
+            destination.to_str().unwrap(),
+            false
+        )
+    );
+    assert_ne!(a.is_ok(), b.is_ok());
+    assert_eq!(a.err().or(b.err()).unwrap().status, 409);
+    assert_eq!(
+        std::fs::read(&destination).unwrap(),
+        if first.exists() {
+            b"second".as_slice()
+        } else {
+            b"first".as_slice()
+        }
+    );
+    assert_ne!(first.exists(), second.exists());
+}
+
+#[tokio::test]
 async fn images_get_unique_private_paths_and_enforce_type_and_size_limits() {
     let fs = libertty_server::filesystem::FileSystem::default();
     let bytes = b"\x89PNG\r\n\x1a\nfixture";

@@ -16,6 +16,7 @@ const folder = '<svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
 const documentIcon = '<svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true"><path d="M7 2h12l7 7v20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"/><path d="M19 2v8h7" fill="none" style="stroke:var(--bg)" stroke-width="2"/></svg>';
 export function fileSize(size: number) { if (size < 1024) return size + ' bytes'; const unit = Math.min(3, Math.floor(Math.log(size) / Math.log(1024))); return (size / 1024 ** unit).toFixed(1) + ' ' + ['bytes', 'KB', 'MB', 'GB'][unit]; }
 function permissions(entry: FileEntry) { return (entry.symlink ? 'l' : entry.directory ? 'd' : '-') + Array.from({ length: 9 }, (_, n) => entry.mode & (1 << (8 - n)) ? 'rwx'[n % 3] : '-').join(''); }
+const dates = new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' });
 export function fileBrowser(client: FileClient, initial = '.', changed: (path: string) => void = () => {}) {
   const element = node('section', 'file-browser'); element.setAttribute('aria-label', 'Files');
   const toolbar = node('div', 'file-toolbar');
@@ -24,14 +25,18 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
   const picker = node('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
   const status = node('p', 'file-status'); status.role = 'status'; status.setAttribute('aria-live', 'polite');
   const list = node('div', 'file-list'); list.setAttribute('aria-label', 'Directory contents');
+  const tail = node('div', 'file-list-tail'); tail.setAttribute('aria-hidden', 'true');
+  let appendRows = () => {};
+  const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) appendRows(); }, { root: list, rootMargin: '600px' });
   let current = initial, listing: FileListing | undefined, generation = 0, disposed = false, uploading = false;
+  let ordered: FileEntry[] = [], entriesByName = new Map<string, FileEntry>();
   const abort = new AbortController();
   const selected = new Set<string>();
   let hold: ReturnType<typeof setTimeout> | undefined;
   const stopHold = () => { clearTimeout(hold); hold = undefined; };
   const selection = node('div', 'file-selection'); selection.hidden = true;
   const count = node('strong');
-  const clear = button('', () => { selected.clear(); render(); }); clear.innerHTML = closeIcon; clear.setAttribute('aria-label', 'Clear selection'); selection.append(clear, count);
+  const clear = button('', () => { selected.clear(); render(true); }); clear.innerHTML = closeIcon; clear.setAttribute('aria-label', 'Clear selection'); selection.append(clear, count);
   const loading = node('span', 'file-loading-spinner'); loading.setAttribute('role', 'status'); loading.setAttribute('aria-label', 'Loading files');
   const upload = button('', () => picker.click()); upload.className = 'file-upload'; upload.innerHTML = uploadIcon + '<span>Upload</span>'; upload.setAttribute('aria-label', 'Upload');
   const more = button('', () => selected.size ? openSelection() : openOptions()); more.innerHTML = moreIcon; more.setAttribute('aria-label', 'File options'); more.setAttribute('aria-haspopup', 'menu');
@@ -40,7 +45,7 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
   const error = (reason: unknown) => { if (!disposed) { status.textContent = reason instanceof Error ? reason.message : 'File transfer failed.'; status.classList.add('error'); } };
   let options: FileOptions = { sort: 'name', descending: false, hidden: false };
   const stored = saved<Partial<FileOptions>>('fileOptions', {}); if (stored.sort && ['name', 'date', 'size', 'kind'].includes(stored.sort)) options = { sort: stored.sort, descending: stored.descending === true, hidden: stored.hidden === true };
-  const saveOptions = () => { try { localStorage.setItem('libertty.fileOptions', JSON.stringify(options)); } catch {} render(); };
+  const saveOptions = () => { try { localStorage.setItem('libertty.fileOptions', JSON.stringify(options)); } catch {} ordered = sortedFiles(listing?.entries || [], options); render(); };
   let menu: HTMLElement | undefined, anchor: HTMLButtonElement | undefined;
   function closeMenu(focus = false) { menu?.remove(); menu = undefined; anchor?.setAttribute('aria-expanded', 'false'); if (focus) anchor?.focus(); anchor = undefined; }
   interface MenuItem { label: string; icon: string; action: () => void; checked?: boolean; detail?: string; separator?: boolean }
@@ -95,7 +100,7 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
     const items: MenuItem[] = [
       { label: 'Copy', icon: fileOptionIcons.copy, action: () => promptAction('Copy selected items', 'Destination folder', current, async destination => { await client.action({ action: 'copy', paths, destination }); }) },
     ];
-    if (entries.every(item => !item.directory)) items.push({ label: 'Download', icon: downloadIcon, action: () => { selected.clear(); render(); void (async () => { for (const path of paths) await client.download(path); })().catch(error); } });
+    if (entries.every(item => !item.directory)) items.push({ label: 'Download', icon: downloadIcon, action: () => { selected.clear(); render(true); void (async () => { for (const path of paths) await client.download(path); })().catch(error); } });
     if (single && !entries[0].directory && !entries[0].symlink) items.push({ label: 'Edit', icon: fileOptionIcons.edit, action: () => { status.textContent = 'Opening file…'; void client.action({ action: 'read', path: paths[0] }).then(result => { status.textContent = ''; promptAction('Edit ' + entries[0].name, 'File content', result.text || '', async text => { await client.action({ action: 'write', path: paths[0], version: result.version, text }); }, true); }, error); } });
     if (single) items.push({ label: 'Rename', icon: fileOptionIcons.edit, action: () => promptAction('Rename', 'File name', entries[0].name, async name => { await client.action({ action: 'rename', path: paths[0], name }); }) });
     items.push({ label: 'Copy path', icon: fileOptionIcons.copy, action: () => { if (!navigator.clipboard) { status.textContent = paths.join('\n'); return; } void navigator.clipboard.writeText(paths.join('\n')).then(() => { status.textContent = 'Paths copied.'; }, error); } });
@@ -117,8 +122,8 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
     modal.onclose = () => modal.remove();
   }
   function render(keepRows = false) {
-    if (!keepRows) { stopHold(); list.replaceChildren(); } selection.hidden = !selected.size; crumbs.hidden = upload.hidden = find.hidden = !!selected.size; count.textContent = `${selected.size} selected`; more.setAttribute('aria-label', selected.size ? 'Selection options' : 'File options'); if (!listing) return;
-    if (keepRows) { for (const b of list.querySelectorAll<HTMLButtonElement>('[data-name]')) { const info = listing.entries.find(item => item.name === b.dataset.name)!; const active = selected.has(info.name); b.setAttribute('aria-pressed', String(active)); b.querySelector('.file-icon')!.innerHTML = active ? '<span class="file-selected-mark">✓</span>' : info.directory ? folder : documentIcon; } return; }
+    if (!keepRows) { stopHold(); observer.disconnect(); list.replaceChildren(); list.scrollTop = 0; } selection.hidden = !selected.size; crumbs.hidden = upload.hidden = find.hidden = !!selected.size; count.textContent = `${selected.size} selected`; more.setAttribute('aria-label', selected.size ? 'Selection options' : 'File options'); if (!listing) return;
+    if (keepRows) { for (const b of list.querySelectorAll<HTMLButtonElement>('[data-name]')) { const info = entriesByName.get(b.dataset.name!)!, active = String(selected.has(info.name)); if (b.getAttribute('aria-pressed') === active) continue; b.setAttribute('aria-pressed', active); b.querySelector('.file-icon')!.innerHTML = active === 'true' ? '<span class="file-selected-mark">✓</span>' : info.directory ? folder : documentIcon; } return; }
     const row = (name: string, directory: boolean, action: () => void, info?: FileEntry) => {
       const toggle = () => { if (selected.has(name)) selected.delete(name); else selected.add(name); render(true); };
       let skipClick = false;
@@ -137,17 +142,25 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
       const text = node('span', 'file-details');
       const title = node('span', 'file-name'); title.textContent = name;
       const meta = node('span', 'file-meta');
-      if (info) { const mode = node('span'), date = node('span'); mode.textContent = permissions(info); date.textContent = new Date(info.modified).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }); meta.append(mode, date); }
+      if (info) { const mode = node('span'), date = node('span'); mode.textContent = permissions(info); date.textContent = dates.format(info.modified); meta.append(mode, date); }
       text.append(title);
       if (info && !directory) { const size = node('span', 'file-size'); size.textContent = fileSize(info.size); title.append(size); }
-      text.append(meta); b.append(icon, text); list.append(b);
+      text.append(meta); b.append(icon, text); return b;
     };
-    if (current !== '/') row('..', true, () => void load(listing!.parent));
-    const shown = sortedFiles(listing.entries, options, search.value);
-    for (const item of shown) {
-      const path = (current === '/' ? '' : current) + '/' + item.name;
-      row(item.name, item.directory, () => item.directory ? void load(path) : void client.download(path).catch(error), item);
-    }
+    if (current !== '/') list.append(row('..', true, () => void load(listing!.parent)));
+    const query = search.value.toLocaleLowerCase(), shown = query ? ordered.filter(item => item.name.toLocaleLowerCase().includes(query)) : ordered;
+    let next = 0;
+    appendRows = () => {
+      if (disposed || !tail.parentNode) return;
+      const fragment = document.createDocumentFragment();
+      for (const item of shown.slice(next, next + 100)) {
+        const path = (current === '/' ? '' : current) + '/' + item.name;
+        fragment.append(row(item.name, item.directory, () => item.directory ? void load(path) : void client.download(path).catch(error), item));
+      }
+      next += fragment.childElementCount; list.insertBefore(fragment, tail);
+      if (next === shown.length) { observer.disconnect(); tail.remove(); }
+    };
+    if (shown.length) { list.append(tail); appendRows(); if (tail.parentNode) observer.observe(tail); }
     if (!shown.length) { const empty = node('p', 'file-empty'); empty.textContent = search.value ? 'No matching files.' : 'This folder is empty.'; list.append(empty); }
   }
   async function load(path: string) {
@@ -157,6 +170,7 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
     try {
       const result = await client.list(path); if (disposed || request !== generation) return;
       listing = result; current = result.path; selected.clear(); changed(current); search.value = ''; crumbs.replaceChildren();
+      entriesByName = new Map(result.entries.map(entry => [entry.name, entry])); ordered = sortedFiles(result.entries, options);
       const trail = fileBreadcrumbs(current);
       if (trail.ancestors.length) {
         const older = button('…', () => openMenu(older, trail.ancestors.map(ancestor => ({ label: ancestor.name, icon: folderIcon, action: () => void load(ancestor.path) }))));
@@ -179,5 +193,5 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
   };
   search.oninput = () => render();
   void load(initial);
-  return { element, dispose() { disposed = true; stopHold(); abort.abort(); closeMenu(); document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', closeMenuOnResize); element.remove(); } };
+  return { element, dispose() { disposed = true; stopHold(); observer.disconnect(); abort.abort(); closeMenu(); document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', closeMenuOnResize); element.remove(); } };
 }

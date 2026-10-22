@@ -34,6 +34,7 @@ pub mod paste_mode;
 pub mod plugin_file;
 pub mod probes;
 pub mod protocol;
+mod pty_input;
 pub mod reading;
 pub mod release;
 pub mod session;

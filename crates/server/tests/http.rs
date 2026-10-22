@@ -774,6 +774,12 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
     );
     assert!(!root.join(".libertty-upload-u1").exists());
     assert_eq!(
+        resumable("u1", 5, 0, &[]).json(),
+        json!({"name":"resumed.bin","bytes":5}),
+        "a lost completion reply can be retried"
+    );
+    assert_eq!(resumable("u1", 6, 0, &[]).status, 409);
+    assert_eq!(
         resumable("u2", 5, 0, &[]).status,
         409,
         "uploads never overwrite"
@@ -816,8 +822,11 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
             .headers
             .contains("attachment; filename=\"download\"; filename*=UTF-8''sample.bin")
     );
-    assert_eq!(backend.request("GET", &path, &[], b"").status, 404);
-    // An interrupted download resumes from its last byte, and reaching the end retires the ticket.
+    assert_eq!(
+        backend.request("GET", &path, &[], b"").bytes,
+        downloaded.bytes
+    );
+    // Even after the server queues the final chunk, the browser may need to resume.
     let ticket = |name: &str| {
         let ticket = backend
             .api(
@@ -839,7 +848,12 @@ fn authentication_json_limits_static_assets_and_owned_file_streams_are_compatibl
         (206, &[65, 66, 67][..])
     );
     assert!(resumed.headers.contains("content-range: bytes 2-4/5"));
-    assert_eq!(backend.request("GET", &path, &[], b"").status, 404);
+    assert_eq!(
+        backend
+            .request("GET", &path, &[("Range", "bytes=4-")], b"")
+            .bytes,
+        [67]
+    );
     let path = ticket("sample.bin");
     assert_eq!(
         backend
@@ -980,6 +994,14 @@ fn retried_changes_with_one_idempotency_key_run_once_and_replay_their_reply() {
             .filter(|session| session["name"] == "Once")
             .count(),
         1
+    );
+    for index in 0..140 {
+        assert_eq!(mkdir(&owner, &format!("fill-{index}")).status, 409);
+    }
+    assert_eq!(
+        mkdir(&owner, "retry-1").status,
+        200,
+        "Recent keys survive more than 128 changes"
     );
 }
 

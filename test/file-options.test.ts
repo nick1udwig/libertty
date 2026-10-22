@@ -22,3 +22,8 @@ test('sort direction, kind, filtering and hidden-file preferences keep folders f
   assert.deepEqual(sortedFiles(entries, { sort: 'name', descending: false, hidden: false }, '.py').map(e => e.name), ['a.py']);
   assert.equal(entries[0].name, 'b.txt');
 });
+test('numeric names and case-insensitive searches preserve the sorted order', () => {
+  const files = ['file10.TXT', 'file2.txt', 'file1.txt'].map(name => ({ ...entries[0], name }));
+  const options = { sort: 'name' as const, descending: false, hidden: false };
+  assert.deepEqual(sortedFiles(files, options, 'TXT').map(file => file.name), ['file1.txt', 'file2.txt', 'file10.TXT']);
+});

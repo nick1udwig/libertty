@@ -16,7 +16,9 @@ use tokio_util::sync::CancellationToken;
 
 /// An abandoned upload's partial file is removed after this long without an attempt.
 const IDLE: Duration = Duration::from_secs(15 * 60);
+const COMPLETED: Duration = Duration::from_secs(120);
 const UPLOADS: usize = 64;
+const RETAINED_UPLOADS: usize = 1024;
 
 struct Upload {
     fs: FileSystem,
@@ -26,18 +28,24 @@ struct Upload {
     size: u64,
     /// Bytes safely written to the partial file.
     received: Mutex<u64>,
-    /// Held by the attempt that writes the partial file.
-    writer: tokio::sync::Mutex<()>,
+    /// Serializes attempts and retains completion after the partial file is renamed.
+    writer: tokio::sync::Mutex<bool>,
     /// Cancels the current attempt when a newer one takes over, because a dead link may hold a request open.
     current: Mutex<CancellationToken>,
     touched: Mutex<Instant>,
 }
 impl Upload {
     fn idle(&self, now: Instant) -> bool {
-        now.duration_since(*self.touched.lock().unwrap()) >= IDLE && self.writer.try_lock().is_ok()
+        self.writer.try_lock().is_ok_and(|complete| {
+            now.duration_since(*self.touched.lock().unwrap())
+                >= if *complete { COMPLETED } else { IDLE }
+        })
     }
     fn received(&self) -> Value {
         json!({ "received": *self.received.lock().unwrap() })
+    }
+    fn completed(&self) -> Value {
+        json!({ "name": self.name, "bytes": self.size })
     }
 }
 /// Where an upload goes and how long it is.
@@ -64,9 +72,13 @@ impl Uploads {
         if let Some(upload) = uploads.get(key) {
             return Ok(upload.clone());
         }
-        if uploads.len() >= UPLOADS {
+        let active = uploads
+            .values()
+            .filter(|upload| !upload.writer.try_lock().is_ok_and(|complete| *complete))
+            .count();
+        if uploads.len() >= RETAINED_UPLOADS || active >= UPLOADS {
             return Err(Error::new(
-                "Too many uploads are in progress. Try again shortly.",
+                "The upload limit has been reached. Try again shortly.",
                 429,
             ));
         }
@@ -112,7 +124,8 @@ impl Uploads {
                 // A partial file left by a backend restart restarts from its beginning.
                 let _ = fs.remove(&partial, false).await;
                 fs.create_new(&partial, 0o600).await?.shutdown().await?;
-                self.open(key, || Upload {
+                let cleanup = partial.clone();
+                match self.open(key, || Upload {
                     fs: fs.clone(),
                     partial,
                     destination,
@@ -122,7 +135,13 @@ impl Uploads {
                     writer: Default::default(),
                     current: Default::default(),
                     touched: Mutex::new(Instant::now()),
-                })?
+                }) {
+                    Ok(upload) => upload,
+                    Err(error) => {
+                        fs.remove_on_drop(cleanup);
+                        return Err(error);
+                    }
+                }
             }
         };
         if upload.destination != libertty_engine::path::join(&[&directory, name])
@@ -132,8 +151,11 @@ impl Uploads {
         }
         let cancel = CancellationToken::new();
         std::mem::replace(&mut *upload.current.lock().unwrap(), cancel.clone()).cancel();
-        let _writer = upload.writer.lock().await;
+        let mut complete = upload.writer.lock().await;
         *upload.touched.lock().unwrap() = Instant::now();
+        if *complete {
+            return Ok(upload.completed());
+        }
         if cancel.is_cancelled() || offset != *upload.received.lock().unwrap() {
             return Ok(upload.received());
         }
@@ -178,8 +200,8 @@ impl Uploads {
         exclusive(fs, &upload.destination).await?;
         fs.rename(&upload.partial, &upload.destination, false)
             .await?;
-        self.0.lock().unwrap().remove(key);
-        Ok(json!({ "name": upload.name, "bytes": size }))
+        *complete = true;
+        Ok(upload.completed())
     }
 }
 /// Uploads never overwrite an existing file.
@@ -191,5 +213,114 @@ async fn exclusive(fs: &FileSystem, file: &str) -> Result<()> {
             "A file with that name already exists. Rename your file before uploading.",
             409,
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn completed_receipts_leave_active_capacity_available_and_rejections_remove_partial_files()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().to_str().unwrap();
+        let uploads = Uploads::default();
+        let fs = FileSystem::default();
+        fn destination<'a>(cwd: &'a str, name: &'a str) -> Destination<'a> {
+            Destination {
+                cwd,
+                home: cwd,
+                directory: ".",
+                name,
+                size: 1,
+            }
+        }
+        for index in 0..=UPLOADS {
+            let name = format!("file-{index}");
+            let reply = uploads
+                .receive(
+                    "scope",
+                    &name,
+                    &fs,
+                    destination(cwd, &name),
+                    0,
+                    Body::from("x"),
+                )
+                .await
+                .unwrap();
+            assert_eq!(reply, json!({"name":name,"bytes":1}));
+        }
+        for index in 0..UPLOADS {
+            let name = format!("pending-{index}");
+            assert_eq!(
+                uploads
+                    .receive(
+                        "scope",
+                        &name,
+                        &fs,
+                        destination(cwd, &name),
+                        0,
+                        Body::empty()
+                    )
+                    .await
+                    .unwrap(),
+                json!({"received":0})
+            );
+        }
+        assert_eq!(
+            uploads
+                .receive(
+                    "scope",
+                    "overflow",
+                    &fs,
+                    destination(cwd, "overflow"),
+                    0,
+                    Body::empty()
+                )
+                .await
+                .unwrap_err()
+                .status,
+            429
+        );
+        assert!(!root.path().join(".libertty-upload-overflow").exists());
+        assert_eq!(
+            uploads
+                .receive(
+                    "scope",
+                    "file-0",
+                    &fs,
+                    destination(cwd, "file-0"),
+                    0,
+                    Body::empty()
+                )
+                .await
+                .unwrap(),
+            json!({"name":"file-0","bytes":1})
+        );
+    }
+
+    #[test]
+    fn completed_uploads_have_a_bounded_retry_window_and_busy_writes_do_not_expire() {
+        let now = Instant::now();
+        let upload = Upload {
+            fs: FileSystem::default(),
+            partial: String::new(),
+            destination: String::new(),
+            name: "file".into(),
+            size: 1,
+            received: Mutex::new(1),
+            writer: tokio::sync::Mutex::new(true),
+            current: Default::default(),
+            touched: Mutex::new(now),
+        };
+        assert!(!upload.idle(now + COMPLETED - Duration::from_secs(1)));
+        assert!(upload.idle(now + COMPLETED));
+        let mut complete = upload.writer.try_lock().unwrap();
+        assert!(!upload.idle(now + IDLE));
+        *complete = false;
+        drop(complete);
+        assert!(!upload.idle(now + COMPLETED));
+        assert!(upload.idle(now + IDLE));
     }
 }

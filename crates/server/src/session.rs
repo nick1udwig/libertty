@@ -152,7 +152,7 @@ struct InputLine {
     internal: Option<tokio::sync::oneshot::Sender<Option<String>>>,
 }
 pub(crate) trait ShellProcess: Send + Sync {
-    fn write(&self, text: &str);
+    fn write(&self, text: &str) -> Result<(), &'static str>;
     fn pause(&self, paused: bool);
     fn resize(&self, cols: u16, rows: u16);
     fn kill(&self);
@@ -211,10 +211,27 @@ impl Drop for Lease {
 }
 pub(crate) enum ProcessEvent {
     Data(Vec<u8>),
+    WriteFailed,
     Closed,
     Exited(u32),
 }
 impl Inner {
+    fn close_input(&self, code: u16, reason: &str) {
+        if let Some(socket) = &self.socket {
+            let _ = socket.send.send(Transport::Close(code, reason.into()));
+        }
+    }
+    fn write(&self, text: &str) -> Result<(), &'static str> {
+        let result = self
+            .pty
+            .as_ref()
+            .ok_or(crate::pty_input::CLOSED)
+            .and_then(|pty| pty.write(text));
+        if let Err(reason) = result {
+            self.close_input(1013, reason);
+        }
+        result
+    }
     fn attached(&self, attachment: u64) -> bool {
         self.socket
             .as_ref()
@@ -586,6 +603,7 @@ impl Session {
                             }
                         }
                     }
+                    ProcessEvent::WriteFailed => inner.close_input(1011, crate::pty_input::CLOSED),
                     ProcessEvent::Closed => {
                         if !bytes.is_empty() {
                             inner.output(&String::from_utf8_lossy(&bytes), &session.directory);
@@ -787,8 +805,10 @@ impl Session {
         let mut inner = self.inner.lock().unwrap();
         let capture = inner.handoffs.release(id, value)?;
         inner.send(ServerMessage::SshReleased { id: id.into() });
-        if native && let Some(pty) = &inner.pty {
-            pty.write(&format!("{CLEAR_LINE}{}\n", bracketed(&capture.command)));
+        if native {
+            inner
+                .write(&format!("{CLEAR_LINE}{}\n", bracketed(&capture.command)))
+                .map_err(str::to_owned)?;
         }
         Ok(())
     }
@@ -816,9 +836,6 @@ impl Session {
     pub fn acknowledge_transfer(&self, id: &str) {
         self.inner.lock().unwrap().transfers.acknowledge(id);
     }
-    pub fn remove_transfer(&self, id: &str) {
-        self.inner.lock().unwrap().transfers.remove(id);
-    }
     pub fn paste(
         &self,
         text: &str,
@@ -837,11 +854,11 @@ impl Session {
         {
             return false;
         }
-        inner.state.input_revision += 1;
-        if let Some(pty) = &inner.pty {
-            let clear = if replace { CLEAR_LINE } else { "" };
-            pty.write(&format!("{clear}{}", bracketed(text)));
+        let clear = if replace { CLEAR_LINE } else { "" };
+        if inner.write(&format!("{clear}{}", bracketed(text))).is_err() {
+            return false;
         }
+        inner.state.input_revision += 1;
         inner.send(ServerMessage::Pasted {
             text: text.into(),
             replace,
@@ -923,13 +940,12 @@ impl Session {
             return;
         }
         if let ClientMessage::Input { seq: Some(seq), .. } = &message
-            && let Some((_, delivered)) = &mut inner.input_client
+            && let Some((_, delivered)) = &inner.input_client
         {
             // A reconnecting browser resends keys it could not confirm, so drop the ones already delivered.
             if *seq <= *delivered {
                 return;
             }
-            *delivered = *seq;
         }
         let same = inner.state.ready
             && !inner.state.exited
@@ -1004,8 +1020,11 @@ impl Session {
                     inner.screen.resize(rows, cols);
                 }
             }
-            ClientMessage::Input { data, .. } => {
+            ClientMessage::Input { data, seq } => {
                 if !inner.state.exited && !inner.handoffs.active() {
+                    if inner.write(&data).is_err() {
+                        return;
+                    }
                     if edits_input {
                         inner.state.input_revision += 1;
                     }
@@ -1016,9 +1035,11 @@ impl Session {
                         inner.state.ready = false;
                         inner.state();
                     }
-                    if let Some(pty) = &inner.pty {
-                        pty.write(&data);
-                    }
+                }
+                if let Some(seq) = seq
+                    && let Some((_, delivered)) = &mut inner.input_client
+                {
+                    *delivered = seq;
                 }
             }
             ClientMessage::Replace {
@@ -1027,12 +1048,12 @@ impl Session {
                 let accepted = same
                     && revision == inner.state.input_revision
                     && utf16_len(&text) <= MAX_LINE
-                    && !control(&text);
+                    && !control(&text)
+                    && inner
+                        .write(&format!("{CLEAR_LINE}{}", bracketed(&text)))
+                        .is_ok();
                 if accepted {
                     inner.state.input_revision += 1;
-                    if let Some(pty) = &inner.pty {
-                        pty.write(&format!("{CLEAR_LINE}{}", bracketed(&text)));
-                    }
                     if text.is_empty() {
                         inner.state.prompt_revision = inner.state.input_revision;
                         inner.state();
@@ -1051,20 +1072,31 @@ impl Session {
                         inner.send(previous);
                         return;
                     }
-                    let accepted = same
+                    let allowed = same
                         && !command.is_empty()
                         && utf16_len(&command) <= MAX_LINE
                         && !control(&command);
-                    let result = ServerMessage::Result { id: id.clone(), accepted, message: (!accepted).then(|| "The shell is not at the same prompt. Review the command and try again.".into()) };
+                    let failure = if allowed {
+                        inner
+                            .write(&format!("{CLEAR_LINE}{}\r", bracketed(&command)))
+                            .err()
+                    } else {
+                        Some(
+                            "The shell is not at the same prompt. Review the command and try again.",
+                        )
+                    };
+                    let accepted = failure.is_none();
+                    let result = ServerMessage::Result {
+                        id: id.clone(),
+                        accepted,
+                        message: failure.map(str::to_owned),
+                    };
                     inner.remember_command(&id, result.clone());
                     if accepted {
                         inner.state.input_revision += 1;
                         inner.state.ready = false;
                         inner.state.input_target = None;
                         inner.state();
-                        if let Some(pty) = &inner.pty {
-                            pty.write(&format!("{CLEAR_LINE}{}\r", bracketed(&command)));
-                        }
                     }
                     inner.send(result);
                 }
@@ -1093,8 +1125,9 @@ impl Session {
                     serial,
                     internal: None,
                 });
-                if let Some(pty) = &inner.pty {
-                    pty.write("\x18\x12");
+                if inner.write("\x18\x12").is_err() {
+                    inner.reject_input_line();
+                    return;
                 }
                 let weak = Arc::downgrade(self);
                 tokio::spawn(async move {
@@ -1114,10 +1147,7 @@ impl Session {
             _ => {}
         }
     }
-    pub async fn snapshot(
-        &self,
-        include_paths: bool,
-    ) -> Result<(Catalog, Arc<BTreeMap<String, String>>, u64), String> {
+    pub async fn snapshot(&self) -> Result<(Catalog, Arc<BTreeMap<String, String>>, u64), String> {
         let state = self.state();
         let shell = if let Some(remote) = &self.remote {
             remote.context(state.prompt, &self.lifetime).await?
@@ -1134,16 +1164,6 @@ impl Session {
             Some(history::history_sources(&shell.environment).await)
         } else {
             None
-        };
-        let paths = if include_paths && let Some(remote) = &self.remote {
-            remote.paths(&state.cwd, &self.lifetime).await?.into()
-        } else if include_paths {
-            self.services
-                .catalog
-                .paths_in(&state.cwd, &self.lifetime)
-                .await?
-        } else {
-            Default::default()
         };
         let mut inner = self.inner.lock().unwrap();
         if inner.state.prompt != state.prompt || inner.state.cwd != state.cwd {
@@ -1162,7 +1182,7 @@ impl Session {
                     shell.commands.clone().into()
                 },
                 functions: Some(shell.functions.clone().into()),
-                paths,
+                paths: Default::default(),
                 history,
                 history_cwds: Some(inner.history.cwds()),
             },
@@ -1199,15 +1219,16 @@ impl Session {
         {
             return false;
         }
-        inner.state.input_revision += 1;
         let shell = target == DictationTarget::Shell;
-        if let Some(pty) = &inner.pty {
-            pty.write(&if shell {
-                bracketed(text)
-            } else {
-                inner.paste.paste(text)
-            });
+        let data = if shell {
+            bracketed(text)
+        } else {
+            inner.paste.paste(text)
+        };
+        if inner.write(&data).is_err() {
+            return false;
         }
+        inner.state.input_revision += 1;
         inner.send(ServerMessage::Pasted {
             text: (text).to_string(),
             replace: false,
@@ -1223,7 +1244,7 @@ impl Session {
         text: &str,
         cancel: &CancellationToken,
     ) -> Result<Suggestions, String> {
-        let (catalog, env, prompt) = self.snapshot(false).await?;
+        let (catalog, env, prompt) = self.snapshot().await?;
         let key = facts::context_key(prompt, &catalog, &env);
         let mut host = NativeHost::new(
             self.services.clone(),
@@ -1242,7 +1263,7 @@ impl Session {
             }
         }
         let candidates = candidates.ok_or("Directory changed. Try again.")?;
-        let (latest, latest_env, latest_prompt) = self.snapshot(false).await?;
+        let (latest, latest_env, latest_prompt) = self.snapshot().await?;
         if facts::context_key(latest_prompt, &latest, &latest_env) != key
             || !self.state().ready
             || self.state().exited
@@ -1276,7 +1297,10 @@ impl Session {
                 serial,
                 internal: Some(sender),
             });
-            inner.pty.as_ref()?.write("\x18\x12");
+            if inner.write("\x18\x12").is_err() {
+                inner.reject_input_line();
+                return None;
+            }
             serial
         };
         let line = tokio::time::timeout(Duration::from_secs(2), receiver)
@@ -1345,7 +1369,7 @@ impl Session {
                 }
             }
             let _warming = Warming(session.clone());
-            let Ok((catalog, env, _)) = session.snapshot(false).await else {
+            let Ok((catalog, env, _)) = session.snapshot().await else {
                 return;
             };
             if !session.state().ready || session.state().exited {
@@ -1521,12 +1545,15 @@ impl crate::input_coordinator::RepairTarget for Session {
                 .as_ref()
                 .is_some_and(|(id, _)| id == &reply.id);
         if reply.accepted {
-            inner.state.input_revision += 1;
-            if let Some(pty) = &inner.pty {
-                pty.write(&format!(
-                    "{CLEAR_LINE}{}",
-                    bracketed(&reply.prepared.selected)
-                ));
+            match inner.write(&format!(
+                "{CLEAR_LINE}{}",
+                bracketed(&reply.prepared.selected)
+            )) {
+                Ok(()) => inner.state.input_revision += 1,
+                Err(message) => {
+                    reply.accepted = false;
+                    reply.error = Some(message.into());
+                }
             }
         }
         reply.revision = inner.state.input_revision;
@@ -1610,10 +1637,15 @@ mod tests {
     struct Stub {
         writes: Arc<Mutex<Vec<String>>>,
         paused: Arc<AtomicBool>,
+        rejected: Arc<AtomicBool>,
     }
     impl ShellProcess for Stub {
-        fn write(&self, text: &str) {
+        fn write(&self, text: &str) -> Result<(), &'static str> {
+            if self.rejected.load(Ordering::SeqCst) {
+                return Err(crate::pty_input::FULL);
+            }
             self.writes.lock().unwrap().push(text.into());
+            Ok(())
         }
         fn pause(&self, paused: bool) {
             self.paused.store(paused, Ordering::SeqCst);
@@ -1705,6 +1737,71 @@ mod tests {
                 .contains("after snapshot")
         );
     }
+    #[tokio::test]
+    async fn rejected_input_preserves_acknowledgements_revisions_and_command_state() {
+        let (session, stub, _, _) = fixture().await;
+        let (attachment, mut receive) = session.attach(0, None, Some("tab"));
+        while receive.try_recv().is_ok() {}
+        session.receive(attachment, json!({"type":"input","data":"a","seq":1}));
+        let before = session.state();
+        stub.rejected.store(true, Ordering::SeqCst);
+        session.receive(attachment, json!({"type":"input","data":"\r","seq":2}));
+        session.receive(attachment, json!({"type":"replace","text":"replacement","id":"edit","prompt":before.prompt,"revision":before.input_revision}));
+        session.receive(attachment, json!({"type":"command","command":"echo rejected","id":"command","prompt":before.prompt}));
+        session.receive(attachment, json!({"type":"input-line","id":"line","prompt":before.prompt,"revision":before.input_revision}));
+        assert!(!session.paste("paste", before.prompt, before.input_revision, false, None));
+        assert!(
+            session
+                .internal_line(before.prompt, before.input_revision, attachment)
+                .await
+                .is_none()
+        );
+        assert!(session.inner.lock().unwrap().input_line.is_none());
+        assert_eq!(session.state().input_revision, before.input_revision);
+        assert_eq!(session.state().ready, before.ready);
+        session.checkpoint(attachment);
+        let mut messages = Vec::new();
+        let mut rejected = false;
+        while let Ok(message) = receive.try_recv() {
+            if let Transport::Close(1013, reason) = &message {
+                assert_eq!(reason, crate::pty_input::FULL);
+                rejected = true;
+            }
+            if let Some(value) = message.value() {
+                messages.push(value);
+            }
+        }
+        assert!(rejected);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["type"] == "input-ack" && m["seq"] == 1)
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m["type"] == "edit-result" && m["accepted"] == false)
+        );
+        assert!(messages.iter().any(|m| m["type"] == "result"
+            && m["accepted"] == false
+            && m["message"] == crate::pty_input::FULL));
+        stub.rejected.store(false, Ordering::SeqCst);
+        let (replacement, _) = session.attach(0, None, Some("tab"));
+        session.receive(replacement, json!({"type":"input","data":"b","seq":2}));
+        assert_eq!(*stub.writes.lock().unwrap(), ["a", "b"]);
+        assert_eq!(
+            session
+                .inner
+                .lock()
+                .unwrap()
+                .input_client
+                .as_ref()
+                .unwrap()
+                .1,
+            2
+        );
+    }
+
     #[tokio::test]
     async fn numbered_keys_reach_the_shell_once_across_reconnects_of_the_same_browser() {
         let (session, stub, _, _) = fixture().await;

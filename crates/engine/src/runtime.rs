@@ -172,7 +172,6 @@ struct Task {
     host: Rc<RequestHost>,
     future: LocalBoxFuture<'static, Result<Value, String>>,
     waiting: BTreeMap<u32, Vec<Slot>>,
-    directories: BTreeMap<u32, crate::types::SharedList<crate::types::DirectoryEntry>>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HostRequest {
@@ -205,25 +204,6 @@ pub enum Reply {
 pub enum HostResult {
     Value { value: Value },
     Error { error: String },
-    Entries { entries: u32 },
-    Lookup { lookup: DirectoryReference },
-}
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DirectoryReference {
-    pub directory: u32,
-    pub version: String,
-    pub complete: bool,
-}
-#[derive(Debug, Deserialize)]
-pub struct DirectoryPin {
-    pub directory: u32,
-    #[serde(default, deserialize_with = "present_entries")]
-    pub entries: Option<crate::types::SharedList<crate::types::DirectoryEntry>>,
-}
-fn present_entries<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<crate::types::SharedList<crate::types::DirectoryEntry>>, D::Error> {
-    crate::types::SharedList::deserialize(deserializer).map(Some)
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "lowercase")]
@@ -247,14 +227,6 @@ pub struct Runtime {
     callback: u32,
     highest_request: u32,
     discovery: Rc<crate::discovery::Discovery>,
-    prepared: Option<(
-        u32,
-        Arc<crate::types::Catalog>,
-        Arc<crate::validation::Environment>,
-    )>,
-    highest_context: u32,
-    directories: VecDeque<(u32, crate::types::SharedList<crate::types::DirectoryEntry>)>,
-    highest_directory: u32,
 }
 #[derive(Deserialize)]
 struct Start {
@@ -264,17 +236,11 @@ struct Start {
     now: f64,
 }
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Resume {
     request: u32,
     replies: Vec<Reply>,
     now: f64,
-    #[serde(default, deserialize_with = "present_pins")]
-    directories: Option<Vec<DirectoryPin>>,
-}
-fn present_pins<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<Option<Vec<DirectoryPin>>, D::Error> {
-    Vec::<DirectoryPin>::deserialize(deserializer).map(Some)
 }
 /// Run a call to completion, resolving each batch of host operations with `resolve`.
 /// The call starts before this returns, so concurrent calls keep their start order; dropping the future cancels it.
@@ -321,17 +287,7 @@ pub fn message(runtime: &mut Runtime, bytes: &[u8], resume: bool) -> Step {
         Err("Engine request exceeds 64 MiB.".into())
     } else if resume {
         crate::deserialize_bytes::<Resume>(bytes)
-            .map(|message| {
-                if let Some(directories) = message.directories
-                    && let Err(error) = runtime.pin_directories(message.request, directories)
-                {
-                    return Step::Error {
-                        request: message.request,
-                        error,
-                    };
-                }
-                runtime.resume(message.request, message.replies, message.now)
-            })
+            .map(|message| runtime.resume(message.request, message.replies, message.now))
             .map_err(|error| error.to_string())
     } else {
         crate::deserialize_bytes::<Start>(bytes)
@@ -341,95 +297,6 @@ pub fn message(runtime: &mut Runtime, bytes: &[u8], resume: bool) -> Step {
     result.unwrap_or_else(|error| Step::Error { request: 0, error })
 }
 impl Runtime {
-    /// Pin immutable arrays immediately before a reply, independently of global cache eviction.
-    pub fn pin_directories(
-        &mut self,
-        request: u32,
-        directories: Vec<DirectoryPin>,
-    ) -> Result<(), String> {
-        if !self.tasks.contains_key(&request) || directories.len() > 32 {
-            return Err("Invalid directory snapshot request.".into());
-        }
-        let mut pins = BTreeMap::new();
-        let mut highest = self.highest_directory;
-        let mut count = 0usize;
-        for pin in directories {
-            let entries = match pin.entries {
-                Some(entries) if pin.directory > highest => {
-                    highest = pin.directory;
-                    entries
-                }
-                None => self
-                    .directories
-                    .iter()
-                    .find(|(id, _)| *id == pin.directory)
-                    .map(|(_, entries)| entries.clone())
-                    .ok_or("Unknown directory snapshot.")?,
-                _ => return Err("Invalid directory snapshot ID.".into()),
-            };
-            count += entries.len();
-            if count > 30000 || pins.insert(pin.directory, entries).is_some() {
-                return Err("Invalid or oversized directory snapshots.".into());
-            }
-        }
-        // The whole batch is valid; only now update the global cache and request pins.
-        for (id, entries) in &pins {
-            self.directories.retain(|(old, _)| old != id);
-            self.directories.push_back((*id, entries.clone()));
-        }
-        while self.directories.len() > 32
-            || self
-                .directories
-                .iter()
-                .map(|(_, entries)| entries.len())
-                .sum::<usize>()
-                > 30000
-        {
-            self.directories.pop_front();
-        }
-        self.highest_directory = highest;
-        self.tasks
-            .get_mut(&request)
-            .expect("validated request")
-            .directories = pins;
-        Ok(())
-    }
-    pub fn prepare_context(
-        &mut self,
-        id: u32,
-        catalog: crate::types::Catalog,
-        environment: crate::validation::Environment,
-    ) -> Result<(), String> {
-        if id == 0 || id <= self.highest_context {
-            return Err("Invalid or exhausted engine context ID.".into());
-        }
-        self.highest_context = id;
-        self.prepared = Some((id, Arc::new(catalog), Arc::new(environment)));
-        Ok(())
-    }
-    pub fn start_prepared(&mut self, id: u32, input: String, context: u32, now: f64) -> Step {
-        let Some((current, catalog, environment)) = &self.prepared else {
-            return Step::Error {
-                request: id,
-                error: "Unknown engine context.".into(),
-            };
-        };
-        if *current != context {
-            return Step::Error {
-                request: id,
-                error: "Unknown engine context.".into(),
-            };
-        }
-        self.start_call(
-            id,
-            Call::Suggest {
-                input,
-                catalog: catalog.clone(),
-                environment: environment.clone(),
-            },
-            now,
-        )
-    }
     pub fn start(&mut self, id: u32, request: Request, now: f64) -> Step {
         self.start_call(id, Call::Json(request), now)
     }
@@ -493,7 +360,6 @@ impl Runtime {
                 host,
                 future,
                 waiting: BTreeMap::new(),
-                directories: BTreeMap::new(),
             },
         );
         self.poll(id)
@@ -526,17 +392,7 @@ impl Runtime {
                 .get(&callback)
                 .is_some_and(|slots| length.is_none_or(|length| length == slots.len()))
                 && seen.insert(callback, ()).is_none();
-            let valid_directories = match reply {
-                Reply::Results { results, .. } => results.iter().all(|result| match result {
-                    HostResult::Entries { entries } => task.directories.contains_key(entries),
-                    HostResult::Lookup { lookup } => {
-                        task.directories.contains_key(&lookup.directory)
-                    }
-                    _ => true,
-                }),
-                _ => true,
-            };
-            if !valid || !valid_directories {
+            if !valid {
                 self.cancel(id);
                 return Step::Error {
                     request: id,
@@ -569,19 +425,6 @@ impl Runtime {
                         *slot.borrow_mut() = Some(match result {
                             HostResult::Value { value } => Ok(value.into()),
                             HostResult::Error { error } => Err(error),
-                            HostResult::Entries { entries } => {
-                                Ok(FactValue::Entries(task.directories[&entries].clone()))
-                            }
-                            HostResult::Lookup { lookup } => {
-                                Ok(FactValue::Lookup(Arc::new(crate::types::DirectoryLookup {
-                                    info: None,
-                                    listing: Some(crate::types::DirectorySnapshot {
-                                        version: lookup.version,
-                                        complete: lookup.complete,
-                                        entries: task.directories[&lookup.directory].clone(),
-                                    }),
-                                })))
-                            }
                         });
                     }
                 }
@@ -603,7 +446,6 @@ impl Runtime {
                 }
             }
         }
-        task.directories.clear();
         self.poll(id)
     }
     pub fn cancel(&mut self, id: u32) {
@@ -612,8 +454,6 @@ impl Runtime {
     pub fn reset(&mut self) {
         self.tasks.clear();
         self.discovery.clear();
-        self.prepared = None;
-        self.directories.clear();
     }
     pub fn active(&self) -> usize {
         self.tasks.len()

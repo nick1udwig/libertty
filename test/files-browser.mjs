@@ -46,16 +46,19 @@ try {
     const part = (offset, body) => fetch(base + 'api/files/upload?' + new URLSearchParams({ session: id, path: folder, name: 'resumed.bin', upload: 'resume-' + dir, size: String(bytes.length), offset: String(offset) }), { method: 'POST', headers: { Origin: origin, Authorization: 'Bearer ' + owner, 'Content-Type': 'application/octet-stream' }, body });
     assert.deepEqual(await (await part(0, bytes.subarray(0, 3))).json(), { received: 3 });
     assert.deepEqual(await (await part(3, bytes.subarray(3))).json(), { name: 'resumed.bin', bytes: bytes.length });
+    assert.deepEqual(await (await part(0, new Blob())).json(), { name: 'resumed.bin', bytes: bytes.length });
     assert.deepEqual(await readFile(folder + '/resumed.bin'), bytes);
     assert.equal((await send('../escape')).status, 400); assert.equal((await send('uploaded.bin', 'overwrite')).ok, false); assert.deepEqual(await readFile(folder + '/uploaded.bin'), bytes);
     const ticket = await (await request(base, 'api/files/download?session=' + id, owner, { path: folder + '/uploaded.bin' })).json();
     const download = await fetch(base + 'api/files/download?ticket=' + ticket.ticket); assert.match(download.headers.get('content-disposition'), /attachment/); assert.deepEqual(Buffer.from(await download.arrayBuffer()), bytes);
-    assert.equal((await fetch(base + 'api/files/download?ticket=' + ticket.ticket)).status, 404);
-    // Local and SFTP files resume from an offset, and the resumed request completes the link.
+    const retry = await fetch(base + 'api/files/download?ticket=' + ticket.ticket, { headers: { Range: 'bytes=2-' } });
+    assert.equal(retry.status, 206); assert.deepEqual(Buffer.from(await retry.arrayBuffer()), bytes.subarray(2));
+    // Local and SFTP files can resume even after an earlier request queued all bytes.
     const resume = await (await request(base, 'api/files/download?session=' + id, owner, { path: folder + '/uploaded.bin' })).json();
     const rest = await fetch(base + 'api/files/download?ticket=' + resume.ticket, { headers: { Range: 'bytes=2-' } });
     assert.equal(rest.status, 206); assert.deepEqual(Buffer.from(await rest.arrayBuffer()), bytes.subarray(2));
-    assert.equal((await fetch(base + 'api/files/download?ticket=' + resume.ticket)).status, 404);
+    const retried = await fetch(base + 'api/files/download?ticket=' + resume.ticket);
+    assert.equal(retried.status, 200); assert.deepEqual(Buffer.from(await retried.arrayBuffer()), bytes);
     assert.equal((await request(base, 'api/files/download?session=' + id, owner, { path: folder })).status, 400);
   }
   browser = await launchBrowser({ });
@@ -178,6 +181,26 @@ try {
   await page.reload(); await view.getByRole('button', { name: 'Download device.txt', exact: true }).waitFor();
   await view.getByRole('button', { name: 'Search files', exact: true }).click(); await view.getByRole('searchbox').fill('device'); assert.equal(await view.locator('.file-row').count(), 2);
   await page.screenshot({ path: '/tmp/libertty-files-mobile.png' });
+  // Large directories render in batches, while searches can reach every entry.
+  const large = Array.from({ length: 10000 }, (_, i) => ({ name: `file-${String(i).padStart(4, '0')}.txt`, directory: false, symlink: false, size: i, modified: i, mode: 0o644 }));
+  await page.route('**/api/files/list?**', route => route.fulfill({ json: { path: fixture + '/local/docs', parent: fixture + '/local', entries: large, truncated: false } }));
+  await view.getByRole('searchbox').fill('');
+  await view.getByRole('button', { name: 'File options' }).click(); await view.getByRole('menuitem', { name: 'Refresh folder' }).click();
+  await view.getByRole('button', { name: 'Download file-0000.txt', exact: true }).waitFor();
+  assert.ok(await view.locator('.file-row').count() <= 201, 'Initial rendering is bounded');
+  await view.locator('.file-list').evaluate(list => { list.scrollTop = list.scrollHeight; });
+  await page.waitForFunction(() => document.querySelectorAll('.file-browser:not([hidden]) .file-row').length > 101);
+  assert.ok(await view.locator('.file-row').count() <= 301, 'Scrolling appends a bounded batch');
+  await view.getByRole('searchbox').fill('FILE-9999');
+  const last = view.getByRole('button', { name: 'Download file-9999.txt', exact: true });
+  await last.waitFor(); assert.equal(await view.locator('.file-row').count(), 2);
+  await last.evaluate(row => { window.__fileRow = row; });
+  await last.focus(); await page.keyboard.press('Shift+Space');
+  assert.equal(await last.getAttribute('aria-pressed'), 'true');
+  await view.getByRole('button', { name: 'Clear selection' }).click();
+  assert.equal(await last.evaluate(row => row === window.__fileRow), true, 'Selection preserves existing rows');
+  assert.equal(await last.getAttribute('aria-pressed'), 'false');
+  await page.unroute('**/api/files/list?**');
   // The same component uses bearer authentication against an independent backend.
   const secondOwner = (await (await request(second, 'api/connect', undefined, { token: 'files-feature-test-123456789', noSession: true })).json()).accessToken;
   const secondSession = await (await request(second, 'api/sessions', secondOwner, { files: true })).json();
@@ -203,6 +226,6 @@ try {
   const crossDownload = page.waitForEvent('download'); await view.getByRole('button', { name: 'Download cross-origin.txt', exact: true }).click();
   assert.equal(await readFile(await (await crossDownload).path(), 'utf8'), 'cross origin');
   assert.deepEqual(errors, []);
-  console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, resumed uploads and downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, links retired after one complete download, no shell in Files tabs, mobile menu and restored directory');
+  console.log('PASS files: local and real SFTP browsing, binary uploads/downloads, resumed uploads and downloads, Unicode names, symlink folders, duplicate protection, owner/origin isolation, retries after the final chunk, no shell in Files tabs, mobile menu and restored directory');
 } catch (e) { console.error(system.logs); throw e; }
 finally { await browser?.close(); await system.close(); }

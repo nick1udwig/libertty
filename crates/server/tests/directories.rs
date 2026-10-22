@@ -120,7 +120,7 @@ async fn batched_path_scans_preserve_executable_symlinks_deduplication_and_cance
     symlink("absent", root.path().join("broken")).unwrap();
     let cwd = root.path().to_str().unwrap();
     let env = BTreeMap::from([("PATH".into(), format!("{cwd}:{cwd}:/absent"))]);
-    let catalog = CatalogHost::new(Directories::default(), ProbePool::default());
+    let catalog = CatalogHost::new(ProbePool::default());
     let cancel = CancellationToken::new();
     let names = catalog.executable_names(&env, &cancel).await.unwrap();
     assert_eq!(names.iter().filter(|name| *name == "tool").count(), 1);
