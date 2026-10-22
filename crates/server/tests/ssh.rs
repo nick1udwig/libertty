@@ -451,7 +451,7 @@ async fn remote_pty_and_sftp_share_session_guards_and_file_actions() {
     let (attachment, mut receive) = session.attach(0, None, None);
     ready(&session, attachment, &mut receive, 0).await;
     assert_eq!(session.state().cwd, fixture.home());
-    let snapshot = session.snapshot(true).await.unwrap();
+    let snapshot = session.snapshot().await.unwrap();
     assert!(snapshot.0.commands.contains(&"cd".into()));
     assert_eq!(snapshot.1["HOME"], fixture.home());
     let prompt = session.state().prompt;
@@ -459,7 +459,7 @@ async fn remote_pty_and_sftp_share_session_guards_and_file_actions() {
     ready(&session, attachment, &mut receive, prompt).await;
     assert!(
         session
-            .snapshot(false)
+            .snapshot()
             .await
             .unwrap()
             .0

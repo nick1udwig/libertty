@@ -1111,10 +1111,7 @@ impl Session {
             _ => {}
         }
     }
-    pub async fn snapshot(
-        &self,
-        include_paths: bool,
-    ) -> Result<(Catalog, Arc<BTreeMap<String, String>>, u64), String> {
+    pub async fn snapshot(&self) -> Result<(Catalog, Arc<BTreeMap<String, String>>, u64), String> {
         let state = self.state();
         let shell = if let Some(remote) = &self.remote {
             remote.context(state.prompt, &self.lifetime).await?
@@ -1131,16 +1128,6 @@ impl Session {
             Some(history::history_sources(&shell.environment).await)
         } else {
             None
-        };
-        let paths = if include_paths && let Some(remote) = &self.remote {
-            remote.paths(&state.cwd, &self.lifetime).await?.into()
-        } else if include_paths {
-            self.services
-                .catalog
-                .paths_in(&state.cwd, &self.lifetime)
-                .await?
-        } else {
-            Default::default()
         };
         let mut inner = self.inner.lock().unwrap();
         if inner.state.prompt != state.prompt || inner.state.cwd != state.cwd {
@@ -1159,7 +1146,7 @@ impl Session {
                     shell.commands.clone().into()
                 },
                 functions: Some(shell.functions.clone().into()),
-                paths,
+                paths: Default::default(),
                 history,
                 history_cwds: Some(inner.history.cwds()),
             },
@@ -1220,7 +1207,7 @@ impl Session {
         text: &str,
         cancel: &CancellationToken,
     ) -> Result<Suggestions, String> {
-        let (catalog, env, prompt) = self.snapshot(false).await?;
+        let (catalog, env, prompt) = self.snapshot().await?;
         let key = facts::context_key(prompt, &catalog, &env);
         let mut host = NativeHost::new(
             self.services.clone(),
@@ -1239,7 +1226,7 @@ impl Session {
             }
         }
         let candidates = candidates.ok_or("Directory changed. Try again.")?;
-        let (latest, latest_env, latest_prompt) = self.snapshot(false).await?;
+        let (latest, latest_env, latest_prompt) = self.snapshot().await?;
         if facts::context_key(latest_prompt, &latest, &latest_env) != key
             || !self.state().ready
             || self.state().exited
@@ -1342,7 +1329,7 @@ impl Session {
                 }
             }
             let _warming = Warming(session.clone());
-            let Ok((catalog, env, _)) = session.snapshot(false).await else {
+            let Ok((catalog, env, _)) = session.snapshot().await else {
                 return;
             };
             if !session.state().ready || session.state().exited {

@@ -30,7 +30,7 @@ impl HostServices {
         let directories = Directories::default();
         Self {
             syntax: Syntax::new(pool.clone()),
-            catalog: CatalogHost::new(directories.clone(), pool.clone()),
+            catalog: CatalogHost::new(pool.clone()),
             completion: CompletionProvider::default(),
             pool,
             directories,

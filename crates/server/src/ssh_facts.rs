@@ -178,41 +178,6 @@ impl SSHHost {
         })
         .await
     }
-    pub async fn paths(
-        &self,
-        cwd: &str,
-        cancel: &CancellationToken,
-    ) -> Result<Vec<String>, String> {
-        let entries = self.snapshot(cwd, 10000, cancel).await?.entries;
-        let mut paths = entries
-            .iter()
-            .map(|e| format!("{}{}", e.name, if e.directory { "/" } else { "" }))
-            .collect::<Vec<_>>();
-        for entry in &entries {
-            if paths.len() >= 4000 {
-                break;
-            }
-            if !entry.directory
-                || entry.name.starts_with('.')
-                || ["node_modules", "dist", "venv"].contains(&entry.name.as_str())
-            {
-                continue;
-            }
-            for child in &self
-                .snapshot(&path::join(&[cwd, &entry.name]), 4000 - paths.len(), cancel)
-                .await?
-                .entries
-            {
-                paths.push(format!(
-                    "{}/{}{}",
-                    entry.name,
-                    child.name,
-                    if child.directory { "/" } else { "" }
-                ));
-            }
-        }
-        Ok(paths)
-    }
     pub async fn stat(
         &self,
         file: &str,
