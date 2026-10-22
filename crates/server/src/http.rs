@@ -161,7 +161,7 @@ struct HerdrTicket {
 #[derive(Clone)]
 struct Download {
     owner: String,
-    terminal: String,
+    terminal: SessionKey,
     session: std::sync::Weak<Session>,
     file: String,
     name: String,
@@ -195,15 +195,15 @@ pub struct App {
     token: String,
     owners: Arc<Mutex<Pairings>>,
     vault: Arc<Vault>,
-    sessions: tokio::sync::Mutex<HashMap<String, Terminal>>,
-    openings: Mutex<HashMap<String, Opening>>,
+    sessions: tokio::sync::Mutex<HashMap<SessionKey, Terminal>>,
+    openings: Mutex<HashMap<SessionKey, Opening>>,
     tickets: Mutex<HashMap<String, Ticket>>,
     downloads: Mutex<HashMap<String, Download>>,
     herdr_tickets: Mutex<HashMap<String, HerdrTicket>>,
-    herdr_targets: Mutex<HashMap<String, herdr::Target>>,
-    herdr_readings: Mutex<HashMap<String, crate::reading::Captures>>,
+    herdr_targets: Mutex<HashMap<HerdrKey, herdr::Target>>,
+    herdr_readings: Mutex<HashMap<HerdrKey, crate::reading::Captures>>,
     herdr_reading_capacity: tokio::sync::Semaphore,
-    herdr_connections: Mutex<HashMap<String, (String, CancellationToken)>>,
+    herdr_connections: Mutex<HashMap<String, (SessionKey, CancellationToken)>>,
     herdr_capacity: Arc<tokio::sync::Semaphore>,
     ssh_probes: tokio::sync::Semaphore,
     herdr_terminals: herdr_terminal_stream::Hub,
@@ -215,12 +215,34 @@ pub struct App {
     services: HostServices,
     commands: Vec<String>,
 }
-type Failure = (StatusCode, String);
+/// The paired owner and terminal id that scope a session and its Herdr connections.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct SessionKey {
+    owner: String,
+    sid: String,
+}
+impl SessionKey {
+    fn new(owner: &str, sid: &str) -> Self {
+        Self {
+            owner: owner.into(),
+            sid: sid.into(),
+        }
+    }
+}
+/// A Herdr session reached through a source terminal, or directly when the source id is empty.
+type HerdrKey = (SessionKey, String);
+/// An HTTP error status with the message its JSON body reports.
+struct Failure(StatusCode, String);
+impl IntoResponse for Failure {
+    fn into_response(self) -> Response<Body> {
+        error(self.0, self.1)
+    }
+}
 fn fail(message: impl Into<String>) -> Failure {
-    (StatusCode::BAD_REQUEST, message.into())
+    Failure(StatusCode::BAD_REQUEST, message.into())
 }
 fn file_failure(error: files::Error) -> Failure {
-    (
+    Failure(
         StatusCode::from_u16(error.status).unwrap_or(StatusCode::BAD_REQUEST),
         error.message,
     )
@@ -374,7 +396,7 @@ impl App {
     }
     async fn reserve_session(
         &self,
-        key: &str,
+        key: &SessionKey,
     ) -> Result<(tokio::sync::OwnedMutexGuard<()>, CancellationToken), Failure> {
         let (gate, cancel) = {
             let mut openings = self.openings.lock().unwrap();
@@ -387,7 +409,7 @@ impl App {
                 let gate = Arc::new(tokio::sync::Mutex::new(()));
                 let cancel = CancellationToken::new();
                 openings.insert(
-                    key.into(),
+                    key.clone(),
                     Opening {
                         gate: Arc::downgrade(&gate),
                         cancel: cancel.clone(),
@@ -422,7 +444,7 @@ impl App {
         name: &str,
         files: bool,
     ) -> Result<Arc<Session>, Failure> {
-        let key = format!("{owner}/{sid}");
+        let key = SessionKey::new(owner, sid);
         let (_opening, cancel) = self.reserve_session(&key).await?;
         let registry = self.sessions.lock().await;
         if let Some(terminal) = registry.get(&key) {
@@ -456,16 +478,16 @@ impl App {
         Ok(session)
     }
     async fn close_session(&self, owner: &str, sid: &str) {
-        if let Some(opening) = self.openings.lock().unwrap().get(&format!("{owner}/{sid}")) {
+        let key = SessionKey::new(owner, sid);
+        if let Some(opening) = self.openings.lock().unwrap().get(&key) {
             opening.cancel.cancel();
         }
         self.notifications.remove_source(owner, sid);
-        let prefix = format!("{owner}/{sid}");
         self.herdr_connections
             .lock()
             .unwrap()
-            .retain(|_, (key, cancel)| {
-                if *key == prefix {
+            .retain(|_, (source, cancel)| {
+                if *source == key {
                     cancel.cancel();
                     false
                 } else {
@@ -475,16 +497,16 @@ impl App {
         self.herdr_targets
             .lock()
             .unwrap()
-            .retain(|key, _| !key.starts_with(&format!("{prefix}/")));
+            .retain(|(source, _), _| *source != key);
         self.herdr_readings
             .lock()
             .unwrap()
-            .retain(|key, _| !key.starts_with(&format!("{prefix}/")));
+            .retain(|(source, _), _| *source != key);
         self.herdr_tickets
             .lock()
             .unwrap()
             .retain(|_, t| t.owner != owner || t.source != sid);
-        let terminal = self.sessions.lock().await.remove(&format!("{owner}/{sid}"));
+        let terminal = self.sessions.lock().await.remove(&key);
         if let Some(terminal) = terminal {
             terminal.session.dispose().await;
         }
@@ -498,11 +520,11 @@ impl App {
         system: Option<system_ssh::System>,
         files: bool,
     ) -> Result<Arc<Session>, ssh::Error> {
-        let key = format!("{owner}/{sid}");
+        let key = SessionKey::new(owner, sid);
         let (_opening, cancel) = self
             .reserve_session(&key)
             .await
-            .map_err(|(_, error)| ssh::Error::from(error))?;
+            .map_err(|Failure(_, error)| ssh::Error::from(error))?;
         let registry = self.sessions.lock().await;
         if let Some(terminal) = registry.get(&key) {
             return Ok(terminal.session.clone());
@@ -561,7 +583,7 @@ impl App {
                 && self.owners.lock().unwrap().has(&d.owner)
         });
         if downloads.len() >= 256 {
-            return Err((
+            return Err(Failure(
                 StatusCode::TOO_MANY_REQUESTS,
                 "Too many pending downloads. Try again shortly.".into(),
             ));
@@ -571,7 +593,7 @@ impl App {
             ticket.clone(),
             Download {
                 owner: owner.into(),
-                terminal: format!("{owner}/{sid}"),
+                terminal: SessionKey::new(owner, sid),
                 session: Arc::downgrade(session),
                 file,
                 name: name.clone(),
@@ -590,7 +612,7 @@ impl App {
         offset: u64,
     ) -> Result<Response<Body>, Failure> {
         let expired = || {
-            (
+            Failure(
                 StatusCode::NOT_FOUND,
                 "This download link has expired. Download the file again.".into(),
             )
@@ -638,14 +660,14 @@ impl App {
         }
         if attrs.version() != download.version {
             retire();
-            return Err((
+            return Err(Failure(
                 StatusCode::CONFLICT,
                 "The file changed during the download. Download it again.".into(),
             ));
         }
         let size = attrs.len();
         if offset > 0 && offset >= size {
-            return Err((
+            return Err(Failure(
                 StatusCode::RANGE_NOT_SATISFIABLE,
                 "The download is already complete.".into(),
             ));
@@ -923,7 +945,7 @@ async fn herdr_websocket(
     req: Request<Body>,
     query: &HashMap<String, String>,
 ) -> Result<Response<Body>, Failure> {
-    let denied = || (StatusCode::FORBIDDEN, "Forbidden".into());
+    let denied = || Failure(StatusCode::FORBIDDEN, "Forbidden".into());
     let session_name =
         herdr::session(query.get("herdrSession").map(String::as_str)).map_err(|_| denied())?;
     let ticket = query
@@ -943,7 +965,7 @@ async fn herdr_websocket(
                 .sessions
                 .lock()
                 .await
-                .contains_key(&format!("{}/{source}", ticket.owner)))
+                .contains_key(&SessionKey::new(&ticket.owner, source)))
     {
         return Err(denied());
     }
@@ -968,7 +990,7 @@ async fn herdr_websocket(
             app.herdr_connections.lock().unwrap().insert(
                 id.clone(),
                 (
-                    format!("{}/{}", ticket.owner, ticket.source),
+                    SessionKey::new(&ticket.owner, &ticket.source),
                     cancel.clone(),
                 ),
             );
@@ -994,7 +1016,7 @@ async fn herdr_socket_session(
             .sessions
             .lock()
             .await
-            .get(&format!("{}/{}", ticket.owner, ticket.source))
+            .get(&SessionKey::new(&ticket.owner, &ticket.source))
             .and_then(|terminal| terminal.session.lease());
         let Some(source) = source else { return };
         Some(source)
@@ -1098,7 +1120,7 @@ async fn websocket(
     req: Request<Body>,
     query: &HashMap<String, String>,
 ) -> Result<Response<Body>, Failure> {
-    let denied = || (StatusCode::FORBIDDEN, "Forbidden".into());
+    let denied = || Failure(StatusCode::FORBIDDEN, "Forbidden".into());
     if !app.same_origin(req.headers()) {
         return Err(denied());
     }
@@ -1122,7 +1144,7 @@ async fn websocket(
         .sessions
         .lock()
         .await
-        .get(&format!("{owner}/{sid}"))
+        .get(&SessionKey::new(&owner, &sid))
         .map(|t| t.session.clone())
         .filter(|s| !s.files_only)
         .ok_or_else(denied)?;
@@ -1199,9 +1221,7 @@ pub async fn run() -> Result<(), String> {
                 .map(|(key, _)| key.clone())
                 .collect::<Vec<_>>();
             for key in expired {
-                if let Some((owner, sid)) = key.split_once('/') {
-                    cleanup.close_session(owner, sid).await;
-                }
+                cleanup.close_session(&key.owner, &key.sid).await;
             }
         }
     });

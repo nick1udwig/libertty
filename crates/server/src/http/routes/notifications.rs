@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn api_notifications_subscribe(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -11,7 +11,7 @@ pub(super) async fn api_notifications_subscribe(
 }
 
 pub(super) async fn api_notifications_unsubscribe(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -24,7 +24,7 @@ pub(super) async fn api_notifications_unsubscribe(
 }
 
 pub(super) async fn api_notifications_unwatch(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {

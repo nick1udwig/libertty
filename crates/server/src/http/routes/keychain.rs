@@ -2,7 +2,7 @@ use super::*;
 use crate::protocol::KeychainAction;
 
 pub(super) async fn api_keychain(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     _ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {

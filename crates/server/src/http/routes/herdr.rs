@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn api_herdr_connect(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -12,7 +12,7 @@ pub(super) async fn api_herdr_connect(
         .sessions
         .lock()
         .await
-        .get(&format!("{owner}/{sid}"))
+        .get(&SessionKey::new(owner, &sid))
         .map(|t| t.session.clone())
         .filter(|s| s.files_only)
         .ok_or_else(|| fail("Open a dedicated connection before connecting Herdr."))?;
@@ -25,20 +25,20 @@ pub(super) async fn api_herdr_connect(
         .sessions
         .lock()
         .await
-        .get(&format!("{owner}/{sid}"))
+        .get(&SessionKey::new(owner, &sid))
         .is_some_and(|t| Arc::ptr_eq(&t.session, &source))
     {
         return Err(fail("This connection has closed."));
     }
-    app.herdr_targets
-        .lock()
-        .unwrap()
-        .insert(format!("{owner}/{sid}/{}", target.session), target);
+    app.herdr_targets.lock().unwrap().insert(
+        (SessionKey::new(owner, &sid), target.session.clone()),
+        target,
+    );
     ok(json!({"herdrSession":session_name,"herdrSource":sid}))
 }
 
 pub(super) async fn api_herdr_captured(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -49,7 +49,7 @@ pub(super) async fn api_herdr_captured(
         .sessions
         .lock()
         .await
-        .get(&format!("{owner}/{sid}"))
+        .get(&SessionKey::new(owner, &sid))
         .map(|t| t.session.clone())
         .ok_or_else(|| fail("The source terminal has ended."))?;
     let input: crate::protocol::requests::Capture = typed_body(&mut req, 16384).await?;
@@ -96,7 +96,7 @@ pub(super) async fn api_herdr_captured(
         .sessions
         .lock()
         .await
-        .get(&format!("{owner}/{sid}"))
+        .get(&SessionKey::new(owner, &sid))
         .is_some_and(|t| Arc::ptr_eq(&t.session, &source))
     {
         return Err(fail("This connection has closed."));
@@ -104,15 +104,15 @@ pub(super) async fn api_herdr_captured(
     let local = source.remote.is_none()
         && socket_path == herdr::socket(&session, &std::env::vars().collect()).map_err(fail)?;
     let result = json!({"herdrSession":session,"herdrSource":if local{""}else{&sid},"name":if target.session.is_empty(){"Herdr".into()}else{format!("Herdr · {}",target.session)},"remote":source.remote.is_some()});
-    app.herdr_targets
-        .lock()
-        .unwrap()
-        .insert(format!("{owner}/{sid}/{}", target.session), target.clone());
+    app.herdr_targets.lock().unwrap().insert(
+        (SessionKey::new(owner, &sid), target.session.clone()),
+        target.clone(),
+    );
     if local {
         app.herdr_targets
             .lock()
             .unwrap()
-            .insert(format!("{owner}//{}", target.session), target);
+            .insert((SessionKey::new(owner, ""), target.session.clone()), target);
     }
     source
         .release_capture(id, false, Some(result.clone()))
@@ -121,7 +121,7 @@ pub(super) async fn api_herdr_captured(
 }
 
 pub(super) async fn api_herdr_notifications(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -135,17 +135,12 @@ pub(super) async fn api_herdr_notifications(
     ok(json!({"ok":true}))
 }
 
-pub(super) async fn api_herdr_snapshot(
-    _app: &Arc<App>,
-    ctx: HerdrContext,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
+pub(super) async fn api_herdr_snapshot(ctx: HerdrContext) -> Result<Response<Body>, Failure> {
     let target = ctx.target;
     return ok(json!(target.snapshot().await.map_err(fail)?));
 }
 
 pub(super) async fn api_herdr_images_upload(
-    _app: &Arc<App>,
     ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -174,17 +169,12 @@ pub(super) async fn api_herdr_images_upload(
     .map_err(file_failure)?);
 }
 
-pub(super) async fn api_herdr_options(
-    _app: &Arc<App>,
-    ctx: HerdrContext,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
+pub(super) async fn api_herdr_options(ctx: HerdrContext) -> Result<Response<Body>, Failure> {
     let target = ctx.target;
     return ok(target.options().await.map_err(fail)?);
 }
 
 pub(super) async fn api_herdr_action(
-    _app: &Arc<App>,
     ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -194,7 +184,7 @@ pub(super) async fn api_herdr_action(
 }
 
 pub(super) async fn api_herdr_ticket(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -256,7 +246,7 @@ pub(super) async fn api_herdr_ticket(
 }
 
 pub(super) async fn api_herdr_reading(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: HerdrContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -287,7 +277,10 @@ pub(super) async fn api_herdr_reading(
             data,
             exit_code,
         } => {
-            let key = format!("{}/{}/{}", ctx.owner, ctx.source, ctx.session_name);
+            let key = (
+                SessionKey::new(&ctx.owner, &ctx.source),
+                ctx.session_name.clone(),
+            );
             let mut readings = app.herdr_readings.lock().unwrap();
             if readings.len() >= 32
                 && !readings.contains_key(&key)
@@ -305,11 +298,7 @@ pub(super) async fn api_herdr_reading(
     }
 }
 
-pub(super) async fn api_herdr_reading_file(
-    _app: &Arc<App>,
-    ctx: HerdrContext,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
+pub(super) async fn api_herdr_reading_file(ctx: HerdrContext) -> Result<Response<Body>, Failure> {
     let path = ctx
         .query
         .get("path")
@@ -331,11 +320,14 @@ pub(super) async fn api_herdr_reading_file(
 }
 
 pub(super) async fn api_herdr_reading_capture(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: HerdrContext,
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
-    let key = format!("{}/{}/{}", ctx.owner, ctx.source, ctx.session_name);
+    let key = (
+        SessionKey::new(&ctx.owner, &ctx.source),
+        ctx.session_name.clone(),
+    );
     let id = ctx.query.get("id").map(String::as_str).unwrap_or("");
     let mut readings = app.herdr_readings.lock().unwrap();
     if req.method() == Method::DELETE {
@@ -347,7 +339,7 @@ pub(super) async fn api_herdr_reading_capture(
     let capture = readings
         .get_mut(&key)
         .and_then(|readings| readings.get(id))
-        .ok_or((
+        .ok_or(Failure(
             StatusCode::NOT_FOUND,
             "This captured output has expired. Run the command again to create a new snapshot."
                 .into(),

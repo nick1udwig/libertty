@@ -9,7 +9,7 @@ pub(super) async fn upgrade(req: Request<Body>) -> Result<WebSocketUpgrade, Fail
     let (mut parts, _) = req.into_parts();
     Ok(WebSocketUpgrade::from_request_parts(&mut parts, &())
         .await
-        .map_err(|_| (StatusCode::FORBIDDEN, "Forbidden".into()))?
+        .map_err(|_| Failure(StatusCode::FORBIDDEN, "Forbidden".into()))?
         .protocols([wire::GZIP, wire::GZIP_FAST, wire::BINARY])
         .max_message_size(128 * 1024)
         .max_frame_size(128 * 1024))

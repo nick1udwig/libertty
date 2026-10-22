@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn api_files_download_download(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let query = parse_query(req.uri())?;
@@ -28,7 +28,6 @@ pub(super) async fn api_files_download_download(
 }
 
 pub(super) async fn api_plugins_read(
-    _app: &Arc<App>,
     ctx: FileContext,
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -78,11 +77,7 @@ pub(super) async fn api_plugins_read(
     Ok(response)
 }
 
-pub(super) async fn api_files_list(
-    _app: &Arc<App>,
-    ctx: FileContext,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
+pub(super) async fn api_files_list(ctx: FileContext) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
     let session = ctx.session;
     let cwd = session.state().cwd;
@@ -105,7 +100,6 @@ pub(super) async fn api_files_list(
 }
 
 pub(super) async fn api_files_mkdir(
-    _app: &Arc<App>,
     ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -125,7 +119,6 @@ pub(super) async fn api_files_mkdir(
 }
 
 pub(super) async fn api_files_action(
-    _app: &Arc<App>,
     ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -139,7 +132,6 @@ pub(super) async fn api_files_action(
 }
 
 pub(super) async fn api_images_upload(
-    _app: &Arc<App>,
     ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -156,7 +148,7 @@ pub(super) async fn api_images_upload(
 }
 
 pub(super) async fn api_files_upload(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -220,7 +212,7 @@ pub(super) async fn api_files_upload(
 }
 
 pub(super) async fn api_files_download(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -234,7 +226,7 @@ pub(super) async fn api_files_download(
 }
 
 pub(super) async fn api_files_transfer(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: FileContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -242,7 +234,7 @@ pub(super) async fn api_files_transfer(
     let sid = ctx.sid;
     let session = ctx.session;
     let input: crate::protocol::requests::Transfer = typed_body(&mut req, 16384).await?;
-    let transfer = session.transfer(&input.id).ok_or((
+    let transfer = session.transfer(&input.id).ok_or(Failure(
         StatusCode::NOT_FOUND,
         "This transfer request expired. Run the command again.".into(),
     ))?;
