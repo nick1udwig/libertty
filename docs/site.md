@@ -17,6 +17,15 @@ npx vite preview --config site/vite.config.ts
 The build writes a static site to `dist-site/` that any static host can serve.
 Set `LIBERTTY_SITE_BASE=/path/` when the site is not served from the root of its domain.
 
+## Search and sharing
+
+Set `LIBERTTY_SITE_URL` to the landing page's public address, which defaults to `https://libertty.sh/`.
+The build uses it for the canonical link, Open Graph and structured data on the landing page, `sitemap.xml` and `robots.txt`.
+Crawlers only read `robots.txt` at the root of a domain, so publish it there when `LIBERTTY_SITE_BASE` is not `/`.
+`robots.txt` keeps crawlers out of the repository snapshot, and `app.html` and `terminal.html` carry `noindex`, so only the landing page is indexed.
+`site/social.png` is the 1200 × 630 link preview, a dark-mode screenshot of the landing page.
+Retake it when the landing page changes visibly.
+
 ## How the demo works
 
 The workspace and terminal documents are the app's own `index.html` and `terminal.html`, built with demo entries that run first.

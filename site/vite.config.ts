@@ -57,7 +57,7 @@ function engine(): Plugin {
 }
 
 /** Boot the app documents through the demo entries, which install the in-page backend before the real modules run. */
-function demoEntries(base: string): Plugin {
+function demoEntries(base: string, site: string): Plugin {
   return {
     name: 'libertty-site-entries',
     // During development the landing page is served at / and the workspace at /app.html, as in the build.
@@ -71,9 +71,11 @@ function demoEntries(base: string): Plugin {
     },
     transformIndexHtml: { order: 'pre', handler(html, context) {
       const page = path.relative(root, context.filename);
+      if (page === 'site/index.html') return html.replaceAll('%SITE_URL%', site);
       const entry = page === 'index.html' ? 'app' : page === 'terminal.html' ? 'terminal' : undefined;
       if (!entry) return;
-      return html.replace('<base href="/" data-libertty-base>', `<base href="${base}" data-libertty-base>`)
+      // Only the landing page belongs in search results, so the documents inside the phone opt out.
+      return html.replace('<base href="/" data-libertty-base>', `<base href="${base}" data-libertty-base>\n  <meta name="robots" content="noindex">`)
         .replace(/src="\/src\/(main|terminal)\.ts"/, `src="/site/demo/${entry}.ts"`);
     } },
     closeBundle() {
@@ -83,6 +85,10 @@ function demoEntries(base: string): Plugin {
       writeFileSync(path.join(out, 'index.html'), readFileSync(path.join(out, 'site/index.html'), 'utf8').replaceAll('="../', '="./'));
       // Service workers would cache a backend that does not exist here.
       for (const name of ['site', 'sw.js', 'push-sw.js']) rmSync(path.join(out, name), { recursive: true, force: true });
+      copyFileSync(path.join(root, 'site/social.png'), path.join(out, 'social.png'));
+      // Crawlers skip the repository snapshot, which duplicates GitHub.
+      writeFileSync(path.join(out, 'robots.txt'), `User-agent: *\nDisallow: ${new URL(site).pathname}repo/\n\nSitemap: ${site}sitemap.xml\n`);
+      writeFileSync(path.join(out, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${site}</loc></url>\n</urlset>\n`);
     },
   };
 }
@@ -92,5 +98,5 @@ export default defineConfig(({ command }) => ({
   build: { outDir: 'dist-site', emptyOutDir: true, target: 'es2022', rolldownOptions: { input: { site: 'site/index.html', app: 'index.html', terminal: 'terminal.html' } } },
   optimizeDeps: { exclude: ['ghostty-web'] },
   server: { port: 5180, fs: { allow: [root] } },
-  plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/'), repository(), engine(), externalWasm(), terminalPreloads()],
+  plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/', process.env.LIBERTTY_SITE_URL || 'https://libertty.sh/'), repository(), engine(), externalWasm(), terminalPreloads()],
 }));
