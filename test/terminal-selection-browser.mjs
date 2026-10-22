@@ -27,6 +27,8 @@ try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const errors = [];
     await installWireObserver(context);
+    // Keep optional dictation setup from intercepting selection touches on clean backends.
+    await context.route(url => url.pathname.endsWith('/api/dictation'), route => route.fulfill({ json: { installed: true, available: true } }));
     await context.addInitScript(({ accessToken, theme }) => {
       localStorage.setItem('libertty.theme', JSON.stringify(theme));
       window.__copies = [];
