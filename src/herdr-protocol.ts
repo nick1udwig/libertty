@@ -1,20 +1,10 @@
-export type HerdrStatus = 'idle' | 'working' | 'blocked' | 'done' | 'unknown';
-export interface HerdrAgent {
-  terminalId: string; paneId: string; workspace: string; name: string; kind: string;
-  workspaceId?: string; tabId?: string;
-  status: HerdrStatus; sequence: number; completion?: number; cwd: string;
-}
-export interface HerdrSpace { id: string; name: string; terminalIds: string[]; selectedTerminalId?: string; cwd?: string; linkedWorktree?: boolean; checkoutPath?: string; repoKey?: string; repoName?: string }
-export interface HerdrSnapshot { version: string; protocol: number; agents: HerdrAgent[]; terminals: HerdrAgent[]; spaces: HerdrSpace[]; worktreeDirectory?: string }
+export type { HerdrAgent, HerdrMessage, HerdrSnapshot, HerdrSpace, HerdrStatus } from './generated/protocol.ts';
 export interface HerdrWorktrees {
   source: { repo_name: string; repo_root: string };
   worktrees: { path: string; branch?: string; label: string; is_bare: boolean; is_prunable: boolean; open_workspace_id?: string }[];
   directory?: string;
   branches?: string[];
 }
-export type HerdrMessage =
-  | { type: 'snapshot'; snapshot: HerdrSnapshot }
-  | { type: 'error'; message: string; terminalId?: string };
 
 export function herdrSession(value: unknown): string {
   if (value === undefined || value === null || value === '' || value === 'default') return '';

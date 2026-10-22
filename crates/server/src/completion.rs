@@ -265,10 +265,11 @@ impl CompletionProvider {
 }
 pub fn valid_completion_words(words: &[String]) -> bool {
     (2..=64).contains(&words.len())
-        && words
-            .iter()
-            .all(|w| utf16_len(w) <= 2000 && !w.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}'))
-        && utf16_len(&words.join(" ")) <= 4000
+        && words.iter().all(|w| {
+            utf16_len(w) <= libertty_engine::MAX_COMMAND
+                && !w.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
+        })
+        && utf16_len(&words.join(" ")) <= crate::protocol::MAX_LINE
         && !words[0].is_empty()
         && words[0]
             .chars()
@@ -296,7 +297,7 @@ pub fn completion_values(raw: &str) -> Vec<String> {
     let mut result = Vec::new();
     for value in raw.split('\0').map(str::trim_end) {
         if !value.is_empty()
-            && utf16_len(value) <= 2000
+            && utf16_len(value) <= libertty_engine::MAX_COMMAND
             && !value.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
             && !result.iter().any(|old| old == value)
         {

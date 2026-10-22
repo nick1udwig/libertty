@@ -112,7 +112,7 @@ pub(super) fn coalesce(
     let mut units = utf16_len(&input.text);
     while let Ok(next) = receive.try_recv() {
         let next_units = utf16_len(&next.text);
-        if !plain(&next) || units + next_units > 16000 {
+        if !plain(&next) || units + next_units > crate::protocol::MAX_TEXT {
             *deferred = Some(next);
             break;
         }

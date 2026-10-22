@@ -3,7 +3,7 @@ members = ["crates/engine", "crates/engine-wasm", "crates/server"]
 resolver = "2"
 
 [workspace.package]
-version = "0.2.7"
+version = "0.2.8"
 edition = "2024"
 license = "MIT"
 rust-version = "1.89"
@@ -12,6 +12,7 @@ rust-version = "1.89"
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = { version = "1.0.150", features = ["float_roundtrip"] }
 regex = "1.13.0"
+ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
 
 [profile.release]
 lto = true

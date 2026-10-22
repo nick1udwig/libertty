@@ -61,7 +61,7 @@ struct Handle {
 }
 #[derive(Default)]
 pub struct Hub {
-    resources: Arc<Mutex<HashMap<String, Arc<Handle>>>>,
+    resources: Arc<Mutex<HashMap<crate::herdr::ResourceKey, Arc<Handle>>>>,
     next: AtomicU64,
 }
 pub struct Subscription {
@@ -90,11 +90,7 @@ impl Hub {
         }) {
             return Err("Invalid terminal size.".into());
         }
-        let transport = target
-            .remote
-            .as_ref()
-            .map(|host| format!("{:p}", Arc::as_ptr(host)));
-        let key = json!([transport, target.path()?, terminal]).to_string();
+        let key = target.key(&terminal)?;
         let mut resources = self.resources.lock().unwrap();
         resources.retain(|_, resource| !resource.send.is_closed());
         let handle = resources.get(&key).cloned().unwrap_or_else(|| {
@@ -333,8 +329,8 @@ async fn run(
     target: Target,
     terminal: String,
     mut receive: mpsc::Receiver<Command>,
-    key: String,
-    resources: Weak<Mutex<HashMap<String, Arc<Handle>>>>,
+    key: crate::herdr::ResourceKey,
+    resources: Weak<Mutex<HashMap<crate::herdr::ResourceKey, Arc<Handle>>>>,
 ) {
     let mut viewers = Vec::<Viewer>::new();
     let mut running = None::<Running>;

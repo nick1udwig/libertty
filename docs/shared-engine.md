@@ -59,7 +59,7 @@ Known-buffer repair uses one request; an unknown browser-tracked line requires a
 The backend microphone obtains that snapshot directly through shell markers.
 SSH filesystem traversal, listing freshness, verified help ancestors and completion planning remain backend dependencies.
 
-See the [CI checks](ci.md), [workspace implementation](workspace.md) and historical [Rust migration report](rust-migration.md).
+See the [CI checks](ci.md) and [workspace implementation](workspace.md).
 The results below describe the earlier TypeScript consolidation and its retired client coordinator.
 
 ## Historical TypeScript consolidation results (`516ad8f`)

@@ -1,7 +1,8 @@
 use crate::{host::NativeHost, probes::ABORTED};
 use libertty_engine::{
     Request,
-    runtime::{Call, Reply, Runtime, Step},
+    runtime::{self, Call, Runtime},
+    types::Candidate,
 };
 use serde_json::Value;
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
@@ -28,18 +29,9 @@ impl Drop for Pending {
         self.0.cancel();
     }
 }
-struct EngineRequest {
-    runtime: Rc<RefCell<Runtime>>,
-    id: u32,
-}
 enum Executor {
     Shared(tokio::runtime::Handle),
     Owned(tokio::runtime::Runtime),
-}
-impl Drop for EngineRequest {
-    fn drop(&mut self) {
-        self.runtime.borrow_mut().cancel(self.id);
-    }
 }
 impl NativeEngine {
     pub fn new() -> Result<Self, String> {
@@ -88,68 +80,30 @@ impl NativeEngine {
                                     continue;
                                 }
                                 // Assign and start IDs in receiver order, before tasks can yield.
-                                let step = match runtime.borrow_mut().start_call(
-                                    id,
-                                    call,
-                                    clock.elapsed().as_secs_f64() * 1000.0,
-                                ) {
-                                    Step::Complete { value, .. } => {
-                                        let _ = result.send(Ok(value));
-                                        continue;
-                                    }
-                                    Step::Error { error, .. } => {
-                                        let _ = result.send(Err(error));
-                                        continue;
-                                    }
-                                    pending => pending,
-                                };
-                                let reset = generation.clone();
                                 let deadline = tokio::time::Instant::now()
                                     + std::time::Duration::from_millis(
                                         libertty_engine::runtime::REPAIR_BUDGET_MS as u64,
                                     );
-                                let runtime = runtime.clone();
-                                tokio::task::spawn_local(async move {
-                                    let _request = EngineRequest {
-                                        runtime: runtime.clone(),
-                                        id,
-                                    };
-                                    let work = async {
-                                        let host = &host;
-                                        let cancel = &cancel;
-                                        let mut step = step;
-                                        loop {
-                                            match step {
-                                                Step::Complete { value, .. } => return Ok(value),
-                                                Step::Error { error, .. } => return Err(error),
-                                                Step::Pending { callbacks, .. } => {
-                                                    let replies = futures::future::join_all(
-                                                        callbacks.into_iter().map(
-                                                            |callback| async move {
-                                                                let results = host
-                                                                    .engine_operations_until(
-                                                                        &callback.operations,
-                                                                        cancel,
-                                                                        Some(deadline),
-                                                                    )
-                                                                    .await;
-                                                                Reply::Native {
-                                                                    request: callback.request,
-                                                                    results,
-                                                                }
-                                                            },
-                                                        ),
-                                                    )
-                                                    .await;
-                                                    step = runtime.borrow_mut().resume(
-                                                        id,
-                                                        replies,
-                                                        clock.elapsed().as_secs_f64() * 1000.0,
-                                                    );
-                                                }
-                                            }
+                                let (host, facts) = (Rc::new(host), cancel.clone());
+                                let work = runtime::drive(
+                                    runtime.clone(),
+                                    id,
+                                    call,
+                                    move || clock.elapsed().as_secs_f64() * 1000.0,
+                                    move |operations| {
+                                        let (host, cancel) = (host.clone(), facts.clone());
+                                        async move {
+                                            host.engine_operations_until(
+                                                &operations,
+                                                &cancel,
+                                                Some(deadline),
+                                            )
+                                            .await
                                         }
-                                    };
+                                    },
+                                );
+                                let reset = generation.clone();
+                                tokio::task::spawn_local(async move {
                                     let value = tokio::select! { biased;
                                         _ = cancel.cancelled() => Err(ABORTED.into()),
                                         _ = reset.cancelled() => Err(ABORTED.into()),
@@ -188,17 +142,19 @@ impl NativeEngine {
         input: &str,
         host: &NativeHost,
         cancel: &CancellationToken,
-    ) -> Result<Value, String> {
-        self.run(
-            Call::Suggest {
-                input: input.into(),
-                catalog: Arc::new(host.catalog.clone()),
-                environment: host.environment.clone(),
-            },
-            host,
-            cancel,
-        )
-        .await
+    ) -> Result<Vec<Candidate>, String> {
+        let value = self
+            .run(
+                Call::Suggest {
+                    input: input.into(),
+                    catalog: Arc::new(host.catalog.clone()),
+                    environment: host.environment.clone(),
+                },
+                host,
+                cancel,
+            )
+            .await?;
+        serde_json::from_value(value).map_err(|error| error.to_string())
     }
     async fn run(
         &self,

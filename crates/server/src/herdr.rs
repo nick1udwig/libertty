@@ -16,32 +16,24 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 pub const MAX_LINE: usize = 8 * 1024 * 1024;
-pub fn session(value: Option<&Value>) -> Result<String, String> {
-    if value.is_none_or(Value::is_null)
-        || value
-            .and_then(Value::as_str)
-            .is_some_and(|s| s.is_empty() || s == "default")
-    {
-        return Ok(String::new());
-    }
-    let value = value
-        .and_then(Value::as_str)
-        .ok_or("Use a Herdr session name containing letters, numbers, hyphens or underscores.")?;
-    if value.is_empty()
-        || value.len() > 64
-        || !value.as_bytes()[0].is_ascii_alphanumeric()
-        || !value
-            .bytes()
-            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
-    {
-        return Err(
+pub fn session(value: Option<&str>) -> Result<String, String> {
+    match value {
+        None | Some("" | "default") => Ok(String::new()),
+        Some(value)
+            if value.len() <= 64
+                && value.as_bytes()[0].is_ascii_alphanumeric()
+                && value
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-') =>
+        {
+            Ok(value.into())
+        }
+        Some(_) => Err(
             "Use a Herdr session name containing letters, numbers, hyphens or underscores.".into(),
-        );
+        ),
     }
-    Ok(value.into())
 }
-pub fn name(value: &Value) -> Result<String, String> {
-    let value = value.as_str().ok_or("Enter a name of 1–100 characters.")?;
+pub fn name(value: &str) -> Result<String, String> {
     if value.trim().is_empty()
         || utf16_len(value) > 100
         || value.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
@@ -51,7 +43,7 @@ pub fn name(value: &Value) -> Result<String, String> {
     Ok(value.trim().into())
 }
 pub fn socket(session_name: &str, env: &Environment) -> Result<String, String> {
-    let session = session(Some(&json!(session_name)))?;
+    let session = session(Some(session_name))?;
     let setting = |key: &str| env.get(key).filter(|s| !s.is_empty()).cloned();
     if session.is_empty()
         && let Some(path) = setting("HERDR_SOCKET_PATH")
@@ -78,9 +70,8 @@ pub fn parse_command(command: &str, env: &Environment) -> Result<(String, String
     let session_name = session(
         captures
             .get(2)
-            .map(|m| json!(m.as_str()))
-            .or_else(|| env.get("HERDR_SESSION").map(|s| json!(s)))
-            .as_ref(),
+            .map(|m| m.as_str())
+            .or_else(|| env.get("HERDR_SESSION").map(String::as_str)),
     )?;
     Ok((captures[1].into(), session_name))
 }
@@ -94,6 +85,12 @@ pub struct Target {
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
     pub repairs: RepairSessions,
     pub shared: crate::herdr_metadata::Shared,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ResourceKey {
+    transport: Option<usize>,
+    socket: String,
+    item: String,
 }
 #[derive(Clone, Default)]
 pub struct RepairSessions(Arc<tokio::sync::Mutex<HashMap<String, RepairContext>>>);
@@ -202,7 +199,7 @@ impl Target {
         text: &str,
         services: crate::host::HostServices,
         cancel: &CancellationToken,
-    ) -> Result<Value, String> {
+    ) -> Result<Vec<libertty_engine::types::Candidate>, String> {
         let snapshot = self.snapshot().await?;
         let pane = snapshot
             .terminal(terminal)
@@ -250,11 +247,11 @@ impl Target {
         if self.shell_input(&pane.pane_id).await?.as_ref() != Some(&shell) {
             return Err("Terminal input changed. Try again.".into());
         }
-        Ok(json!({"candidates":candidates}))
+        Ok(candidates)
     }
     pub fn local(session_name: &str) -> Result<Self, String> {
         Ok(Self {
-            session: session(Some(&json!(session_name)))?,
+            session: session(Some(session_name))?,
             socket_path: None,
             binary: "herdr".into(),
             env: std::env::vars().collect(),
@@ -268,6 +265,14 @@ impl Target {
             .clone()
             .map(Ok)
             .unwrap_or_else(|| socket(&self.session, &self.env))
+    }
+    /// Identifies this Herdr server, and one of its panes or terminals when `item` is set, for shared hubs.
+    pub(crate) fn key(&self, item: &str) -> Result<ResourceKey, String> {
+        Ok(ResourceKey {
+            transport: self.remote.as_ref().map(|host| Arc::as_ptr(host) as usize),
+            socket: self.path()?,
+            item: item.into(),
+        })
     }
     pub async fn open(&self) -> Result<Connection, String> {
         if let Some(remote) = &self.remote {
@@ -396,7 +401,7 @@ impl Target {
                         return Ok(listing);
                     }
                     Action::NewWorktree { branch, .. } => {
-                        params["branch"] = json!(name(&json!(branch))?);
+                        params["branch"] = json!(name(&branch)?);
                         params["base"] = json!("HEAD");
                         "worktree.create"
                     }
@@ -498,7 +503,7 @@ impl Target {
                 cwd,
                 ..
             } => {
-                let label = name(&json!(label))?;
+                let label = name(&label)?;
                 if !array(&self.options().await?, "kinds").contains(&json!(kind)) {
                     return Err("Choose a supported agent type.".into());
                 }
@@ -535,7 +540,7 @@ impl Target {
                 let space = space.ok_or("This space has closed.")?;
                 self.request(
                     "workspace.rename",
-                    json!({"workspace_id":space.id,"label":name(&json!(label))?}),
+                    json!({"workspace_id":space.id,"label":name(&label)?}),
                 )
                 .await
             }
@@ -563,7 +568,7 @@ impl Target {
                     Action::Rename { name: label, .. } => {
                         self.request(
                             "pane.rename",
-                            json!({"pane_id":agent.pane_id,"label":name(&json!(label))?}),
+                            json!({"pane_id":agent.pane_id,"label":name(&label)?}),
                         )
                         .await
                     }
@@ -620,7 +625,7 @@ impl Target {
         };
         Ok(output
             .lines()
-            .filter(|branch| name(&json!(branch)).is_ok())
+            .filter(|branch| name(branch).is_ok())
             .map(str::to_owned)
             .collect())
     }
@@ -799,7 +804,7 @@ pub(crate) fn truthy(value: &Value) -> bool {
         _ => true,
     }
 }
-pub use crate::herdr_snapshot::{Snapshot, Space, Terminal, normalize};
+pub use crate::herdr_snapshot::{Snapshot, Space, Status, Terminal, normalize};
 
 pub fn response_preview(screen: &str) -> String {
     static COMPOSER: LazyLock<Regex> =
@@ -850,6 +855,7 @@ pub fn notification_body(cwd: &str, preview: &str) -> String {
 }
 
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "HerdrMessage"))]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Metadata {
     Snapshot { snapshot: Arc<Snapshot> },

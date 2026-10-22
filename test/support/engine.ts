@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import type { Candidate, Catalog } from '../../src/engine/types.ts';
+import type { Candidate, Catalog } from '../../src/protocol.ts';
 import { rustExample } from './rust-example.ts';
 
 /** Drive the production native engine instead of a duplicate JavaScript backend. */

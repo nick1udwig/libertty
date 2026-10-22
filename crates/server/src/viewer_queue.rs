@@ -83,18 +83,21 @@ impl Item {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::herdr::Metadata;
     #[test]
     fn concurrent_senders_preserve_the_byte_limit_and_release_reservations() {
         let (send, mut receive, slow) = channel();
-        let message = serde_json::json!({"bytes":"x".repeat(32 * 1024)});
-        let size = message.to_string().len();
+        let message = Transport::Metadata(Metadata::Error {
+            message: "x".repeat(32 * 1024),
+        });
+        let size = message.size();
         std::thread::scope(|scope| {
             for _ in 0..16 {
                 let send = send.clone();
                 let message = message.clone();
                 scope.spawn(move || {
                     for _ in 0..32 {
-                        if !send.send(Transport::Message(message.clone())) {
+                        if !send.send(message.clone()) {
                             break;
                         }
                     }
@@ -115,25 +118,30 @@ mod tests {
     #[tokio::test]
     async fn queued_and_in_flight_bytes_are_bounded_and_released() {
         let (send, mut receive, slow) = channel();
-        assert!(send.send(Transport::Message(
-            serde_json::json!({"bytes":"x".repeat(MAX_BYTES / 2)})
-        )));
+        let half = || {
+            Transport::Metadata(Metadata::Error {
+                message: "x".repeat(MAX_BYTES / 2),
+            })
+        };
+        assert!(send.send(half()));
         let item = receive.recv().await.unwrap();
         assert!(item.size() > MAX_BYTES / 2);
-        assert!(!send.send(Transport::Message(
-            serde_json::json!({"bytes":"x".repeat(MAX_BYTES / 2)})
-        )));
+        assert!(!send.send(half()));
         assert!(slow.is_cancelled());
         drop(item);
         assert_eq!(send.bytes.load(Ordering::Acquire), 0);
         let (send, mut receive, slow) = channel();
         for id in 0..100 {
-            assert!(send.send(Transport::Message(serde_json::json!({"id":id}))));
+            assert!(send.send(Transport::Metadata(Metadata::Error {
+                message: id.to_string()
+            })));
         }
         for id in 0..100 {
             let item = receive.recv().await.unwrap();
             match &item.message {
-                Transport::Message(value) => assert_eq!(value["id"], id),
+                Transport::Metadata(Metadata::Error { message }) => {
+                    assert_eq!(*message, id.to_string())
+                }
                 _ => panic!(),
             }
         }

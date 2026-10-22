@@ -1,8 +1,9 @@
-import { uploadIcon, downloadIcon } from './icons.ts';
+import { icon as svgIcon, uploadIcon, downloadIcon } from './icons.ts';
 import { transferAction, downloadPipeline } from './transfer-command.ts';
 import type { Terminal } from 'ghostty-web';
 import type { ShellState, RepairIntent, RepairResult } from './protocol.ts';
 import { InputLine } from './input-line.ts';
+import { saved } from './persistence.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
 import { cursorSteps } from './touch-cursor.ts';
 import { defaultReadingPhrases, readingPath, readingPhrases, readingPipeline, readingRequest } from './reading-request.ts';
@@ -62,7 +63,7 @@ export class InlineSuggestions {
     this.pendingPresentation = new TerminalPresentation(document.getElementById('terminal-viewport')!, () => {
       this.pendingCursor = undefined; this.render();
     }, false);
-    try { this.phrases = readingPhrases(JSON.parse(localStorage.getItem('libertty.readingPhrases') || 'null')); } catch {}
+    this.phrases = readingPhrases(saved<unknown>('readingPhrases', null));
     const setting = document.getElementById('auto-alternatives') as HTMLInputElement;
     try { this.autoOpen = localStorage.getItem('libertty.autoAlternatives') !== 'false' && localStorage.getItem('libertty.justRun') !== 'true'; } catch {}
     setting.checked = this.autoOpen;
@@ -434,7 +435,7 @@ export class InlineSuggestions {
     const icon = document.createElement('span'); icon.className = 'choice-icon'; icon.setAttribute('aria-hidden', 'true');
     const transfer = transferAction(text) || (downloadPipeline(text) ? 'download' : undefined);
     if (transfer) icon.innerHTML = transfer === 'upload' ? uploadIcon : downloadIcon;
-    else if (reading) icon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/></svg>';
+    else if (reading) icon.innerHTML = svgIcon('<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/>', 16);
     else if (literal) icon.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 3H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3v3l5-3h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"/></svg>';
     else icon.textContent = '›_';
     const label = document.createElement('span'); label.className = 'choice-command'; label.textContent = reading ? 'Read ' + reading : text;

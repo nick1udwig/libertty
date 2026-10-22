@@ -66,9 +66,13 @@ impl PasteMode {
     }
     pub fn paste(&self, text: &str) -> String {
         if self.enabled {
-            format!("\x1b[200~{text}\x1b[201~")
+            bracketed(text)
         } else {
             text.into()
         }
     }
+}
+/// Wrap text so the shell or program receives it as one literal paste.
+pub fn bracketed(text: &str) -> String {
+    format!("\x1b[200~{text}\x1b[201~")
 }

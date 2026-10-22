@@ -1,10 +1,7 @@
 use super::*;
 use libertty_engine::truncate_utf16;
 
-pub(super) async fn healthz(
-    app: &Arc<App>,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
+pub(super) async fn healthz(State(app): State<Arc<App>>) -> Result<Response<Body>, Failure> {
     Ok(json_response(
         StatusCode::OK,
         json!({"ok":true,"version":env!("CARGO_PKG_VERSION"),"commit":app.config.release.as_ref().and_then(|v| v["commit"].as_str()).or(option_env!("LIBERTTY_COMMIT")),"platform":if cfg!(target_os="macos"){"darwin"}else{std::env::consts::OS},"arch":if cfg!(target_arch="x86_64"){"x64"}else{std::env::consts::ARCH},"runtime":"rust","packaged":app.config.release.is_some() || option_env!("LIBERTTY_COMMIT").is_some()}),
@@ -12,21 +9,21 @@ pub(super) async fn healthz(
 }
 
 pub(super) async fn api_connect(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let mut owner = app.owner(req.headers());
     let input: crate::protocol::requests::Connect = typed_body(&mut req, 16384).await?;
     if owner.is_none() {
         if !token_matches(&app.token, input.token.as_deref().unwrap_or("")) {
-            return Err((
+            return Err(Failure(
                 StatusCode::UNAUTHORIZED,
                 "Enter the pairing token shown by your libertty server.".into(),
             ));
         }
         let mut registry = app.owners.lock().unwrap();
         if registry.len() >= 256 {
-            return Err((
+            return Err(Failure(
                 StatusCode::TOO_MANY_REQUESTS,
                 "The saved pairing limit has been reached. Revoke old pairings before adding more."
                     .into(),
@@ -44,9 +41,9 @@ pub(super) async fn api_connect(
                 .sessions
                 .lock()
                 .await
-                .contains_key(&format!("{owner}/{sid}"))
+                .contains_key(&SessionKey::new(&owner, &sid))
         {
-            return Err((
+            return Err(Failure(
                 StatusCode::NOT_FOUND,
                 "This terminal has ended. Open its saved host to reconnect.".into(),
             ));
@@ -76,41 +73,31 @@ pub(super) async fn api_connect(
 }
 
 pub(super) async fn api_notifications_key(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     _ctx: OwnerContext,
-    _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     ok(json!({"publicKey":app.notifications.public_key}))
 }
 
-pub(super) async fn api_dictation(
-    _app: &Arc<App>,
-    _ctx: OwnerContext,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
+pub(super) async fn api_dictation(_ctx: OwnerContext) -> Result<Response<Body>, Failure> {
     return ok(dictation::detect(&std::env::vars().collect()).await);
 }
 
-pub(super) async fn api_ping(
-    _app: &Arc<App>,
-    _ctx: OwnerContext,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
+pub(super) async fn api_ping(_ctx: OwnerContext) -> Result<Response<Body>, Failure> {
     ok(json!({"ok":true}))
 }
 
 pub(super) async fn api_sessions_get(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
-    _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sessions = app.sessions.lock().await;
-    ok(json!(sessions.iter().filter(|(key,_)|key.starts_with(&format!("{owner}/"))).map(|(_,t)|json!({"id":t.id,"name":t.name,"kind":if t.session.remote.is_some(){"ssh"}else{"http"},"state":t.session.state()})).collect::<Vec<_>>()))
+    ok(json!(sessions.iter().filter(|(key,_)|key.owner==owner).map(|(_,t)|json!({"id":t.id,"name":t.name,"kind":if t.session.remote.is_some(){"ssh"}else{"http"},"state":t.session.state()})).collect::<Vec<_>>()))
 }
 
 pub(super) async fn api_sessions_post(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -145,9 +132,8 @@ pub(super) async fn api_sessions_post(
 }
 
 pub(super) async fn api_sessions_close(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
-    _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sid = ctx.sid;
@@ -156,9 +142,8 @@ pub(super) async fn api_sessions_close(
 }
 
 pub(super) async fn api_ticket(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
-    _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sid = ctx.sid;
@@ -170,7 +155,7 @@ pub(super) async fn api_ticket(
         .get(&key)
         .is_some_and(|t| !t.session.files_only)
     {
-        return Err((StatusCode::NOT_FOUND, "Terminal not found.".into()));
+        return Err(Failure(StatusCode::NOT_FOUND, "Terminal not found.".into()));
     }
     let mut tickets = app.tickets.lock().unwrap();
     tickets.retain(|_, t| t.until >= Instant::now());
@@ -190,7 +175,6 @@ pub(super) async fn api_ticket(
 }
 
 pub(super) async fn api_dictation_install(
-    _app: &Arc<App>,
     ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -208,7 +192,6 @@ pub(super) async fn api_dictation_install(
 }
 
 pub(super) async fn api_reading_capture(
-    _app: &Arc<App>,
     ctx: ShellContext,
     req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -221,21 +204,17 @@ pub(super) async fn api_reading_capture(
         return ok(json!({"ok":true}));
     }
     if get {
-        let capture = session.reading_capture(id).ok_or((
+        let capture = session.reading_capture(id).ok_or(Failure(
             StatusCode::NOT_FOUND,
             "This captured output has expired. Run the command again to create a new snapshot."
                 .into(),
         ))?;
         return Ok(binary_response(capture.mime, capture.data));
     }
-    Err((StatusCode::NOT_FOUND, "Not found".into()))
+    Err(Failure(StatusCode::NOT_FOUND, "Not found".into()))
 }
 
-pub(super) async fn api_reading_file(
-    _app: &Arc<App>,
-    ctx: ShellContext,
-    _req: Request<Body>,
-) -> Result<Response<Body>, Failure> {
+pub(super) async fn api_reading_file(ctx: ShellContext) -> Result<Response<Body>, Failure> {
     let query = ctx.query;
     let session = ctx.session;
     let cwd = session.state().cwd;
@@ -247,20 +226,20 @@ pub(super) async fn api_reading_file(
 }
 
 pub(super) async fn api_suggest(
-    _app: &Arc<App>,
     ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let session = ctx.session;
     let input: crate::protocol::SuggestRequest = typed_body(&mut req, 16384).await?;
     let text = input.text.as_str();
-    return ok(bounded(async |cancel| session.suggest(text, cancel).await).await?);
+    ok(json!(
+        bounded(async |cancel| session.suggest(text, cancel).await).await?
+    ))
 }
 
 pub(super) async fn api_new(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: ShellContext,
-    _req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let sid = ctx.sid;

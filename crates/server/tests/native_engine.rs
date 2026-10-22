@@ -1,4 +1,7 @@
-use libertty_engine::{Request, types::Catalog};
+use libertty_engine::{
+    Request,
+    types::{Candidate, Catalog},
+};
 use libertty_server::{
     completion::shell_complete,
     engine::NativeEngine,
@@ -22,6 +25,9 @@ fn catalog(cwd: &str, commands: &[&str]) -> Catalog {
         commands: commands.iter().map(|s| (*s).into()).collect(),
         ..Catalog::default()
     }
+}
+fn candidates(value: Value) -> Vec<Candidate> {
+    serde_json::from_value(value).unwrap()
 }
 fn request(operation: &str, args: Value) -> Request {
     serde_json::from_value(json!({"operation":operation,"args":args})).unwrap()
@@ -87,7 +93,8 @@ async fn learned_schema_is_replaced_when_the_executable_changes() {
         engine
             .suggest("orbit first value", &host, &CancellationToken::new())
             .await
-            .unwrap()[0]["command"],
+            .unwrap()[0]
+            .command,
         "orbit --first value"
     );
     let replacement = root.path().join("replacement");
@@ -100,18 +107,14 @@ async fn learned_schema_is_replaced_when_the_executable_changes() {
         .suggest("orbit other value", &host, &CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(result[0]["command"], "orbit --other value", "{result}");
+    assert_eq!(result[0].command, "orbit --other value", "{result:?}");
     let result = engine
         .suggest("orbit first value", &host, &CancellationToken::new())
         .await
         .unwrap();
     assert!(
-        !result
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["command"] == "orbit --first value"),
-        "{result}"
+        !result.iter().any(|c| c.command == "orbit --first value"),
+        "{result:?}"
     );
 }
 
@@ -146,11 +149,11 @@ async fn reader_count_flags_repair_paths_without_gnu_help() {
             .await
             .unwrap();
         assert!(
-            result.as_array().unwrap().iter().any(|candidate| {
-                candidate["command"] == format!("head {option} 1 'docs/My Notes.txt'")
-                    && candidate["literal"] != true
+            result.iter().any(|candidate| {
+                candidate.command == format!("head {option} 1 'docs/My Notes.txt'")
+                    && candidate.literal != Some(true)
             }),
-            "{option}: {result}"
+            "{option}: {result:?}"
         );
     }
 }
@@ -187,7 +190,7 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
         )
         .await
         .unwrap();
-    assert_eq!(symbols[0]["command"], "echo $HOME", "{symbols}");
+    assert_eq!(symbols[0].command, "echo $HOME", "{symbols:?}");
     for (input, expected) in [
         ("vi skill dot md", "vi SKILL.md"),
         ("ls dash all", "ls --all"),
@@ -231,14 +234,12 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
             .unwrap();
         assert!(
             result
-                .as_array()
-                .unwrap()
                 .iter()
-                .any(|c| c["command"] == expected && c["literal"] != true),
-            "{input}: {result}"
+                .any(|c| c.command == expected && c.literal != Some(true)),
+            "{input}: {result:?}"
         );
         if input == "vi skill dot md" || input == "ls dash all" {
-            assert_eq!(result[0]["command"], expected, "{result}");
+            assert_eq!(result[0].command, expected, "{result:?}");
         }
     }
     for input in [
@@ -251,12 +252,8 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
             .await
             .unwrap();
         assert!(
-            result
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|c| c["literal"] == true),
-            "{input}: {result}"
+            result.iter().all(|c| c.literal == Some(true)),
+            "{input}: {result:?}"
         );
     }
     let help = engine
@@ -332,15 +329,13 @@ async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
             .unwrap();
         assert!(
             result
-                .as_array()
-                .unwrap()
                 .iter()
-                .any(|c| c["command"] == expected && c["literal"] != true),
-            "{input}: {result}"
+                .any(|c| c.command == expected && c.literal != Some(true)),
+            "{input}: {result:?}"
         );
-        assert_eq!(result.as_array().unwrap().last().unwrap()["command"], input);
+        assert_eq!(result.last().unwrap().command, input);
         if input == "Ls pipe through Grepp hello_world" {
-            assert_eq!(result[0]["command"], expected, "{result}");
+            assert_eq!(result[0].command, expected, "{result:?}");
         }
     }
     let candidate = libertty_engine::types::Candidate {
@@ -350,24 +345,24 @@ async fn compound_commands_repair_each_node_and_preserve_shell_expressions() {
         literal: None,
         evidence: Default::default(),
     };
-    let result = engine
-        .invoke(
-            request(
-                "suggest",
-                json!(["unknown pipe cat", host.catalog, host.environment]),
-            ),
-            &host,
-            &CancellationToken::new(),
-        )
-        .await
-        .unwrap();
+    let result = candidates(
+        engine
+            .invoke(
+                request(
+                    "suggest",
+                    json!(["unknown pipe cat", host.catalog, host.environment]),
+                ),
+                &host,
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap(),
+    );
     assert!(
         !result
-            .as_array()
-            .unwrap()
             .iter()
-            .any(|c| c["command"] == candidate.command && c["literal"] != true),
-        "{result}"
+            .any(|c| c.command == candidate.command && c.literal != Some(true)),
+        "{result:?}"
     );
 }
 
@@ -399,11 +394,9 @@ async fn history_and_validation_do_not_discard_live_filename_alternatives() {
     for command in ["cat my-notes", "cat my_notes"] {
         assert!(
             result
-                .as_array()
-                .unwrap()
                 .iter()
-                .any(|c| c["command"] == command && c["literal"] != true),
-            "{result}"
+                .any(|c| c.command == command && c.literal != Some(true)),
+            "{result:?}"
         );
     }
     host.catalog.paths = vec![
@@ -418,8 +411,8 @@ async fn history_and_validation_do_not_discard_live_filename_alternatives() {
         .suggest("cat notes", &host, &CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(result[0]["command"], "cat not.es");
-    assert_eq!(result.as_array().unwrap().last().unwrap()["literal"], true);
+    assert_eq!(result[0].command, "cat not.es");
+    assert_eq!(result.last().unwrap().literal, Some(true));
 }
 
 #[tokio::test]
@@ -464,18 +457,14 @@ async fn script_options_keep_their_scope_after_interpreter_options_and_multiple_
             .unwrap();
         assert!(
             result
-                .as_array()
-                .unwrap()
                 .iter()
-                .any(|c| c["command"] == expected && c["literal"] != true),
-            "{input}: {result}"
+                .any(|c| c.command == expected && c.literal != Some(true)),
+            "{input}: {result:?}"
         );
         assert!(
             result
-                .as_array()
-                .unwrap()
                 .iter()
-                .any(|c| c["command"] == input && c["literal"] == true)
+                .any(|c| c.command == input && c.literal == Some(true))
         );
     }
     let flags = host
@@ -519,8 +508,6 @@ async fn spelled_cd_uses_directory_discovery_without_catalog_paths() {
             .suggest(&phrase, &host, &CancellationToken::new())
             .await
             .unwrap();
-        let candidates: Vec<libertty_engine::types::Candidate> =
-            serde_json::from_value(candidates).unwrap();
         assert!(
             candidates
                 .iter()
@@ -592,17 +579,16 @@ async fn copy_destinations_resolve_spoken_components_against_existing_directorie
             .suggest(input, &host, &CancellationToken::new())
             .await
             .unwrap();
-        let candidates = candidates.as_array().unwrap();
         assert!(
             candidates.iter().any(|candidate| {
-                candidate["command"] == expected && candidate["literal"] != true
+                candidate.command == expected && candidate.literal != Some(true)
             }),
             "{input}: {candidates:?}"
         );
         assert!(
             candidates
                 .iter()
-                .any(|candidate| { candidate["command"] == input && candidate["literal"] == true })
+                .any(|candidate| { candidate.command == input && candidate.literal == Some(true) })
         );
     }
 }
@@ -638,11 +624,9 @@ async fn copy_destinations_preserve_literal_paths_and_exact_spelling() {
             .unwrap();
         assert!(
             candidates
-                .as_array()
-                .unwrap()
                 .iter()
-                .all(|candidate| { !candidate["command"].as_str().unwrap().contains("~/.herdr/") }),
-            "{input}: {candidates}"
+                .all(|candidate| { !candidate.command.as_str().contains("~/.herdr/") }),
+            "{input}: {candidates:?}"
         );
     }
     std::fs::create_dir_all(root.path().join(".herder/work trees/liber tty/latency")).unwrap();
@@ -655,9 +639,8 @@ async fn copy_destinations_preserve_literal_paths_and_exact_spelling() {
         .await
         .unwrap();
     let repaired =
-        libertty_engine::validation::simple_words(candidates[0]["command"].as_str().unwrap())
-            .unwrap();
-    assert_eq!(repaired.len(), 3, "{candidates}");
+        libertty_engine::validation::simple_words(candidates[0].command.as_str()).unwrap();
+    assert_eq!(repaired.len(), 3, "{candidates:?}");
     assert_eq!(repaired[2].value, "~/.herder/work trees/liber tty/latency/");
     assert!(repaired[2].home);
 }
@@ -950,44 +933,44 @@ async fn native_completion_and_suggestions_preserve_ambiguity_quotes_and_operand
         .await
         .unwrap();
     assert_eq!(
-        function_result[0]["command"], "orchard deploy release/east-zone",
-        "{function_result}"
+        function_result[0].command, "orchard deploy release/east-zone",
+        "{function_result:?}"
     );
     for input in [
         "orchard deploy release slash east dash zone",
         "orchard deploy R E L E A S E slash east dash zone",
     ] {
-        let result = engine
+        let result = candidates(
+            engine
+                .invoke(
+                    request("suggest", json!([input, catalog, env])),
+                    &host,
+                    &cancel,
+                )
+                .await
+                .unwrap(),
+        );
+        assert_eq!(result[0].command, "orchard deploy release/east-zone");
+        assert_eq!(result.last().unwrap().literal, Some(true));
+    }
+    let ambiguous = candidates(
+        engine
             .invoke(
-                request("suggest", json!([input, catalog, env])),
+                request("suggest", json!(["orchard deploy release", catalog, env])),
                 &host,
                 &cancel,
             )
             .await
-            .unwrap();
-        assert_eq!(result[0]["command"], "orchard deploy release/east-zone");
-        assert_eq!(result.as_array().unwrap().last().unwrap()["literal"], true);
-    }
-    let ambiguous = engine
-        .invoke(
-            request("suggest", json!(["orchard deploy release", catalog, env])),
-            &host,
-            &cancel,
-        )
-        .await
-        .unwrap();
+            .unwrap(),
+    );
     let commands: Vec<_> = ambiguous
-        .as_array()
-        .unwrap()
         .iter()
         .filter(|c| {
-            c["changes"]
-                .as_array()
-                .unwrap()
+            c.changes
                 .iter()
-                .any(|v| v.as_str().unwrap().starts_with("Completion →"))
+                .any(|change| change.to_string().starts_with("Completion →"))
         })
-        .map(|c| c["command"].as_str().unwrap())
+        .map(|c| c.command.as_str())
         .collect();
     assert_eq!(
         commands,
@@ -996,15 +979,17 @@ async fn native_completion_and_suggestions_preserve_ambiguity_quotes_and_operand
             "orchard deploy release/west-zone"
         ]
     );
-    let quoted = engine
-        .invoke(
-            request("suggest", json!(["orchard deploy 'release'", catalog, env])),
-            &host,
-            &cancel,
-        )
-        .await
-        .unwrap();
-    assert_eq!(quoted[0]["command"], "orchard deploy 'release'");
+    let quoted = candidates(
+        engine
+            .invoke(
+                request("suggest", json!(["orchard deploy 'release'", catalog, env])),
+                &host,
+                &cancel,
+            )
+            .await
+            .unwrap(),
+    );
+    assert_eq!(quoted[0].command, "orchard deploy 'release'");
     let sentinel = dir.path().join("executed");
     shell_complete(
         &host.services.pool,
@@ -1020,13 +1005,13 @@ async fn native_completion_and_suggestions_preserve_ambiguity_quotes_and_operand
     .await
     .unwrap();
     assert!(!sentinel.exists());
-    assert!(!ambiguous.to_string().contains("private chatter"));
+    assert!(!format!("{ambiguous:?}").contains("private chatter"));
     std::fs::write(&definitions, "_orchard(){ if [[ ${COMP_WORDS[COMP_CWORD]} == ea ]]; then COMPREPLY=('eager'); else COMPREPLY=('east-zone'); fi; }; complete -F _orchard orchard\n").unwrap();
     let broad = engine
         .suggest("orchard deploy east zone", &host, &cancel)
         .await
         .unwrap();
-    assert_eq!(broad[0]["command"], "orchard deploy east-zone", "{broad}");
+    assert_eq!(broad[0].command, "orchard deploy east-zone", "{broad:?}");
     let other = NativeEngine::new().unwrap();
     let cached = other
         .invoke(

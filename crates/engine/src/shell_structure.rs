@@ -30,7 +30,7 @@ pub struct CommandList<'a> {
 }
 
 pub fn command_list(input: &str) -> Option<CommandList<'_>> {
-    if utf16_len(input) > 2000 || input.contains(['\n', '\r']) {
+    if utf16_len(input) > crate::MAX_COMMAND || input.contains(['\n', '\r']) {
         return None;
     }
     let chars: Vec<_> = input.char_indices().collect();

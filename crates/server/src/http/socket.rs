@@ -9,7 +9,7 @@ pub(super) async fn upgrade(req: Request<Body>) -> Result<WebSocketUpgrade, Fail
     let (mut parts, _) = req.into_parts();
     Ok(WebSocketUpgrade::from_request_parts(&mut parts, &())
         .await
-        .map_err(|_| (StatusCode::FORBIDDEN, "Forbidden".into()))?
+        .map_err(|_| Failure(StatusCode::FORBIDDEN, "Forbidden".into()))?
         .protocols([wire::GZIP, wire::GZIP_FAST, wire::BINARY])
         .max_message_size(128 * 1024)
         .max_frame_size(128 * 1024))
@@ -88,18 +88,14 @@ impl Input<'_> {
                 match message {
                     ViewerMessage::Ping => return Ok(true),
                     ViewerMessage::NotificationPresence { device, focused } => {
-                        let _ =
-                            app.notifications
-                                .presence(connection, owner, &json!(device), focused);
+                        let _ = app
+                            .notifications
+                            .presence(connection, owner, &device, focused);
                     }
                     ViewerMessage::NotificationAck { device, event } => {
-                        let _ = app.notifications.acknowledge(
-                            owner,
-                            &json!(device),
-                            source,
-                            target,
-                            &event,
-                        );
+                        let _ = app
+                            .notifications
+                            .acknowledge(owner, &device, source, target, &event);
                     }
                 }
             }
@@ -123,7 +119,7 @@ impl Input<'_> {
         if matches!(self, Self::Metadata { .. }) {
             return Ok(false);
         }
-        match wire::decode_as::<ClientMessage>(bytes).map_err(|_| "Invalid wire message")? {
+        match wire::decode(bytes).map_err(|_| "Invalid wire message")? {
             wire::Incoming::Audio(audio) => {
                 self.audio(audio);
                 Ok(false)
@@ -218,16 +214,14 @@ async fn close(sender: &mut Sender, code: u16, reason: &str, deadline: Option<Du
     .await;
 }
 fn encode(message: &Transport, mode: wire::Mode) -> Message {
-    let encoded = match message {
-        Transport::Server(message) => wire::encode_server(message, mode),
-        Transport::Message(value) => wire::encode(value, mode),
-        Transport::Close(..) => unreachable!("close frames are sent separately"),
-    };
-    if encoded.binary {
-        Message::Binary(encoded.bytes.into())
-    } else {
-        Message::Text(String::from_utf8(encoded.bytes).expect("wire UTF-8").into())
-    }
+    Message::Binary(
+        match message {
+            Transport::Server(message) => wire::encode_server(message, mode),
+            Transport::Metadata(message) => wire::encode_json(message, mode),
+            Transport::Close(..) => unreachable!("close frames are sent separately"),
+        }
+        .into(),
+    )
 }
 
 pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output, policy: Policy) {

@@ -1,4 +1,4 @@
-import type { FileEntry } from './file-protocol.ts';
+import type { FileEntry } from './generated/protocol.ts';
 export type FileSort = 'name' | 'date' | 'size' | 'kind';
 export interface FileOptions { sort: FileSort; descending: boolean; hidden: boolean }
 export function sortedFiles(entries: FileEntry[], options: FileOptions, query = '') {

@@ -1,5 +1,5 @@
 import type { FileClient } from './file-browser.ts';
-import type { TransferRequest } from './transfer-protocol.ts';
+import type { TransferRequest } from './generated/protocol.ts';
 
 /** A visible picker remains available when mobile browsers require a fresh tap. */
 export function transferView(request: TransferRequest, client: FileClient, acknowledge: () => Promise<void>, download: () => Promise<void>) {

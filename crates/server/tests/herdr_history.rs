@@ -1,4 +1,4 @@
-use libertty_server::herdr_history::Hub;
+use libertty_server::herdr_poll::HistoryHub as Hub;
 use std::time::Duration;
 #[path = "support/herdr.rs"]
 mod support;
@@ -23,7 +23,7 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .unwrap()
             .as_ref()
             .unwrap()
-            .value()["text"],
+            .as_ref(),
         second
             .receive
             .borrow()
@@ -31,7 +31,7 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .unwrap()
             .as_ref()
             .unwrap()
-            .value()["text"]
+            .as_ref()
     );
     assert!(
         tokio::time::timeout(Duration::from_millis(220), second.receive.changed())
@@ -52,7 +52,7 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .unwrap()
             .as_ref()
             .unwrap()
-            .value()["text"],
+            .as_ref(),
         "Live Herdr terminal"
     );
     assert!(
@@ -72,7 +72,7 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .unwrap()
             .as_ref()
             .unwrap()
-            .value()["text"],
+            .as_ref(),
         "changed 界😀"
     );
     assert_eq!(
@@ -83,7 +83,7 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .unwrap()
             .as_ref()
             .unwrap()
-            .value()["text"],
+            .as_ref(),
         "Live Herdr terminal"
     );
     drop(first);
@@ -104,7 +104,7 @@ async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_l
             .unwrap()
             .as_ref()
             .unwrap()
-            .value()["text"],
+            .as_ref(),
         "changed 界😀"
     );
 }
@@ -176,4 +176,41 @@ async fn a_live_frame_stream_replaces_interval_polling_with_reads_on_activity() 
     hub.activity(&fixture.target, "w1:p0", false);
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert!(reads() >= quiet + 4, "polling resumes: {}", reads());
+}
+
+#[tokio::test]
+async fn viewers_of_one_pane_share_one_shell_check() {
+    let fixture = support::Fixture::new().await;
+    fixture
+        .reading_shell
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    let hub = libertty_server::herdr_poll::InputHub::default();
+    let mut first = hub
+        .subscribe(fixture.target.clone(), "w1:p0".into())
+        .unwrap();
+    first.receive.changed().await.unwrap();
+    let second = hub
+        .subscribe(fixture.target.clone(), "w1:p0".into())
+        .unwrap();
+    let (shell, _) = second.receive.borrow().clone().unwrap().unwrap();
+    assert_eq!(
+        shell.unwrap().cwd,
+        "/workspace",
+        "a new viewer replays the latest check"
+    );
+    let checks = || {
+        fixture
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|request| request["method"] == "pane.process_info")
+            .count()
+    };
+    tokio::time::sleep(Duration::from_millis(650)).await;
+    assert!(
+        checks() <= 4,
+        "two viewers must share one check: {}",
+        checks()
+    );
 }

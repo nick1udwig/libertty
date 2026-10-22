@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { herdrCache } from '../src/herdr-cache.ts';
 
 const agent = { terminalId: 'term_0', paneId: 'pane_0', workspace: 'Project', name: 'Agent', kind: 'Codex', cwd: '/project', status: 'working', sequence: 3, workspaceId: 'space_0' };
-const snapshot = { version: '0.9.3', protocol: 1, agents: [agent], terminals: [agent], spaces: [{ id: 'space_0', name: 'Project', terminalIds: ['term_0'], selectedTerminalId: 'term_0', repoKey: '/project/.git', repoName: 'project' }] };
+const snapshot = { version: '0.9.3', protocol: 1, agents: [agent], terminals: [agent], spaces: [{ id: 'space_0', name: 'Project', terminalIds: ['term_0'], cwd: '/project', selectedTerminalId: 'term_0', repoKey: '/project/.git', repoName: 'project' }] };
 test('Herdr navigation cache preserves typed metadata and excludes opaque content', () => {
   assert.deepEqual(herdrCache(snapshot), snapshot);
   assert.deepEqual(herdrCache({ ...snapshot, token: 'secret', history: 'private', agents: [{ ...agent, token: 'secret' }], spaces: [{ ...snapshot.spaces[0], history: 'private' }] }), snapshot);

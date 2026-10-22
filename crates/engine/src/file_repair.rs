@@ -175,7 +175,7 @@ pub async fn repair_input_file(
         .filter(|p| !p.is_empty())
         .map(str::to_owned)
         .collect();
-    if parts.is_empty() || parts.len() > 16 || utf16_len(&operand) > 2000 {
+    if parts.is_empty() || parts.len() > 16 || utf16_len(&operand) > crate::MAX_COMMAND {
         return Ok(Some(vec![]));
     }
     let request = PathInput {

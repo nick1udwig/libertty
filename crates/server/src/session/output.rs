@@ -302,12 +302,15 @@ mod tests {
         let first = replay.next().unwrap();
         assert!(first.bytes <= BATCH);
         assert_eq!(&*first.data, chunks[..first.seq as usize].concat());
-        let encoded = crate::wire::encode(
-            &serde_json::json!({"type":"output","seq":first.seq,"data":first.data}),
+        let encoded = crate::wire::encode_server(
+            &crate::protocol::ServerMessage::Output {
+                seq: first.seq,
+                data: first.data.clone(),
+            },
             crate::wire::Mode::Gzip,
         );
         assert_ne!(
-            encoded.bytes[3] & 128,
+            encoded[3] & 128,
             0,
             "Small replay chunks should share one compressible message"
         );

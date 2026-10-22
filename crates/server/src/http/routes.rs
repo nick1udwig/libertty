@@ -1,5 +1,8 @@
 use super::*;
-use axum::http::{Uri, request::Parts};
+use axum::{
+    http::{Uri, request::Parts},
+    routing::{any, get, post},
+};
 #[path = "routes/files.rs"]
 mod files_routes;
 #[path = "routes/herdr.rs"]
@@ -13,15 +16,6 @@ mod ssh_routes;
 #[path = "routes/terminal.rs"]
 mod terminal_routes;
 
-struct ApiError(Failure);
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response<Body> {
-        error(self.0.0, self.0.1)
-    }
-}
-fn respond(result: Result<Response<Body>, Failure>) -> Response<Body> {
-    result.unwrap_or_else(|failure| ApiError(failure).into_response())
-}
 fn ok(value: Value) -> Result<Response<Body>, Failure> {
     Ok(json_response(StatusCode::OK, value))
 }
@@ -37,7 +31,7 @@ struct OwnerContext {
     owner: String,
     query: HashMap<String, String>,
     sid: String,
-    key: String,
+    key: SessionKey,
 }
 struct FileContext {
     owner: String,
@@ -49,7 +43,7 @@ struct ShellContext {
     owner: String,
     query: HashMap<String, String>,
     sid: String,
-    key: String,
+    key: SessionKey,
     session: Arc<Session>,
 }
 struct HerdrContext {
@@ -60,17 +54,17 @@ struct HerdrContext {
     session_name: String,
 }
 impl FromRequestParts<Arc<App>> for OwnerContext {
-    type Rejection = ApiError;
-    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
+    type Rejection = Failure;
+    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, Failure> {
         let owner = app.owner(&parts.headers).ok_or_else(|| {
-            ApiError((
+            Failure(
                 StatusCode::UNAUTHORIZED,
                 "Connect to your shell first.".into(),
-            ))
+            )
         })?;
-        let query = parse_query(&parts.uri).map_err(ApiError)?;
-        let sid = session_id_text(query.get("session").map(String::as_str)).map_err(ApiError)?;
-        let key = format!("{owner}/{sid}");
+        let query = parse_query(&parts.uri)?;
+        let sid = session_id_text(query.get("session").map(String::as_str))?;
+        let key = SessionKey::new(&owner, &sid);
         Ok(Self {
             owner,
             query,
@@ -80,8 +74,8 @@ impl FromRequestParts<Arc<App>> for OwnerContext {
     }
 }
 impl FromRequestParts<Arc<App>> for FileContext {
-    type Rejection = ApiError;
-    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
+    type Rejection = Failure;
+    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, Failure> {
         let OwnerContext {
             owner,
             query,
@@ -89,15 +83,9 @@ impl FromRequestParts<Arc<App>> for FileContext {
             key,
         } = OwnerContext::from_request_parts(parts, app).await?;
         if sid != "default" && !app.sessions.lock().await.contains_key(&key) {
-            return Err(ApiError((
-                StatusCode::NOT_FOUND,
-                "Terminal not found.".into(),
-            )));
+            return Err(Failure(StatusCode::NOT_FOUND, "Terminal not found.".into()));
         }
-        let session = app
-            .get_session(&owner, &sid, "Terminal", false)
-            .await
-            .map_err(ApiError)?;
+        let session = app.get_session(&owner, &sid, "Terminal", false).await?;
         Ok(Self {
             owner,
             query,
@@ -107,8 +95,8 @@ impl FromRequestParts<Arc<App>> for FileContext {
     }
 }
 impl FromRequestParts<Arc<App>> for ShellContext {
-    type Rejection = ApiError;
-    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
+    type Rejection = Failure;
+    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, Failure> {
         let FileContext {
             owner,
             query,
@@ -116,9 +104,9 @@ impl FromRequestParts<Arc<App>> for ShellContext {
             session,
         } = FileContext::from_request_parts(parts, app).await?;
         if session.files_only {
-            return Err(ApiError(fail("Open a terminal tab for shell actions.")));
+            return Err(fail("Open a terminal tab for shell actions."));
         }
-        let key = format!("{owner}/{sid}");
+        let key = SessionKey::new(&owner, &sid);
         Ok(Self {
             owner,
             query,
@@ -129,45 +117,44 @@ impl FromRequestParts<Arc<App>> for ShellContext {
     }
 }
 impl FromRequestParts<Arc<App>> for HerdrContext {
-    type Rejection = ApiError;
-    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, ApiError> {
+    type Rejection = Failure;
+    async fn from_request_parts(parts: &mut Parts, app: &Arc<App>) -> Result<Self, Failure> {
         let OwnerContext { owner, query, .. } =
             OwnerContext::from_request_parts(parts, app).await?;
-        let session_name = herdr::session(query.get("herdrSession").map(|s| json!(s)).as_ref())
-            .map_err(|error| ApiError(fail(error)))?;
+        let session_name =
+            herdr::session(query.get("herdrSession").map(String::as_str)).map_err(fail)?;
         let source = query
             .get("herdrSource")
             .filter(|source| !source.is_empty())
             .cloned()
             .unwrap_or_default();
         let disconnected = || {
-            ApiError((StatusCode::NOT_FOUND, "This Herdr connection has ended. Reconnect from the host menu, or run herdr again in its source terminal.".into()))
+            Failure(StatusCode::NOT_FOUND, "This Herdr connection has ended. Reconnect from the host menu, or run herdr again in its source terminal.".into())
         };
         let target = if source.is_empty() {
-            let key = format!("{owner}//{session_name}");
+            let key = (SessionKey::new(&owner, ""), session_name.clone());
             let mut targets = app.herdr_targets.lock().unwrap();
             if let Some(target) = targets.get(&key) {
                 target.clone()
             } else {
-                let target =
-                    herdr::Target::local(&session_name).map_err(|error| ApiError(fail(error)))?;
+                let target = herdr::Target::local(&session_name).map_err(fail)?;
                 targets.insert(key, target.clone());
                 target
             }
         } else {
-            let source = session_id_text(Some(&source)).map_err(ApiError)?;
+            let source = session_id_text(Some(&source))?;
             if !app
                 .sessions
                 .lock()
                 .await
-                .contains_key(&format!("{owner}/{source}"))
+                .contains_key(&SessionKey::new(&owner, &source))
             {
                 return Err(disconnected());
             }
             app.herdr_targets
                 .lock()
                 .unwrap()
-                .get(&format!("{owner}/{source}/{session_name}"))
+                .get(&(SessionKey::new(&owner, &source), session_name.clone()))
                 .cloned()
                 .ok_or_else(disconnected)?
         };
@@ -180,81 +167,109 @@ impl FromRequestParts<Arc<App>> for HerdrContext {
         })
     }
 }
-async fn socket(State(app): State<Arc<App>>, req: Request<Body>) -> Response<Body> {
-    respond(match parse_query(req.uri()) {
-        Ok(query) => websocket(&app, req, &query).await,
-        Err(error) => Err(error),
-    })
+async fn socket(
+    State(app): State<Arc<App>>,
+    req: Request<Body>,
+) -> Result<Response<Body>, Failure> {
+    let query = parse_query(req.uri())?;
+    websocket(&app, req, &query).await
 }
-async fn herdr_socket(State(app): State<Arc<App>>, req: Request<Body>) -> Response<Body> {
-    respond(match parse_query(req.uri()) {
-        Ok(query) => herdr_websocket(&app, req, &query).await,
-        Err(error) => Err(error),
-    })
-}
-macro_rules! endpoint {
-    ($handler:path) => {
-        |State(app): State<Arc<App>>, req: Request<Body>| async move {
-            respond($handler(&app, req).await)
-        }
-    };
-    ($handler:path, $context:ty) => {
-        |State(app): State<Arc<App>>, ctx: $context, req: Request<Body>| async move {
-            respond($handler(&app, ctx, req).await)
-        }
-    };
-}
-macro_rules! routes {
-    ($($path:literal => $method:ident($handler:path $(, $context:ty)?) $(, $next:ident($next_handler:path $(, $next_context:ty)?))*;)*) => {
-        Router::new()$(.route($path, axum::routing::$method(endpoint!($handler $(, $context)?))$(.$next(endpoint!($next_handler $(, $next_context)?)))*))*
-    };
+async fn herdr_socket(
+    State(app): State<Arc<App>>,
+    req: Request<Body>,
+) -> Result<Response<Body>, Failure> {
+    let query = parse_query(req.uri())?;
+    herdr_websocket(&app, req, &query).await
 }
 pub(super) fn router() -> Router<Arc<App>> {
-    routes! {
-        "/healthz" => get(terminal_routes::healthz);
-        "/api/files/download" => get(files_routes::api_files_download_download),
-            post(files_routes::api_files_download, FileContext);
-        "/api/connect" => post(terminal_routes::api_connect);
-        "/api/notifications/key" => get(terminal_routes::api_notifications_key, OwnerContext);
-        "/api/ssh/probe" => post(ssh_routes::api_ssh_probe, OwnerContext);
-        "/api/dictation" => get(terminal_routes::api_dictation, OwnerContext);
-        "/api/ping" => get(terminal_routes::api_ping, OwnerContext);
-        "/api/keychain" => get(keychain_routes::api_keychain, OwnerContext),
-            post(keychain_routes::api_keychain, OwnerContext);
-        "/api/sessions" => get(terminal_routes::api_sessions_get, OwnerContext),
-            post(terminal_routes::api_sessions_post, OwnerContext);
-        "/api/sessions/close" => post(terminal_routes::api_sessions_close, OwnerContext);
-        "/api/ticket" => post(terminal_routes::api_ticket, OwnerContext);
-        "/api/plugins/read" => get(files_routes::api_plugins_read, FileContext);
-        "/api/files/list" => get(files_routes::api_files_list, FileContext);
-        "/api/files/mkdir" => post(files_routes::api_files_mkdir, FileContext);
-        "/api/files/action" => post(files_routes::api_files_action, FileContext);
-        "/api/images/upload" => post(files_routes::api_images_upload, FileContext);
-        "/api/files/upload" => post(files_routes::api_files_upload, FileContext);
-        "/api/files/transfer" => post(files_routes::api_files_transfer, FileContext);
-        "/api/dictation/install" => post(terminal_routes::api_dictation_install, ShellContext);
-        "/api/reading/capture" => get(terminal_routes::api_reading_capture, ShellContext),
-            delete(terminal_routes::api_reading_capture, ShellContext);
-        "/api/reading/file" => get(terminal_routes::api_reading_file, ShellContext);
-        "/api/ssh/captured" => post(ssh_routes::api_ssh_captured, ShellContext);
-        "/api/suggest" => post(terminal_routes::api_suggest, ShellContext);
-        "/api/new" => post(terminal_routes::api_new, ShellContext);
-        "/api/herdr/connect" => post(herdr_routes::api_herdr_connect, OwnerContext);
-        "/api/herdr/captured" => post(herdr_routes::api_herdr_captured, OwnerContext);
-        "/api/herdr/notifications" => post(herdr_routes::api_herdr_notifications, HerdrContext);
-        "/api/herdr/snapshot" => get(herdr_routes::api_herdr_snapshot, HerdrContext);
-        "/api/herdr/images/upload" => post(herdr_routes::api_herdr_images_upload, HerdrContext);
-        "/api/herdr/options" => get(herdr_routes::api_herdr_options, HerdrContext);
-        "/api/herdr/reading" => post(herdr_routes::api_herdr_reading, HerdrContext);
-        "/api/herdr/reading/file" => get(herdr_routes::api_herdr_reading_file, HerdrContext);
-        "/api/herdr/reading/capture" => get(herdr_routes::api_herdr_reading_capture, HerdrContext),
-            delete(herdr_routes::api_herdr_reading_capture, HerdrContext);
-        "/api/herdr/action" => post(herdr_routes::api_herdr_action, HerdrContext);
-        "/api/herdr/ticket" => post(herdr_routes::api_herdr_ticket, HerdrContext);
-        "/api/notifications/subscribe" => post(notifications_routes::api_notifications_subscribe, OwnerContext);
-        "/api/notifications/unsubscribe" => post(notifications_routes::api_notifications_unsubscribe, OwnerContext);
-        "/api/notifications/unwatch" => post(notifications_routes::api_notifications_unwatch, OwnerContext);
-    }
-    .route("/ws", axum::routing::any(socket))
-    .route("/herdr/ws", axum::routing::any(herdr_socket))
+    Router::new()
+        .route("/healthz", get(terminal_routes::healthz))
+        .route(
+            "/api/files/download",
+            get(files_routes::api_files_download_download).post(files_routes::api_files_download),
+        )
+        .route("/api/connect", post(terminal_routes::api_connect))
+        .route(
+            "/api/notifications/key",
+            get(terminal_routes::api_notifications_key),
+        )
+        .route("/api/ssh/probe", post(ssh_routes::api_ssh_probe))
+        .route("/api/dictation", get(terminal_routes::api_dictation))
+        .route("/api/ping", get(terminal_routes::api_ping))
+        .route(
+            "/api/keychain",
+            get(keychain_routes::api_keychain).post(keychain_routes::api_keychain),
+        )
+        .route(
+            "/api/sessions",
+            get(terminal_routes::api_sessions_get).post(terminal_routes::api_sessions_post),
+        )
+        .route(
+            "/api/sessions/close",
+            post(terminal_routes::api_sessions_close),
+        )
+        .route("/api/ticket", post(terminal_routes::api_ticket))
+        .route("/api/plugins/read", get(files_routes::api_plugins_read))
+        .route("/api/files/list", get(files_routes::api_files_list))
+        .route("/api/files/mkdir", post(files_routes::api_files_mkdir))
+        .route("/api/files/action", post(files_routes::api_files_action))
+        .route("/api/images/upload", post(files_routes::api_images_upload))
+        .route("/api/files/upload", post(files_routes::api_files_upload))
+        .route(
+            "/api/files/transfer",
+            post(files_routes::api_files_transfer),
+        )
+        .route(
+            "/api/dictation/install",
+            post(terminal_routes::api_dictation_install),
+        )
+        .route(
+            "/api/reading/capture",
+            get(terminal_routes::api_reading_capture).delete(terminal_routes::api_reading_capture),
+        )
+        .route("/api/reading/file", get(terminal_routes::api_reading_file))
+        .route("/api/ssh/captured", post(ssh_routes::api_ssh_captured))
+        .route("/api/suggest", post(terminal_routes::api_suggest))
+        .route("/api/new", post(terminal_routes::api_new))
+        .route("/api/herdr/connect", post(herdr_routes::api_herdr_connect))
+        .route(
+            "/api/herdr/captured",
+            post(herdr_routes::api_herdr_captured),
+        )
+        .route(
+            "/api/herdr/notifications",
+            post(herdr_routes::api_herdr_notifications),
+        )
+        .route("/api/herdr/snapshot", get(herdr_routes::api_herdr_snapshot))
+        .route(
+            "/api/herdr/images/upload",
+            post(herdr_routes::api_herdr_images_upload),
+        )
+        .route("/api/herdr/options", get(herdr_routes::api_herdr_options))
+        .route("/api/herdr/reading", post(herdr_routes::api_herdr_reading))
+        .route(
+            "/api/herdr/reading/file",
+            get(herdr_routes::api_herdr_reading_file),
+        )
+        .route(
+            "/api/herdr/reading/capture",
+            get(herdr_routes::api_herdr_reading_capture)
+                .delete(herdr_routes::api_herdr_reading_capture),
+        )
+        .route("/api/herdr/action", post(herdr_routes::api_herdr_action))
+        .route("/api/herdr/ticket", post(herdr_routes::api_herdr_ticket))
+        .route(
+            "/api/notifications/subscribe",
+            post(notifications_routes::api_notifications_subscribe),
+        )
+        .route(
+            "/api/notifications/unsubscribe",
+            post(notifications_routes::api_notifications_unsubscribe),
+        )
+        .route(
+            "/api/notifications/unwatch",
+            post(notifications_routes::api_notifications_unwatch),
+        )
+        .route("/ws", any(socket))
+        .route("/herdr/ws", any(herdr_socket))
 }

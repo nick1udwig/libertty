@@ -331,7 +331,7 @@ fn expand(input: &str, general: bool, keep_flag_names: bool) -> String {
 }
 pub fn symbol_alternatives(input: &str) -> Vec<String> {
     let words = raw_words(input);
-    if words.len() > 64 || utf16_len(input) > 2000 || input.contains(['\n', '\r']) {
+    if words.len() > 64 || utf16_len(input) > crate::MAX_COMMAND || input.contains(['\n', '\r']) {
         return vec![];
     }
     #[derive(Clone)]

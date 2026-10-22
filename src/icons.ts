@@ -1,4 +1,5 @@
-const svg = (body: string) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+export const icon = (body: string, size = 18, stroke = 1.8) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const svg = (body: string) => icon(body);
 export const uploadIcon = svg('<path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5"/>');
 export const downloadIcon = svg('<path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4"/>');
 export const folderIcon = svg('<path d="M3 7V5h6l3 3h9v12H3Z"/>');

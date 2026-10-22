@@ -54,7 +54,18 @@ struct WireSnapshot {
     version: Option<Value>,
     protocol: Option<Value>,
 }
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "HerdrStatus"))]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    Idle,
+    Working,
+    Blocked,
+    Done,
+    Unknown,
+}
 #[derive(Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields, rename = "HerdrAgent"))]
 #[serde(rename_all = "camelCase")]
 pub struct Terminal {
     pub terminal_id: String,
@@ -66,13 +77,14 @@ pub struct Terminal {
     pub workspace: String,
     pub name: String,
     pub kind: String,
-    pub status: String,
+    pub status: Status,
     pub sequence: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completion: Option<f64>,
     pub cwd: String,
 }
 #[derive(Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields, rename = "HerdrSpace"))]
 #[serde(rename_all = "camelCase")]
 pub struct Space {
     pub id: String,
@@ -92,6 +104,7 @@ pub struct Space {
     pub repo_name: Option<String>,
 }
 #[derive(Clone, Serialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields, rename = "HerdrSnapshot"))]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     pub agents: Vec<Terminal>,
@@ -100,8 +113,10 @@ pub struct Snapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree_directory: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(type = "string", optional))]
     pub version: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(type = "number", optional))]
     pub protocol: Option<Value>,
 }
 impl Snapshot {
@@ -161,15 +176,16 @@ fn terminal(
             "Terminal".into()
         },
         status: if agent {
-            source
-                .agent_status
-                .as_deref()
-                .filter(|s| matches!(*s, "idle" | "working" | "blocked" | "done"))
-                .unwrap_or("unknown")
+            match source.agent_status.as_deref() {
+                Some("idle") => Status::Idle,
+                Some("working") => Status::Working,
+                Some("blocked") => Status::Blocked,
+                Some("done") => Status::Done,
+                _ => Status::Unknown,
+            }
         } else {
-            "idle"
-        }
-        .into(),
+            Status::Idle
+        },
         sequence: crate::protocol::integer(&source.state_change_seq)
             .filter(|_| agent)
             .or_else(|| crate::protocol::integer(&source.revision))

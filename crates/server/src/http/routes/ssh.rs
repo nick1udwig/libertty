@@ -1,12 +1,12 @@
 use super::*;
 
 pub(super) async fn api_ssh_probe(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     _ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let _permit = app.ssh_probes.try_acquire().map_err(|_| {
-        (
+        Failure(
             StatusCode::TOO_MANY_REQUESTS,
             "Route probes are busy. Try again.".into(),
         )
@@ -18,7 +18,7 @@ pub(super) async fn api_ssh_probe(
 }
 
 pub(super) async fn api_ssh_captured(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: ShellContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {

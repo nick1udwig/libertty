@@ -1,8 +1,9 @@
-import { button } from './dom.ts';
+import { button, node } from './dom.ts';
+import { saved } from './persistence.ts';
 import './file-browser.css';
 import { uploadIcon, downloadIcon, moreIcon, searchIcon, chevronIcon, folderIcon, fileOptionIcons, closeIcon } from './icons.ts';
 import { fileBreadcrumbs, sortedFiles, type FileOptions, type FileSort } from './file-options.ts';
-import type { FileListing, FileEntry } from './file-protocol.ts';
+import type { FileListing, FileEntry } from './generated/protocol.ts';
 
 export interface FileClient {
   action(input: Record<string, unknown>): Promise<{ text?: string; version?: string }>;
@@ -16,43 +17,43 @@ const documentIcon = '<svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="
 export function fileSize(size: number) { if (size < 1024) return size + ' bytes'; const unit = Math.min(3, Math.floor(Math.log(size) / Math.log(1024))); return (size / 1024 ** unit).toFixed(1) + ' ' + ['bytes', 'KB', 'MB', 'GB'][unit]; }
 function permissions(entry: FileEntry) { return (entry.symlink ? 'l' : entry.directory ? 'd' : '-') + Array.from({ length: 9 }, (_, n) => entry.mode & (1 << (8 - n)) ? 'rwx'[n % 3] : '-').join(''); }
 export function fileBrowser(client: FileClient, initial = '.', changed: (path: string) => void = () => {}) {
-  const element = document.createElement('section'); element.className = 'file-browser'; element.setAttribute('aria-label', 'Files');
-  const toolbar = document.createElement('div'); toolbar.className = 'file-toolbar';
-  const crumbs = document.createElement('nav'); crumbs.className = 'file-breadcrumbs'; crumbs.setAttribute('aria-label', 'Directory');
-  const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Search this folder'; search.setAttribute('aria-label', 'Search this folder'); search.className = 'file-search'; search.hidden = true;
-  const picker = document.createElement('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
-  const status = document.createElement('p'); status.className = 'file-status'; status.role = 'status'; status.setAttribute('aria-live', 'polite');
-  const list = document.createElement('div'); list.className = 'file-list'; list.setAttribute('aria-label', 'Directory contents');
+  const element = node('section', 'file-browser'); element.setAttribute('aria-label', 'Files');
+  const toolbar = node('div', 'file-toolbar');
+  const crumbs = node('nav', 'file-breadcrumbs'); crumbs.setAttribute('aria-label', 'Directory');
+  const search = node('input'); search.type = 'search'; search.placeholder = 'Search this folder'; search.setAttribute('aria-label', 'Search this folder'); search.className = 'file-search'; search.hidden = true;
+  const picker = node('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true;
+  const status = node('p', 'file-status'); status.role = 'status'; status.setAttribute('aria-live', 'polite');
+  const list = node('div', 'file-list'); list.setAttribute('aria-label', 'Directory contents');
   let current = initial, listing: FileListing | undefined, generation = 0, disposed = false, uploading = false;
   const abort = new AbortController();
   const selected = new Set<string>();
   let hold: ReturnType<typeof setTimeout> | undefined;
   const stopHold = () => { clearTimeout(hold); hold = undefined; };
-  const selection = document.createElement('div'); selection.className = 'file-selection'; selection.hidden = true;
-  const count = document.createElement('strong');
+  const selection = node('div', 'file-selection'); selection.hidden = true;
+  const count = node('strong');
   const clear = button('', () => { selected.clear(); render(); }); clear.innerHTML = closeIcon; clear.setAttribute('aria-label', 'Clear selection'); selection.append(clear, count);
-  const loading = document.createElement('span'); loading.className = 'file-loading-spinner'; loading.setAttribute('role', 'status'); loading.setAttribute('aria-label', 'Loading files');
+  const loading = node('span', 'file-loading-spinner'); loading.setAttribute('role', 'status'); loading.setAttribute('aria-label', 'Loading files');
   const upload = button('', () => picker.click()); upload.className = 'file-upload'; upload.innerHTML = uploadIcon + '<span>Upload</span>'; upload.setAttribute('aria-label', 'Upload');
   const more = button('', () => selected.size ? openSelection() : openOptions()); more.innerHTML = moreIcon; more.setAttribute('aria-label', 'File options'); more.setAttribute('aria-haspopup', 'menu');
   const find = button('', () => { search.hidden = !search.hidden; if (!search.hidden) search.focus(); else { search.value = ''; render(); } }); find.innerHTML = searchIcon; find.setAttribute('aria-label', 'Search files');
   toolbar.append(selection, crumbs, loading, upload, more, find); element.append(toolbar, search, status, list, picker);
   const error = (reason: unknown) => { if (!disposed) { status.textContent = reason instanceof Error ? reason.message : 'File transfer failed.'; status.classList.add('error'); } };
   let options: FileOptions = { sort: 'name', descending: false, hidden: false };
-  try { const saved = JSON.parse(localStorage.getItem('libertty.fileOptions') || 'null'); if (saved && ['name', 'date', 'size', 'kind'].includes(saved.sort)) options = { sort: saved.sort, descending: saved.descending === true, hidden: saved.hidden === true }; } catch {}
+  const stored = saved<Partial<FileOptions>>('fileOptions', {}); if (stored.sort && ['name', 'date', 'size', 'kind'].includes(stored.sort)) options = { sort: stored.sort, descending: stored.descending === true, hidden: stored.hidden === true };
   const saveOptions = () => { try { localStorage.setItem('libertty.fileOptions', JSON.stringify(options)); } catch {} render(); };
   let menu: HTMLElement | undefined, anchor: HTMLButtonElement | undefined;
   function closeMenu(focus = false) { menu?.remove(); menu = undefined; anchor?.setAttribute('aria-expanded', 'false'); if (focus) anchor?.focus(); anchor = undefined; }
   interface MenuItem { label: string; icon: string; action: () => void; checked?: boolean; detail?: string; separator?: boolean }
   function openMenu(control: HTMLButtonElement, items: MenuItem[]) {
     if (anchor === control) { closeMenu(true); return; } closeMenu(); anchor = control; control.setAttribute('aria-expanded', 'true');
-    menu = document.createElement('div'); menu.className = 'file-menu'; menu.role = 'menu'; menu.setAttribute('aria-label', control.getAttribute('aria-label') || 'Directories');
+    menu = node('div', 'file-menu'); menu.role = 'menu'; menu.setAttribute('aria-label', control.getAttribute('aria-label') || 'Directories');
     for (const item of items) {
-      if (item.separator) menu.append(document.createElement('hr'));
+      if (item.separator) menu.append(node('hr'));
       const row = button('', () => { closeMenu(); item.action(); }); row.role = item.checked === undefined ? 'menuitem' : item.label === 'Hidden files' ? 'menuitemcheckbox' : 'menuitemradio';
       row.setAttribute('aria-label', item.label); if (item.checked !== undefined) row.setAttribute('aria-checked', String(item.checked));
-      const glyph = document.createElement('span'); glyph.innerHTML = item.icon; glyph.className = 'file-menu-icon';
-      const label = document.createElement('span'); label.textContent = item.label;
-      const detail = document.createElement('span'); detail.className = 'file-menu-detail'; detail.textContent = item.detail || (item.checked ? '✓' : '');
+      const glyph = node('span'); glyph.innerHTML = item.icon; glyph.className = 'file-menu-icon';
+      const label = node('span'); label.textContent = item.label;
+      const detail = node('span', 'file-menu-detail'); detail.textContent = item.detail || (item.checked ? '✓' : '');
       row.append(glyph, label, detail); menu.append(row);
     }
     element.append(menu); const bounds = element.getBoundingClientRect(), rect = control.getBoundingClientRect();
@@ -80,13 +81,13 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
   function selectedPaths() { return [...selected].map(name => (current === '/' ? '' : current) + '/' + name); }
   async function runAction(input: Record<string, unknown>) { status.textContent = 'Working…'; try { await client.action(input); selected.clear(); await load(current); } catch (e) { error(e); } }
   function promptAction(title: string, field: string, value: string, submit: (value: string) => Promise<void>, multiline = false) {
-    const modal = document.createElement('dialog'); modal.className = 'file-action-dialog'; modal.setAttribute('aria-label', title);
-    const heading = document.createElement('h2'); heading.textContent = title;
-    const form = document.createElement('form'), input = document.createElement(multiline ? 'textarea' : 'input'), message = document.createElement('p');
+    const modal = node('dialog', 'file-action-dialog'); modal.setAttribute('aria-label', title);
+    const heading = node('h2'); heading.textContent = title;
+    const form = node('form'), input = document.createElement(multiline ? 'textarea' : 'input'), message = node('p');
     input.value = value; input.setAttribute('aria-label', field); input.required = !multiline;
     if (multiline) { (input as HTMLTextAreaElement).rows = 14; input.spellcheck = false; }
     const cancel = button('Cancel', () => modal.close()), save = button(multiline ? 'Save' : 'Confirm', () => {}); save.type = 'submit'; save.className = 'primary';
-    const actions = document.createElement('div'); actions.className = 'actions'; actions.append(cancel, save); form.append(heading, input, message, actions); modal.append(form); element.append(modal); modal.showModal(); input.focus();
+    const actions = node('div', 'actions'); actions.append(cancel, save); form.append(heading, input, message, actions); modal.append(form); element.append(modal); modal.showModal(); input.focus();
     form.onsubmit = async event => { event.preventDefault(); save.disabled = true; try { await submit(input.value); modal.close(); selected.clear(); await load(current); } catch (e) { message.textContent = e instanceof Error ? e.message : 'Operation failed.'; save.disabled = false; } }; modal.onclose = () => modal.remove();
   }
   function openSelection() {
@@ -99,16 +100,16 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
     if (single) items.push({ label: 'Rename', icon: fileOptionIcons.edit, action: () => promptAction('Rename', 'File name', entries[0].name, async name => { await client.action({ action: 'rename', path: paths[0], name }); }) });
     items.push({ label: 'Copy path', icon: fileOptionIcons.copy, action: () => { if (!navigator.clipboard) { status.textContent = paths.join('\n'); return; } void navigator.clipboard.writeText(paths.join('\n')).then(() => { status.textContent = 'Paths copied.'; }, error); } });
     items.push({ label: 'Delete', icon: fileOptionIcons.delete, separator: true, action: () => {
-      const modal = document.createElement('dialog'); modal.className = 'file-action-dialog'; modal.setAttribute('aria-label', 'Delete selected items');
-      const title = document.createElement('h2'); title.textContent = `Delete ${paths.length} selected item${paths.length === 1 ? '' : 's'}?`;
-      const detail = document.createElement('p'); detail.textContent = 'Folders include all their contents. This cannot be undone.';
+      const modal = node('dialog', 'file-action-dialog'); modal.setAttribute('aria-label', 'Delete selected items');
+      const title = node('h2'); title.textContent = `Delete ${paths.length} selected item${paths.length === 1 ? '' : 's'}?`;
+      const detail = node('p', '', 'Folders include all their contents. This cannot be undone.');
       const cancel = button('Cancel', () => modal.close()), remove = button('Delete', () => { modal.close(); void runAction({ action: 'delete', paths }); }); remove.className = 'danger'; modal.append(title, detail, cancel, remove); element.append(modal); modal.showModal(); cancel.focus(); modal.onclose = () => modal.remove();
     } });
     openMenu(more, items);
   }
   function newFolder() {
-    const destination = current, modal = document.createElement('dialog'); modal.className = 'file-new-folder';
-    const form = document.createElement('form'), title = document.createElement('h2'), name = document.createElement('input'), message = document.createElement('p');
+    const destination = current, modal = node('dialog', 'file-new-folder');
+    const form = node('form'), title = node('h2'), name = node('input'), message = node('p');
     title.textContent = 'New folder'; name.required = true; name.placeholder = 'Folder name'; name.setAttribute('aria-label', 'Folder name');
     const cancel = button('Cancel', () => modal.close()), create = button('Create', () => {}); create.type = 'submit'; create.className = 'primary';
     form.append(title, name, message, cancel, create); modal.append(form); element.append(modal); modal.showModal(); name.focus();
@@ -132,13 +133,13 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
         b.oncontextmenu = event => { event.preventDefault(); stopHold(); skipClick = true; if (!selected.has(name)) { selected.add(name); render(true); } };
         b.onkeydown = event => { if (event.key === ' ' && event.shiftKey) { event.preventDefault(); toggle(); } };
       } b.className = 'file-row'; b.setAttribute('aria-label', (directory ? 'Open folder ' : 'Download ') + name);
-      const icon = document.createElement('span'); icon.className = 'file-icon'; icon.innerHTML = info && selected.has(name) ? '<span class="file-selected-mark">✓</span>' : directory ? folder : documentIcon;
-      const text = document.createElement('span'); text.className = 'file-details';
-      const title = document.createElement('span'); title.className = 'file-name'; title.textContent = name;
-      const meta = document.createElement('span'); meta.className = 'file-meta';
-      if (info) { const mode = document.createElement('span'), date = document.createElement('span'); mode.textContent = permissions(info); date.textContent = new Date(info.modified).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }); meta.append(mode, date); }
+      const icon = node('span', 'file-icon'); icon.innerHTML = info && selected.has(name) ? '<span class="file-selected-mark">✓</span>' : directory ? folder : documentIcon;
+      const text = node('span', 'file-details');
+      const title = node('span', 'file-name'); title.textContent = name;
+      const meta = node('span', 'file-meta');
+      if (info) { const mode = node('span'), date = node('span'); mode.textContent = permissions(info); date.textContent = new Date(info.modified).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }); meta.append(mode, date); }
       text.append(title);
-      if (info && !directory) { const size = document.createElement('span'); size.className = 'file-size'; size.textContent = fileSize(info.size); title.append(size); }
+      if (info && !directory) { const size = node('span', 'file-size'); size.textContent = fileSize(info.size); title.append(size); }
       text.append(meta); b.append(icon, text); list.append(b);
     };
     if (current !== '/') row('..', true, () => void load(listing!.parent));
@@ -147,7 +148,7 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
       const path = (current === '/' ? '' : current) + '/' + item.name;
       row(item.name, item.directory, () => item.directory ? void load(path) : void client.download(path).catch(error), item);
     }
-    if (!shown.length) { const empty = document.createElement('p'); empty.className = 'file-empty'; empty.textContent = search.value ? 'No matching files.' : 'This folder is empty.'; list.append(empty); }
+    if (!shown.length) { const empty = node('p', 'file-empty'); empty.textContent = search.value ? 'No matching files.' : 'This folder is empty.'; list.append(empty); }
   }
   async function load(path: string) {
     closeMenu(); stopHold();
@@ -162,7 +163,7 @@ export function fileBrowser(client: FileClient, initial = '.', changed: (path: s
         older.setAttribute('aria-label', 'Earlier directories'); older.setAttribute('aria-haspopup', 'menu'); crumbs.append(older);
       }
       for (const part of trail.visible) {
-        if (crumbs.children.length) { const divider = document.createElement('span'); divider.innerHTML = chevronIcon; crumbs.append(divider); }
+        if (crumbs.children.length) { const divider = node('span'); divider.innerHTML = chevronIcon; crumbs.append(divider); }
         const crumb = button(part.name, () => void load(part.path)); crumb.title = part.path; if (part.path === current) crumb.setAttribute('aria-current', 'location'); crumbs.append(crumb);
       }
       status.classList.remove('error'); status.textContent = result.truncated ? 'Showing the first 10,000 entries. Open a subfolder to browse further.' : ''; render();

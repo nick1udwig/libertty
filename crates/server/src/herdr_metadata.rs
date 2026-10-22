@@ -17,10 +17,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-type Registry = Mutex<HashMap<String, Weak<Resource>>>;
+type Registry = Mutex<HashMap<crate::herdr::ResourceKey, Weak<Resource>>>;
 static RESOURCES: LazyLock<Registry> = LazyLock::new(Default::default);
 
-type HeldResource = Option<(String, Arc<Resource>)>;
+type HeldResource = Option<(crate::herdr::ResourceKey, Arc<Resource>)>;
 #[derive(Clone, Default)]
 pub struct Shared(Arc<Mutex<HeldResource>>);
 impl std::fmt::Debug for Shared {
@@ -30,11 +30,7 @@ impl std::fmt::Debug for Shared {
 }
 impl Shared {
     pub(crate) fn resource(&self, target: &Target) -> Result<Arc<Resource>, String> {
-        let transport = target
-            .remote
-            .as_ref()
-            .map(|host| format!("{:p}", Arc::as_ptr(host)));
-        let key = json!([transport, target.path()?]).to_string();
+        let key = target.key("")?;
         let mut held = self.0.lock().unwrap();
         if let Some((previous, resource)) = &*held
             && previous == &key

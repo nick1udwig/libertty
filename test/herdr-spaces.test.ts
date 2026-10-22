@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spaceLayout, dropSpace, spaceTerminal, worktreePath, spaceRepos, repoSpace, repoTap, triageSpace } from '../src/herdr-spaces.ts';
 
 test('worktrees group under their repository root while other spaces stand alone', () => {
-  const space = (id: string, extra = {}) => ({ id, name: id, terminalIds: [id + ':pane'], ...extra });
+  const space = (id: string, extra = {}) => ({ id, name: id, terminalIds: [id + ':pane'], cwd: '', ...extra });
   const repo = { repoKey: '/repo/.git', repoName: 'repo' };
   const repos = spaceRepos([space('review', { ...repo, linkedWorktree: true }), space('notes'), space('main', { ...repo, linkedWorktree: false }), space('fix', { ...repo, linkedWorktree: true })]);
   assert.deepEqual(repos.map(group => [group.id, group.name, group.git, group.root?.id, group.spaces.map(space => space.id)]), [
@@ -22,7 +22,7 @@ test('worktrees group under their repository root while other spaces stand alone
 });
 
 test('triage opens the checkout that has waited longest in the most urgent state', () => {
-  const spaces = ['main', 'review', 'fix', 'docs'].map(id => ({ id, name: id, terminalIds: [id + ':pane'] }));
+  const spaces = ['main', 'review', 'fix', 'docs'].map(id => ({ id, name: id, terminalIds: [id + ':pane'], cwd: '' }));
   const repo = { id: 'repo:/repo/.git', name: 'repo', git: true, root: spaces[0], spaces };
   type Pane = { status: 'blocked' | 'done' | 'working' | 'idle'; sequence: number; completion?: number };
   const pick = (states: Record<string, Pane[]>) => triageSpace(spaces, space => (states[space.id] || []).map(pane => ({ ...pane, terminalId: space.id + ':pane' })))?.space.id;
@@ -36,7 +36,7 @@ test('triage opens the checkout that has waited longest in the most urgent state
 });
 
 test('held-space actions use its remembered pane, then desktop selection, then first pane', () => {
-  const space = { id: 'held', name: 'Held', terminalIds: ['original', 'split'], selectedTerminalId: 'original' };
+  const space = { id: 'held', name: 'Held', terminalIds: ['original', 'split'], cwd: '', selectedTerminalId: 'original' };
   assert.equal(spaceTerminal(space, 'split'), 'split');
   assert.equal(spaceTerminal(space, 'other-space-pane'), 'original');
   assert.equal(spaceTerminal({ ...space, selectedTerminalId: undefined }), 'original');

@@ -1,6 +1,6 @@
 use crate::{
     herdr::{self, Target},
-    herdr_state::Tracker,
+    herdr_state::{Event, Tracker},
     storage,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -31,8 +31,7 @@ pub fn hash(text: &str) -> String {
         .map(|b| format!("{b:02x}"))
         .collect()
 }
-fn decode(value: &Value) -> Option<Vec<u8>> {
-    let text = value.as_str()?;
+fn decode(text: &str) -> Option<Vec<u8>> {
     let body = text.trim_end_matches('=');
     if body.is_empty()
         || text.len() - body.len() > 2
@@ -52,41 +51,68 @@ fn decode(value: &Value) -> Option<Vec<u8>> {
     .decode(text)
     .ok()
 }
-pub fn subscription(value: &Value) -> Result<Value, String> {
-    let endpoint = value["endpoint"]
-        .as_str()
-        .filter(|s| utf16_len(s) <= 4096)
-        .ok_or("Invalid push subscription.")?;
-    let url = url::Url::parse(endpoint).map_err(|e| e.to_string())?;
-    let host = url.host_str().unwrap_or("");
-    let provider = host == "fcm.googleapis.com"
-        || host == "updates.push.services.mozilla.com"
-        || host.ends_with(".push.services.mozilla.com")
-        || host == "web.push.apple.com"
-        || host.ends_with(".push.apple.com")
-        || host.ends_with(".notify.windows.com");
-    if !provider
-        || url.scheme() != "https"
-        || url.port().is_some_and(|p| p != 443)
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-    {
-        return Err("Unsupported browser push service.".into());
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct Subscription {
+    pub endpoint: String,
+    pub keys: SubscriptionKeys,
+}
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct SubscriptionKeys {
+    pub p256dh: String,
+    pub auth: String,
+}
+/// Validate a browser push subscription received from a client.
+pub fn subscription(value: &Value) -> Result<Subscription, String> {
+    let key = |name: &str| value["keys"][name].as_str().unwrap_or_default().to_owned();
+    Subscription {
+        endpoint: value["endpoint"]
+            .as_str()
+            .ok_or("Invalid push subscription.")?
+            .into(),
+        keys: SubscriptionKeys {
+            p256dh: key("p256dh"),
+            auth: key("auth"),
+        },
     }
-    let public = decode(&value["keys"]["p256dh"]);
-    let auth = decode(&value["keys"]["auth"]);
-    if public.as_ref().is_none_or(|k| k.len() != 65 || k[0] != 4)
-        || auth.as_ref().is_none_or(|k| k.len() != 16)
-    {
-        return Err("Invalid push encryption keys.".into());
+    .validated()
+}
+impl Subscription {
+    fn validated(self) -> Result<Self, String> {
+        if utf16_len(&self.endpoint) > 4096 {
+            return Err("Invalid push subscription.".into());
+        }
+        let url = url::Url::parse(&self.endpoint).map_err(|e| e.to_string())?;
+        let host = url.host_str().unwrap_or("");
+        let provider = host == "fcm.googleapis.com"
+            || host == "updates.push.services.mozilla.com"
+            || host.ends_with(".push.services.mozilla.com")
+            || host == "web.push.apple.com"
+            || host.ends_with(".push.apple.com")
+            || host.ends_with(".notify.windows.com");
+        if !provider
+            || url.scheme() != "https"
+            || url.port().is_some_and(|p| p != 443)
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.fragment().is_some()
+        {
+            return Err("Unsupported browser push service.".into());
+        }
+        let public = decode(&self.keys.p256dh);
+        let auth = decode(&self.keys.auth);
+        if public.as_ref().is_none_or(|k| k.len() != 65 || k[0] != 4)
+            || auth.as_ref().is_none_or(|k| k.len() != 16)
+        {
+            return Err("Invalid push encryption keys.".into());
+        }
+        if p256::PublicKey::from_sec1_bytes(public.as_ref().unwrap()).is_err() {
+            return Err("Invalid push encryption key.".into());
+        }
+        Ok(Self {
+            endpoint: url.into(),
+            ..self
+        })
     }
-    if p256::PublicKey::from_sec1_bytes(public.as_ref().unwrap()).is_err() {
-        return Err("Invalid push encryption key.".into());
-    }
-    Ok(
-        json!({"endpoint":url.as_str(),"keys":{"p256dh":value["keys"]["p256dh"],"auth":value["keys"]["auth"]}}),
-    )
 }
 pub struct Push {
     private: String,
@@ -118,7 +144,7 @@ impl Push {
             .ok_or("Invalid VAPID public key.")?
             .to_owned();
         VapidSignatureBuilder::from_base64_no_sub(&private).map_err(|e| e.to_string())?;
-        if decode(&json!(public)).is_none_or(|k| k.len() != 65) {
+        if decode(&public).is_none_or(|k| k.len() != 65) {
             return Err("Invalid VAPID public key.".into());
         }
         let contact = url::Url::parse(contact).map_err(|_| "Invalid VAPID subject.")?;
@@ -136,12 +162,16 @@ impl Push {
                 .map_err(|e| e.to_string())?,
         })
     }
-    pub fn message(&self, value: &Value, text: &str) -> Result<WebPushMessage, String> {
-        let checked = subscription(value)?;
+    pub fn message(
+        &self,
+        subscription: &Subscription,
+        text: &str,
+    ) -> Result<WebPushMessage, String> {
+        let checked = subscription.clone().validated()?;
         let info = SubscriptionInfo::new(
-            checked["endpoint"].as_str().unwrap().to_owned(),
-            URL_SAFE_NO_PAD.encode(decode(&checked["keys"]["p256dh"]).unwrap()),
-            URL_SAFE_NO_PAD.encode(decode(&checked["keys"]["auth"]).unwrap()),
+            checked.endpoint,
+            URL_SAFE_NO_PAD.encode(decode(&checked.keys.p256dh).unwrap()),
+            URL_SAFE_NO_PAD.encode(decode(&checked.keys.auth).unwrap()),
         );
         let mut signature =
             VapidSignatureBuilder::from_base64(&self.private, &info).map_err(|e| e.to_string())?;
@@ -154,9 +184,9 @@ impl Push {
         builder.set_payload(ContentEncoding::Aes128Gcm, text.as_bytes());
         builder.build().map_err(|e| e.to_string())
     }
-    async fn send(&self, value: Value, text: String) -> Result<(), DeliveryError> {
+    async fn send(&self, subscription: Subscription, text: String) -> Result<(), DeliveryError> {
         let message = self
-            .message(&value, &text)
+            .message(&subscription, &text)
             .map_err(|message| DeliveryError {
                 status: Some(400),
                 message,
@@ -195,7 +225,7 @@ pub struct DeliveryError {
     pub message: String,
 }
 pub type Sender = Arc<
-    dyn Fn(Value, String) -> futures::future::BoxFuture<'static, Result<(), DeliveryError>>
+    dyn Fn(Subscription, String) -> futures::future::BoxFuture<'static, Result<(), DeliveryError>>
         + Send
         + Sync,
 >;
@@ -226,7 +256,7 @@ struct WatchView {
 struct Device {
     id: String,
     owner: String,
-    subscription: Value,
+    subscription: Subscription,
     views: Vec<WatchView>,
     #[serde(flatten)]
     extra: Map<String, Value>,
@@ -236,7 +266,14 @@ struct State {
     checkpoints: Map<String, Value>,
     watches: HashMap<String, Watch>,
     presence: HashMap<String, Presence>,
-    acknowledgements: HashMap<String, Instant>,
+    acknowledgements: HashMap<Receipt, Instant>,
+}
+/// One delivery of an event to a device through a watched Herdr server.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Receipt {
+    device: String,
+    watch: String,
+    event: Event,
 }
 pub struct Notifications {
     pub public_key: String,
@@ -257,15 +294,12 @@ fn key(owner: &str, view: &WatchView) -> String {
     ])
     .to_string()
 }
-fn receipt(device: &str, key: &str, event: &Value) -> String {
-    json!([
-        device,
-        key,
-        event["terminalId"],
-        event["kind"],
-        event["sequence"]
-    ])
-    .to_string()
+fn receipt(device: &str, key: &str, event: &Event) -> Receipt {
+    Receipt {
+        device: device.into(),
+        watch: key.into(),
+        event: event.clone(),
+    }
 }
 fn views(device: &Device) -> &[WatchView] {
     &device.views
@@ -303,7 +337,7 @@ impl Notifications {
                 }
                 let mut device = Device::deserialize(device)
                     .map_err(|_| "Invalid saved Herdr notification device.")?;
-                device.subscription = subscription(&device.subscription)?;
+                device.subscription = device.subscription.validated()?;
                 if device.views.len() > 16 {
                     return Err("Invalid saved Herdr notification watches.".into());
                 }
@@ -367,38 +401,39 @@ impl Notifications {
         )
         .map_err(|e| e.to_string())
     }
-    fn device<'a>(state: &'a mut State, owner: &str, id: &Value) -> Result<&'a mut Device, String> {
+    fn device<'a>(state: &'a mut State, owner: &str, id: &str) -> Result<&'a mut Device, String> {
         let owner = hash(owner);
         state
             .devices
             .iter_mut()
-            .find(|d| Some(d.id.as_str()) == id.as_str() && d.owner == owner)
+            .find(|d| d.id == id && d.owner == owner)
             .ok_or("Enable notifications on this device first.".into())
     }
     pub fn subscribe(self: &Arc<Self>, owner: &str, input: &Value) -> Result<String, String> {
         let subscription = subscription(input)?;
         let owner = hash(owner);
         let mut state = self.state.lock().unwrap();
-        let id =
-            if let Some(device) = state.devices.iter_mut().find(|d| {
-                d.owner == owner && d.subscription["endpoint"] == subscription["endpoint"]
-            }) {
-                device.subscription = subscription;
-                device.id.clone()
-            } else {
-                if state.devices.len() >= 256 {
-                    return Err("The notification device limit has been reached.".into());
-                }
-                let id = storage::random_uuid();
-                state.devices.push(Device {
-                    id: id.clone(),
-                    owner,
-                    subscription,
-                    views: vec![],
-                    extra: Map::new(),
-                });
-                id
-            };
+        let id = if let Some(device) = state
+            .devices
+            .iter_mut()
+            .find(|d| d.owner == owner && d.subscription.endpoint == subscription.endpoint)
+        {
+            device.subscription = subscription;
+            device.id.clone()
+        } else {
+            if state.devices.len() >= 256 {
+                return Err("The notification device limit has been reached.".into());
+            }
+            let id = storage::random_uuid();
+            state.devices.push(Device {
+                id: id.clone(),
+                owner,
+                subscription,
+                views: vec![],
+                extra: Map::new(),
+            });
+            id
+        };
         drop(state);
         self.save();
         Ok(id)
@@ -406,19 +441,18 @@ impl Notifications {
     pub fn add_view(
         self: &Arc<Self>,
         owner: &str,
-        id: &Value,
-        tab: &Value,
+        id: &str,
+        tab: &str,
         source: &str,
         target: &Target,
     ) -> Result<(), String> {
-        let tab = tab
-            .as_str()
-            .filter(|s| {
-                s.len() == 36
-                    && s.bytes()
-                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || b == b'-')
-            })
-            .ok_or("Invalid notification tab.")?;
+        if tab.len() != 36
+            || !tab
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || b == b'-')
+        {
+            return Err("Invalid notification tab.".into());
+        }
         let view = WatchView {
             id: tab.into(),
             source: source.into(),
@@ -450,18 +484,11 @@ impl Notifications {
         self.save();
         Ok(())
     }
-    pub fn remove_view(
-        self: &Arc<Self>,
-        owner: &str,
-        id: &Value,
-        tab: &Value,
-    ) -> Result<(), String> {
+    pub fn remove_view(self: &Arc<Self>, owner: &str, id: &str, tab: &str) -> Result<(), String> {
         {
             let mut state = self.state.lock().unwrap();
             let device = Self::device(&mut state, owner, id)?;
-            device
-                .views
-                .retain(|view| Some(view.id.as_str()) != tab.as_str());
+            device.views.retain(|view| view.id != tab);
         }
         self.prune();
         self.save();
@@ -479,13 +506,11 @@ impl Notifications {
         self.prune();
         self.save();
     }
-    pub fn unsubscribe(self: &Arc<Self>, owner: &str, id: &Value) -> Result<(), String> {
+    pub fn unsubscribe(self: &Arc<Self>, owner: &str, id: &str) -> Result<(), String> {
         {
             let mut state = self.state.lock().unwrap();
             Self::device(&mut state, owner, id)?;
-            state
-                .devices
-                .retain(|device| Some(device.id.as_str()) != id.as_str());
+            state.devices.retain(|device| device.id != id);
         }
         self.prune();
         self.save();
@@ -495,7 +520,7 @@ impl Notifications {
         &self,
         socket: &str,
         owner: &str,
-        id: &Value,
+        id: &str,
         focused: bool,
     ) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
@@ -515,20 +540,15 @@ impl Notifications {
     pub fn acknowledge(
         &self,
         owner: &str,
-        id: &Value,
+        id: &str,
         source: &str,
         target: &Target,
-        event: &Value,
+        event: &Event,
     ) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
         let device = Self::device(&mut state, owner, id)?;
-        if !event["terminalId"]
-            .as_str()
-            .is_some_and(|s| utf16_len(s) <= 256)
-            || !["done", "request"].iter().any(|s| event["kind"] == *s)
-            || !event["sequence"]
-                .as_f64()
-                .is_some_and(|n| n.is_finite() && n.fract() == 0.0 && n.abs() <= 9007199254740991.0)
+        if utf16_len(&event.terminal_id) > 256
+            || event.sequence as f64 > crate::protocol::MAX_SAFE_INTEGER
         {
             return Ok(());
         }
@@ -619,14 +639,14 @@ impl Notifications {
     fn notify(
         self: &Arc<Self>,
         key: &str,
-        event: &Value,
+        event: &Event,
         snapshot: &herdr::Snapshot,
         target: &Target,
     ) {
         let Some(agent) = snapshot
             .agents
             .iter()
-            .find(|agent| Some(agent.terminal_id.as_str()) == event["terminalId"].as_str())
+            .find(|agent| agent.terminal_id == event.terminal_id)
         else {
             return;
         };
@@ -655,13 +675,14 @@ impl Notifications {
                 let receipt = receipt(&device.id, &key, &event);
                 let payload = async {
                     let preview = preview.get_or_init(|| target.preview(&agent)).await;
-                    json!({"title":agent.name,"body":herdr::notification_body(&agent.cwd,preview),"tag":format!("herdr-{}",&hash(&(key.clone()+event["terminalId"].as_str().unwrap_or("")+event["kind"].as_str().unwrap_or("")))[..32]),"tabId":view.id,"terminalId":event["terminalId"]}).to_string()
+                    let tag = hash(&format!("{key}{}{}", event.terminal_id, event.kind.name()));
+                    json!({"title":agent.name,"body":herdr::notification_body(&agent.cwd,preview),"tag":format!("herdr-{}",&tag[..32]),"tabId":view.id,"terminalId":event.terminal_id}).to_string()
                 };
                 manager.deliver(device, &key, &receipt, payload).await;
             });
         }
     }
-    fn live(&self, device: &Device, key: &str, receipt: &str) -> bool {
+    fn live(&self, device: &Device, key: &str, receipt: &Receipt) -> bool {
         if self.cancel.is_cancelled() || !(self.owner)(&device.owner) {
             return false;
         }
@@ -689,7 +710,7 @@ impl Notifications {
         &self,
         device: Device,
         key: &str,
-        receipt: &str,
+        receipt: &Receipt,
         payload: impl std::future::Future<Output = String>,
     ) {
         if !self.delay(Duration::from_millis(300)).await {

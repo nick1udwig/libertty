@@ -4,6 +4,7 @@ use crate::{
     dictation::Recording,
     protocol::Repair,
 };
+use libertty_engine::types::Candidate;
 use serde_json::Value;
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -22,7 +23,7 @@ pub(crate) trait RepairTarget: Send + Sync + 'static {
         &self,
         text: &str,
         cancel: &CancellationToken,
-    ) -> impl Future<Output = Result<Value, String>> + Send;
+    ) -> impl Future<Output = Result<Vec<Candidate>, String>> + Send;
     // Applying text and sending its acknowledgement stay atomic where the adapter permits it.
     fn complete_repair(
         &self,
@@ -72,7 +73,7 @@ async fn prepare<'a>(
     intent: &alternatives::Intent,
     cancel: &CancellationToken,
     timeout: Duration,
-    suggest: impl FnMut(String) -> futures::future::BoxFuture<'a, Result<Value, String>>,
+    suggest: impl FnMut(String) -> futures::future::BoxFuture<'a, Result<Vec<Candidate>, String>>,
 ) -> Result<Prepared, String> {
     let prepared = alternatives::prepare(text, intent, suggest);
     tokio::select! {
@@ -103,7 +104,7 @@ pub(crate) trait RecordingTarget: Send + Sync + 'static {
         guard: &Self::Guard,
         id: &str,
         serial: u64,
-        state: &str,
+        state: crate::protocol::DictationState,
         reply: crate::protocol::ServerMessage,
     );
 }
@@ -147,7 +148,7 @@ pub(crate) fn recording<T: RecordingTarget>(
                     state: status,
                     message,
                 };
-                target.recording_status(&guard, &id, serial, state, reply);
+                target.recording_status(&guard, &id, serial, status, reply);
             }
         },
     );

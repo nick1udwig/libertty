@@ -457,7 +457,7 @@ pub fn path_input(command: &str, options: &str, target: &str) -> Option<PathInpu
         .filter(|part| !part.is_empty())
         .map(str::to_owned)
         .collect();
-    if parts.len() > 16 || utf16_len(&target) > 2000 {
+    if parts.len() > 16 || utf16_len(&target) > crate::MAX_COMMAND {
         return None;
     }
     Some(PathInput {

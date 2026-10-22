@@ -9,6 +9,7 @@ use serde_json::Value;
 use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, HashMap, VecDeque, hash_map::Entry},
+    future::Future,
     rc::Rc,
     sync::Arc,
     task::{Context, Poll},
@@ -274,6 +275,46 @@ fn present_pins<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Vec<DirectoryPin>>, D::Error> {
     Vec::<DirectoryPin>::deserialize(deserializer).map(Some)
+}
+/// Run a call to completion, resolving each batch of host operations with `resolve`.
+/// The call starts before this returns, so concurrent calls keep their start order; dropping the future cancels it.
+pub fn drive<'a, F: Future<Output = Vec<Result<FactValue, String>>> + 'a>(
+    runtime: Rc<RefCell<Runtime>>,
+    id: u32,
+    call: Call,
+    now: impl Fn() -> f64 + 'a,
+    resolve: impl Fn(Vec<HostOperation>) -> F + 'a,
+) -> impl Future<Output = Result<Value, String>> + 'a {
+    struct Cancel(Rc<RefCell<Runtime>>, u32);
+    impl Drop for Cancel {
+        fn drop(&mut self) {
+            self.0.borrow_mut().cancel(self.1);
+        }
+    }
+    let mut step = runtime.borrow_mut().start_call(id, call, now());
+    let request = Cancel(runtime, id);
+    async move {
+        loop {
+            match step {
+                Step::Complete { value, .. } => return Ok(value),
+                Step::Error { error, .. } => return Err(error),
+                Step::Pending { callbacks, .. } => {
+                    let replies =
+                        futures::future::join_all(callbacks.into_iter().map(|callback| {
+                            let results = resolve(callback.operations);
+                            async move {
+                                Reply::Native {
+                                    request: callback.request,
+                                    results: results.await,
+                                }
+                            }
+                        }))
+                        .await;
+                    step = request.0.borrow_mut().resume(id, replies, now());
+                }
+            }
+        }
+    }
 }
 pub fn message(runtime: &mut Runtime, bytes: &[u8], resume: bool) -> Step {
     let result = if bytes.len() > crate::INPUT_LIMIT {

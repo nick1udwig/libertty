@@ -5,16 +5,19 @@ use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use serde_json::Value;
 
 #[derive(Clone, Copy, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum EngineMode {
     Server,
 }
 #[derive(Clone, Copy, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum DictationSource {
     Dictation,
 }
 #[derive(Clone, Copy, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum DictationState {
     Ready,
@@ -31,15 +34,27 @@ impl DictationState {
         }
     }
 }
+/// Where dictated text goes: the shell prompt or a running program.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "lowercase")]
+pub enum DictationTarget {
+    Shell,
+    Program,
+}
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct HerdrFrame {
+    /// Viewers receive only acknowledged frames.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(type = "number"))]
     pub seq: Option<u64>,
     pub width: u16,
     pub height: u16,
     pub full: bool,
     /// Raw ANSI bytes, decoded once from Herdr and base64-encoded only for JSON clients.
     #[serde(serialize_with = "base64")]
+    #[cfg_attr(test, ts(type = "string"))]
     pub bytes: std::sync::Arc<[u8]>,
 }
 fn base64<S: serde::Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
@@ -47,6 +62,7 @@ fn base64<S: serde::Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S:
     serializer.serialize_str(&base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[serde(
     tag = "type",
     rename_all = "kebab-case",
@@ -158,8 +174,17 @@ impl ServerMessage {
     pub fn value(&self) -> Value {
         serde_json::to_value(self).expect("server message")
     }
+    pub fn dictation_error(id: &str, message: &str) -> Self {
+        Self::Dictation {
+            resume: None,
+            id: id.into(),
+            state: DictationState::Error,
+            message: Some(message.into()),
+        }
+    }
 }
 #[derive(Clone, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields, rename = "RepairResult"))]
 pub struct RepairReply {
     pub id: String,
     pub prompt: u64,
@@ -197,8 +222,14 @@ impl RepairReply {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ViewerMessage {
     Ping,
-    NotificationPresence { device: String, focused: bool },
-    NotificationAck { device: String, event: Value },
+    NotificationPresence {
+        device: String,
+        focused: bool,
+    },
+    NotificationAck {
+        device: String,
+        event: crate::herdr_state::Event,
+    },
 }
 pub mod requests;
 
@@ -229,10 +260,16 @@ fn id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     bounded::<D, 100, false>(d)
 }
 fn repair_text<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    bounded::<D, 2000, true>(d)
+    bounded::<D, { libertty_engine::MAX_COMMAND }, true>(d)
 }
+/// The longest raw terminal input frame, in UTF-16 code units.
+pub const MAX_INPUT: usize = 65536;
+/// The longest typed, pasted or dictated text a terminal accepts at once, in UTF-16 code units.
+pub const MAX_TEXT: usize = 16000;
+/// The longest line libertty writes into the shell's line editor, in UTF-16 code units.
+pub const MAX_LINE: usize = 4000;
 fn input_text<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    bounded::<D, 65536, false>(d)
+    bounded::<D, MAX_INPUT, false>(d)
 }
 fn safe<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     unsigned(&Value::deserialize(d)?)
@@ -253,6 +290,7 @@ fn recording_id<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Ok(value)
 }
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum DictationAction {
     Start,
@@ -260,6 +298,7 @@ pub enum DictationAction {
     Cancel,
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "RepairRequest"))]
 pub struct Repair {
     #[serde(deserialize_with = "id")]
     pub id: String,
@@ -270,9 +309,15 @@ pub struct Repair {
     #[serde(deserialize_with = "safe")]
     pub revision: u64,
     #[serde(default)]
+    #[cfg_attr(test, ts(optional = nullable))]
     pub intent: Intent,
 }
 #[derive(Deserialize)]
+#[cfg_attr(
+    test,
+    derive(ts_rs::TS),
+    ts(optional_fields, rename = "DictationRequest")
+)]
 #[serde(rename_all = "camelCase")]
 pub struct Dictation {
     #[serde(deserialize_with = "recording_id")]
@@ -283,29 +328,37 @@ pub struct Dictation {
     #[serde(default, deserialize_with = "optional_safe")]
     pub revision: Option<u64>,
     #[serde(default)]
+    #[cfg_attr(test, ts(type = "DictationTarget", optional = nullable))]
     pub target: Value,
     #[serde(default)]
+    #[cfg_attr(test, ts(type = "string[]", optional = nullable))]
     pub reading_phrases: Value,
 }
 impl Dictation {
-    pub fn target(&self) -> Option<&str> {
+    pub fn target(&self) -> Option<DictationTarget> {
         dictation_target(&self.target)
     }
 }
-pub fn dictation_target(value: &Value) -> Option<&str> {
+/// Older clients name the shell with any falsy target.
+pub fn dictation_target(value: &Value) -> Option<DictationTarget> {
     match value {
-        Value::Null | Value::Bool(false) => Some("shell"),
-        Value::Number(number) if number.as_f64() == Some(0.0) => Some("shell"),
-        Value::String(text) if text.is_empty() => Some("shell"),
-        Value::String(text) if matches!(text.as_str(), "shell" | "program") => Some(text),
+        Value::Null | Value::Bool(false) => Some(DictationTarget::Shell),
+        Value::Number(number) if number.as_f64() == Some(0.0) => Some(DictationTarget::Shell),
+        Value::String(text) => match text.as_str() {
+            "" | "shell" => Some(DictationTarget::Shell),
+            "program" => Some(DictationTarget::Program),
+            _ => None,
+        },
         _ => None,
     }
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ClientMessage {
     Ping {
         #[serde(default)]
+        #[cfg_attr(test, ts(optional = nullable))]
         checkpoint: bool,
     },
     Repair(Repair),
@@ -319,8 +372,8 @@ pub enum ClientMessage {
         seq: u64,
     },
     Resize {
-        cols: f64,
-        rows: f64,
+        cols: u16,
+        rows: u16,
         #[serde(default)]
         mobile: Option<bool>,
     },
@@ -384,6 +437,7 @@ pub enum ClientMessage {
         #[serde(deserialize_with = "safe")]
         revision: u64,
         #[serde(default, rename = "readingPhrases")]
+        #[cfg_attr(test, ts(type = "string[]", optional = nullable))]
         reading_phrases: Value,
     },
 }
@@ -470,4 +524,113 @@ pub struct InputStamp {
     pub prompt: u64,
     #[serde(deserialize_with = "safe")]
     pub revision: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClientMessage;
+    use serde_json::{Value, json};
+    use ts_rs::{Config, TS};
+
+    const BINDINGS: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../src/generated/protocol.ts"
+    );
+
+    /// One declaration per type, with one-line field comments and one union member per line.
+    fn declaration(file: &str) -> String {
+        let mut result = String::new();
+        let mut comment: Option<Vec<&str>> = None;
+        for line in file.lines() {
+            match (line.trim(), &mut comment) {
+                (_, None) if line.starts_with("// ") || line.starts_with("import ") => {}
+                ("/**", _) => comment = Some(vec![]),
+                ("*/", Some(lines)) => {
+                    let separator = if result.is_empty() { "\n" } else { " " };
+                    result += &format!("/** {} */{separator}", lines.join(" "));
+                    comment = None;
+                }
+                (text, Some(lines)) => lines.push(text.trim_start_matches('*').trim()),
+                (_, None) => result += line,
+            }
+        }
+        result.trim().replace(" | { \"", "\n  | { \"")
+    }
+
+    #[test]
+    fn typescript_bindings_match_the_rust_wire_types() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = Config::new()
+            .with_large_int("number")
+            .with_out_dir(directory.path());
+        super::ServerMessage::export_all(&config).unwrap();
+        ClientMessage::export_all(&config).unwrap();
+        crate::herdr::Metadata::export_all(&config).unwrap();
+        crate::files::Listing::export_all(&config).unwrap();
+        libertty_engine::types::Catalog::export_all(&config).unwrap();
+        let mut files: Vec<_> = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        files.sort();
+        let declarations: Vec<String> = files
+            .iter()
+            .map(|file| declaration(&std::fs::read_to_string(file).unwrap()))
+            .collect();
+        let generated = format!(
+            "// Generated from the Rust wire types by `npm run bindings`; do not edit.\n\n{}\n",
+            declarations.join("\n\n")
+        );
+        if std::env::var_os("LIBERTTY_WRITE_BINDINGS").is_some() {
+            std::fs::write(BINDINGS, generated).unwrap();
+        } else {
+            assert!(
+                std::fs::read_to_string(BINDINGS).ok().as_deref() == Some(generated.as_str()),
+                "src/generated/protocol.ts is stale; run `npm run bindings`"
+            );
+        }
+    }
+
+    #[test]
+    fn client_messages_accept_unknown_fields_and_reject_malformed_field_types() {
+        let id = "11111111-1111-4111-8111-111111111111";
+        let samples = [
+            json!({"type":"ping"}),
+            json!({"type":"repair","id":id,"text":"echo 🌍","prompt":1,"revision":2}),
+            json!({"type":"repair-cancel","id":id}),
+            json!({"type":"input-line","id":id,"prompt":1,"revision":2}),
+            json!({"type":"dictation","id":id,"action":"start","target":"program","prompt":1,"revision":2}),
+            json!({"type":"input","data":"\u{1b}[A","seq":1}),
+            json!({"type":"paste","text":"🌍"}),
+            json!({"type":"dictation-paste","text":"hello","applied":false,"replace":false,"prompt":1,"revision":2}),
+            json!({"type":"replace","id":id,"text":"echo","prompt":1,"revision":2}),
+            json!({"type":"command","id":id,"command":"echo","prompt":1}),
+            json!({"type":"resize","cols":80,"rows":24,"mobile":true}),
+            json!({"type":"terminal-scroll","lines":-2,"column":0,"row":0}),
+            json!({"type":"terminal-click","column":3,"row":4,"cols":80,"rows":24}),
+            json!({"type":"herdr-frame-request"}),
+            json!({"type":"herdr-active","active":true}),
+            json!({"type":"ack","seq":9_007_199_254_740_991u64}),
+        ];
+        for sample in samples {
+            let mut extended = sample.clone();
+            extended["future"] = json!(true);
+            assert!(ClientMessage::try_from(extended).is_ok(), "{sample}");
+            for (field, value) in sample.as_object().unwrap() {
+                if field == "type" || field == "target" {
+                    continue;
+                }
+                let mut malformed = sample.clone();
+                malformed[field] = if value.is_string() {
+                    json!({})
+                } else {
+                    Value::from("invalid")
+                };
+                assert!(
+                    ClientMessage::try_from(malformed).is_err(),
+                    "{sample} {field}"
+                );
+            }
+        }
+    }
 }

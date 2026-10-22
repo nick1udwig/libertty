@@ -4,15 +4,20 @@ use crate::{
     host::{self, Host},
     repair::{matches, tokens},
     types::{Catalog, CommandMetadata, Flag, Help, SchemaState, SharedList},
-    util::locale_cmp,
     validation::Environment,
 };
 use futures::future::join_all;
 use serde::Serialize;
-use std::{cell::RefCell, collections::VecDeque};
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    hash::{DefaultHasher, Hash, Hasher},
+};
 
+/// A hash of the catalog and environment that learned metadata depends on.
+type ContextKey = u64;
 struct Snapshot {
-    key: String,
+    key: ContextKey,
     until: f64,
     metadata: CommandMetadata,
 }
@@ -21,12 +26,12 @@ type DiscoveryContext = (
     Environment,
     SharedList<String>,
     Option<SharedList<String>>,
-    String,
+    ContextKey,
 );
 #[derive(Default)]
 pub struct Discovery {
     snapshots: RefCell<VecDeque<Snapshot>>,
-    warmed: RefCell<VecDeque<(String, f64)>>,
+    warmed: RefCell<VecDeque<(ContextKey, String, f64)>>,
     context: RefCell<Option<DiscoveryContext>>,
 }
 #[derive(Debug, Serialize)]
@@ -43,8 +48,8 @@ struct Branch {
     score: f64,
 }
 
-fn context(catalog: &Catalog, env: &Environment) -> String {
-    let mut stable: Vec<_> = env
+fn context(catalog: &Catalog, env: &Environment) -> ContextKey {
+    let stable: Vec<_> = env
         .iter()
         .filter(|(key, _)| {
             !test!(
@@ -53,9 +58,15 @@ fn context(catalog: &Catalog, env: &Environment) -> String {
             )
         })
         .collect();
-    stable.sort_by(|(a, _), (b, _)| locale_cmp(a, b));
-    serde_json::to_string(&(&catalog.cwd, stable, &catalog.commands, &catalog.functions))
-        .expect("metadata context")
+    let mut hasher = DefaultHasher::new();
+    (
+        &catalog.cwd,
+        stable,
+        catalog.commands.as_slice(),
+        catalog.functions.as_deref(),
+    )
+        .hash(&mut hasher);
+    hasher.finish()
 }
 fn merge(base: &[Flag], discovered: &[Flag]) -> Vec<Flag> {
     let mut result = base.to_vec();
@@ -128,7 +139,7 @@ fn record(
     }
 }
 impl Discovery {
-    fn context(&self, catalog: &Catalog, env: &Environment) -> String {
+    fn context(&self, catalog: &Catalog, env: &Environment) -> ContextKey {
         let mut cached = self.context.borrow_mut();
         if let Some((cwd, environment, commands, functions, key)) = cached.as_ref()
             && *cwd == catalog.cwd
@@ -136,7 +147,7 @@ impl Discovery {
             && commands == &catalog.commands
             && functions == &catalog.functions
         {
-            return key.clone();
+            return *key;
         }
         let key = context(catalog, env);
         *cached = Some((
@@ -144,7 +155,7 @@ impl Discovery {
             env.clone(),
             catalog.commands.clone(),
             catalog.functions.clone(),
-            key.clone(),
+            key,
         ));
         key
     }
@@ -204,9 +215,9 @@ impl Discovery {
                 .unwrap_or_default();
             if !catalog.commands.contains(&root)
                 || targets.contains(&target)
-                || warmed
-                    .iter()
-                    .any(|(entry, until)| *entry == format!("{key}{target}") && *until > now)
+                || warmed.iter().any(|(context, warm, until)| {
+                    *context == key && *warm == target && *until > now
+                })
             {
                 continue;
             }
@@ -215,13 +226,16 @@ impl Discovery {
         targets
     }
     pub fn mark_warmed(&self, target: &str, catalog: &Catalog, env: &Environment, now: f64) {
-        let key = format!("{}{target}", self.context(catalog, env));
+        let key = self.context(catalog, env);
         let mut warmed = self.warmed.borrow_mut();
-        if let Some((_, until)) = warmed.iter_mut().find(|(entry, _)| *entry == key) {
+        if let Some((_, _, until)) = warmed
+            .iter_mut()
+            .find(|(context, warm, _)| *context == key && warm == target)
+        {
             *until = now + 600000.0;
             return;
         }
-        warmed.push_back((key, now + 600000.0));
+        warmed.push_back((key, target.into(), now + 600000.0));
         if warmed.len() > 200 {
             warmed.pop_front();
         }

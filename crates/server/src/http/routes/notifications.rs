@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) async fn api_notifications_subscribe(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
@@ -11,27 +11,27 @@ pub(super) async fn api_notifications_subscribe(
 }
 
 pub(super) async fn api_notifications_unsubscribe(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let input: crate::protocol::requests::Device = typed_body(&mut req, 16384).await?;
     app.notifications
-        .unsubscribe(&owner, &json!(input.device))
+        .unsubscribe(&owner, &input.device)
         .map_err(fail)?;
     ok(json!({"ok":true}))
 }
 
 pub(super) async fn api_notifications_unwatch(
-    app: &Arc<App>,
+    State(app): State<Arc<App>>,
     ctx: OwnerContext,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let owner = ctx.owner;
     let input: crate::protocol::requests::Watch = typed_body(&mut req, 16384).await?;
     app.notifications
-        .remove_view(&owner, &json!(input.device), &json!(input.tab_id))
+        .remove_view(&owner, &input.device, &input.tab_id)
         .map_err(fail)?;
     ok(json!({"ok":true}))
 }
