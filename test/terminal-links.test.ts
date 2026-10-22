@@ -77,6 +77,8 @@ test('native screen repaints resolve wrapped GitHub links without wrap flags', (
     const term = new Terminal({ ghostty, cols, rows: 12 });
     term.wasmTerm = ghostty.createTerminal(cols, 12);
     try {
+      // Match the full-frame reset in TerminalProjection before painting absolute rows.
+      term.wasmTerm.write('\x1bc\x1b[2J\x1b[H');
       for (let offset = 0; offset < text.length; offset += cols)
         term.wasmTerm.write('\x1b[' + (Math.floor(offset / cols) + 1) + ';1H' + text.slice(offset, offset + cols));
       assert.equal(term.wasmTerm.getScrollbackLength(), 0);
