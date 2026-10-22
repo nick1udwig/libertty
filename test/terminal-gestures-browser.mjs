@@ -352,6 +352,10 @@ try {
   await page.getByRole('button', { name: 'Ctrl', exact: true }).click();
   await page.keyboard.press('Backspace'); assert.equal(await page.getByRole('button', { name: 'Ctrl', exact: true }).getAttribute('aria-pressed'), 'false');
   await checkLinks(page);
+  // Leaving a page can report another system appearance for a moment, which must not reload the terminal.
+  await page.evaluate(() => { window.__unreloaded = true; });
+  await page.emulateMedia({ colorScheme: 'dark' }); await page.emulateMedia({ colorScheme: 'light' }); await delay(500);
+  assert.equal(await page.evaluate(() => window.__unreloaded), true, 'A momentary appearance change must not reload the terminal');
   // Repeat the release and keyboard-close checks in the workspace iframe used on phones.
   await page.goto(base + '/');
   const frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();

@@ -143,7 +143,12 @@ function send(message: ClientMessage): boolean {
 }
 // Ghostty fixes its ANSI palette when the terminal is created, so a theme change reloads this document and replays the session.
 const terminalTheme = applyTheme();
-function applyTerminalTheme() { if (applyTheme() !== terminalTheme) location.reload(); }
+// Chromium can report a different system appearance while leaving a page, so only a change that lasts reloads it.
+let themeChange: ReturnType<typeof setTimeout> | undefined;
+function applyTerminalTheme() {
+  clearTimeout(themeChange);
+  themeChange = setTimeout(() => { if (applyTheme() !== terminalTheme) location.reload(); }, 250);
+}
 watchSystemTheme(applyTerminalTheme);
 const fontSizeInput = $<HTMLInputElement>('font-size');
 try {
