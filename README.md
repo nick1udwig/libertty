@@ -24,7 +24,7 @@ Beautiful and fast.
 After the first stable release has finished building, install the server and optionally set up Herdr, Voxtype Mobile and private Tailscale access with:
 
 ```sh
-curl -fsSL https://github.com/nick1udwig/libertty/releases/latest/download/install.sh | bash
+curl -fsSL https://install.libertty.sh | bash
 ```
 
 The installer bundles the native Rust server and its setup runtime, and asks before installing a user service or optional companions.
