@@ -678,6 +678,7 @@ function socketClosed(event?: CloseEvent) {
   for (const [id, resolve] of repairs) resolve({ id, accepted: false, candidates: [], original: '', selected: '', prompt: state.prompt, revision: state.inputRevision }); repairs.clear();
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) { pendingCommand = undefined; toast('Connection lost before acknowledgement. Check the terminal before running again.'); }
+  if ((event?.code === 1011 || event?.code === 1013) && event.reason) toast(event.reason);
   if (event?.code === 4001) { unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason); return false; }
   if (herdrTerminal && event?.code === 1000 && event.reason === 'Herdr terminal ended') { inline.disconnect(); connection('Session ended'); notify('terminal-ended'); return false; }
   if (embedded && state.exited) return false; // The workspace is replacing this finished shell.

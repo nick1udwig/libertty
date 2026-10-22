@@ -526,6 +526,20 @@ async fn remote_pty_and_sftp_share_session_guards_and_file_actions() {
     let snapshot = session.snapshot().await.unwrap();
     assert!(snapshot.0.commands.contains(&"cd".into()));
     assert_eq!(snapshot.1["HOME"], fixture.home());
+    for cols in 2..=300 {
+        session.receive(attachment, json!({"type":"resize","cols":cols,"rows":24}));
+    }
+    session.receive(attachment, json!({"type":"resize","cols":101,"rows":42}));
+    let prompt = session.state().prompt;
+    session.receive(attachment, json!({"type":"command","id":"dimensions","command":"stty size > dimensions","prompt":prompt}));
+    ready(&session, attachment, &mut receive, prompt).await;
+    assert_eq!(
+        tokio::fs::read_to_string(format!("{}/dimensions", fixture.home()))
+            .await
+            .unwrap()
+            .trim(),
+        "42 101"
+    );
     let prompt = session.state().prompt;
     session.receive(attachment,json!({"type":"command","id":"remote-command","command":"printf remote-output","prompt":prompt}));
     ready(&session, attachment, &mut receive, prompt).await;

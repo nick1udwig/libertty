@@ -1,4 +1,5 @@
 use crate::{
+    pty_input,
     session::{ProcessEvent, ShellProcess},
     ssh::{ChannelGuard, RemoteChannel},
 };
@@ -8,11 +9,12 @@ use tokio::sync::{mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
 enum Command {
-    Write(Vec<u8>),
+    Write(pty_input::Input),
     Resize(u16, u16),
 }
 pub(crate) struct RemotePty {
-    send: mpsc::UnboundedSender<Command>,
+    send: pty_input::Sender,
+    resize: watch::Sender<(u16, u16)>,
     pause: watch::Sender<bool>,
     lifetime: CancellationToken,
 }
@@ -21,34 +23,46 @@ impl RemotePty {
         let (mut read, write) = channel.split();
         let guard = Arc::new(ChannelGuard(Arc::new(write)));
         let lifetime = CancellationToken::new();
-        let (send, mut commands) = mpsc::unbounded_channel();
+        let (send, mut commands) = pty_input::channel();
+        let (resize, mut sizes) = watch::channel((80, 24));
+        let (events, receive) = mpsc::channel(128);
+        let input_events = events.clone();
         let (pause, mut paused) = watch::channel(false);
         let writer = guard.clone();
         let stopped = lifetime.clone();
         tokio::spawn(async move {
             loop {
-                let command = tokio::select! {biased;_=stopped.cancelled()=>break,command=commands.recv()=>command};
+                let command = tokio::select! {
+                    biased;
+                    _=stopped.cancelled()=>break,
+                    changed=sizes.changed()=>{
+                        if changed.is_err() { break; }
+                        let (cols, rows) = *sizes.borrow_and_update();
+                        Command::Resize(cols, rows)
+                    },
+                    input=commands.recv()=>match input { Some(input)=>Command::Write(input), None=>break },
+                };
                 let work = async {
                     match command {
-                        Some(Command::Write(bytes)) => writer.0.data(bytes.as_slice()).await,
-                        Some(Command::Resize(cols, rows)) => {
+                        Command::Write(input) => writer.0.data(input.bytes.as_slice()).await,
+                        Command::Resize(cols, rows) => {
                             writer.0.window_change(cols as u32, rows as u32, 0, 0).await
                         }
-                        None => return false,
                     }
-                    .is_ok()
                 };
-                if !tokio::select! { biased;_=stopped.cancelled()=>false,result=work=>result } {
+                let result =
+                    tokio::select! { biased;_=stopped.cancelled()=>break,result=work=>result };
+                if result.is_err() {
+                    let _ = input_events.send(ProcessEvent::WriteFailed).await;
                     break;
                 }
             }
             stopped.cancel();
         });
-        let (events, receive) = mpsc::channel(128);
         let stopped = lifetime.clone();
         tokio::spawn(async move {
             let _guard = guard;
-            let mut code = 0;
+            let mut code = 1;
             loop {
                 if *paused.borrow() {
                     tokio::select! {biased;_=stopped.cancelled()=>break,result=paused.changed()=>{if result.is_err(){break;}}}
@@ -79,6 +93,7 @@ impl RemotePty {
         (
             Self {
                 send,
+                resize,
                 pause,
                 lifetime,
             },
@@ -87,14 +102,14 @@ impl RemotePty {
     }
 }
 impl ShellProcess for RemotePty {
-    fn write(&self, text: &str) {
-        let _ = self.send.send(Command::Write(text.as_bytes().to_vec()));
+    fn write(&self, text: &str) -> Result<(), &'static str> {
+        self.send.write(text)
     }
     fn pause(&self, paused: bool) {
         self.pause.send_replace(paused);
     }
     fn resize(&self, cols: u16, rows: u16) {
-        let _ = self.send.send(Command::Resize(cols, rows));
+        self.resize.send_replace((cols, rows));
     }
     fn kill(&self) {
         self.lifetime.cancel();
