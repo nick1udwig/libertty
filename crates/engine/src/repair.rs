@@ -1188,14 +1188,14 @@ fn repair_one(
                     if !word.quoted
                         && let Some(schema) = &flag.value
                     {
-                        let choices = match schema.kind {
-                            ValueKind::Choice => schema.choices.clone().unwrap_or_default(),
+                        let choices: &[String] = match schema.kind {
+                            ValueKind::Choice => schema.choices.as_deref().unwrap_or_default(),
                             ValueKind::Path | ValueKind::Directory | ValueKind::InputFile => {
-                                catalog.paths.to_vec()
+                                &catalog.paths
                             }
-                            _ => vec![],
+                            _ => &[],
                         };
-                        for matched in argument_matches(&words, state.index, &choices) {
+                        for matched in argument_matches(&words, state.index, choices) {
                             let spoken = words[state.index..state.index + matched.consumed]
                                 .iter()
                                 .map(|w| w.value.as_str())
@@ -1465,9 +1465,15 @@ fn repair_one(
                     }
                 }
             }
-            if let Some(values) = metadata.argument_values.as_ref().and_then(|values| {
-                values.get(&serde_json::to_string(&state.args.values()).unwrap())
-            }) && !matched_flag
+            // Values are keyed by the JSON argument vector, so it is built only when one could match.
+            if !matched_flag
+                && let Some(values) = metadata
+                    .argument_values
+                    .as_ref()
+                    .filter(|values| !values.is_empty())
+                    .and_then(|values| {
+                        values.get(&serde_json::to_string(&state.args.values()).unwrap())
+                    })
             {
                 for matched in argument_matches(&words, state.index, values) {
                     let spoken = words[state.index..state.index + matched.consumed]
