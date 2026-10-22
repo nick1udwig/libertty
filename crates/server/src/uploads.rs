@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 const IDLE: Duration = Duration::from_secs(15 * 60);
 const COMPLETED: Duration = Duration::from_secs(120);
 const UPLOADS: usize = 64;
+const RETAINED_UPLOADS: usize = 1024;
 
 struct Upload {
     fs: FileSystem,
@@ -71,9 +72,13 @@ impl Uploads {
         if let Some(upload) = uploads.get(key) {
             return Ok(upload.clone());
         }
-        if uploads.len() >= UPLOADS {
+        let active = uploads
+            .values()
+            .filter(|upload| !upload.writer.try_lock().is_ok_and(|complete| *complete))
+            .count();
+        if uploads.len() >= RETAINED_UPLOADS || active >= UPLOADS {
             return Err(Error::new(
-                "Too many uploads are in progress. Try again shortly.",
+                "The upload limit has been reached. Try again shortly.",
                 429,
             ));
         }
@@ -119,7 +124,8 @@ impl Uploads {
                 // A partial file left by a backend restart restarts from its beginning.
                 let _ = fs.remove(&partial, false).await;
                 fs.create_new(&partial, 0o600).await?.shutdown().await?;
-                self.open(key, || Upload {
+                let cleanup = partial.clone();
+                match self.open(key, || Upload {
                     fs: fs.clone(),
                     partial,
                     destination,
@@ -129,7 +135,13 @@ impl Uploads {
                     writer: Default::default(),
                     current: Default::default(),
                     touched: Mutex::new(Instant::now()),
-                })?
+                }) {
+                    Ok(upload) => upload,
+                    Err(error) => {
+                        fs.remove_on_drop(cleanup);
+                        return Err(error);
+                    }
+                }
             }
         };
         if upload.destination != libertty_engine::path::join(&[&directory, name])
@@ -207,6 +219,86 @@ async fn exclusive(fs: &FileSystem, file: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn completed_receipts_leave_active_capacity_available_and_rejections_remove_partial_files()
+     {
+        let root = tempfile::tempdir().unwrap();
+        let cwd = root.path().to_str().unwrap();
+        let uploads = Uploads::default();
+        let fs = FileSystem::default();
+        fn destination<'a>(cwd: &'a str, name: &'a str) -> Destination<'a> {
+            Destination {
+                cwd,
+                home: cwd,
+                directory: ".",
+                name,
+                size: 1,
+            }
+        }
+        for index in 0..=UPLOADS {
+            let name = format!("file-{index}");
+            let reply = uploads
+                .receive(
+                    "scope",
+                    &name,
+                    &fs,
+                    destination(cwd, &name),
+                    0,
+                    Body::from("x"),
+                )
+                .await
+                .unwrap();
+            assert_eq!(reply, json!({"name":name,"bytes":1}));
+        }
+        for index in 0..UPLOADS {
+            let name = format!("pending-{index}");
+            assert_eq!(
+                uploads
+                    .receive(
+                        "scope",
+                        &name,
+                        &fs,
+                        destination(cwd, &name),
+                        0,
+                        Body::empty()
+                    )
+                    .await
+                    .unwrap(),
+                json!({"received":0})
+            );
+        }
+        assert_eq!(
+            uploads
+                .receive(
+                    "scope",
+                    "overflow",
+                    &fs,
+                    destination(cwd, "overflow"),
+                    0,
+                    Body::empty()
+                )
+                .await
+                .unwrap_err()
+                .status,
+            429
+        );
+        assert!(!root.path().join(".libertty-upload-overflow").exists());
+        assert_eq!(
+            uploads
+                .receive(
+                    "scope",
+                    "file-0",
+                    &fs,
+                    destination(cwd, "file-0"),
+                    0,
+                    Body::empty()
+                )
+                .await
+                .unwrap(),
+            json!({"name":"file-0","bytes":1})
+        );
+    }
 
     #[test]
     fn completed_uploads_have_a_bounded_retry_window_and_busy_writes_do_not_expire() {
