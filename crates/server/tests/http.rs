@@ -995,6 +995,14 @@ fn retried_changes_with_one_idempotency_key_run_once_and_replay_their_reply() {
             .count(),
         1
     );
+    for index in 0..140 {
+        assert_eq!(mkdir(&owner, &format!("fill-{index}")).status, 409);
+    }
+    assert_eq!(
+        mkdir(&owner, "retry-1").status,
+        200,
+        "Recent keys survive more than 128 changes"
+    );
 }
 
 #[test]
