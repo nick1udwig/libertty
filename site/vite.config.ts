@@ -8,6 +8,15 @@ import { externalWasm, terminalPreloads } from '../build/assets.ts';
 const root = path.resolve(import.meta.dirname, '..');
 const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
+function publicSiteUrl(): string {
+  const url = new URL(process.env.LIBERTTY_SITE_URL || 'https://libertty.sh/');
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('LIBERTTY_SITE_URL must be an absolute HTTP(S) URL without credentials, a query or a fragment.');
+  }
+  if (!url.pathname.endsWith('/')) url.pathname += '/';
+  return url.href.replaceAll('&', '&amp;');
+}
+
 /** Snapshot the tracked repository so the demo shell, files and reader browse the real project. */
 function repository(): Plugin {
   const id = 'virtual:libertty-repo', resolved = '\0' + id;
@@ -57,7 +66,7 @@ function engine(): Plugin {
 }
 
 /** Boot the app documents through the demo entries, which install the in-page backend before the real modules run. */
-function demoEntries(base: string): Plugin {
+function demoEntries(base: string, site: string): Plugin {
   return {
     name: 'libertty-site-entries',
     // During development the landing page is served at / and the workspace at /app.html, as in the build.
@@ -66,11 +75,13 @@ function demoEntries(base: string): Plugin {
         const [route, query = ''] = (request.url || '').split('?');
         if (route === '/' || route === '/index.html') request.url = '/site/index.html' + (query && '?' + query);
         else if (route === '/app.html') request.url = '/index.html' + (query && '?' + query);
+        else if (route === '/social.png') request.url = '/site/social.png';
         next();
       });
     },
     transformIndexHtml: { order: 'pre', handler(html, context) {
       const page = path.relative(root, context.filename);
+      if (page === 'site/index.html') return html.replaceAll('%SITE_URL%', site);
       const entry = page === 'index.html' ? 'app' : page === 'terminal.html' ? 'terminal' : undefined;
       if (!entry) return;
       return html.replace('<base href="/" data-libertty-base>', `<base href="${base}" data-libertty-base>`)
@@ -83,6 +94,7 @@ function demoEntries(base: string): Plugin {
       writeFileSync(path.join(out, 'index.html'), readFileSync(path.join(out, 'site/index.html'), 'utf8').replaceAll('="../', '="./'));
       // Service workers would cache a backend that does not exist here.
       for (const name of ['site', 'sw.js', 'push-sw.js']) rmSync(path.join(out, name), { recursive: true, force: true });
+      copyFileSync(path.join(root, 'site/social.png'), path.join(out, 'social.png'));
     },
   };
 }
@@ -92,5 +104,5 @@ export default defineConfig(({ command }) => ({
   build: { outDir: 'dist-site', emptyOutDir: true, target: 'es2022', rolldownOptions: { input: { site: 'site/index.html', app: 'index.html', terminal: 'terminal.html' } } },
   optimizeDeps: { exclude: ['ghostty-web'] },
   server: { port: 5180, fs: { allow: [root] } },
-  plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/'), repository(), engine(), externalWasm(), terminalPreloads()],
+  plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/', publicSiteUrl()), repository(), engine(), externalWasm(), terminalPreloads()],
 }));
