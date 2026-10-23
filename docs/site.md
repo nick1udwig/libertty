@@ -17,6 +17,17 @@ npx vite preview --config site/vite.config.ts
 The build writes a static site to `dist-site/` that any static host can serve.
 Set `LIBERTTY_SITE_BASE=/path/` when the site is not served from the root of its domain.
 
+## Link previews
+
+The landing page includes Open Graph and Twitter card metadata in its HTML so link previews do not need JavaScript.
+Set `LIBERTTY_SITE_URL` to the public landing page URL, which defaults to `https://libertty.sh/`.
+Use an absolute HTTP(S) URL without credentials, a query or a fragment.
+The build adds a trailing slash if needed.
+For a site under `/path/`, set both `LIBERTTY_SITE_BASE=/path/` and `LIBERTTY_SITE_URL=https://example.com/path/`.
+The build copies `site/social.png` to `dist-site/social.png` and uses its absolute public URL in the preview metadata.
+The image is a 1200 × 630 screenshot of the landing page in dark mode.
+Retake it when the landing page changes visibly.
+
 ## How the demo works
 
 The workspace and terminal documents are the app's own `index.html` and `terminal.html`, built with demo entries that run first.
