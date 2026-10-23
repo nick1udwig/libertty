@@ -428,12 +428,23 @@ const gestures = new TerminalGestures(term, {
   link: (col, row) => terminalLinkAt(term, col, row, projection?.clickable),
   pan: { enabled: () => fullWidth() && terminalViewport.scrollWidth > terminalViewport.clientWidth, move: pixels => { terminalViewport.scrollLeft += pixels; } },
   scroll: {
-    enabled: () => mobileTerminal() && herdrReady && state.terminalScroll === true && tabVisible && !document.hidden && term.buffer.active.length <= term.rows,
+    enabled: () => tabVisible && !document.hidden && !presentation.pending && !capturedConnection && !!replayState
+      && transport.socket?.readyState === WebSocket.OPEN && term.buffer.active.length <= term.rows
+      && (mobileTerminal() && herdrReady && !herdrParked && !herdrLayout.pending && state.terminalScroll === true || !herdrTerminal && !!term.wasmTerm?.isAlternateScreen()),
     move: (lines, x, y) => {
       const bounds = term.element!.querySelector('canvas')!.getBoundingClientRect();
       const column = Math.max(0, Math.min(term.cols - 1, Math.floor((x - bounds.left) * term.cols / bounds.width)));
       const row = Math.max(0, Math.min(term.rows - 1, Math.floor((y - bounds.top) * term.rows / bounds.height)));
-      send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
+      if (herdrTerminal) send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
+      else {
+        const terminal = term.wasmTerm!, button = lines < 0 ? 64 : 65;
+        const tracking = [1000, 1002, 1003].some(mode => terminal.getMode(mode));
+        const data = !tracking ? lines < 0 ? '\x1b[A' : '\x1b[B'
+          : terminal.getMode(1006) ? `\x1b[<${button};${column + 1};${row + 1}M`
+          : terminal.getMode(1015) ? `\x1b[${button + 32};${column + 1};${row + 1}M`
+          : '\x1b[M' + String.fromCharCode(button + 32, Math.min(255, column + 33), Math.min(255, row + 33));
+        rawInput(data.repeat(Math.min(100, Math.abs(lines))));
+      }
     },
   },
   tap: (x, y) => {
@@ -793,7 +804,7 @@ if (embedded) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;
       herdrParked = parked; dictation.visibility(!parked && tabVisible);
-      if (parked) discardHerdrFrames();
+      if (parked) { gestures.cancelGesture(); discardHerdrFrames(); }
       rendering.setVisible(!parked && tabVisible);
       clearTimeout(parkTimer);
       if (parked) parkTimer = setTimeout(() => { if (herdrParked) { herdrDormant = true; transport.suspend(); } }, inactiveGrace);
@@ -808,7 +819,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { gestures.cancelGesture(); presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);
