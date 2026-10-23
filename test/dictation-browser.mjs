@@ -1,5 +1,6 @@
 import { launchBrowser, freePort, until } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
+import { installMicrophoneRoutes } from './support/microphone.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, mkdir, rm, access, readFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -68,6 +69,7 @@ try {
   });
   const errors = []; page.on('pageerror', error => errors.push(String(error)));
   await installWireObserver(page.context());
+  await installMicrophoneRoutes(page.context());
   await page.context().addInitScript(() => {
     window.__wakeLocks = [];
     Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { async request(type) {
@@ -274,7 +276,9 @@ try {
   await page.screenshot({ path: '/tmp/libertty-voxtype-web-transcribing.png' });
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'done'));
   assert.ok(audioBytes > 0);
-  assert.deepEqual(await page.evaluate(() => window.__captureConstraints.audio), { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true });
+  const capture = await page.evaluate(() => window.__captureConstraints.audio);
+  assert.ok(capture.deviceId.exact && capture.deviceId.exact !== 'bluetooth-headset', 'Dictation opens a phone input instead of the Bluetooth headset');
+  assert.deepEqual({ ...capture, deviceId: undefined }, { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true, deviceId: undefined });
   assert.equal(await page.evaluate(() => window.__messages.some(m => m.type === 'partial' || m.type === 'final')), false);
   assert.equal(await page.evaluate(() => window.__out.includes('never forward')), false);
   assert.equal(await page.evaluate(() => window.__state.ready), true, 'Dictation must not submit the command');
@@ -309,6 +313,11 @@ try {
   await page.evaluate(() => { window.__holdPermission = false; window.__releasePermission(); });
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
   await page.getByLabel('Cancel dictation', { exact: true }).click();
+  await page.evaluate(() => { localStorage.setItem('libertty.bluetoothMicrophone', 'true'); window.__messages = []; });
+  await mic.press('Enter'); await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+  assert.equal(await page.evaluate(() => 'deviceId' in window.__captureConstraints.audio), false, 'Allowing Bluetooth keeps the browser default input');
+  await page.getByLabel('Cancel dictation', { exact: true }).click();
+  await page.evaluate(() => localStorage.removeItem('libertty.bluetoothMicrophone'));
   // Dragging a provisional press cancels it; the controls expand on the other side near the left edge.
   const dragFrom = await mic.boundingBox();
   await page.mouse.move(dragFrom.x + 24, dragFrom.y + 24); await page.mouse.down();

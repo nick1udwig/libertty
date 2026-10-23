@@ -7,6 +7,7 @@ import { WebSocketServer } from 'ws';
 import { resumableVoxtype } from './support/voxtype-daemon.mjs';
 import { herdrRequest } from './support/herdr.ts';
 import { installWireObserver } from './wire-observer.mjs';
+import { installMicrophoneRoutes } from './support/microphone.mjs';
 
 const fixturePort3191 = await freePort();
 
@@ -34,6 +35,7 @@ try {
   browser = await launchBrowser({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   await installWireObserver(context);
+  await installMicrophoneRoutes(context);
   await context.addInitScript(() => {
     window.__messages = []; window.__sent = []; const Original = WebSocket;
     window.WebSocket = class extends Original { constructor(...args) { super(...args); window.__socket = this; this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); window.__messages.push(message); if (message.type === 'state') window.__state = message.state; }); } send(data) { window.__sent.push(window.__wireSent(data)); super.send(data); } };

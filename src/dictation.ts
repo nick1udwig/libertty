@@ -5,6 +5,7 @@ import { dictationTarget } from './protocol.ts';
 import './dictation.css';
 import { DictationView } from './dictation-view.ts';
 import { DictationWakeLock, dictationWakeEnvironment } from './dictation-wake-lock.ts';
+import { bluetoothMicrophoneAllowed, bluetoothMicrophoneKey, openMicrophone } from './dictation-microphone.ts';
 
 interface Host {
   api<T>(path: string, data?: unknown): Promise<T>;
@@ -70,6 +71,11 @@ export class DictationControl {
     this.wakeLock = new DictationWakeLock(dictationWakeEnvironment(), message => host.notice(message));
     window.addEventListener('pagehide', () => { this.cancel(); this.wakeLock.stop(); clearTimeout(this.pollTimer); });
     this.cancelButton.onclick = () => this.cancel();
+    const bluetoothSetting = document.getElementById('bluetooth-microphone') as HTMLInputElement | null;
+    if (bluetoothSetting) {
+      bluetoothSetting.checked = bluetoothMicrophoneAllowed();
+      bluetoothSetting.onchange = () => { try { localStorage.setItem(bluetoothMicrophoneKey, String(bluetoothSetting.checked)); } catch {} };
+    }
     this.dialog.id = 'dictation-install';
     this.dialog.innerHTML = '<h2>Dictate with Voxtype Mobile</h2><p data-explanation>Install the daemon on your backend to dictate directly into this terminal.</p><p>Install pastes the command into your session. Review it and press Enter to run it.</p><label class="setting-toggle"><input type="checkbox"><span>Do not show again</span></label><div class="run-row"><button type="button" class="secondary-button" data-later>Not now</button><button type="button" class="run-button" data-install>Install</button></div>';
     const dismiss = () => { if (this.dialog.querySelector('input')!.checked) this.save('dismissed'); this.dialog.close(); };
@@ -260,7 +266,7 @@ export class DictationControl {
     } catch (error) { if (generation === this.generation) { this.host.notice((error as Error).message); this.cancel(); } }
   }
   private async microphone(generation: number): Promise<MediaStream | undefined> {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true } });
+    const stream = await openMicrophone(navigator.mediaDevices, bluetoothMicrophoneAllowed());
     if (generation !== this.generation) { stream.getTracks().forEach(track => track.stop()); return; }
     const track = stream.getAudioTracks()[0];
     if (!track || track.readyState === 'ended') { stream.getTracks().forEach(track => track.stop()); throw new Error('The microphone stopped before recording started.'); }

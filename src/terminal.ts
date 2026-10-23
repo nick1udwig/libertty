@@ -408,7 +408,7 @@ function applySettings() {
     applyTerminalTheme();
     const font = JSON.parse(localStorage.getItem('libertty.fontSizePt') || '10');
     if (typeof font === 'number') { fontSizeInput.value = String(font); fontSizeInput.dispatchEvent(new Event('input')); }
-    for (const [id, value] of [['auto-alternatives', localStorage.getItem('libertty.autoAlternatives') !== 'false' && localStorage.getItem('libertty.justRun') !== 'true'], ['tap-alternate-send', localStorage.getItem('libertty.tapAlternateSend') !== 'false']] as const) {
+    for (const [id, value] of [['auto-alternatives', localStorage.getItem('libertty.autoAlternatives') !== 'false' && localStorage.getItem('libertty.justRun') !== 'true'], ['tap-alternate-send', localStorage.getItem('libertty.tapAlternateSend') !== 'false'], ['bluetooth-microphone', localStorage.getItem('libertty.bluetoothMicrophone') === 'true']] as const) {
       const setting = $<HTMLInputElement>(id); if (setting.checked !== value) { setting.checked = value; setting.dispatchEvent(new Event('change')); }
     }
     const next = validateShortcuts(JSON.parse(localStorage.getItem('libertty.shortcuts') || JSON.stringify(defaults)));
@@ -417,7 +417,7 @@ function applySettings() {
     sizeTerminal();
   } catch { /* Keep valid settings if stored data is unavailable or malformed. */ }
 }
-window.addEventListener('storage', event => { if (event.key === null || ['libertty.herdrLayout', 'libertty.fontSizePt', 'libertty.autoAlternatives', 'libertty.tapAlternateSend', 'libertty.shortcuts', 'libertty.readingPhrases', 'libertty.justRun', 'libertty.theme'].includes(event.key)) applySettings(); });
+window.addEventListener('storage', event => { if (event.key === null || ['libertty.herdrLayout', 'libertty.fontSizePt', 'libertty.autoAlternatives', 'libertty.tapAlternateSend', 'libertty.bluetoothMicrophone', 'libertty.shortcuts', 'libertty.readingPhrases', 'libertty.justRun', 'libertty.theme'].includes(event.key)) applySettings(); });
 function copyTerminalText(text: string) {
   // Clipboard access needs a focused document. Focus the frame itself without
   // enabling its textarea or opening the software keyboard after a gesture.
