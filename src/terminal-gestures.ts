@@ -4,6 +4,7 @@ import { TerminalScrollbar } from './terminal-scrollbar.ts';
 import { terminalLinkAt } from './terminal-links.ts';
 import { isPreservingScrollback } from './terminal-viewport.ts';
 import { terminalContact } from './terminal-contact.ts';
+import { TerminalSelectionHistory } from './terminal-selection-history.ts';
 
 interface Point { row: number; col: number }
 interface Host {
@@ -27,6 +28,15 @@ export class TerminalGestures {
   private hold?: ReturnType<typeof setTimeout>;
   private frame = 0;
   private dragHandle?: number;
+  private selectionFrame = 0;
+  private selectionContact?: { x: number; y: number; handle: number };
+  private selectionHistory?: TerminalSelectionHistory;
+  private selectionScroll = false;
+  private selectionBlocked = false;
+  private selectionWarning = '';
+  private nextSelectionRead = 0;
+  private remoteScroll?: { direction: number; at: number };
+  private nextSelectionScroll = 0;
   private lastTouch = -Infinity;
   private scrollFraction = 0;
   private scrollLinePixels?: number;
@@ -53,19 +63,20 @@ export class TerminalGestures {
       handle.setAttribute('aria-label', index ? 'Selection end' : 'Selection start');
       element.append(handle);
       terminalContact(handle, {
-        down: () => { host.focus.suppress(); this.dismissNotice(); this.cancelMomentum(); this.dragHandle = index; return true; },
+        down: () => {
+          host.focus.suppress(); this.dismissNotice(); this.cancelMomentum(); this.stopSelectionScroll();
+          this.lastTouch = performance.now(); this.dragHandle = index; return true;
+        },
         move: ({ x, y }) => {
           if (this.dragHandle !== index) return;
-          const bounds = this.canvas.getBoundingClientRect();
-          const point = this.point(x + (index ? -.5 : .5) * bounds.width / term.cols, y - 12 - bounds.height / term.rows / 2);
-          if (index) this.end = point; else this.start = point;
-          this.render();
+          this.lastTouch = performance.now(); this.extendSelection(host, x, y, index);
         },
-        up: () => {
+        up: ({ x, y }) => {
           if (this.dragHandle !== index) return;
-          this.dragHandle = undefined; void this.copy(host);
+          this.extendSelection(host, x, y, index); this.finishSelectionScroll();
+          this.lastTouch = performance.now(); this.dragHandle = undefined; void this.copy(host);
         },
-        cancel: () => { this.dragHandle = undefined; },
+        cancel: () => { this.dragHandle = undefined; this.stopSelectionScroll(); },
       });
     });
     const move = (x: number, y: number, at: number) => {
@@ -79,7 +90,7 @@ export class TerminalGestures {
         if (press.mode === 'select') this.start = this.point(press.x, press.y);
       }
       if (press.mode === 'pan') host.pan?.move(press.lastX - x);
-      else if (press.mode === 'select') { this.end = this.point(x, y); this.render(); }
+      else if (press.mode === 'select') this.extendSelection(host, x, y);
       else {
         const delta = y - press.lastY;
         press.velocity = delta / Math.max(8, at - press.at);
@@ -96,7 +107,7 @@ export class TerminalGestures {
           return false;
         }
         host.focus.suppress(); this.dismissNotice(); this.lastTouch = performance.now();
-        this.cancelMomentum(); this.scrollFraction = 0; this.scrollLinePixels = undefined; clearTimeout(this.hold);
+        this.cancelMomentum(); this.clear(); this.scrollFraction = 0; this.scrollLinePixels = undefined; clearTimeout(this.hold);
         this.press = { x, y, lastX: x, lastY: y, started: at, at, velocity: 0, mode: 'pending' };
         this.hold = setTimeout(() => {
           if (!this.press || this.press.mode !== 'pending') return;
@@ -114,7 +125,7 @@ export class TerminalGestures {
           this.press.mode = 'select'; this.selectWord(this.point(this.press.x, this.press.y));
         }
         if (x !== this.press.lastX || y !== this.press.lastY) move(x, y, at);
-        const press = this.press; this.press = undefined;
+        const press = this.press; this.press = undefined; this.finishSelectionScroll();
         if (press.mode === 'pending') {
           this.clear();
           const bounds = this.canvas.getBoundingClientRect();
@@ -127,7 +138,7 @@ export class TerminalGestures {
         else if (press.mode === 'select') void this.copy(host);
         else if (press.mode === 'scroll' && at - press.at < 100) this.momentum(host, press.velocity, x, y);
       },
-      cancel: () => { this.lastTouch = performance.now(); clearTimeout(this.hold); this.press = undefined; this.cancelMomentum(); },
+      cancel: () => { this.lastTouch = performance.now(); this.cancelGesture(); },
     });
     element.addEventListener('pointerdown', e => {
       if (surface(e.target) && e.pointerType === 'mouse' && performance.now() - this.lastTouch < 800) stop(e);
@@ -146,12 +157,14 @@ export class TerminalGestures {
       if (type === 'mousedown') { this.cancelMomentum(); this.clear(false); }
     }, { capture: true });
     term.onSelectionChange(() => this.render());
-    term.onScroll(() => { if (this.start && !isPreservingScrollback(term)) this.clear(); else this.render(); });
-    term.onData(() => { this.cancelMomentum(); this.clear(); });
-    term.onResize(() => { this.scrollLinePixels = undefined; this.clear(); });
+    term.onScroll(() => { if (this.start && !this.selectionScroll && !isPreservingScrollback(term)) this.clear(); else this.render(); });
+    term.onData(() => { this.cancelGesture(); this.clear(); });
+    term.onResize(() => { this.cancelGesture(); this.scrollLinePixels = undefined; this.clear(); });
+    window.addEventListener('pagehide', () => this.cancelGesture());
+    window.addEventListener('blur', () => this.cancelGesture());
+    document.addEventListener('visibilitychange', () => { if (document.hidden) this.cancelGesture(); });
     new TerminalScrollbar(term, () => {
-      host.focus.suppress(); this.cancelMomentum(); clearTimeout(this.hold);
-      this.press = undefined; this.lastTouch = performance.now(); this.clear();
+      host.focus.suppress(); this.cancelGesture(); this.lastTouch = performance.now(); this.clear();
     });
   }
   get text() {
@@ -159,16 +172,19 @@ export class TerminalGestures {
     if (!range) return this.term.getSelection();
     const chunks: string[] = [];
     for (let row = range.start.row; row <= range.end.row; row++) {
-      const line = this.term.buffer.active.getLine(row);
-      if (!line) continue;
+      const saved = this.selectionHistory?.getLine(row);
+      const line = this.selectionHistory ? undefined : this.term.buffer.active.getLine(row);
+      if (!line && !saved) continue;
       let text = '';
       const first = row === range.start.row ? range.start.col : 0;
       const last = row === range.end.row ? range.end.col : this.term.cols - 1;
       for (let col = first; col <= last; col++) {
-        const cell = line.getCell(col);
-        if (cell?.getWidth()) text += cell.getChars() || ' ';
+        const cell = line?.getCell(col);
+        const retained = saved?.cells[col];
+        if (retained ? retained.width : cell?.getWidth()) text += retained?.chars ?? (cell?.getChars() || ' ');
       }
-      const wrapped = row < range.end.row && this.term.buffer.active.getLine(row + 1)?.isWrapped;
+      const wrapped = row < range.end.row && (this.selectionHistory
+        ? this.selectionHistory.getLine(row + 1)?.wrapped : this.term.buffer.active.getLine(row + 1)?.isWrapped);
       chunks.push(wrapped && last === this.term.cols - 1 ? text : text.trimEnd());
       if (row < range.end.row && !wrapped) chunks.push('\n');
     }
@@ -177,12 +193,12 @@ export class TerminalGestures {
   private point(x: number, y: number): Point {
     const bounds = this.canvas.getBoundingClientRect();
     let col = Math.max(0, Math.min(this.term.cols - 1, Math.floor((x - bounds.left) / (bounds.width / this.term.cols))));
-    const row = Math.max(0, Math.min(this.term.rows - 1, Math.floor((y - bounds.top) / (bounds.height / this.term.rows))));
-    const line = this.term.buffer.active.getLine(this.topRow() + row);
+    const row = Math.max(this.selectionHistory?.first ?? 0, Math.min(this.selectionHistory?.last ?? this.term.rows - 1, Math.floor((y - bounds.top) / (bounds.height / this.term.rows))));
+    const line = this.term.buffer.active.getLine(Math.max(0, this.term.buffer.active.length - this.term.rows - Math.floor(this.term.getViewportY())) + row);
     if (col > 0 && line?.getCell(col)?.getWidth() === 0 && line.getCell(col - 1)?.getWidth() === 2) col--;
     return { col, row: this.topRow() + row };
   }
-  private topRow() { return Math.max(0, this.term.buffer.active.length - this.term.rows - Math.floor(this.term.getViewportY())); }
+  private topRow() { return this.selectionHistory?.top ?? Math.max(0, this.term.buffer.active.length - this.term.rows - Math.floor(this.term.getViewportY())); }
   private linePixels() { return this.scrollLinePixels ??= Math.max(6, this.canvas.getBoundingClientRect().height / this.term.rows * .65); }
   private range() {
     if (!this.start || !this.end) return;
@@ -190,7 +206,7 @@ export class TerminalGestures {
     return before ? { start: this.start, end: this.end } : { start: this.end, end: this.start };
   }
   private selectWord(point: Point) {
-    this.term.clearSelection();
+    this.clear();
     const line = this.term.buffer.active.getLine(point.row);
     let first = point.col, last = point.col;
     const word = (col: number) => !!line?.getCell(col)?.getChars().trim() || col > 0 && line?.getCell(col)?.getWidth() === 0 && line.getCell(col - 1)?.getWidth() === 2;
@@ -201,6 +217,7 @@ export class TerminalGestures {
     this.start = { row: point.row, col: first }; this.end = { row: point.row, col: last }; this.render();
   }
   clear(native = true) {
+    this.stopSelectionScroll(); this.selectionHistory = undefined; this.selectionBlocked = false; this.selectionWarning = '';
     this.start = this.end = undefined;
     this.dismissNotice();
     this.highlights.replaceChildren(); this.handles.forEach(handle => handle.hidden = true);
@@ -219,8 +236,8 @@ export class TerminalGestures {
       message = `Copied ${count.toLocaleString()} ${count === 1 ? 'character' : 'characters'} to clipboard`;
     } catch { message = 'Clipboard is unavailable. Text remains selected.'; }
     if (generation !== this.copyGeneration) return;
-    this.notice.textContent = message; this.notice.hidden = false; this.render();
-    clearTimeout(this.noticeTimer); this.noticeTimer = setTimeout(() => { this.notice.hidden = true; }, 2200);
+    this.notice.textContent = this.selectionWarning ? `${message}\n${this.selectionWarning}` : message; this.notice.hidden = false; this.render();
+    clearTimeout(this.noticeTimer); if (!this.selectionWarning) this.noticeTimer = setTimeout(() => { this.notice.hidden = true; }, 2200);
   }
   private render() {
     const range = this.range();
@@ -231,7 +248,7 @@ export class TerminalGestures {
     const width = bounds.width / this.term.cols, height = bounds.height / this.term.rows, top = this.topRow();
     this.handles.forEach(handle => handle.hidden = !range);
     if (range) {
-      for (let row = Math.max(top, range.start.row); row <= Math.min(top + this.term.rows - 1, range.end.row); row++) {
+      for (let row = Math.max(top + (this.selectionHistory?.first ?? 0), range.start.row); row <= Math.min(top + (this.selectionHistory?.last ?? this.term.rows - 1), range.end.row); row++) {
         const first = row === range.start.row ? range.start.col : 0, last = row === range.end.row ? range.end.col : this.term.cols - 1;
         const highlight = document.createElement('span');
         Object.assign(highlight.style, { left: `${bounds.left - container.left + first * width}px`, top: `${bounds.top - container.top + (row - top) * height}px`, width: `${(last - first + 1) * width}px`, height: `${height}px` });
@@ -239,8 +256,9 @@ export class TerminalGestures {
       }
       [this.start!, this.end!].forEach((point, i) => {
         const handle = this.handles[i];
+        handle.hidden = this.dragHandle !== i && (point.row < top + (this.selectionHistory?.first ?? 0) || point.row > top + (this.selectionHistory?.last ?? this.term.rows - 1));
         handle.style.left = `${Math.max(viewport.left - container.left, Math.min(viewport.right - container.left - 32, bounds.left - container.left + (point.col + (i ? 1 : 0)) * width - 16))}px`;
-        handle.style.top = `${Math.min(container.height - 32, bounds.top - container.top + (point.row - top + 1) * height - 4)}px`;
+        handle.style.top = `${Math.max(0, Math.min(container.height - 32, bounds.top - container.top + (point.row - top + 1) * height - 4))}px`;
       });
     }
     if (!this.notice.hidden) {
@@ -248,6 +266,85 @@ export class TerminalGestures {
       const row = range ? range.start.row - top : 0;
       this.notice.style.top = `${Math.max(4, Math.min(container.height - 40, bounds.top - container.top + row * height - 36))}px`;
     }
+  }
+  cancelGesture() {
+    clearTimeout(this.hold); this.press = undefined; this.dragHandle = undefined;
+    this.cancelMomentum(); this.stopSelectionScroll();
+  }
+  private stopSelectionScroll() {
+    cancelAnimationFrame(this.selectionFrame); this.selectionFrame = 0;
+    if (this.remoteScroll) this.selectionBlocked = true;
+    this.selectionContact = undefined; this.remoteScroll = undefined; this.nextSelectionScroll = this.nextSelectionRead = 0;
+  }
+  private finishSelectionScroll() {
+    if (this.remoteScroll && this.selectionHistory && this.selectionContact) {
+      const anchor = this.selectionContact.handle ? this.start : this.end;
+      if (anchor && this.selectionHistory.update(this.remoteScroll.direction, anchor.row) === 'moved') {
+        this.remoteScroll = undefined; this.moveSelectionEndpoint();
+      } else this.selectionWarning = 'Only confirmed text was copied; start a new selection to extend it.';
+    }
+    this.stopSelectionScroll();
+  }
+  private extendSelection(host: Host, x: number, y: number, handle = 1) {
+    if (!this.start || this.selectionBlocked) return;
+    if (host.scroll?.enabled() && !this.selectionHistory) {
+      this.selectionHistory = new TerminalSelectionHistory(this.term);
+    }
+    const bounds = this.canvas.getBoundingClientRect();
+    const adjustedX = this.dragHandle === undefined ? x : x + (handle ? -.5 : .5) * bounds.width / this.term.cols;
+    const adjustedY = this.dragHandle === undefined ? y : y - 12 - bounds.height / this.term.rows / 2;
+    this.selectionContact = { x: adjustedX, y: adjustedY, handle };
+    this.moveSelectionEndpoint();
+    if (!this.selectionFrame) this.selectionFrame = requestAnimationFrame(at => this.autoScrollSelection(host, at));
+  }
+  private moveSelectionEndpoint() {
+    const contact = this.selectionContact;
+    if (!contact) return;
+    const point = this.point(contact.x, contact.y);
+    if (contact.handle) this.end = point; else this.start = point;
+    this.render();
+  }
+  private blockSelectionScroll(message: string) {
+    this.selectionBlocked = true; this.stopSelectionScroll();
+    this.selectionWarning = message;
+    this.notice.textContent = message; this.notice.hidden = false; this.render();
+  }
+  private autoScrollSelection(host: Host, at: number) {
+    this.selectionFrame = 0;
+    const contact = this.selectionContact;
+    if (!contact || !this.start || this.selectionBlocked || document.hidden) return;
+    if (this.remoteScroll && this.selectionHistory && at >= this.nextSelectionRead) {
+      this.nextSelectionRead = at + 50;
+      const anchor = contact.handle ? this.start : this.end!;
+      const result = this.selectionHistory.update(this.remoteScroll.direction, anchor.row);
+      if (result === 'fixed' || result === 'limit') {
+        this.blockSelectionScroll(result === 'fixed' ? 'Select text inside the scrolling area to extend the selection.' : 'Selection history is full; release to copy, then start a new selection.'); return;
+      }
+      if (result === 'moved') {
+        this.remoteScroll = undefined; this.moveSelectionEndpoint();
+      } else if (at - this.remoteScroll.at > 1500) {
+        this.blockSelectionScroll(result === 'ambiguous' ? 'The view changed; start a new selection to copy more text.' : 'No more scrollable text; release to copy the selection.'); return;
+      }
+    }
+    const bounds = this.canvas.getBoundingClientRect();
+    const height = bounds.height / this.term.rows;
+    const top = bounds.top + (this.selectionHistory?.first ?? 0) * height;
+    const bottom = bounds.top + ((this.selectionHistory?.last ?? this.term.rows - 1) + 1) * height;
+    const margin = Math.min(40, (bottom - top) / 4);
+    const direction = contact.y < top + margin ? -1 : contact.y > bottom - margin ? 1 : 0;
+    if (direction && at >= this.nextSelectionScroll && !this.remoteScroll) {
+      this.nextSelectionScroll = at + 100;
+      if (this.selectionHistory) {
+        if (!host.scroll?.enabled()) { this.blockSelectionScroll('The terminal changed; start a new selection.'); return; }
+        this.remoteScroll = { direction, at };
+        host.scroll.move(direction, contact.x, Math.max(top + height / 2, Math.min(bottom - height / 2, contact.y)));
+      } else {
+        this.selectionScroll = true;
+        try { this.term.scrollLines(direction); } finally { this.selectionScroll = false; }
+        this.moveSelectionEndpoint();
+      }
+    }
+    this.selectionFrame = requestAnimationFrame(time => this.autoScrollSelection(host, time));
   }
   private cancelMomentum() { cancelAnimationFrame(this.frame); this.frame = 0; }
   private scroll(host: Host, lines: number, x: number, y: number) {
