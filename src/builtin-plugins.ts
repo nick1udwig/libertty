@@ -74,7 +74,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
           },
           notificationDevice: () => s.notificationDevice(tab.backendId), toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
           api: async <T>(name: string, data?: unknown, signal?: AbortSignal) => {
-            try { return await s.api<T>(backend, name + '?' + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }
+            try { return await s.api<T>(backend, name + (name.includes('?') ? '&' : '?') + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }
             catch (error: any) { if (!signal?.aborted && error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
           },
           changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice });
