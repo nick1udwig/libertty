@@ -130,6 +130,16 @@ When an app keeps its own history, vertical drags send native wheel events throu
 Mobile TUI panes render text and cursors directly from Herdr’s live frames when their grid matches the shared terminal.
 Shell scrollback and differently sized observers retain the history projection.
 
+Tap **Copy response** above an agent terminal to copy its latest saved assistant response, including Markdown and code blocks.
+This uses Codex or Claude JSONL transcripts reported by Herdr, including sessions on SSH hosts.
+User prompts, tool results, reasoning and marked work updates are excluded.
+If clipboard access is blocked, a dialog lets you retry or select the response for manual copying.
+Local transcripts must be under `CODEX_HOME/sessions` or `CLAUDE_CONFIG_DIR/projects`, using `~/.codex` and `~/.claude` when those variables are unset.
+SSH connections use the remote user's default `~/.codex/sessions` and `~/.claude/projects` directories.
+ID lookup searches at most 512 directories and 20,000 entries.
+The reader checks the last 8 MB and copies responses up to 2 MB; missing, unsupported or incomplete transcripts show an error.
+The response reflects saved transcript content, which can lag the agent's display.
+
 Status circles follow Herdr: hollow green means idle, orange means working, red means attention is requested, and blue means completed work you have not viewed here.
 Herdr's original completion and request sounds play while the webapp has focus, including when another top-level tab is selected.
 A browser gesture enables audio playback.
