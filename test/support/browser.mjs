@@ -51,8 +51,8 @@ export async function pair(base, token) {
   return result.accessToken;
 }
 
-export async function waitForShell(frame, { afterPrompt, session, line, visible = true } = {}) {
-  await frame.waitForFunction(async ({ afterPrompt, session, line, visible }) => {
+export async function waitForShell(frame, { afterPrompt, session, visible = true } = {}) {
+  await frame.waitForFunction(({ afterPrompt, session, visible }) => {
     const state = window.__testShellState;
     const socket = window.__testShellSocket;
     const viewport = document.querySelector('#terminal-viewport');
@@ -63,16 +63,8 @@ export async function waitForShell(frame, { afterPrompt, session, line, visible 
     if (visible && (document.hidden || frameElement?.inert || frameElement && !frameElement.checkVisibility())) return false;
     if (document.querySelector('#connection-label')?.textContent !== 'Connected') return false;
     if (viewport?.classList.contains('awaiting-herdr-layout') || viewport?.getAttribute('aria-busy') === 'true') return false;
-    if (line === undefined) return true;
-    window.__testLineRequests ??= new Map();
-    const id = crypto.randomUUID();
-    const snapshot = await new Promise(resolve => {
-      const timer = setTimeout(() => { window.__testLineRequests.delete(id); resolve(undefined); }, 1000);
-      window.__testLineRequests.set(id, value => { clearTimeout(timer); window.__testLineRequests.delete(id); resolve(value); });
-      socket.send(JSON.stringify({ type: 'input-line', id, prompt: state.prompt, revision: state.inputRevision }));
-    });
-    return snapshot?.prompt === state.prompt && snapshot.text === line && snapshot.cursor === line.length && window.__testShellSocket === socket && window.__testShellState?.prompt === state.prompt && window.__testShellState.ready;
-  }, { afterPrompt, session, line, visible }, { polling: 100 });
+    return new URL(socket.url).pathname.endsWith('/herdr/ws') || window.__testReadlineReady === true;
+  }, { afterPrompt, session, visible }, { polling: 100 });
   return frame.evaluate(() => ({ ...window.__testShellState }));
 }
 
@@ -88,7 +80,8 @@ export async function focusShell(frame) {
   if (!await input.evaluate(element => document.activeElement === element && !element.readOnly)) {
     const canvas = frame.locator('#terminal canvas');
     const position = await canvas.evaluate(element => { const bounds = element.getBoundingClientRect(); return { x: bounds.width - 4, y: bounds.height - 4 }; });
-    await canvas.tap({ position });
+    if (await frame.evaluate(() => navigator.maxTouchPoints > 0)) await canvas.tap({ position });
+    else await canvas.click({ position });
   }
   await frame.waitForFunction(() => {
     const input = document.querySelector('#terminal textarea');
@@ -98,7 +91,6 @@ export async function focusShell(frame) {
 }
 
 export async function submitShellCommand(frame, text) {
-  await waitForShell(frame, { line: '' });
   await focusShell(frame);
   const page = typeof frame.page === 'function' ? frame.page() : frame;
   await page.keyboard.type(text);
@@ -108,11 +100,10 @@ export async function submitShellCommand(frame, text) {
 
 export async function shellCommand(frame, text) {
   await submitShellCommand(frame, text);
-  return waitForShell(frame, { line: '' });
+  return waitForShell(frame);
 }
 
 export async function dictateShell(frame, text, { replacement = false } = {}) {
-  await waitForShell(frame, { line: '' });
   const input = await focusShell(frame);
   await input.evaluate((element, { text, replacement }) => element.dispatchEvent(new InputEvent('beforeinput', {
     inputType: replacement ? 'insertReplacementText' : 'insertText', data: text, bubbles: true, cancelable: true,

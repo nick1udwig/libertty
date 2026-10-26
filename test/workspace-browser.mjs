@@ -75,7 +75,7 @@ try {
   await installWireObserver(context);
   await context.addInitScript(() => {
     const Original = window.WebSocket; window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'state') window.__shellState = m.state; if (m.type === 'hello') window.__engine = m.engine; if (m.type === 'output') window.__output = (window.__output || '') + m.data; if (m.type === 'ssh-command') window.__sshCapture = m.id; if (m.type === 'ssh-released' && window.__sshCapture === m.id) window.__sshCapture = undefined; }); }
+      constructor(...args) { super(...args); this.addEventListener('message', async event => { const m = await window.__wireMessage(event.data, this); if (m.type === 'state') window.__shellState = m.state; if (m.type === 'hello') window.__engine = m.engine; if (m.type === 'output') window.__output = (window.__output || '') + m.data; if (m.type === 'ssh-command') { window.__sshCapture = m.id; (window.__sshCaptures ??= []).push(m.command); } if (m.type === 'ssh-released' && window.__sshCapture === m.id) window.__sshCapture = undefined; }); }
     };
   });
   await page.goto(origin);
@@ -411,6 +411,7 @@ try {
   // Reconnection/terminal-cleanup wrappers must still hand off to remote facts.
   await command(frame, 'ssh() { local rc started; started=$SECONDS; command ssh "$@"; rc=$?; printf wrapper-cleanup; return "$rc"; }');
   for (const method of ['typing', 'history', 'search', 'completion', 'paste', 'reload']) {
+    console.log('Checking SSH capture through ' + method);
     frame = await activeFrame(page);
     await command(frame, `history -s '${sshCommand}'`);
     await frame.locator('#terminal textarea').focus();
@@ -428,7 +429,10 @@ try {
       const response = await route.fetch(); if (response.ok()) { await route.abort(); } else await route.fulfill({ response });
     });
     const completed = method === 'reload' ? page.waitForEvent('requestfailed', { predicate: request => request.url().includes('/api/ssh/captured'), timeout: 20000 }) : undefined;
+    const captures = await frame.evaluate(() => window.__sshCaptures?.length || 0);
     await page.keyboard.press('Enter');
+    await frame.waitForFunction(count => window.__sshCaptures?.length > count, captures);
+    assert.equal(await frame.evaluate(() => window.__sshCaptures.at(-1).trimEnd()), sshCommand, method + ' captures the intended SSH command');
     if (method === 'typing') await page.locator('#terminal-loading').waitFor({ state: 'visible' });
     if (completed) { await completed; await context.unroute(secondary + '/api/ssh/captured?**'); await page.reload(); }
     await until(async () => await page.locator('[role=tab]').count() === capturedTabsBefore + 1, 20000);

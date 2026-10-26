@@ -36,7 +36,11 @@ It covers native repairs, SSH, reading, Herdr, plugins, pairing, reconnects, ges
 It first downloads and verifies the pinned Herdr release, which the dictation, spaces, resize, flash and fullscreen scrolling harnesses use as the real native integration.
 It runs three harnesses at a time and reports every failure at the end; set `BROWSER_JOBS` to change the number.
 Every existing application harness remains available through its original npm command or `node test/<harness>.mjs`.
-The helpers in `test/support/browser.mjs` wait for a connected, visible shell and confirm the input line through the backend before entering a new command or transcript.
+The helpers in `test/support/browser.mjs` wait for a connected, visible shell before entering a new command or transcript.
+For native sessions, they also wait for Readline's bracketed-paste enable sequence.
+This passive check waits until Readline restores raw input after the prompt marker without sending input-line probes that can race with history navigation.
+The observer follows every page and preserves confirmed input mode when the same prompt reconnects.
+Input helpers restore focus through an intentional touch or mouse action and confirm that the textarea is editable and focused.
 Commands and reading choices record the current prompt so later input waits for a newer prompt after returning from a reader or switching tabs.
 Use `waitForShell` with `visible: false` only when observing command completion in a background terminal.
 Synthetic touch sequences dispatch immediate events in one browser call and select interior text outside the 40-pixel edge-scroll zone.
