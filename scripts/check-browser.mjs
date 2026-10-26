@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
 
@@ -27,16 +28,28 @@ const harnesses = [
 ];
 
 // Buffer each harness so parallel output stays readable, and report every failure instead of stopping at the first.
-function run([file, overrides]) {
+async function run([file, overrides]) {
+  const parent = path.join(root, '.test-artifacts/browser');
+  await mkdir(parent, { recursive: true });
+  const diagnostics = await mkdtemp(path.join(parent, path.basename(file, '.mjs') + '-'));
   return new Promise(resolve => {
     const start = performance.now(), output = [];
-    const child = spawn(process.execPath, ['test/' + file], { cwd: root, env: { ...env, ...overrides }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, ['test/' + file], { cwd: root, env: { ...env, ...overrides, TEST_DIAGNOSTICS_DIR: diagnostics }, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', chunk => output.push(chunk)); child.stderr.on('data', chunk => output.push(chunk));
-    child.on('close', (code, signal) => {
+    child.on('error', error => output.push(Buffer.from(error.stack || String(error))));
+    child.on('close', async (code, signal) => {
       const seconds = ((performance.now() - start) / 1000).toFixed(1);
       process.stdout.write(Buffer.concat(output));
       console.log(`${code === 0 ? 'PASS' : 'FAIL'} ${file} (${seconds}s${signal ? ', ' + signal : ''})`);
-      resolve(code === 0 ? undefined : file);
+      try {
+        if (code === 0) await rm(diagnostics, { recursive: true, force: true });
+        else {
+          await writeFile(path.join(diagnostics, 'runner.log'), Buffer.concat(output));
+          await writeFile(path.join(diagnostics, 'result.json'), JSON.stringify({ file, code, signal, seconds, overrides }, null, 2) + '\n');
+          console.error('Browser diagnostics: ' + path.relative(root, diagnostics));
+        }
+        resolve(code === 0 ? undefined : file);
+      } catch (error) { console.error(error); resolve(file); }
     });
   });
 }

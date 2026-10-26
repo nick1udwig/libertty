@@ -194,6 +194,8 @@ try {
   assert.equal(await standalone.locator('.reading-view:not([hidden]) .reading-text').textContent(), 'A quiet place to read.\nSecond line.\n');
   assert.equal(errors.length, 0, errors.join('\n'));
   console.log('Reading Mode browser checks passed');
+} catch (error) {
+  console.error(logs); throw error;
 } finally {
   await browser?.close(); server.kill('SIGTERM'); await serverExited; await rm(fixture, { recursive: true, force: true });
 }

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import net from 'node:net';
 import { chromium } from 'playwright-core';
+import { trackBrowser } from './browser-diagnostics.mjs';
 
 const root = new URL('../../', import.meta.url).pathname;
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -31,8 +32,8 @@ export async function freePort() {
 export function startBackend(options = {}) {
   return spawn(root + 'target/debug/libertty', [], { cwd: root, ...options });
 }
-export function launchBrowser(options = {}) {
-  return chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, ...options });
+export async function launchBrowser(options = {}) {
+  return trackBrowser(await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, ...options }));
 }
 export async function waitForBackend(base, process) {
   await until(async () => {

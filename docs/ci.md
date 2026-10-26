@@ -40,6 +40,10 @@ Commands and reading choices record the current prompt so later input waits for 
 Use `waitForShell` with `visible: false` only when observing command completion in a background terminal.
 Synthetic touch sequences dispatch immediate events in one browser call and select interior text outside the 40-pixel edge-scroll zone.
 Long presses and edge scrolling advance the Playwright clock explicitly, while native taps and selection checks retain real browser event delivery.
+The shared browser launcher saves traces, screenshots, browser errors and terminal state before pages or contexts close.
+The browser runner keeps failed harness output and diagnostics in `.test-artifacts/browser/` and removes diagnostics for successful harnesses.
+Direct harness commands retain their diagnostics in the same directory.
+Release checks upload these files even after a failure.
 Use `npm run format:workspace` to format the workspace entry point and modules with the configured 100-column width, or `npm run check:workspace-format` to check them without editing.
 `npm run verify:package -- release/libertty-vVERSION-PLATFORM.tar.gz` retains packaged browser coverage locally by running both smoke checks and the browser suite against the extracted archive.
 The deleted tests covered only the removed CI suite selector and build manifests, while useful package checksum, permission, metadata and companion checks remain in `test/package-release.test.mjs`.

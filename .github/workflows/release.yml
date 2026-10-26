@@ -92,7 +92,9 @@ jobs:
         if: always()
         with:
           name: release-check-diagnostics
-          path: .test-artifacts/*.json
+          path: |
+            .test-artifacts/*.json
+            .test-artifacts/browser/**
           if-no-files-found: ignore
           include-hidden-files: true
 

@@ -10,11 +10,13 @@ const fixture = await herdrFixture(), root = new URL('../', import.meta.url).pat
 const base = 'http://127.0.0.1:' + await freePort();
 const history = Array.from({ length: 160 }, () => 'alpha beta gamma').join('\n');
 fixture.setScreen(0, history);
-const server = spawn(root + 'target/debug/libertty', [], { cwd: root, stdio: 'ignore', env: { ...process.env,
+let backendLogs = '';
+const server = spawn(root + 'target/debug/libertty', [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env,
   NODE_ENV: 'production', HOST: '127.0.0.1', PORT: new URL(base).port, LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base,
   LIBERTTY_DATA_DIR: fixture.directory + '/libertty', HOME: fixture.directory, LIBERTTY_CWD: fixture.directory, LIBERTTY_TOKEN: '',
   LIBERTTY_NO_RC: '1', HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH,
 } });
+server.stdout.on('data', data => { backendLogs += data; }); server.stderr.on('data', data => { backendLogs += data; });
 const exited = once(server, 'exit');
 let browser;
 try {
@@ -99,6 +101,8 @@ try {
     console.log('PASS ' + label + ': selected text contrast ' + pixels.contrast.toFixed(2) + ', visible tint and copied alpha.');
     await context.close();
   }
+} catch (error) {
+  console.error(backendLogs); throw error;
 } finally {
   await browser?.close(); server.kill(); await exited; await fixture.close();
 }

@@ -1,5 +1,6 @@
 import { launchBrowser, freePort } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
+import { trackBrowser } from './support/browser-diagnostics.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -14,11 +15,13 @@ const wrappedURL = 'https://example.com/' + 'wrapped/'.repeat(12) + 'end?q=1';
 const base = 'http://127.0.0.1:' + fixturePort3183, history = Array.from({ length: 160 }, (_, i) => `ROW-${i} alpha beta gamma`).join('\n')
   + '\nRead https://example.com/touch\nWRAPPED ' + wrappedURL + '\n\x1b]8;;https://example.com/help\x07Open help\x1b]8;;\x07\n';
 fixture.setScreen(0, history);
-const server = spawn(new URL('../target/debug/libertty', import.meta.url).pathname, [], { cwd: root, stdio: 'ignore', env: { ...process.env,
+let backendLogs = '';
+const server = spawn(new URL('../target/debug/libertty', import.meta.url).pathname, [], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env,
   NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3183), LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base,
   LIBERTTY_DATA_DIR: fixture.directory + '/libertty', HOME: fixture.directory, LIBERTTY_CWD: fixture.directory, LIBERTTY_TOKEN: '',
   LIBERTTY_NO_RC: '1', HERDR_SOCKET_PATH: fixture.socketPath, PATH: fixture.directory + ':' + process.env.PATH,
 } });
+server.stdout.on('data', data => { backendLogs += data; }); server.stderr.on('data', data => { backendLogs += data; });
 const exited = once(server, 'exit'), delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let browser, live;
 try {
@@ -27,7 +30,7 @@ try {
   const response = await fetch(base + '/api/connect', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ token, noSession: true }) });
   assert.ok(response.ok); const { accessToken } = await response.json();
   const safari = process.env.TEST_BROWSER === 'webkit';
-  browser = await (safari ? webkit.launch() : launchBrowser({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', args: ['--use-gl=angle', '--use-angle=gl'] }));
+  browser = safari ? trackBrowser(await webkit.launch()) : await launchBrowser({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', args: ['--use-gl=angle', '--use-angle=gl'] });
   for (const herdr of [false, true]) {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const errors = [];
@@ -201,6 +204,8 @@ try {
     await context.close();
   }
   console.log('PASS: ' + (safari ? 'WebKit' : 'Chromium') + ' touch-only and cancelled-pointer scrolling, hold/drag copying, selection handles and plain/OSC-8 links share the normal/Herdr iframe gesture path during live updates.');
+} catch (error) {
+  console.error(backendLogs); throw error;
 } finally {
   clearInterval(live); await browser?.close(); server.kill(); await exited; await fixture.close();
 }
