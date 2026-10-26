@@ -3,7 +3,7 @@
 ## Install a release
 
 The release installer bundles the native Rust executable, built frontend and a Node runtime for setup tools, so you do not need npm or a compiler on the server.
-The command below becomes available after the first release built by the [release workflow](../.github/workflows/release.yml) has finished publishing its assets.
+Run the installer to download the latest stable release.
 
 ```sh
 curl -fsSL https://github.com/nick1udwig/libertty/releases/latest/download/install.sh | bash

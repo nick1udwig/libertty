@@ -4,7 +4,7 @@ A webterm designed for modern mobile.
 
 [Website and live demo](https://libertty.sh/) · [Setup guide](https://libertty.sh/setup/) · [Usage guide](https://libertty.sh/usage/)
 
-Run the server on your Linux machine, connect from your phone over Tailscale, and dictate commands.
+Run the server on Linux or an Apple Silicon Mac, connect from your phone over Tailscale, and dictate commands.
 libertty repairs dictation using your shell’s commands, files and history, with the original text available as an alternative.
 
 <p>
@@ -23,7 +23,7 @@ Beautiful and fast.
 
 ## Install
 
-After the first stable release has finished building, install the server and optionally set up Herdr, Voxtype Mobile and private Tailscale access with:
+Install the server and optionally set up Herdr, Voxtype Mobile and private Tailscale access with:
 
 ```sh
 curl -fsSL https://install.libertty.sh | bash
