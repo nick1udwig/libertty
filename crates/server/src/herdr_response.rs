@@ -16,6 +16,22 @@ pub async fn latest(target: &Target, terminal: &str) -> Result<String, String> {
         return Err("This agent ended or moved; reopen its tab.".into());
     }
     let session = &pane["pane"]["agent_session"];
+    if session.is_null() {
+        let agent = pane["pane"]["agent"].as_str().unwrap_or("");
+        return Err(match agent {
+            "codex" | "claude" | "claude-code" => format!(
+                concat!(
+                    "Herdr has no transcript reference for this agent. ",
+                    "Run `herdr integration install {}` on the agent host, then restart or resume the agent."
+                ),
+                if agent == "codex" { "codex" } else { "claude" }
+            ),
+            _ => {
+                "Copy response supports Codex and Claude agents with a Herdr transcript reference."
+                    .into()
+            }
+        });
+    }
     let agent = session["agent"].as_str().unwrap_or("");
     let home = target
         .env

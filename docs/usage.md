@@ -172,6 +172,7 @@ Shell scrollback and differently sized observers retain the history projection.
 
 Tap **Copy response** above an agent terminal to copy its latest saved assistant response, including Markdown and code blocks.
 This uses Codex or Claude JSONL transcripts reported by Herdr, including sessions on SSH hosts.
+Run `herdr integration install codex` or `herdr integration install claude` on the agent host, then restart or resume the agent so Herdr receives its transcript reference.
 User prompts, tool results, reasoning and marked work updates are excluded.
 If clipboard access is blocked, a dialog lets you retry or select the response for manual copying.
 Local transcripts must be under `CODEX_HOME/sessions` or `CLAUDE_CONFIG_DIR/projects`, using `~/.codex` and `~/.claude` when those variables are unset.

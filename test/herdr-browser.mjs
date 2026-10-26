@@ -18,6 +18,25 @@ const fixturePort3168 = await freePort();
 
 const fixture = await herdrFixture(), origin = 'http://127.0.0.1:' + fixturePort3167, base = origin + '/herdr-test';
 const root = new URL('../', import.meta.url).pathname;
+const transcriptDirectory = fixture.directory + '/.claude/projects/fixture', transcriptPath = transcriptDirectory + '/agent.jsonl';
+const agentResponse = '## Agent response\n\n```ts\nconst copied = true;\n```';
+await mkdir(transcriptDirectory, { recursive: true });
+await writeFile(transcriptPath, [
+  { type: 'user', message: { role: 'user', content: 'Private prompt' } },
+  { type: 'assistant', message: { id: 'tool', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'text', text: 'Work update' }, { type: 'tool_use', name: 'Read' }] } },
+  { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'Private tool result' }] } },
+  { type: 'assistant', message: { id: 'final', role: 'assistant', content: [{ type: 'text', text: agentResponse }] } },
+].map(record => JSON.stringify(record)).join('\n') + '\n');
+fixture.snapshot.panes[0].agent_session = { source: 'fixture', agent: 'claude', kind: 'path', value: transcriptPath };
+fixture.snapshot.panes[1].agent = 'claude';
+const codexDirectory = fixture.directory + '/.codex/sessions/2026/10/26';
+await mkdir(codexDirectory, { recursive: true });
+await writeFile(codexDirectory + '/rollout-fixture-session-123.jsonl', [
+  { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Private prompt' }] } },
+  { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: agentResponse }] } },
+  { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'commentary', content: [{ type: 'output_text', text: 'Work update' }] } },
+].map(record => JSON.stringify(record)).join('\n') + '\n');
+fixture.snapshot.panes[2].agent_session = { source: 'fixture', agent: 'codex', kind: 'id', value: 'session-123' };
 const voiceToken = 'fixture-voice-token-'.repeat(4), daemon = new WebSocketServer({ port: 0, host: '127.0.0.1' });
 await once(daemon, 'listening'); await writeFile(fixture.directory + '/voice-token', voiceToken, { mode: 0o600 });
 let voiceBytes = 0, voiceAcks = 0;
@@ -33,7 +52,7 @@ daemon.on('connection', (socket, request) => {
 const backend = startBackend({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, LIBERTTY_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token', LIBERTTY_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate', NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3167), LIBERTTY_BASE_PATH: '/herdr-test',
   LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: origin, LIBERTTY_DATA_DIR: fixture.directory + '/libertty',
-  LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture.directory, HOME: fixture.directory,
+  LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture.directory, HOME: fixture.directory, CODEX_HOME: fixture.directory + '/.codex', CLAUDE_CONFIG_DIR: fixture.directory + '/.claude',
   PATH: fixture.directory + ':' + process.env.PATH, LIBERTTY_TOKEN: '', HERDR_SOCKET_PATH: fixture.socketPath,
 } });
 const exited = once(backend, 'exit'), errors = [], network = []; let logs = '', browser, page, sshd, liveOutput;
@@ -45,7 +64,18 @@ try {
   const request = (name, data, bearer) => fetch(base + '/api/' + name, { method: data === undefined ? 'GET' : 'POST',
     headers: { Origin: origin, ...(bearer ? { Authorization: 'Bearer ' + bearer } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   for (const name of ['herdr/snapshot', 'herdr/action', 'herdr/ticket', 'herdr/captured', 'notifications/key', 'notifications/subscribe', 'notifications/unsubscribe', 'notifications/unwatch', 'herdr/notifications']) assert.equal((await request(name, {})).status, 401);
+  assert.equal((await request('herdr/response')).status, 401);
   const bearer = (await (await request('connect', { noSession: true, token })).json()).accessToken;
+  const copiedResponse = await request('herdr/response?terminalId=term_0', undefined, bearer);
+  const copiedBody = await copiedResponse.json();
+  assert.equal(copiedResponse.status, 200, JSON.stringify(copiedBody));
+  assert.deepEqual(copiedBody, { text: agentResponse });
+  const codexResponse = await request('herdr/response?terminalId=term_2', undefined, bearer);
+  assert.equal(codexResponse.status, 200);
+  assert.deepEqual(await codexResponse.json(), { text: agentResponse });
+  const missingTranscript = await request('herdr/response?terminalId=term_1', undefined, bearer);
+  assert.equal(missingTranscript.status, 400);
+  assert.match((await missingTranscript.json()).error, /herdr integration install claude/);
   assert.equal((await request('herdr/snapshot?herdrSession=../../escape', undefined, bearer)).status, 400);
   assert.equal((await request('herdr/action', { action: 'rename', terminalId: 'missing', name: 'x' }, bearer)).status, 400);
   {
@@ -705,5 +735,5 @@ try {
   assert.deepEqual(await page.evaluate(index => window.__notices.slice(index), lastClosureNotices), [], 'Closing the last space must not show an error');
   fixture.pauseEvents(false);
   assert.deepEqual(errors, []); console.log('Herdr browser checks passed: automatic discovery, shared direct input/shortcuts/touch scroll/copy, live-output selection and wrapped/labeled link taps, native mobile sizing/release, desktop reflow/full-width layouts and panning, PWA enable/disable/scoped workers/focus/click routing, session labels, hold menus, ordering, persistence, server pane/space close, sounds and scoped tickets.');
-} catch (error) { await page?.screenshot({ path: '/tmp/libertty-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all(page.frames().map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('.selection-notice')?.textContent, pending: document.querySelector('#terminal-viewport')?.className, parentVisible: frameElement && getComputedStyle(frameElement).visibility, layout: window.__herdrMessages?.filter(m => m.type === 'herdr-layout'), rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: JSON.stringify(window.__herdrMessages?.filter(m => m.type === 'herdr-frame').map(m => ({width:m.width,height:m.height,full:m.full}))), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('libertty.hosts'), tabs: localStorage.getItem('libertty.tabs') })).catch(() => ({}))); throw error; }
+} catch (error) { await page?.screenshot({ path: '/tmp/libertty-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all((page?.frames() || []).map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('.selection-notice')?.textContent, pending: document.querySelector('#terminal-viewport')?.className, parentVisible: frameElement && getComputedStyle(frameElement).visibility, layout: window.__herdrMessages?.filter(m => m.type === 'herdr-layout'), rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: JSON.stringify(window.__herdrMessages?.filter(m => m.type === 'herdr-frame').map(m => ({width:m.width,height:m.height,full:m.full}))), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('libertty.hosts'), tabs: localStorage.getItem('libertty.tabs') })).catch(() => ({}))); throw error; }
 finally { clearInterval(liveOutput); await browser?.close(); backend.kill('SIGTERM'); await exited; sshd?.kill('SIGTERM'); for (const socket of daemon.clients) socket.terminate(); await new Promise(resolve => daemon.close(resolve)); await fixture.close(); }
