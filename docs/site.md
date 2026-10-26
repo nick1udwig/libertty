@@ -2,7 +2,10 @@
 
 The project site in `site/` is a landing page around a working demo of libertty.
 On desktop the page shows a phone whose screen runs the real app, with sections below that explain the features, setup steps and platforms and link to the guides.
-On a phone the page is only the app.
+On a phone the page opens on the headline, a summary, the install command and the features, with a cue to swipe to the demo.
+The swipe raises the app as a card over the landing page, and when the card reaches the top it becomes the full-screen app.
+Scrolling up then stays inside the app, and Back returns to the landing page.
+Phones load the app after the landing page, or as soon as the visitor starts the swipe, and `#demo` opens the app directly.
 The page follows the system appearance, using the 1776 theme in dark mode and the flag theme in light mode.
 
 ## Build and preview
@@ -37,7 +40,7 @@ Retake it when the landing page changes visibly.
 
 The workspace and terminal documents are the app's own `index.html` and `terminal.html`, built with demo entries that run first.
 `site/demo/boot-app.ts` seeds a fresh workspace on every visit with a terminal, Herdr, files and a reader, and installs an in-page backend.
-On desktops the reader shows the README last, and on phones it opens first on `site/welcome.md`, which repeats the landing page.
+The app opens on the terminal, and the reader shows the README last.
 Terminal and Herdr pane frames reach that backend through `site/demo/shim.ts`, which replaces `fetch` and `WebSocket` for backend URLs only.
 Everything the visitor sees and touches inside the phone is the real frontend.
 

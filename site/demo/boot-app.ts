@@ -5,7 +5,6 @@ import { repo } from './vfs.ts';
 
 /** Each visit starts fresh: four tabs on one host, in the theme the visitor's system asks for. */
 const dark = matchMedia('(prefers-color-scheme: dark)');
-const reader = new URLSearchParams(location.search).get('layout') === 'phone';
 const save = (key: string, value: unknown) => localStorage.setItem('libertty.' + key, JSON.stringify(value));
 try {
   for (const key of Object.keys(localStorage)) if (key.startsWith('libertty.') || key.startsWith('termai.')) localStorage.removeItem(key);
@@ -15,9 +14,8 @@ try {
     { ...common, id: crypto.randomUUID(), name: 'Herdr · monticello', session: crypto.randomUUID(), pluginId: 'herdr', mode: 'herdr', herdrSession: '' },
     { ...common, id: crypto.randomUUID(), name: 'Files · monticello', session: crypto.randomUUID(), pluginId: 'files', mode: 'files', ownsSession: true, directory: repo },
   ];
-  // Phones open on a welcome page, since the landing page around the phone is not there to introduce the project.
-  const read = (file: string) => ({ ...common, id: crypto.randomUUID(), name: file.split('/').pop()!, session: shell, pluginId: 'reading', ownsSession: false, readPath: repo + '/' + file });
-  if (reader) tabs.unshift(read('site/welcome.md')); else tabs.push(read('README.md'));
+  // The landing page introduces the project, so the app opens on the terminal with the README last.
+  tabs.push({ ...common, id: crypto.randomUUID(), name: 'README.md', session: shell, pluginId: 'reading', ownsSession: false, readPath: repo + '/README.md' });
   save('hosts', [{ id: 'local', name: 'monticello', kind: 'http', backendId: 'primary' }]);
   save('tabs', tabs); save('activeTab', (tabs[0] as { id: string }).id);
   save('theme', dark.matches ? '1776' : 'flag');
