@@ -60,7 +60,7 @@ export function terminalPreloads(): Plugin {
   return {
     name: 'libertty-terminal-preloads',
     transformIndexHtml: { order: 'post', handler(_html, context) {
-      if (!context.bundle || !context.path.endsWith('/index.html')) return;
+      if (!context.bundle || context.path !== '/index.html') return;
       return Object.values(context.bundle).flatMap(output => {
         const href = './' + output.fileName;
         if (output.type === 'chunk' && output.name === 'terminal') return [{ tag: 'link', attrs: { rel: 'modulepreload', href, crossorigin: '' } }];

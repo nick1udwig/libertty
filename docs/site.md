@@ -6,7 +6,8 @@ On a phone the page opens on the headline, a summary, the install command and th
 The demo button scrolls to the swipe area after those sections.
 Swiping through that area raises the app as a card over the page, and when the card reaches the top it becomes the full-screen app.
 Scrolling up then stays inside the app, and Back returns to the landing page.
-Phones load the app after the landing page, or as soon as the visitor starts the swipe, and `#demo` opens the app directly.
+The app loads when a desktop visitor selects Try the demo or a phone visitor reaches the swipe area.
+The `#demo` link loads the app directly on both layouts.
 The page follows the system appearance, using the 1776 theme in dark mode and the flag theme in light mode.
 
 ## Build and preview
@@ -22,6 +23,9 @@ npx vite preview --config site/vite.config.ts
 The build writes a static site to `dist-site/` that any static host can serve.
 Set `LIBERTTY_SITE_BASE=/path/` when the site is not served from the root of its domain.
 Run `npm run test:site` to build the site and check mobile content, navigation and demo entry in Chromium.
+Run `npm run bench:site` to measure three cold loads for mobile and desktop network and CPU profiles.
+The lab report at `.test-artifacts/site/performance.json` records main-page LCP, layout shifts, long tasks and received local bytes during ten seconds after DOM content loads.
+Google Fonts requests are blocked for repeatability, so the results exclude external font delivery and do not measure field Core Web Vitals or INP.
 
 ## Guides
 

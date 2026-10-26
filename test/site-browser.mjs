@@ -1,20 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import { freePort, launchBrowser, until } from './support/browser.mjs';
+import { launchBrowser } from './support/browser.mjs';
+import { previewSite } from './support/site.mjs';
 
 const root = new URL('../', import.meta.url).pathname;
-const port = await freePort(), origin = `http://127.0.0.1:${port}`;
-const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--config', 'site/vite.config.ts', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
-const logs = [];
-server.stdout.on('data', chunk => logs.push(String(chunk)));
-server.stderr.on('data', chunk => logs.push(String(chunk)));
+const site = await previewSite(), { origin } = site;
 let browser;
 try {
-  await until(async () => {
-    if (server.exitCode !== null) throw new Error(logs.join(''));
-    try { return (await fetch(origin)).ok; } catch { return false; }
-  }, 'site preview');
   browser = await launchBrowser();
   await mkdir(root + '.test-artifacts/site', { recursive: true });
   for (const width of [320, 390, 760, 1280]) {
@@ -24,6 +16,9 @@ try {
     const page = await context.newPage(), errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(origin);
+    await page.waitForLoadState('networkidle');
+    assert.equal(await page.locator('#app').getAttribute('src'), null, 'Reading the landing page does not load the demo');
+    assert.equal(await page.evaluate(() => performance.getEntriesByType('resource').some(entry => /\/(?:app\.html|assets\/|repo\/)/.test(new URL(entry.name).pathname))), false, 'The landing page does not request demo assets');
     assert.equal(await page.locator('html').evaluate(el => el.classList.contains('in-app')), false);
     for (const selector of ['#features-title', '#steps-title', '#platforms-title', '#docs-title', 'footer']) {
       await page.locator(selector).scrollIntoViewIfNeeded();
@@ -50,6 +45,14 @@ try {
       assert.equal(await page.locator('#features-title').isVisible(), true);
       await page.goto(origin + '/#demo');
       await page.waitForFunction(() => document.documentElement.classList.contains('in-app'));
+    } else {
+      await page.locator('#start-demo').click();
+      assert.equal(await page.locator('#app').getAttribute('src'), 'app.html');
+      assert.equal(await page.locator('#app').evaluate(el => el.inert), false);
+      assert.equal(await page.locator('#start-demo').isVisible(), false);
+      await page.goto(origin + '/setup/');
+      await page.getByRole('link', { name: 'Try the demo', exact: true }).click();
+      await page.waitForFunction(() => document.querySelector('#app').getAttribute('src') === 'app.html');
     }
     assert.deepEqual(errors, [], `No browser errors at ${width}px`);
     await context.close();
@@ -63,5 +66,5 @@ try {
   console.log('PASS: Mobile and desktop product content, section links, swipe demo, Back and static HTML.');
 } finally {
   await browser?.close();
-  server.kill();
+  await site.close();
 }
