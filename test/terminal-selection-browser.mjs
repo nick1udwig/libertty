@@ -50,6 +50,7 @@ try {
     const params = new URLSearchParams({ embedded: '1', session, ...(herdr ? { herdrTerminal: 'term_0' } : {}) });
     await context.route('**/selection-fixture.html', route => route.fulfill({ contentType: 'text/html', body: `<meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{width:100%;height:100%;border:0;display:block}</style><iframe src="/terminal.html?${params}" allow="clipboard-write"></iframe>` }));
     const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
+    await page.clock.install();
     await page.goto(base + '/selection-fixture.html');
     const frame = page.frames().find(frame => frame.url().includes('terminal.html'));
     await frame.waitForFunction(() => window.__terminal && document.querySelector('#connection-label').textContent === 'Connected' && (window.__state?.ready || window.__state?.inputTarget === 'program'));
@@ -58,7 +59,7 @@ try {
     assert.equal(await frame.evaluate(() => document.documentElement.dataset.theme || 'forest'), theme);
     const word = await frame.evaluate(() => {
       const t = window.__terminal, b = t.buffer.active, rect = document.querySelector('#terminal canvas').getBoundingClientRect(), top = b.length - t.rows;
-      for (let row = 2; row < t.rows - 2; row++) {
+      for (let row = Math.floor(t.rows / 3); row < t.rows - 2; row++) {
         const col = b.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1;
         if (col >= 0) return { x: rect.x + col * rect.width / t.cols, y: rect.y + row * rect.height / t.rows, width: 5 * rect.width / t.cols, height: rect.height / t.rows };
       }
@@ -68,7 +69,10 @@ try {
     const clip = { x: Math.ceil(bounds.x + word.x) + 2, y: Math.ceil(bounds.y + word.y) + 2, width: Math.floor(word.width) - 4, height: Math.floor(word.height) - 4 };
     const before = await page.screenshot({ clip });
     const cdp = await context.newCDPSession(page);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: bounds.x + word.x + word.width / 2, y: bounds.y + word.y + word.height / 2 }] });
+    await page.clock.runFor(400);
+    await page.clock.resume();
     await frame.locator('.terminal-selection span').waitFor({ state: 'visible' });
     const selected = await page.screenshot({ clip, path: root + '.test-artifacts/selection-' + label + '.png' });
     const pixels = await page.evaluate(async images => {

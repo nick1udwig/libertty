@@ -59,6 +59,7 @@ try {
     const params = new URLSearchParams({ embedded: '1', session, ...(herdr ? { herdrTerminal: 'term_0' } : {}) });
     await context.route('**/touch-fixture.html', route => route.fulfill({ contentType: 'text/html', body: `<meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{width:100%;height:100%;border:0;display:block}</style><iframe src="/terminal.html?${params}" allow="clipboard-write; microphone"></iframe>` }));
     const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
+    await page.clock.install();
     await page.goto(base + '/touch-fixture.html');
     await page.locator('iframe').waitFor();
     const frame = page.frames().find(frame => frame.url().includes('terminal.html'));
@@ -91,7 +92,6 @@ try {
       return measurements;
     }, { events, measure });
     const touch = (type, point, selector = '#terminal canvas') => contacts([{ type, point, selector }]);
-    const pointer = (type, point = { x: 150, y: 180 }) => contacts([{ type, point }]);
     const start = { x: 150, y: 180 }, end = { x: 150, y: 280 };
     const idleWork = await frame.evaluate(() => {
       const term = window.__testTerminal, canvas = document.querySelector('#terminal canvas'), highlights = document.querySelector('.terminal-selection');
@@ -135,26 +135,37 @@ try {
     assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Touch-first event ordering must also keep touch ownership');
     const word = await frame.evaluate(() => {
       const t = window.__testTerminal, b = t.buffer.active, rect = document.querySelector('#terminal canvas').getBoundingClientRect(), top = b.length - t.rows - Math.floor(t.getViewportY());
-      for (let row = 1; row < t.rows - 2; row++) { const col = b.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1; if (col >= 0) return { x: rect.x + (col + .5) * rect.width / t.cols, y: rect.y + (row + .5) * rect.height / t.rows, cell: rect.width / t.cols }; }
+      for (let row = Math.floor(t.rows / 3); row < t.rows - 2; row++) {
+        const y = rect.y + (row + .5) * rect.height / t.rows;
+        const col = b.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1;
+        if (col >= 0 && y > rect.top + 40 && y < rect.bottom - 40) return { x: rect.x + (col + .5) * rect.width / t.cols, y, cell: rect.width / t.cols };
+      }
       throw new Error('No visible alpha');
     });
-    await touch('touchstart', word); await pointer('pointercancel'); await delay(450); await touch('touchend', word);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+    await contacts([{ type: 'touchstart', point: word }, { type: 'pointercancel', point: word }]);
+    await page.clock.runFor(400);
+    await touch('touchend', word);
+    await page.clock.resume();
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha');
     assert.ok(await frame.locator('.terminal-selection span').count(), 'Long press highlights the selected word');
-    await touch('touchstart', word); await touch('touchmove', { ...word, x: word.x + 9 * word.cell }); await touch('touchend', { ...word, x: word.x + 9 * word.cell });
+    await contacts([{ type: 'touchstart', point: word }, { type: 'touchmove', point: { ...word, x: word.x + 9 * word.cell } }, { type: 'touchend', point: { ...word, x: word.x + 9 * word.cell } }]);
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta');
     const handle = await frame.locator('.selection-handle').last().evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
     const endHandle = '.selection-handle[aria-label="Selection end"]';
-    await touch('touchstart', handle, endHandle); await touch('touchmove', { ...handle, x: handle.x + 6 * word.cell }, endHandle); await touch('touchend', { ...handle, x: handle.x + 6 * word.cell }, endHandle);
+    await contacts([{ type: 'touchstart', point: handle, selector: endHandle }, { type: 'touchmove', point: { ...handle, x: handle.x + 6 * word.cell }, selector: endHandle }, { type: 'touchend', point: { ...handle, x: handle.x + 6 * word.cell }, selector: endHandle }]);
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta gamma');
     const selectionEdge = await frame.evaluate(x => ({ x, y: document.querySelector('#terminal canvas').getBoundingClientRect().top + 1 }), word.x + 9 * word.cell);
     const beforeEdge = await frame.evaluate(() => window.__testTerminal.getViewportY());
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
     await contacts([{ type: 'touchstart', point: word }, { type: 'touchmove', point: { ...word, x: selectionEdge.x } }, { type: 'touchmove', point: selectionEdge }]);
+    await page.clock.runFor(120);
     await frame.waitForFunction(before => window.__testTerminal.getViewportY() > before, beforeEdge);
     await touch('touchcancel', selectionEdge);
     const cancelledOffset = await frame.evaluate(() => window.__testTerminal.getViewportY());
-    await delay(200);
+    await page.clock.runFor(200);
     assert.ok(Math.abs(await frame.evaluate(() => window.__testTerminal.getViewportY()) - cancelledOffset) < 1e-6, 'Cancellation stops edge selection scrolling');
+    await page.clock.resume();
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
     for (const [needle, expected, offset = 0] of [
       ['https://example.com/touch', 'https://example.com/touch'],
@@ -167,7 +178,7 @@ try {
         for (let row = 0; row < t.rows; row++) { const col = b.getLine(top + row)?.translateToString(true).indexOf(needle) ?? -1; if (col >= 0) return { x: r.x + (col + offset + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; } throw new Error('Missing link');
       }, { needle, offset });
       const point = await linkPoint();
-      await touch('touchstart', point); await touch('touchend', point);
+      await contacts([{ type: 'touchstart', point }, { type: 'touchend', point }]);
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected, 'Touch-only taps activate terminal links');
       const count = await frame.evaluate(() => window.__opened.length);
       await frame.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -182,7 +193,7 @@ try {
       assert.equal(await frame.evaluate(() => window.__opened.at(-1)?.[0]), expected);
     }
     const edge = await frame.locator('.terminal-scrollbar').evaluate(el => { const r = el.getBoundingClientRect(), thumb = el.firstChild.getBoundingClientRect(); return { x: r.right - 10, y: thumb.y + thumb.height / 2, top: r.y + thumb.height / 2 }; });
-    await touch('touchstart', edge, '.terminal-scrollbar'); await touch('touchmove', { ...edge, y: edge.top }, '.terminal-scrollbar'); await touch('touchend', { ...edge, y: edge.top }, '.terminal-scrollbar');
+    await contacts([{ type: 'touchstart', point: edge, selector: '.terminal-scrollbar' }, { type: 'touchmove', point: { ...edge, y: edge.top }, selector: '.terminal-scrollbar' }, { type: 'touchend', point: { ...edge, y: edge.top }, selector: '.terminal-scrollbar' }]);
     assert.equal(await frame.evaluate(() => window.__testTerminal.getViewportY()), await frame.evaluate(() => window.__testTerminal.buffer.active.length - window.__testTerminal.rows), 'Touch-only scrollbar dragging reaches the oldest history');
     assert.equal(await frame.locator('#terminal textarea').evaluate(el => el === document.activeElement), false);
     assert.deepEqual(await frame.evaluate(() => window.__inputs), [], 'Reading gestures must not send terminal input');
