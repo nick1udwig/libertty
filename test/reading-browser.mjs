@@ -44,13 +44,12 @@ try {
   await page.locator('#backend-login').waitFor({ state: 'visible' });
   await page.locator('#backend-token').fill(token); await page.locator('#backend-login-form button[type=submit]').click();
   let frame = await (await page.locator('#terminal-stack iframe').elementHandle()).contentFrame();
-  await waitForShell(frame);
-  const prompt = await frame.evaluate(() => window.__shellState.prompt);
+  const { prompt } = await waitForShell(frame);
   await submitShellCommand(frame, 'look at note.txt');
   await page.locator('.reading-view .reading-text').waitFor();
   assert.equal(await page.locator('.reading-text').textContent(), 'A quiet place to read.\nSecond line.\n');
-  await waitForShell(frame, { afterPrompt: prompt, visible: false });
-  assert.equal(await frame.evaluate(() => window.__shellState.exitCode), 0);
+  const completed = await waitForShell(frame, { afterPrompt: prompt, visible: false });
+  assert.equal(completed.exitCode, 0);
   await page.locator('[role=tab]').first().click();
   const historyFile = path.join(fixture, 'history-inspection');
   await shellCommand(frame, ` builtin history -w '${historyFile}'`);

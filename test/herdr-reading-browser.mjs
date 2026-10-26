@@ -1,4 +1,4 @@
-import { launchBrowser, freePort, until, delay, waitForShell } from './support/browser.mjs';
+import { launchBrowser, freePort, until, delay, waitForShell, focusShell } from './support/browser.mjs';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { herdrRequest } from './support/herdr.ts';
@@ -37,7 +37,8 @@ try {
   const token = (await readFile(dir + '/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser(); const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await installWireObserver(context);
-  await context.addInitScript(() => {
+  await context.addInitScript(({ origin }) => {
+    if (location.origin !== origin) return;
     // Dictation setup help is a modal that would capture typed reading commands.
     localStorage.setItem('libertty.voxtype:' + location.origin + '/reading-test/', 'dismissed');
     const Original = WebSocket;
@@ -48,14 +49,18 @@ try {
       localStorage.setItem('libertty.tabs', JSON.stringify([{ id, session: 'default', name: 'Herdr', pluginId: 'herdr', pluginVersion: '1', herdrSession: '', backendId: 'primary', hostId: 'herdr-reader' }]));
       localStorage.setItem('libertty.activeTab', JSON.stringify(id));
     }
-  });
+  }, { origin });
   const page = await context.newPage(), errors = []; page.setDefaultTimeout(15000); page.on('pageerror', error => errors.push(error.message));
   await page.goto(base); await page.locator('#backend-token').fill(token); await page.locator('#backend-login-form button[type=submit]').click();
   const terminal = async () => {
     const element = await page.locator('.herdr-view:visible .herdr-terminal').elementHandle(), frame = await element.contentFrame();
     await waitForShell(frame); return frame;
   };
-  const type = async command => { const frame = await terminal(); await frame.locator('#terminal textarea').focus(); await page.keyboard.type(command); await page.keyboard.press('Enter'); };
+  const type = async command => {
+    const frame = await terminal();
+    await focusShell(frame);
+    await page.keyboard.type(command); await page.keyboard.press('Enter');
+  };
   const closeReader = async () => { await showTerminalTabs(page); await page.locator('#tabs [role=tab][aria-selected=true] .tab-close').click(); await terminal(); };
   await type('look at README.md'); await page.locator('.reading-markdown h1').filter({ hasText: 'Herdr reader' }).waitFor();
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'reading').readHerdrTerminal), pane.terminal_id);
@@ -63,6 +68,13 @@ try {
   await page.reload(); await page.locator('.reading-text').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
   await closeReader();
   if (await page.locator('.reading-view:visible').count()) await closeReader();
+  const returned = await terminal();
+  await returned.evaluate(() => {
+    document.querySelector('#terminal textarea').blur();
+    const canvas = document.querySelector('#terminal canvas');
+    for (const type of ['pointerdown', 'pointercancel']) canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch', pointerId: 42, isPrimary: true }));
+  });
+  assert.equal(await returned.locator('#terminal textarea').evaluate(input => input.readOnly), true, 'A cancelled touch keeps the keyboard closed before intentional input');
   for (const command of ['look at printf prefix-output', 'printf pipe-output | look at']) {
     await type(command); await page.locator('.reading-text').filter({ hasText: command.includes('prefix') ? 'prefix-output' : 'pipe-output' }).waitFor();
     const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).readCapture);
@@ -70,7 +82,7 @@ try {
     assert.equal((await fetch(base + 'api/herdr/reading/capture?id=' + capture, { headers: { Authorization: 'Bearer ' + foreign.accessToken } })).status, 404, 'Captured output belongs to its paired viewer');
     await page.reload(); await page.locator('.reading-text').waitFor(); await closeReader();
   }
-  const frame = await terminal(); await frame.locator('#terminal textarea').focus();
+  const frame = await terminal(); await focusShell(frame);
   await frame.locator('#terminal textarea').evaluate(element => element.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'look at note dot txt', bubbles: true, cancelable: true })));
   await frame.locator('.reading-choice').filter({ hasText: 'Read note.txt' }).click();
   await page.locator('.reading-text').filter({ hasText: 'A reader inside Herdr.' }).waitFor(); await closeReader();
@@ -98,7 +110,7 @@ try {
   const standalone = await context.newPage(); standalone.on('pageerror', error => errors.push(error.message));
   await standalone.goto(base + 'terminal.html?herdrTerminal=' + pane.terminal_id);
   await standalone.waitForFunction(() => window.__state?.ready && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && document.querySelector('#terminal-viewport').getAttribute('aria-busy') !== 'true');
-  await standalone.locator('#terminal textarea').focus(); await standalone.keyboard.type('look at note.txt'); await standalone.keyboard.press('Enter');
+  await focusShell(standalone); await standalone.keyboard.type('look at note.txt'); await standalone.keyboard.press('Enter');
   await standalone.waitForURL(base); await standalone.locator('.reading-text:visible').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
   assert.deepEqual(errors, []);
   console.log('PASS Herdr reader: typed and dictated files, relative links, prefix and piped command output, reloads, source navigation and SSH context.');

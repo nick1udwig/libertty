@@ -82,9 +82,24 @@ export async function expectShellPrompt(frame) {
   return state.prompt;
 }
 
+export async function focusShell(frame) {
+  await waitForShell(frame);
+  const input = frame.locator('#terminal textarea');
+  if (!await input.evaluate(element => document.activeElement === element && !element.readOnly)) {
+    const canvas = frame.locator('#terminal canvas');
+    const position = await canvas.evaluate(element => { const bounds = element.getBoundingClientRect(); return { x: bounds.width - 4, y: bounds.height - 4 }; });
+    await canvas.tap({ position });
+  }
+  await frame.waitForFunction(() => {
+    const input = document.querySelector('#terminal textarea');
+    return document.activeElement === input && !input.readOnly;
+  });
+  return input;
+}
+
 export async function submitShellCommand(frame, text) {
   await waitForShell(frame, { line: '' });
-  await frame.locator('#terminal textarea').focus();
+  await focusShell(frame);
   const page = typeof frame.page === 'function' ? frame.page() : frame;
   await page.keyboard.type(text);
   await expectShellPrompt(frame);
@@ -98,8 +113,7 @@ export async function shellCommand(frame, text) {
 
 export async function dictateShell(frame, text, { replacement = false } = {}) {
   await waitForShell(frame, { line: '' });
-  const input = frame.locator('#terminal textarea');
-  await input.focus();
+  const input = await focusShell(frame);
   await input.evaluate((element, { text, replacement }) => element.dispatchEvent(new InputEvent('beforeinput', {
     inputType: replacement ? 'insertReplacementText' : 'insertText', data: text, bubbles: true, cancelable: true,
   })), { text, replacement });
