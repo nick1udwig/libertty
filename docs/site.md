@@ -36,11 +36,14 @@ Add a guide by listing its file, slug, label and search description in `pages`.
 ## Search and sharing
 
 Set `LIBERTTY_SITE_URL` to the landing page's public address, which defaults to `https://libertty.sh/`.
+The build normalizes its trailing slash and rejects non-HTTP addresses, credentials, queries and fragments.
+For a subpath, use a public address such as `https://example.com/project/` with `LIBERTTY_SITE_BASE=/project/`.
 The build uses it for the canonical links, Open Graph and structured data, `sitemap.xml` and `robots.txt`.
 Crawlers only read `robots.txt` at the root of a domain, so publish it there when `LIBERTTY_SITE_BASE` is not `/`.
 `robots.txt` keeps crawlers out of the repository snapshot, and `app.html` and `terminal.html` carry `noindex`, so only the landing page and the guides are indexed.
 `site/social.png` is the 1200 × 630 link preview, a dark-mode screenshot of the landing page.
 Retake it when the landing page changes visibly.
+Software app rich results also require genuine review or rating content under [Google's software app guidelines](https://developers.google.com/search/docs/appearance/structured-data/software-app).
 
 ## How the demo works
 

@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#0b1430" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="description" content="libertty is an open-source mobile web terminal for your Linux machine. Dictate shell commands, repair them against your files and history, and steer coding agents from your phone.">
+  <meta name="description" content="An open-source mobile web terminal for Linux and macOS that repairs dictated shell commands and lets you control coding agents from your phone.">
   <title>libertty · Mobile web terminal with dictation and agent integrations</title>
   <link rel="canonical" href="%SITE_URL%">
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="libertty">
   <meta property="og:url" content="%SITE_URL%">
-  <meta property="og:title" content="libertty · All terminals are created equal.">
-  <meta property="og:description" content="Intelligent dictation and agent integrations to make mobile a first-class terminal.">
+  <meta property="og:title" content="libertty · Mobile web terminal with dictation and agent integrations">
+  <meta property="og:description" content="A mobile web terminal for Linux and macOS, with command dictation and coding agent integrations.">
   <meta property="og:image" content="%SITE_URL%social.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -24,14 +24,14 @@
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "libertty",
-      "url": "%SITE_URL%",
-      "image": "%SITE_URL%social.png",
-      "description": "An open-source mobile web terminal with dictation that is repaired against your shell, and integrations for coding agents.",
+      "url": %SITE_JSON_URL%,
+      "image": %SITE_JSON_IMAGE%,
+      "description": "An open-source mobile web terminal for Linux and macOS with shell command dictation and coding agent integrations.",
       "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "Linux",
+      "operatingSystem": ["Linux", "macOS"],
       "license": "https://github.com/nick1udwig/libertty/blob/master/LICENSE",
       "sameAs": "https://github.com/nick1udwig/libertty",
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      "offers": { "@type": "Offer", "price": 0, "priceCurrency": "USD" }
     }
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -209,7 +209,8 @@
         <li><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4"/></svg><div><a href="./setup/#tailscale-setup">Self-hosted and private</a><p>Your machine, your tailnet, local speech.</p></div></li>
         <li><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg><div><a href="./usage/#touch-controls">A real terminal, made for mobile</a><p>Key bar, SSH, file transfers, a reader.</p></div></li>
       </ul>
-      <p class="try"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--prompt)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>The phone runs the real app in your browser. Select Try the demo to start.</p>
+      <p class="try"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--prompt)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>The phone runs the real app in your browser.
+      Select Try the demo to start.</p>
       <button class="cue" id="cue" type="button">Try the demo<span aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></span></button>
     </div>
     <div class="phone" id="demo"><div class="screen">

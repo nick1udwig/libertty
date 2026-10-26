@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import MarkdownIt from 'markdown-it';
+import { normalizeSiteUrl } from './urls.ts';
 
 // User-facing guides become pages of the site, so search and readers land on the project's own domain.
 export const pages = [
@@ -41,12 +42,13 @@ function markdown(doc: string) {
 
 /** Render one guide into the site's page template. */
 export function renderPage(root: string, site: string, slug: string) {
+  site = normalizeSiteUrl(site);
   const page = pages.find(item => item.slug === slug)!;
   const source = readFileSync(path.join(root, page.doc), 'utf8'), title = source.match(/^# (.+)$/m)?.[1] || page.label;
   const nav = pages.map(item => `<a href="../${item.slug}/"${item === page ? ' aria-current="page"' : ''}>${item.label}</a>`).join('\n        ');
   const fields: Record<string, string> = {
     title: escape(title), documentTitle: escape(/\blibertty\b/i.test(title) ? title : `${title} · libertty`),
-    description: escape(page.description), canonical: `${site}${slug}/`, image: `${site}social.png`,
+    description: escape(page.description), canonical: escape(new URL(slug + '/', site).href), image: escape(new URL('social.png', site).href),
     nav, body: markdown(page.doc).render(source), source: `${repository}/blob/master/${page.doc}`,
   };
   return readFileSync(path.join(root, 'site/page.html'), 'utf8').replace(/%(\w+)%/g, (match, key) => fields[key] ?? match);
