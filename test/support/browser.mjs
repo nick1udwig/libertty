@@ -88,7 +88,8 @@ export async function focusShell(frame) {
   if (!await input.evaluate(element => document.activeElement === element && !element.readOnly)) {
     const canvas = frame.locator('#terminal canvas');
     const position = await canvas.evaluate(element => { const bounds = element.getBoundingClientRect(); return { x: bounds.width - 4, y: bounds.height - 4 }; });
-    await canvas.tap({ position });
+    if (await frame.evaluate(() => navigator.maxTouchPoints > 0)) await canvas.tap({ position });
+    else await canvas.click({ position });
   }
   await frame.waitForFunction(() => {
     const input = document.querySelector('#terminal textarea');
