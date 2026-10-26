@@ -1,4 +1,4 @@
-# Usage guide
+# Use libertty from your phone
 
 For installation and a quick start, see the [README](../README.md).
 

@@ -45,7 +45,8 @@ export function renderPage(root: string, site: string, slug: string) {
   const source = readFileSync(path.join(root, page.doc), 'utf8'), title = source.match(/^# (.+)$/m)?.[1] || page.label;
   const nav = pages.map(item => `<a href="../${item.slug}/"${item === page ? ' aria-current="page"' : ''}>${item.label}</a>`).join('\n        ');
   const fields: Record<string, string> = {
-    title: escape(title), description: escape(page.description), canonical: `${site}${slug}/`, image: `${site}social.png`,
+    title: escape(title), documentTitle: escape(/\blibertty\b/i.test(title) ? title : `${title} · libertty`),
+    description: escape(page.description), canonical: `${site}${slug}/`, image: `${site}social.png`,
     nav, body: markdown(page.doc).render(source), source: `${repository}/blob/master/${page.doc}`,
   };
   return readFileSync(path.join(root, 'site/page.html'), 'utf8').replace(/%(\w+)%/g, (match, key) => fields[key] ?? match);

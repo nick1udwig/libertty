@@ -1,4 +1,4 @@
-# libertty reference
+# libertty technical reference
 
 Implementation, testing, and deployment notes.
 Start with the [README](../README.md) or the [usage guide](usage.md).

@@ -1,4 +1,4 @@
-# Herdr connection
+# Control coding agents from your phone with Herdr
 
 Type `herdr` in a libertty terminal on a local or SSH machine to save and open its Herdr host automatically.
 Named sessions support `herdr --session NAME` and `herdr session attach NAME`.

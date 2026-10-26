@@ -71,6 +71,7 @@
     .mark { font: 700 22px var(--mono); color: var(--accent); letter-spacing: -0.01em; margin: 0; }
     .mark span { color: var(--muted); font-weight: 400; }
     h1 { font: 600 clamp(40px, 5vw, 64px) / 1.05 var(--mono); letter-spacing: -0.045em; margin: 0; text-wrap: balance; }
+    .tagline { margin: 12px 0 0; font-size: 18px; line-height: 1.5; color: var(--muted); }
     .lede { font-size: 21px; line-height: 1.5; color: var(--text-2); margin: 0; max-width: 31ch; text-wrap: pretty; }
     .install { display: flex; align-items: center; gap: 12px; max-width: 100%; width: max-content; padding: 8px 8px 8px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--command); font: 15px var(--mono); }
     .install code { font: inherit; white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
@@ -187,7 +188,10 @@
     <section class="hero" aria-labelledby="headline">
     <div class="copy">
       <p class="mark">›_ libertty <span>v0.2.11</span></p>
-      <h1 id="headline">All terminals are created equal.</h1>
+      <div>
+        <h1 id="headline">A mobile web terminal with dictation</h1>
+        <p class="tagline">All terminals are created equal.</p>
+      </div>
       <p class="lede">libertty is an open-source web terminal for your phone. It runs on your own computer, repairs dictated commands against your shell, and lets you steer coding agents from anywhere.</p>
       <div class="install"><code id="install">curl -fsSL https://install.libertty.sh | bash</code><button id="copy" type="button" aria-label="Copy the install command">Copy</button></div>
       <nav aria-label="Project">

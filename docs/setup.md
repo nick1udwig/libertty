@@ -1,4 +1,4 @@
-# Install and set up libertty
+# Install libertty on Linux or macOS
 
 ## Install a release
 
