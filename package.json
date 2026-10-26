@@ -18,6 +18,7 @@
     "build:frontend": "tsc --noEmit && vite build",
     "build:site": "tsc --noEmit && vite build --config site/vite.config.ts",
     "dev:site": "vite --config site/vite.config.ts",
+    "test:site": "npm run build:site && node test/site-browser.mjs",
     "build": "npm run build:backend && npm run build:frontend",
     "build:release": "cargo build --release --locked -p libertty-server --bin libertty && npm run build:frontend",
     "start": "cargo run --release --locked -p libertty-server --bin libertty",

@@ -2,8 +2,9 @@
 
 The project site in `site/` is a landing page around a working demo of libertty.
 On desktop the page shows a phone whose screen runs the real app, with sections below that explain the features, setup steps and platforms and link to the guides.
-On a phone the page opens on the headline, a summary, the install command and the features, with a cue to swipe to the demo.
-The swipe raises the app as a card over the landing page, and when the card reaches the top it becomes the full-screen app.
+On a phone the page opens on the headline, a summary, the install command and the features, followed by the full product sections and guides.
+The demo button scrolls to the swipe area after those sections.
+Swiping through that area raises the app as a card over the page, and when the card reaches the top it becomes the full-screen app.
 Scrolling up then stays inside the app, and Back returns to the landing page.
 Phones load the app after the landing page, or as soon as the visitor starts the swipe, and `#demo` opens the app directly.
 The page follows the system appearance, using the 1776 theme in dark mode and the flag theme in light mode.
@@ -20,6 +21,7 @@ npx vite preview --config site/vite.config.ts
 `npm run dev:site` serves the same pages with hot reload, with the landing page at `/`, the guides at `/setup/` and beside it, and the app at `/app.html`.
 The build writes a static site to `dist-site/` that any static host can serve.
 Set `LIBERTTY_SITE_BASE=/path/` when the site is not served from the root of its domain.
+Run `npm run test:site` to build the site and check mobile content, navigation and demo entry in Chromium.
 
 ## Guides
 
