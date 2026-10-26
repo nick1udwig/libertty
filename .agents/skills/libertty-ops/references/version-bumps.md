@@ -22,11 +22,12 @@ The active fields and examples to update are:
 | `package.json` | Top-level `version` |
 | `package-lock.json` | Top-level `version` and `packages[""].version` |
 | `Cargo.toml` | `[workspace.package].version` |
-| `Cargo.lock` | `version` in the `libertty-engine` and `libertty-server` package blocks |
+| `Cargo.lock` | `version` in the `libertty-engine`, `libertty-engine-wasm` and `libertty-server` package blocks |
 | `docs/setup.md` | Explicit installer version and local archive example |
 | `docs/releases.md` | Local archive verification example |
+| `site/index.html` | Visible application version label |
 
-Both crate manifests inherit `version.workspace = true`, so they do not need separate version literals.
+All three crate manifests inherit `version.workspace = true`, so they do not need separate version literals.
 `build/release-config.json` pins Node, Herdr, and Voxtype Mobile rather than libertty's application version.
 Release tags must match `v` plus the version in `package.json`.
 Archive names and generated `release.json` metadata derive from `package.json`.
@@ -41,17 +42,17 @@ npm version NEW_VERSION --no-git-tag-version
 ```
 
 This updates the npm manifest and both root lockfile fields without creating a commit or tag.
-Update the Cargo workspace version, the two local Cargo lockfile package entries, and the documentation examples listed above.
+Update the Cargo workspace version, all three local Cargo lockfile package entries, and the documentation examples listed above.
 Inspect the npm and Cargo fields with:
 
 ```sh
 npm pkg get version
 node -p "JSON.stringify({lockfile: require('./package-lock.json').version, rootPackage: require('./package-lock.json').packages[''].version})"
-rg -n -A 2 '^\[workspace\.package\]$|^name = "libertty-(engine|server)"$' Cargo.toml Cargo.lock
+rg -n -A 2 '^\[workspace\.package\]$|^name = "libertty-(engine|engine-wasm|server)"$' Cargo.toml Cargo.lock
 cargo metadata --locked --offline --no-deps --format-version 1
 git grep -nF -- "$old_version" -- . ':!archive/**'
 git diff --check
-git diff -- package.json package-lock.json Cargo.toml Cargo.lock docs/setup.md docs/releases.md
+git diff -- package.json package-lock.json Cargo.toml Cargo.lock docs/setup.md docs/releases.md site/index.html
 ```
 
 All application version fields must agree, and any remaining old-version matches must belong to unrelated dependencies or intentionally historical text.
