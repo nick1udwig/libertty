@@ -331,7 +331,7 @@ try {
   const historyWord = await terminal.evaluate(() => {
     const term = window.__testTerminal, rect = document.querySelector('#terminal canvas').getBoundingClientRect();
     const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
-    for (let row = 0; row < term.rows; row++) {
+    for (let row = Math.floor(term.rows / 3); row < term.rows - 2; row++) {
       const col = term.buffer.active.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1;
       if (col >= 0) return { x: (col + .5) * rect.width / term.cols, y: (row + .5) * rect.height / term.rows, cell: rect.width / term.cols };
     }

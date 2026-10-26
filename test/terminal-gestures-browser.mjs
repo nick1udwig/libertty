@@ -226,7 +226,7 @@ try {
   const rowPoint = await page.evaluate(() => {
     const term = window.__testTerminal, bounds = document.querySelector('#terminal canvas').getBoundingClientRect();
     const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
-    for (let row = 2; row < term.rows - 2; row++) {
+    for (let row = Math.floor(term.rows / 3); row < term.rows - 2; row++) {
       if (term.buffer.active.getLine(top + row)?.translateToString(true).startsWith('ROW-'))
         return { x: bounds.left + 8.5 * bounds.width / term.cols, y: bounds.top + (row + .5) * bounds.height / term.rows, cell: bounds.width / term.cols };
     }

@@ -15,6 +15,14 @@ A terminal tab mounts when selected, stops parsing and painting when hidden, and
 A shell without a connected viewer is never paused by flow control, so a released tab's programs keep running.
 After a reload, the selected tab mounts first and hidden Herdr metadata views mount once the browser is idle for notifications.
 The tab header supplies new-tab and back controls.
+On touch screens, hold a word and drag to select text, or drag either selection handle.
+Hold the dragged endpoint near the top or bottom edge to extend the selection through terminal history.
+Release to copy the selected text.
+Agent TUIs scroll through their application history one request at a time and retain rows only when unique overlapping text confirms their position.
+Fixed headers, repeated-only pages, unrelated redraws and missing scroll responses stop extension with a notice.
+Release during an unfinished application scroll copies only the confirmed text.
+TUI selection retains at most 10,000 rows or 1,000,000 cells; shell selection uses the terminal's retained history.
+Cancellation, typing, resize, hidden tabs and page changes stop selection scrolling.
 Connection actions and terminal/file/Herdr tab lifecycles now register through the [runtime plugin registry](plugins.md).
 User packages load from Settings into isolated frames with a scoped file-read bridge; the built-ins retain their existing trusted views.
 Settings has its own pane in the bottom navigation and applies preferences to open terminals.

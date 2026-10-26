@@ -28,6 +28,10 @@ try {
     assert.equal((await metadataPage.title()).match(/\blibertty\b/gi)?.length, 1);
     assert.equal(await metadataPage.locator('meta[name=robots][content*=noindex]').count(), 0);
     if (!route) {
+      assert.equal(await metadataPage.locator('meta[property="og:image:type"]').getAttribute('content'), 'image/png');
+      assert.equal(await metadataPage.locator('meta[name="twitter:title"]').getAttribute('content'), await metadataPage.title());
+      assert.equal(await metadataPage.locator('meta[name="twitter:description"]').getAttribute('content'), await metadataPage.locator('meta[property="og:description"]').getAttribute('content'));
+      assert.equal(await metadataPage.locator('meta[name="twitter:image"]').getAttribute('content'), new URL('social.png', publicSite).href);
       const schema = JSON.parse(await metadataPage.locator('script[type="application/ld+json"]').textContent());
       assert.equal(schema['@context'], 'https://schema.org');
       assert.equal(schema['@type'], 'SoftwareApplication');

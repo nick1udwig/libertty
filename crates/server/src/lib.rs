@@ -17,6 +17,7 @@ pub mod herdr_metadata;
 pub mod herdr_poll;
 pub mod herdr_reading;
 pub mod herdr_redraw;
+mod herdr_response;
 mod herdr_snapshot;
 pub mod herdr_state;
 pub mod herdr_terminal_stream;

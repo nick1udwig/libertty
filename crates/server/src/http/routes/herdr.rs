@@ -140,6 +140,29 @@ pub(super) async fn api_herdr_snapshot(ctx: HerdrContext) -> Result<Response<Bod
     return ok(json!(target.snapshot().await.map_err(fail)?));
 }
 
+pub(super) async fn api_herdr_response(
+    State(app): State<Arc<App>>,
+    ctx: HerdrContext,
+) -> Result<Response<Body>, Failure> {
+    let _permit = app
+        .herdr_reading_capacity
+        .try_acquire()
+        .map_err(|_| fail("Too many reading commands are running."))?;
+    let terminal = ctx
+        .query
+        .get("terminalId")
+        .map(String::as_str)
+        .unwrap_or("");
+    let text = tokio::time::timeout(
+        Duration::from_secs(15),
+        crate::herdr_response::latest(&ctx.target, terminal),
+    )
+    .await
+    .map_err(|_| fail("Reading the agent response timed out."))?
+    .map_err(fail)?;
+    ok(json!({"text": text}))
+}
+
 pub(super) async fn api_herdr_images_upload(
     ctx: HerdrContext,
     mut req: Request<Body>,

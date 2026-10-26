@@ -70,6 +70,7 @@ function demoEntries(base: string, site: string): Plugin {
         if (page) { response.setHeader('Content-Type', 'text/html'); response.end(renderPage(root, site, page.slug)); return; }
         if (route === '/' || route === '/index.html') request.url = '/site/index.html' + (query && '?' + query);
         else if (route === '/app.html') request.url = '/index.html' + (query && '?' + query);
+        else if (route === '/social.png') request.url = '/site/social.png';
         next();
       });
     },

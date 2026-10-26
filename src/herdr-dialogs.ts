@@ -96,39 +96,40 @@ export class HerdrDialogs {
     actions.append(cancel, submit); form.append(title, context, fields, progress, error, actions); document.body.append(modal); modal.showModal();
     const field = (label: string, input: HTMLElement) => { const wrapper = node('label', '', label); wrapper.append(input); fields.append(wrapper); };
     const input = node('input'), picker = node('select');
-    let updateBranches: (() => void) | undefined;
-    try {
-      if (action === 'split') {
-        field('Split direction', picker); picker.setAttribute('aria-label', 'Split direction');
-        for (const [value, label] of [['right', 'Right (side by side)'], ['down', 'Down (above and below)']]) { const option = node('option', '', label); option.value = value; picker.append(option); }
-        context.textContent = space.name + ' · ' + (this.host.terminalName(terminalId) || 'No running terminal');
-        submit.disabled = !terminalId;
-      } else {
-        progress.textContent = 'Loading worktrees…';
-        const listing = await this.host.api<HerdrWorktrees>('api/herdr/action', { action: 'list-worktrees', workspaceId: space.id });
-        if (!modal.open) return;
-        progress.textContent = ''; context.textContent = space.name + ' · ' + listing.source.repo_root;
-        if (action === 'new-worktree') updateBranches = branchField(listing, input, fields, submit, dialog, field);
-        else {
-          picker.required = true; picker.setAttribute('aria-label', 'Worktree'); field('Worktree', picker);
-          for (const entry of listing.worktrees.filter(entry => !entry.is_bare && !entry.is_prunable)) {
-            const option = node('option', '', (entry.branch || entry.label) + ' · ' + entry.path + (entry.open_workspace_id ? ' (already open)' : '')); option.value = entry.path; picker.append(option);
-          }
-          submit.disabled = !picker.options.length;
-          if (submit.disabled) error.textContent = 'No Git worktrees found for this repo.';
-        }
-      }
-    } catch (reason: any) { if (modal.open) { progress.textContent = ''; error.textContent = reason.message; } }
+    const branch = action === 'new-worktree' ? branchField(input, fields, submit, dialog, field) : undefined;
+    if (action === 'split') {
+      field('Split direction', picker); picker.setAttribute('aria-label', 'Split direction');
+      for (const [value, label] of [['right', 'Right (side by side)'], ['down', 'Down (above and below)']]) { const option = node('option', '', label); option.value = value; picker.append(option); }
+      context.textContent = space.name + ' · ' + (this.host.terminalName(terminalId) || 'No running terminal');
+      submit.disabled = !terminalId;
+    }
     form.onsubmit = async event => {
       event.preventDefault(); if (dialog.busy || submit.disabled) return;
       dialog.busy = true; submit.disabled = cancel.disabled = true; input.disabled = picker.disabled = true; error.textContent = ''; progress.textContent = action === 'split' ? 'Splitting…' : action === 'new-worktree' ? 'Creating worktree…' : 'Opening worktree…';
-      updateBranches?.();
+      branch?.update();
       try {
         const created = await this.host.api<Created>('api/herdr/action', { action, workspaceId: space.id, ...(action === 'split' ? { terminalId, direction: picker.value } : action === 'new-worktree' ? { branch: herdrName(input.value) } : { path: picker.value }) });
         await this.host.refresh(created); modal.close();
       } catch (reason: any) { if (modal.open) error.textContent = reason.message; }
-      finally { dialog.busy = false; submit.disabled = cancel.disabled = input.disabled = picker.disabled = false; progress.textContent = ''; updateBranches?.(); }
+      finally { dialog.busy = false; submit.disabled = cancel.disabled = input.disabled = picker.disabled = false; progress.textContent = ''; branch?.update(); }
     };
+    if (action === 'split') return;
+    progress.textContent = 'Loading worktrees…';
+    try {
+      const listing = await this.host.api<HerdrWorktrees>('api/herdr/action', { action: 'list-worktrees', workspaceId: space.id });
+      if (!modal.open) return;
+      if (!dialog.busy) progress.textContent = '';
+      context.textContent = space.name + ' · ' + listing.source.repo_root;
+      if (branch) branch.load(listing);
+      else {
+        picker.required = true; picker.setAttribute('aria-label', 'Worktree'); field('Worktree', picker);
+        for (const entry of listing.worktrees.filter(entry => !entry.is_bare && !entry.is_prunable)) {
+          const option = node('option', '', (entry.branch || entry.label) + ' · ' + entry.path + (entry.open_workspace_id ? ' (already open)' : '')); option.value = entry.path; picker.append(option);
+        }
+        submit.disabled = !picker.options.length;
+        if (submit.disabled) error.textContent = 'No Git worktrees found for this repo.';
+      }
+    } catch (reason: any) { if (modal.open && !dialog.busy) { progress.textContent = ''; error.textContent = reason.message; } }
   }
   rename(agent: StripItem) {
     this.host.closeMenu();
@@ -148,13 +149,13 @@ export class HerdrDialogs {
 }
 
 /** A branch combobox that suggests existing branches and previews the new checkout path. */
-function branchField(listing: HerdrWorktrees, input: HTMLInputElement, fields: HTMLElement, submit: HTMLButtonElement, dialog: { busy: boolean }, field: (label: string, input: HTMLElement) => void) {
+function branchField(input: HTMLInputElement, fields: HTMLElement, submit: HTMLButtonElement, dialog: { busy: boolean }, field: (label: string, input: HTMLElement) => void) {
   input.required = true; input.maxLength = 100; input.placeholder = 'New or existing branch'; input.autocomplete = 'off'; input.spellcheck = false; input.setAttribute('aria-label', 'Branch'); field('Branch', input);
   const suggestions = node('div', 'herdr-branch-suggestions'); suggestions.id = 'herdr-branches-' + crypto.randomUUID(); suggestions.role = 'listbox'; suggestions.setAttribute('aria-label', 'Existing branches');
   input.role = 'combobox'; input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-controls', suggestions.id);
   fields.append(suggestions);
   const preview = node('p', 'hint'); fields.append(preview);
-  const branches = [...new Set(listing.branches || [])], checkedOut = new Set(listing.worktrees.flatMap(entry => entry.branch ? [entry.branch] : []));
+  let listing: HerdrWorktrees | undefined, branches: string[] = [], checkedOut = new Set<string>();
   let expanded = true, activeBranch = '';
   const choose = (branch: string) => { if (dialog.busy) return; input.value = branch; input.focus(); expanded = false; activeBranch = ''; update(); };
   const update = () => {
@@ -170,7 +171,7 @@ function branchField(listing: HerdrWorktrees, input: HTMLInputElement, fields: H
     }
     suggestions.hidden = !expanded || !matches.length; input.setAttribute('aria-expanded', String(!suggestions.hidden));
     submit.disabled = dialog.busy || !value || checkedOut.has(value);
-    preview.textContent = checkedOut.has(value) ? 'This branch is already checked out. Use Open worktree to open its checkout.' : !value ? 'Choose an existing branch or enter a new branch name.' : listing.directory ? 'Checkout: ' + worktreePath(listing.directory, listing.source.repo_name, value) : branches.includes(value) ? 'Herdr will create the checkout using this existing branch.' : 'Herdr will create the checkout in its configured worktree directory from HEAD.';
+    preview.textContent = checkedOut.has(value) ? 'This branch is already checked out. Use Open worktree to open its checkout.' : !value ? 'Choose an existing branch or enter a new branch name.' : listing?.directory ? 'Checkout: ' + worktreePath(listing.directory, listing.source.repo_name, value) : branches.includes(value) ? 'Herdr will create the checkout using this existing branch.' : 'Herdr will create the checkout in its configured worktree directory from HEAD.';
   };
   const available = () => [...suggestions.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
   input.oninput = () => { expanded = true; activeBranch = ''; update(); };
@@ -187,5 +188,13 @@ function branchField(listing: HerdrWorktrees, input: HTMLInputElement, fields: H
     update(); document.getElementById(input.getAttribute('aria-activedescendant')!)?.scrollIntoView({ block: 'nearest' });
   };
   update(); input.focus();
-  return update;
+  return {
+    update,
+    load(value: HerdrWorktrees) {
+      listing = value;
+      branches = [...new Set(value.branches || [])];
+      checkedOut = new Set(value.worktrees.flatMap(entry => entry.branch ? [entry.branch] : []));
+      update();
+    },
+  };
 }

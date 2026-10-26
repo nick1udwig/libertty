@@ -293,9 +293,30 @@ try {
   assert.equal(await tree.count(), 1, 'A short swipe returns the tree');
   await swipeTree(120); await wait(async () => await tree.count() === 0, 'swiping down dismisses the tree');
   assert.equal(await selected(), chip(beta), 'Swiping the tree away keeps the selection');
+  let releaseListing;
+  const listingGate = new Promise(resolve => { releaseListing = resolve; });
+  let listingPending = false;
+  const slowListing = async route => {
+    if (route.request().postDataJSON()?.action !== 'list-worktrees') return route.continue();
+    const response = await route.fetch(); listingPending = true;
+    await listingGate; await route.fulfill({ response });
+  };
+  await page.route('**/api/herdr/action*', slowListing);
   await hold(alpha); await treeAction('New worktree'); await page.getByLabel('Branch', { exact: true }).waitFor();
   const branch = page.getByRole('combobox', { name: 'Branch', exact: true }), branchList = page.getByRole('listbox', { name: 'Existing branches', exact: true });
+  await wait(() => listingPending, 'worktree listing held before delivery');
+  assert.equal(await branch.evaluate(input => input === document.activeElement), true, 'The branch input is focused before suggestions load');
+  await branch.pressSequentially('REVIEW/');
+  assert.equal(await branch.inputValue(), 'REVIEW/', 'Typing works while worktree discovery is pending');
+  assert.equal(await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).isEnabled(), true, 'Creation does not wait for suggestions');
+  assert.equal(await branchList.getByRole('option').count(), 0);
+  releaseListing();
   await branchList.getByRole('option', { name: 'review/existing', exact: true }).waitFor();
+  await page.unroute('**/api/herdr/action*', slowListing);
+  assert.equal(await branch.inputValue(), 'REVIEW/', 'Loading suggestions preserves the typed name');
+  assert.equal(await branch.evaluate(input => input === document.activeElement), true, 'Loading suggestions preserves input focus');
+  assert.deepEqual(await branchList.getByRole('option').allTextContents(), ['review/existing', 'review/other'], 'Late suggestions use the current input');
+  await branch.fill('');
   assert.equal(await branchList.getByRole('option', { name: 'main Already checked out', exact: true }).isDisabled(), true);
   await branch.fill('REVIEW/');
   assert.deepEqual(await branchList.getByRole('option').allTextContents(), ['review/existing', 'review/other'], 'Existing branches filter as the user types, ignoring case');
@@ -308,6 +329,8 @@ try {
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(await selected(), chip(beta), 'Cancelling on an inactive held space preserves selection');
   await hold(beta); await treeAction('New worktree'); await page.locator('.herdr-space-action .form-error').filter({ hasText: /Git|repo/i }).waitFor();
+  await branch.fill('manual-branch');
+  assert.equal(await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).isEnabled(), true, 'Discovery failure leaves manual branch entry available');
   await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).click();
   assert.equal(await selected(), chip(beta), 'Discovery failure preserves selection');
   const alphaBefore = (await herdrSnapshot(target)).spaces.find(space => space.id === alpha);
@@ -335,10 +358,29 @@ try {
   assert.equal(await selected(), chip(alpha), 'Splitting an inactive held space selects its space');
   const newPane = alphaSplit.terminalIds.find(id => !alphaBefore.terminalIds.includes(id));
   await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === newPane, 'new split opens automatically');
+  let releaseCreationListing, releaseCreation;
+  const creationListingGate = new Promise(resolve => { releaseCreationListing = resolve; }), creationGate = new Promise(resolve => { releaseCreation = resolve; });
+  let creationPending = false;
+  const createBeforeListing = async route => {
+    const action = route.request().postDataJSON()?.action;
+    if (action === 'list-worktrees') { const response = await route.fetch(); await creationListingGate; await route.fulfill({ response }); }
+    else if (action === 'new-worktree') { creationPending = true; await creationGate; await route.continue(); }
+    else await route.continue();
+  };
+  await page.route('**/api/herdr/action*', createBeforeListing);
   await tab(beta).click(); await hold(alpha); await treeAction('New worktree');
   await page.getByLabel('Branch', { exact: true }).fill('mobile-review');
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
+  await wait(() => creationPending, 'creation starts before suggestions arrive');
+  releaseCreationListing();
+  await wait(async () => (await page.locator('.herdr-space-action').textContent()).includes(' · ' + dir + '/alpha'), 'worktree listing arrives during creation');
+  assert.equal(await page.getByRole('dialog').getByRole('status').textContent(), 'Creating worktree…', 'Late suggestions preserve creation progress');
+  assert.equal(await branch.isDisabled(), true);
+  assert.equal(await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole('dialog').getByRole('button', { name: 'Cancel', exact: true }).isDisabled(), true);
+  releaseCreation();
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
+  await page.unroute('**/api/herdr/action*', createBeforeListing);
   const worktreeSpace = (await herdrSnapshot(target)).spaces.find(space => !before.includes(space.id) && space.id !== created);
   assert.ok(worktreeSpace, 'Worktree creation adds a shared native space');
   assert.ok(worktreeSpace.repoKey?.endsWith('/alpha/.git'), 'The worktree reports its repository');
