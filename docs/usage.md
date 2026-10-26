@@ -170,7 +170,7 @@ When an app keeps its own history, vertical drags send native wheel events throu
 Mobile TUI panes render text and cursors directly from Herdr’s live frames when their grid matches the shared terminal.
 Shell scrollback and differently sized observers retain the history projection.
 
-Tap **Copy response** above an agent terminal to copy its latest saved assistant response, including Markdown and code blocks.
+Tap **Copy response** in the hotkeys bar below an agent terminal to copy its latest saved assistant response, including Markdown and code blocks.
 This uses Codex or Claude JSONL transcripts reported by Herdr, including sessions on SSH hosts.
 Run `herdr integration install codex` or `herdr integration install claude` on the agent host, then restart or resume the agent so Herdr receives its transcript reference.
 User prompts, tool results, reasoning and marked work updates are excluded.

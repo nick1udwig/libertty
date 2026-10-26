@@ -93,7 +93,7 @@ try {
   await assertVisible(pane(first,'term_0'),false); assert.equal(await page.locator('#terminal-loading').isVisible(),true);
   assert.equal(await page.locator('#terminal-loading').evaluate(element => element.classList.contains('has-previous')),false);
   assert.equal(await page.locator('#workspace-shortcuts').isVisible(),true,'The bar is present before the first terminal publishes shortcuts');
-  assert.deepEqual(await hotkeys.allTextContents(),['Stop','Ctrl','Status','Image'],'Saved shortcuts are shown during loading');
+  assert.deepEqual(await hotkeys.allTextContents(),['Stop','Ctrl','Status','Image','Copy response'],'Saved shortcuts are shown during loading');
   assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true);
   const coldLayout = await captureBottomLayout();
   await page.evaluate(() => { window.__holdAllShortcuts=false; }); await releaseShortcuts(initial);
@@ -113,7 +113,7 @@ try {
   assert.equal(await pane(first,'term_0').evaluate(element => element.inert),true);
   assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),true);
   assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true,'Pending shortcuts cannot send input to the previous pane');
-  assert.deepEqual(await hotkeys.allTextContents(),['Stop','Ctrl','Status','Image']);
+  assert.deepEqual(await hotkeys.allTextContents(),['Stop','Ctrl','Status','Image','Copy response']);
   const pendingActions = fixture.actions.length;
   await hotkeys.evaluateAll(buttons => buttons.forEach(button => button.click()));
   await delay(100); assert.equal(fixture.actions.slice(pendingActions).some(action => action.method === 'pane.send_text'),false);

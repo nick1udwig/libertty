@@ -153,7 +153,7 @@ export class HerdrView {
       const repo = chip && chip.dataset.terminal !== this.tree!.repo && this.entries().find(item => item.terminalId === chip.dataset.terminal)?.repo;
       if (chip && repo) this.openTree(chip, repo); else this.closeMenu();
     };
-    this.element.append(this.response.element, this.screen, this.menu, backdrop);
+    this.element.append(this.screen, this.menu, backdrop);
     const messages = (event: MessageEvent) => this.frames.message(event);
     document.addEventListener('visibilitychange', viewed); window.addEventListener('focus', viewed); window.addEventListener('message', messages);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', viewed), () => window.removeEventListener('focus', viewed), () => window.removeEventListener('message', messages));
@@ -239,6 +239,7 @@ export class HerdrView {
   }
   get ready() { return this.cached || this.frames.rendered || !!this.status.textContent || this.connected && !this.selected; }
   get navigationElement() { return this.strip; }
+  responseControl(enabled: boolean) { this.response.setEnabled(enabled); return this.response.element; }
   setTerminalTabsExpanded(expanded: boolean) {
     this.tabsToggle.setAttribute('aria-expanded', String(expanded));
     this.tabsToggle.setAttribute('aria-label', expanded ? 'Hide terminal tabs' : 'Show terminal tabs');

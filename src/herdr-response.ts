@@ -3,22 +3,24 @@ import { node } from './dom.ts';
 interface Host { response(): Promise<{ text: string }>; notice(message: string): void }
 
 export class HerdrResponse {
-  readonly element = node('div', 'herdr-response-actions');
-  private button = node('button', 'herdr-copy-response', 'Copy response');
+  readonly element = node('button', 'herdr-copy-response', 'Copy response');
+  private enabled = false;
   private pending = false;
   private disposed = false;
   private modal?: HTMLDialogElement;
   private host: Host;
   constructor(host: Host) {
     this.host = host;
-    this.button.type = 'button'; this.button.title = 'Copy the latest assistant response';
-    this.button.setAttribute('aria-label', 'Copy latest assistant response');
-    this.button.onclick = () => void this.copy(); this.element.append(this.button);
+    this.element.type = 'button'; this.element.title = 'Copy the latest assistant response';
+    this.element.setAttribute('aria-label', 'Copy latest assistant response');
+    this.element.addEventListener('pointerdown', event => event.preventDefault());
+    this.element.onclick = () => void this.copy(); this.setEnabled(false);
   }
-  update(available: boolean) { this.element.hidden = !available; this.button.disabled = this.pending; }
+  update(available: boolean) { this.element.hidden = !available; }
+  setEnabled(enabled: boolean) { this.enabled = enabled; this.element.disabled = this.pending || !enabled; }
   private async copy() {
-    if (this.pending || this.disposed) return;
-    this.pending = this.button.disabled = true; this.button.textContent = 'Copying…';
+    if (this.pending || this.disposed || !this.enabled || this.element.hidden) return;
+    this.pending = this.element.disabled = true; this.element.textContent = 'Copying…';
     const response = this.host.response();
     try {
       let copied = false;
@@ -37,7 +39,7 @@ export class HerdrResponse {
     } catch (error) {
       if (!this.disposed) this.host.notice(error instanceof Error ? error.message : 'Could not read the agent response.');
     } finally {
-      this.pending = this.button.disabled = false; this.button.textContent = 'Copy response';
+      this.pending = false; this.setEnabled(this.enabled); this.element.textContent = 'Copy response';
     }
   }
   private show(text: string) {
