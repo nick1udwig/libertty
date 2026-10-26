@@ -1,5 +1,6 @@
 import { launchBrowser, delay, until } from './support/browser.mjs';
-import { showTerminalTabs } from './support/workspace-navigation.mjs';
+import { showTerminalTabs, connectSSH } from './support/workspace-navigation.mjs';
+import { fingerprint } from './support/ssh-key.ts';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -111,14 +112,29 @@ try {
   await page.evaluate(({ key, sshPort, username }) => {
     const hosts = JSON.parse(localStorage.getItem('libertty.hosts')); hosts.push({ id: 'ssh-plugin', name: 'Remote host', kind: 'ssh', backendId: 'primary', hostname: '127.0.0.1', port: sshPort, username, route: 'fixed', keyFingerprint: key.fingerprint }); localStorage.setItem('libertty.hosts', JSON.stringify(hosts));
   }, { key, sshPort, username: os.userInfo().username });
-  await page.reload(); page.on('dialog', dialog => dialog.accept());
-  await action('Connect Log viewer', 'Remote host'); await page.locator('#plugin-read-path').fill(fixture.directory + '/remote/app.log'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('#ssh-secret').fill('fixture-secret'); await page.locator('#ssh-connect').click();
+  await page.reload();
+  const trustPrompts = [];
+  page.on('dialog', dialog => { trustPrompts.push(dialog.message()); return dialog.accept(); });
+  if (process.env.TEST_SSH_CONNECT_DELAY_MS) {
+    let delayed = false;
+    await context.route('**/api/sessions', async route => {
+      if (!delayed && route.request().postDataJSON()?.ssh?.trust) {
+        delayed = true;
+        const response = await route.fetch();
+        await delay(Number(process.env.TEST_SSH_CONNECT_DELAY_MS));
+        await route.fulfill({ response });
+      } else await route.continue();
+    });
+  }
+  await action('Connect Log viewer', 'Remote host'); await page.locator('#plugin-read-path').fill(fixture.directory + '/remote/app.log'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('#ssh-secret').fill('fixture-secret'); await connectSSH(page);
+  assert.equal(trustPrompts.length, 1, 'Unknown SSH hosts require fingerprint verification');
+  assert.ok(trustPrompts[0].includes(fingerprint(ssh2.utils.parseKey(hostKey.private).getPublicSSH())));
   frame = await pluginFrame(); await frame.locator('#log').filter({ hasText: 'remote warning' }).waitFor();
   const remoteLog = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'example.log-viewer' && tab.hostId === 'ssh-plugin'));
   await page.getByRole('button', { name: 'Close ' + remoteLog.name, exact: true }).click();
   await tabClosed(remoteLog);
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === remoteLog.session), 'Remote plugin cleanup closes its SSH connection');
-  await action('Connect Herdr', 'Remote host'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('#ssh-secret').fill('fixture-secret'); await page.locator('#ssh-connect').click();
+  await action('Connect Herdr', 'Remote host'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('#ssh-secret').fill('fixture-secret'); await connectSSH(page);
   await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
   const remoteHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'herdr' && tab.hostId === 'ssh-plugin'));
   assert.equal(remoteHerdr.ownsSession, true); assert.equal(remoteHerdr.herdrSource, remoteHerdr.session);
@@ -127,7 +143,7 @@ try {
   const other = (await (await request('connect', { noSession: true, token: 'plugin-test-pairing-token-123456789' }, '')).json()).accessToken;
   assert.equal((await request('herdr/ticket?herdrSource=' + remoteHerdr.herdrSource, {}, other)).status, 404);
   assert.equal((await request('plugins/read?session=' + remoteHerdr.session + '&path=' + encodeURIComponent(fixture.directory + '/remote/app.log'), undefined, other)).status, 404, 'Other pairings cannot read plugin sessions');
-  await action('Connect new terminal', 'Remote host'); await page.locator('#ssh-secret').fill('fixture-secret'); await page.locator('#ssh-connect').click();
+  await action('Connect new terminal', 'Remote host'); await page.locator('#ssh-secret').fill('fixture-secret'); await connectSSH(page);
   await until(async () => await page.locator('#terminal-stack > iframe:not([sandbox]):visible').count() === 1, 'independent SSH terminal');
   await page.getByRole('button', { name: 'Close Remote host', exact: true }).click();
   await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').filter({ hasText: 'Remote host' }).click(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
