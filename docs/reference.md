@@ -1,10 +1,12 @@
-# libertty reference
+# libertty technical reference
 
 Implementation, testing, and deployment notes.
 Start with the [README](../README.md) or the [usage guide](usage.md).
 
 A mobile web terminal with inline dictation, command alternatives, and a real Bash session.
-The MVP uses **Ghostty `0.4.0-next.20.g1858a59`**, pinned to the browser build selected in the performance comparison.
+The browser uses **Ghostty `0.4.0-next.20.g1858a59`** for terminal rendering.
+Release targets are Linux x86_64, Linux ARM64 and macOS Apple Silicon.
+See [supported machines](setup.md#supported-machines) for requirements and companion availability.
 
 ## Run locally
 
@@ -17,7 +19,7 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:3000**.
+Open **http://127.0.0.1:3000** and pair with the token printed by the server.
 The server opens a shell in the directory where it was launched.
 Override that with `LIBERTTY_CWD=/path/to/project`.
 It sources your `.bashrc` for aliases/functions, then installs its own prompt/history hooks and Emacs Readline bindings inside this session.
@@ -252,25 +254,14 @@ If `LIBERTTY_TOKEN` is unset or empty, a random token is saved to `$LIBERTTY_DAT
 
 The shell runs with your user privileges.
 The server validates Host and Origin, uses an HttpOnly SameSite session cookie, and requires the pairing token before granting access to any local or remote session.
-It is a single-user MVP, without multi-user isolation or an internet-facing account/authentication system.
+It is a single-user application without multi-user isolation or a public account system.
 
-## Existing local deployment (machine-specific)
+## Run an installed release
 
-The app runs as the enabled user service `libertty.service` on **127.0.0.1:7321**.
-Open **https://omafwchy.taila510b.ts.net/t/** from a device on the tailnet.
-Tailscale Serve forwards only `/t` to this app; existing routes stay separate.
-
-```sh
-systemctl --user status libertty
-systemctl --user restart libertty
-journalctl --user -u libertty -f
-```
-
-The service uses `LIBERTTY_BASE_PATH=/t` and explicitly allows the tailnet hostname.
-Assets, API requests, WebSockets, cookies, the manifest and service worker are scoped to `/t/`.
-This route requires the pairing token as well as tailnet access.
-Read the token in the service’s startup journal.
-To rebuild changes, run `npm run build:release` and restart the service.
+The installer uses `127.0.0.1:7321` and the `/t` mount by default.
+It can configure a systemd user service on Linux or a login LaunchAgent on macOS.
+Use the URL and pairing token printed by setup to connect your phone.
+See [setup and service management](setup.md#configuration-upgrades-and-troubleshooting) for platform commands, paths and upgrades.
 
 For another subpath deployment, set `LIBERTTY_BASE_PATH` at runtime and use a reverse proxy that preserves the Host header.
 Both prefix-preserving and prefix-stripping proxies are supported.
@@ -279,28 +270,17 @@ Tailscale Serve strips its mount prefix.
 ## Verify
 
 ```sh
-npm test
-npm run test:rust
-npm run build
-TEST_BASE_PATH=/terminal npm run test:browser
-npm run test:reconnect
+npm run ci:quick
+cargo fmt --all -- --check
+npm run contracts:vocabulary -- --check
+npm run verify:local
 ```
 
-The reconnect test covers stalled authorization and Herdr ticket requests, delayed close events, stale open sockets, and recovery without replaying input.
-The browser test uses `/usr/bin/chromium` (override with `CHROMIUM=/path/to/chromium`), a loopback server, temporary fixture files and isolated Bash sessions.
-It covers loading and ready alternatives, real Readline replacement, default tap-to-send with duplicate-tap protection, replacement-only selection, reopenable collapsed menus and saved preferences, incremental mobile composition and ordinary typing, mobile Backspace after dictation and during pending repair, case alternatives, spoken symbols, home-relative directory resolution, completion-helper exclusion, eternal-history context, non-executing validation, late-response cancellation, composition-event deduplication, cached help discovery, Git alias flags and explicit `-m` preservation despite corrupt history, Python inspection, command shortcuts, Ctrl-R, busy guards, current-directory updates, mobile and keyboard-sized layouts, reconnect/offline behavior, authentication, command deduplication, stale edit rejection, and output acknowledgements.
-Screenshots are saved to `.test-artifacts/`.
-The README uses full mobile viewport captures, including the terminal, alternatives menus, and shortcut bar, from three simulated dictation regressions.
-To refresh those images after running `npm run build` and `npm run test:browser`:
+The full local check runs Rust checks, builds, JavaScript and installer tests, and browser and native Herdr harnesses.
+See [CI and validation](ci.md) for dependencies, individual commands and performance checks.
+Browser screenshots and reports are saved to `.test-artifacts/`.
 
-```sh
-mkdir -p docs/images
-cp .test-artifacts/example-{git-init,ls,python}.png docs/images/
-```
-
-These fixtures verify libertty’s text repair; they do not record audio or benchmark Aqua Voice, Wispr Flow, or a phone keyboard.
-
-Actual Android/iOS dictation, IMEs, touch selection and software-keyboard behavior still need device testing.
+Actual Android and iOS dictation, text input, touch selection and software-keyboard behavior still need device testing.
 Browsers do not expose one universal dictation event: the app recognizes multi-character insertions, replacement text and bulk committed compositions; clipboard paste stays raw.
 Incremental mobile keyboard compositions stream into the terminal as they change, including deletion and correction, rather than going through dictation repair.
 The hidden keyboard textarea retains a non-output sentinel so mobile keyboards can issue Backspace after text was inserted directly into Bash.
@@ -308,7 +288,3 @@ Bulk keyboard suggestions and speech may still look identical to the browser.
 Completion, history navigation, and unrecognized editing sequences suspend automatic repair until the next prompt because the browser no longer knows the exact editable line.
 Reconnecting to a partially typed line also leaves it untouched.
 Automated keyboard-size tests simulate viewport changes; they do not emulate an OS keyboard.
-Linux/Bash is the implemented host target.
-
-The original product conversation is preserved in [initial-spec.md](../archive/migration/README.md); the user's desires take precedence over its assistant recommendations.
-The complete benchmark project was moved to **`~/git/libertty-benchmark`** before MVP work began; see its `terminal-comparison.md` for the engine decision.

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1430" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="description" content="%description%">
+  <title>%documentTitle%</title>
+  <link rel="canonical" href="%canonical%">
+  <link rel="icon" href="../icon.svg" type="image/svg+xml">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="libertty">
+  <meta property="og:url" content="%canonical%">
+  <meta property="og:title" content="%documentTitle%">
+  <meta property="og:description" content="%description%">
+  <meta property="og:image" content="%image%">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="The libertty landing page beside a phone running the libertty terminal.">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Public+Sans:wght@400;500;600&display=swap">
+  <style>
+    /* The landing page's 1776 and flag looks, following the system. */
+    :root {
+      color-scheme: light;
+      --bg: #ffffff; --text: #0a2550; --text-2: #23406f; --muted: #475b82; --accent: #b31942; --accent-ink: #ffffff;
+      --command: #f3f6fb; --line: #7f93bb; --rule: #d3dcec; --prompt: #1e6b2e;
+      --band: linear-gradient(#0a3161, #0a3161) left / 180px 100% no-repeat, repeating-linear-gradient(180deg, #b31942 0 1px, #ffffff 1px 2px);
+      --band-height: 13px;
+      --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        color-scheme: dark;
+        --bg: #0b1430; --text: #f5f7fc; --text-2: #c8d0e6; --muted: #98a5c8; --accent: #ff4f64; --accent-ink: #0b1430;
+        --command: #101b3b; --line: #3a4f88; --rule: #2a3a6e; --prompt: #7fd99a;
+        --band: linear-gradient(#ff4f64 0 1px, #f5f7fc 1px 2px, #ff4f64 2px 3px);
+        --band-height: 3px;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .band { height: var(--band-height); background: var(--band); }
+    .wrap { max-width: 1240px; margin: 0 auto; padding-inline: max(16px, env(safe-area-inset-left, 0px)) max(16px, env(safe-area-inset-right, 0px)); }
+    header { border-bottom: 1px solid var(--rule); }
+    header .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 32px; padding-block: 8px; }
+    .mark { font: 700 18px var(--mono); color: var(--accent); text-decoration: none; }
+    header nav { flex: 1; display: flex; flex-wrap: wrap; gap: 0 24px; font-size: 15px; }
+    header nav a { display: flex; align-items: center; min-height: 44px; color: var(--muted); text-decoration: none; }
+    header nav a:hover { color: var(--text); }
+    .demo { margin-left: auto; display: inline-flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font-size: 14px; font-weight: 600; text-decoration: none; }
+    .layout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 32px 48px; padding-block: 48px 96px; }
+    aside { flex: 1 1 200px; max-width: 260px; }
+    aside nav { display: flex; flex-direction: column; gap: 2px; font-size: 15px; }
+    aside p { margin: 0 0 8px; font: 600 12px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+    aside a { padding: 8px 12px; border-radius: 8px; color: var(--text-2); text-decoration: none; }
+    aside a:hover, aside a[aria-current] { background: var(--command); color: var(--text); }
+    article { flex: 999 1 560px; min-width: 0; max-width: 780px; font-size: 17px; line-height: 1.65; color: var(--text-2); overflow-wrap: anywhere; }
+    article h1, article h2, article h3 { font-family: var(--mono); color: var(--text); letter-spacing: -.02em; line-height: 1.2; scroll-margin-top: 16px; }
+    article h1 { margin: 0 0 24px; font-size: clamp(32px, 5vw, 44px); font-weight: 600; letter-spacing: -.04em; overflow-wrap: normal; }
+    article h2 { margin: 48px 0 12px; font-size: 26px; font-weight: 600; }
+    article h3 { margin: 32px 0 8px; font-size: 20px; font-weight: 600; }
+    article p, article ul, article ol { margin: 0 0 16px; }
+    article li + li { margin-top: 4px; }
+    article a { color: var(--accent); }
+    article code { font: .9em var(--mono); padding: 1px 4px; border-radius: 4px; background: var(--command); }
+    article pre { margin: 0 0 16px; padding: 16px 20px; overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--command); line-height: 1.5; overflow-wrap: normal; }
+    article pre code { padding: 0; background: none; font-size: 15px; color: var(--text); }
+    article blockquote { margin: 0 0 16px; padding-left: 16px; border-left: 3px solid var(--accent); }
+    article img { max-width: 100%; height: auto; }
+    .table { margin: 0 0 16px; overflow-x: auto; border: 1px solid var(--rule); border-radius: 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: 15px; line-height: 1.5; overflow-wrap: normal; }
+    th, td { padding: 12px 16px; text-align: left; vertical-align: top; }
+    th { background: var(--command); color: var(--text); }
+    tr + tr td, tbody tr td { border-top: 1px solid var(--rule); }
+    /* Phones put the site links on their own row and the guide list above the article. */
+    @media (max-width: 640px) {
+      header nav { order: 1; flex-basis: 100%; }
+      .layout { padding-top: 24px; }
+      aside { flex-basis: 100%; max-width: none; }
+      aside nav { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+      aside p { flex-basis: 100%; }
+    }
+    footer { border-top: 1px solid var(--rule); }
+    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; padding-block: 28px; font-size: 14px; color: var(--muted); }
+    footer p { margin: 0; }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="band" aria-hidden="true"></div>
+  <header>
+    <div class="wrap">
+      <a class="mark" href="../">›_ libertty</a>
+      <nav aria-label="Site">
+        <a href="../#features">Features</a>
+        <a href="../setup/">Setup</a>
+        <a href="../usage/">Usage</a>
+        <a href="https://github.com/nick1udwig/libertty">GitHub</a>
+      </nav>
+      <a class="demo" href="../#demo">Try the demo</a>
+    </div>
+  </header>
+  <div class="wrap layout">
+    <aside>
+      <nav aria-label="Documentation">
+        <p>Docs</p>
+        %nav%
+      </nav>
+    </aside>
+    <article>
+%body%
+    </article>
+  </div>
+  <footer>
+    <div class="wrap">
+      <p>Open source under the MIT license.</p>
+      <a href="%source%">Edit this page on GitHub</a>
+    </div>
+  </footer>
+</body>
+</html>

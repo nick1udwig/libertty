@@ -1,7 +1,8 @@
-# Usage guide
+# Use libertty from your phone
 
-For installation and a quick start, see the [README](../README.md).
+Install the server and pair your phone with the [setup guide](setup.md).
 
+- [Quick start](#quick-start)
 - [Server settings](#server-settings)
 - [Tailscale](#tailscale)
 - [Hosts, tabs and SSH](#hosts-tabs-and-ssh)
@@ -14,9 +15,49 @@ For installation and a quick start, see the [README](../README.md).
 - [Touch controls](#touch-controls)
 - [Files and transfers](#files-and-transfers)
 
+## Quick start
+
+### Dictate a shell command
+
+1. Open a terminal and change to a Git repository.
+2. Tap the terminal and use your keyboard's dictation microphone, or use libertty's floating microphone when Voxtype Mobile is available.
+3. Say "git status" and finish the recording.
+4. Read the repaired command on the shell line, then use **Enter ↵** to run it.
+
+The alternatives menu includes the original transcript.
+Tapping an alternative runs it by default, so read it before selecting it.
+Use **Settings → Tap alternate to send** to change selection to replacement only.
+See [dictation](#dictation) for command repair and [Voxtype Mobile](#voxtype-mobile-dictation) for the built-in microphone.
+
+### Open an SSH terminal from your phone
+
+1. Open **Vault → Keychain**, create or import an SSH key, and install its public key on the target machine.
+2. Open **Hosts**, select **Add host**, and choose **SSH · through a backend**.
+3. Enter the target hostname, username and SSH port, then select **Save host**.
+4. Open the saved host, unlock the key when prompted, and verify the SSH host fingerprint.
+5. Run a command such as `pwd` to confirm the working directory on the remote machine.
+
+The chosen libertty backend must be able to reach the SSH server.
+The SSH target needs Bash and SFTP, but does not need its own libertty installation.
+See [hosts and SSH](#hosts-tabs-and-ssh) and [key storage and routing](#backends-ssh-keys-and-pairing) for details.
+
+### Control a coding agent
+
+1. Install Herdr and your coding agent on the local or SSH machine where the agent will run.
+2. Open that host's menu and choose **Connect Herdr**.
+3. Select the space or pane that contains the agent, or create a space with **+** and start the agent in its shell.
+4. Type or dictate an instruction, then use **Enter ↵** to send it.
+5. Read the agent's output and answer its permission prompts in the same terminal view.
+
+Dictation in a running agent inserts the literal transcript.
+Closing the top-level Herdr tab disconnects the view and leaves agents running.
+Closing a space or agent in the Herdr strip ends its running processes.
+See the [Herdr guide](herdr.md) for sessions, mobile sizing and notifications.
+
 ## Server settings
 
-Open **http://127.0.0.1:3000** and enter the **pairing token** printed at server startup.
+Open the URL printed by setup and enter the **pairing token** printed at server startup.
+Installed releases use `http://127.0.0.1:7321/t/` locally by default, while source builds use `http://127.0.0.1:3000`.
 Every frontend must pair, including browsers on the original host.
 The server generates a token and saves it in `$LIBERTTY_DATA_DIR/pairing-token` (default `~/.local/share/libertty/pairing-token`, readable only by your user).
 It reuses this token after restarts.
@@ -43,26 +84,25 @@ Open terminals reload into the same session to apply a new theme, because the te
 
 ## Tailscale
 
-1.
-  Install and sign in to Tailscale on both the host and your phone, using the same tailnet.
-  Find the host’s full DNS name in Tailscale (for example, `my-machine.tail1234.ts.net`).
-  2.
-  Stop the local server if it is running, then start it with your hostname and preferred working directory:
+The [setup guide](setup.md#tailscale-setup) configures private HTTPS for installed releases.
+For a source build, configure it manually as follows.
+
+1. Install and sign in to Tailscale on the host and phone with the same tailnet.
+   Find the host's full DNS name, such as `my-machine.tail1234.ts.net`.
+2. Stop the local server if it is running, then start it with your hostname and preferred working directory:
 
    ```sh
    HOST=127.0.0.1 PORT=7321 LIBERTTY_ALLOWED_HOSTS=my-machine.tail1234.ts.net LIBERTTY_BASE_PATH=/libertty LIBERTTY_CWD=/absolute/path/to/project npm start
    ```
 
-3.
-  In another terminal on the host, configure [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve):
+3. In another terminal on the host, configure [Tailscale Serve](https://tailscale.com/docs/reference/tailscale-cli/serve):
 
    ```sh
    tailscale serve --bg --set-path=/libertty http://127.0.0.1:7321
    ```
 
    Follow any prompt to enable HTTPS for your tailnet.
-   4.
-   With Tailscale connected on your phone, open https://my-machine.tail1234.ts.net/libertty.
+4. With Tailscale connected on your phone, open `https://my-machine.tail1234.ts.net/libertty`.
    Optionally add it to your home screen.
 
 Keep the server running; for automatic startup, run the same command and environment under a user service or your process manager.

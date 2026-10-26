@@ -1,9 +1,9 @@
-# Install and set up libertty
+# Install libertty on Linux or macOS
 
 ## Install a release
 
 The release installer bundles the native Rust executable, built frontend and a Node runtime for setup tools, so you do not need npm or a compiler on the server.
-The command below becomes available after the first release built by the [release workflow](../.github/workflows/release.yml) has finished publishing its assets.
+Run the installer to download the latest stable release.
 
 ```sh
 curl -fsSL https://github.com/nick1udwig/libertty/releases/latest/download/install.sh | bash
@@ -87,7 +87,7 @@ bash /tmp/libertty-install.sh
 To select a release, including a prerelease:
 
 ```sh
-bash /tmp/libertty-install.sh --version v0.2.11
+bash /tmp/libertty-install.sh --version v0.2.12
 ```
 
 To change the port and mount:
@@ -112,7 +112,7 @@ It does not bypass sudo authentication or Tailscale login.
 For a downloaded or locally built archive, supply its SHA-256 digest explicitly:
 
 ```sh
-bash install.sh --archive release/libertty-v0.2.11-linux-x64.tar.gz --sha256 YOUR_SHA256 --no-companions --no-tailscale
+bash install.sh --archive release/libertty-v0.2.12-linux-x64.tar.gz --sha256 YOUR_SHA256 --no-companions --no-tailscale
 ```
 
 ## Configuration, upgrades and troubleshooting

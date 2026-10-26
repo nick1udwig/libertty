@@ -115,7 +115,9 @@ try {
     await contacts([{ type: 'touchstart', point: start }, { type: 'touchmove', point: end }]);
     const rows = await frame.evaluate(() => { const term = window.__testTerminal, rows = term.rows; term.resize(term.cols, rows - 1); return rows; });
     const resizedMeasurements = await contacts([{ type: 'touchmove', point: { x: end.x, y: end.y + 8 } }, { type: 'touchcancel', point: end }], true);
-    assert.equal(resizedMeasurements, 1, 'Resizing invalidates geometry during an active scroll');
+    assert.equal(resizedMeasurements, 0, 'Resizing cancels the active gesture');
+    const freshMeasurements = await contacts([{ type: 'touchstart', point: start }, { type: 'touchmove', point: end }, { type: 'touchcancel', point: end }], true);
+    assert.equal(freshMeasurements, 1, 'A new gesture after resize measures the updated canvas');
     await frame.evaluate(rows => window.__testTerminal.resize(window.__testTerminal.cols, rows), rows);
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
     // Keep synthetic drag sequences in one browser turn so slow test-driver
@@ -145,6 +147,14 @@ try {
     const endHandle = '.selection-handle[aria-label="Selection end"]';
     await touch('touchstart', handle, endHandle); await touch('touchmove', { ...handle, x: handle.x + 6 * word.cell }, endHandle); await touch('touchend', { ...handle, x: handle.x + 6 * word.cell }, endHandle);
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta gamma');
+    const selectionEdge = await frame.evaluate(x => ({ x, y: document.querySelector('#terminal canvas').getBoundingClientRect().top + 1 }), word.x + 9 * word.cell);
+    const beforeEdge = await frame.evaluate(() => window.__testTerminal.getViewportY());
+    await contacts([{ type: 'touchstart', point: word }, { type: 'touchmove', point: { ...word, x: selectionEdge.x } }, { type: 'touchmove', point: selectionEdge }]);
+    await frame.waitForFunction(before => window.__testTerminal.getViewportY() > before, beforeEdge);
+    await touch('touchcancel', selectionEdge);
+    const cancelledOffset = await frame.evaluate(() => window.__testTerminal.getViewportY());
+    await delay(200);
+    assert.ok(Math.abs(await frame.evaluate(() => window.__testTerminal.getViewportY()) - cancelledOffset) < 1e-6, 'Cancellation stops edge selection scrolling');
     await frame.evaluate(() => window.__testTerminal.scrollToBottom());
     for (const [needle, expected, offset = 0] of [
       ['https://example.com/touch', 'https://example.com/touch'],

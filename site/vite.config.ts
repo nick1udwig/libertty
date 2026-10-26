@@ -3,19 +3,12 @@ import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSyn
 import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import { externalWasm, terminalPreloads } from '../build/assets.ts';
+import { pages, renderPage } from './pages.ts';
+import { normalizeSiteUrl } from './urls.ts';
 
 // The site runs the real workspace and terminal documents against an in-page backend, with the landing page around them.
 const root = path.resolve(import.meta.dirname, '..');
 const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
-
-function publicSiteUrl(): string {
-  const url = new URL(process.env.LIBERTTY_SITE_URL || 'https://libertty.sh/');
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    throw new Error('LIBERTTY_SITE_URL must be an absolute HTTP(S) URL without credentials, a query or a fragment.');
-  }
-  if (!url.pathname.endsWith('/')) url.pathname += '/';
-  return url.href.replaceAll('&', '&amp;');
-}
 
 /** Snapshot the tracked repository so the demo shell, files and reader browse the real project. */
 function repository(): Plugin {
@@ -69,10 +62,12 @@ function engine(): Plugin {
 function demoEntries(base: string, site: string): Plugin {
   return {
     name: 'libertty-site-entries',
-    // During development the landing page is served at / and the workspace at /app.html, as in the build.
+    // During development the landing page is served at /, the guides at /SLUG/ and the workspace at /app.html, as in the build.
     configureServer(server) {
-      server.middlewares.use((request, _response, next) => {
+      server.middlewares.use((request, response, next) => {
         const [route, query = ''] = (request.url || '').split('?');
+        const page = pages.find(item => route === `/${item.slug}/`);
+        if (page) { response.setHeader('Content-Type', 'text/html'); response.end(renderPage(root, site, page.slug)); return; }
         if (route === '/' || route === '/index.html') request.url = '/site/index.html' + (query && '?' + query);
         else if (route === '/app.html') request.url = '/index.html' + (query && '?' + query);
         else if (route === '/social.png') request.url = '/site/social.png';
@@ -81,10 +76,11 @@ function demoEntries(base: string, site: string): Plugin {
     },
     transformIndexHtml: { order: 'pre', handler(html, context) {
       const page = path.relative(root, context.filename);
-      if (page === 'site/index.html') return html.replaceAll('%SITE_URL%', site);
+      if (page === 'site/index.html') return html.replaceAll('%SITE_URL%', site.replaceAll('&', '&amp;')).replaceAll('%SITE_JSON_URL%', JSON.stringify(site)).replaceAll('%SITE_JSON_IMAGE%', JSON.stringify(new URL('social.png', site).href));
       const entry = page === 'index.html' ? 'app' : page === 'terminal.html' ? 'terminal' : undefined;
       if (!entry) return;
-      return html.replace('<base href="/" data-libertty-base>', `<base href="${base}" data-libertty-base>`)
+      // The documents inside the phone opt out of search results.
+      return html.replace('<base href="/" data-libertty-base>', `<base href="${base}" data-libertty-base>\n  <meta name="robots" content="noindex">`)
         .replace(/src="\/src\/(main|terminal)\.ts"/, `src="/site/demo/${entry}.ts"`);
     } },
     closeBundle() {
@@ -95,6 +91,10 @@ function demoEntries(base: string, site: string): Plugin {
       // Service workers would cache a backend that does not exist here.
       for (const name of ['site', 'sw.js', 'push-sw.js']) rmSync(path.join(out, name), { recursive: true, force: true });
       copyFileSync(path.join(root, 'site/social.png'), path.join(out, 'social.png'));
+      for (const page of pages) { mkdirSync(path.join(out, page.slug), { recursive: true }); writeFileSync(path.join(out, page.slug, 'index.html'), renderPage(root, site, page.slug)); }
+      // Crawlers skip the repository snapshot, which duplicates GitHub.
+      writeFileSync(path.join(out, 'robots.txt'), `User-agent: *\nDisallow: ${new URL(site).pathname}repo/\n\nSitemap: ${site}sitemap.xml\n`);
+      writeFileSync(path.join(out, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  ${['', ...pages.map(page => page.slug + '/')].map(page => `<url><loc>${new URL(page, site).href.replaceAll('&', '&amp;')}</loc></url>`).join('\n  ')}\n</urlset>\n`);
     },
   };
 }
@@ -104,5 +104,5 @@ export default defineConfig(({ command }) => ({
   build: { outDir: 'dist-site', emptyOutDir: true, target: 'es2022', rolldownOptions: { input: { site: 'site/index.html', app: 'index.html', terminal: 'terminal.html' } } },
   optimizeDeps: { exclude: ['ghostty-web'] },
   server: { port: 5180, fs: { allow: [root] } },
-  plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/', publicSiteUrl()), repository(), engine(), externalWasm(), terminalPreloads()],
+  plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/', normalizeSiteUrl(process.env.LIBERTTY_SITE_URL || 'https://libertty.sh/')), repository(), engine(), externalWasm(), terminalPreloads()],
 }));
