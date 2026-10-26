@@ -42,7 +42,7 @@
     :root {
       color-scheme: light;
       --bg: #ffffff; --lift: #e3eaf6; --text: #0a2550; --text-2: #23406f; --muted: #475b82; --accent: #b31942; --accent-ink: #ffffff;
-      --command: #f3f6fb; --line: #7f93bb; --prompt: #1e6b2e; --shadow: #0a316140; --app: #fcfdff;
+      --command: #f3f6fb; --line: #7f93bb; --rule: #d3dcec; --prompt: #1e6b2e; --shadow: #0a316140; --app: #fcfdff;
       --band: linear-gradient(#0a3161, #0a3161) left / 180px 100% no-repeat, repeating-linear-gradient(180deg, #b31942 0 1px, #ffffff 1px 2px);
       --band-height: 13px;
       --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -52,20 +52,21 @@
       :root {
         color-scheme: dark;
         --bg: #0b1430; --lift: #1a2a5e; --text: #f5f7fc; --text-2: #c8d0e6; --muted: #98a5c8; --accent: #ff4f64; --accent-ink: #0b1430;
-        --command: #101b3b; --line: #3a4f88; --prompt: #7fd99a; --shadow: #00000080; --app: #0b1430;
+        --command: #101b3b; --line: #3a4f88; --rule: #2a3a6e; --prompt: #7fd99a; --shadow: #00000080; --app: #0b1430;
         --band: linear-gradient(#ff4f64 0 1px, #f5f7fc 1px 2px, #ff4f64 2px 3px);
         --band-height: 3px;
       }
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; }
+    html, body { margin: 0; }
     body {
       background: radial-gradient(60vw 70vh at 72% 52%, var(--lift), var(--bg) 72%) var(--bg) fixed;
       color: var(--text); font-family: var(--sans);
       padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
     }
     .band { position: fixed; inset: 0 0 auto; height: var(--band-height); background: var(--band); }
-    main { min-height: 100%; max-width: 1240px; margin: 0 auto; padding-block: 32px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(32px, 6vw, 96px); }
+    main, footer > div { max-width: 1240px; margin: 0 auto; }
+    .hero { min-height: 100svh; padding-block: 32px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: clamp(32px, 6vw, 96px); }
     .copy { display: grid; gap: 28px; max-width: 600px; }
     .mark { font: 700 22px var(--mono); color: var(--accent); letter-spacing: -0.01em; margin: 0; }
     .mark span { color: var(--muted); font-weight: 400; }
@@ -77,9 +78,10 @@
     .install button { flex: none; display: flex; align-items: center; gap: 6px; margin-left: 6px; border: 0; border-radius: 7px; padding: 8px 12px; background: var(--accent); color: var(--accent-ink); font: 600 13px var(--sans); cursor: pointer; }
     .install button:active { transform: translateY(1px); }
     :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    nav { display: flex; flex-wrap: wrap; gap: 24px; font-size: 15px; }
-    nav a { color: var(--muted); text-decoration: none; }
-    nav a:first-child, nav a:hover { color: var(--text); }
+    .copy nav { display: flex; flex-wrap: wrap; gap: 24px; font-size: 15px; }
+    .copy nav a { color: var(--muted); text-decoration: none; }
+    .copy nav a:first-child, .copy nav a:hover { color: var(--text); }
+    .try { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 14px; color: var(--muted); }
     /* Only the screen inside the bezel is live. */
     .phone { justify-self: center; padding: 16px; border-radius: 62px; background: #05070a; box-shadow: 0 0 0 2px #2a2f2c, 0 40px 90px var(--shadow), inset 0 0 0 1px #3a403c; }
     .screen { display: flex; flex-direction: column; height: min(844px, calc(100dvh - 96px)); aspect-ratio: 390 / 844; border-radius: 46px; overflow: hidden; background: var(--app); color: var(--text); }
@@ -88,11 +90,62 @@
     .home { flex: none; height: 26px; display: grid; place-items: center; }
     .home::before { content: ""; width: 132px; height: 5px; border-radius: 3px; background: var(--text); opacity: .85; }
     .phone iframe { display: block; flex: 1; min-height: 0; width: 100%; border: 0; background: var(--app); }
+    /* Below the phone, the page explains the product and links to the guides. */
+    .more > section { display: grid; gap: 32px; padding-block: 72px; border-top: 1px solid var(--rule); }
+    .more > section:first-child { border-top: 0; }
+    .kicker { margin: 0 0 12px; font: 600 13px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+    h2 { margin: 0; font: 600 clamp(28px, 3.4vw, 40px) / 1.15 var(--mono); letter-spacing: -.035em; text-wrap: balance; }
+    h3 { margin: 0; font-size: 21px; font-weight: 600; }
+    .more p { margin: 0; font-size: 16px; line-height: 1.6; color: var(--text-2); max-width: 70ch; }
+    .more a { color: var(--accent); }
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 480px), 1fr)); gap: 24px; }
+    .feature { display: grid; align-content: start; gap: 16px; padding: 28px; border: 1px solid var(--rule); border-radius: 16px; background: var(--command); }
+    .feature a { font-weight: 500; }
+    .visual { display: grid; gap: 6px; min-height: 152px; align-content: center; padding: 14px; border-radius: 14px; background: var(--bg); font: 13px / 1.45 var(--mono); color: var(--text); }
+    .visual .muted { color: var(--muted); }
+    .choice { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid transparent; border-radius: 10px; }
+    .choice.picked { border-color: var(--prompt); background: color-mix(in srgb, var(--prompt) 14%, transparent); }
+    .choice b { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 7px; background: var(--command); }
+    .choice.picked b { background: var(--prompt); color: var(--bg); }
+    .choice span { flex: 1; }
+    .ask { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+    .ask .picked { color: var(--accent); }
+    .spaces { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 4px 0; border-top: 1px solid var(--rule); color: var(--muted); }
+    .spaces .blocked { color: var(--accent); }
+    .route { display: flex; align-items: center; gap: 10px; }
+    .route > span:first-child, .machine { flex: none; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+    .tunnel { flex: 1; display: grid; justify-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+    .tunnel::after { content: ""; width: 100%; height: 1px; background: var(--line); }
+    .machine { display: grid; gap: 4px; border-color: var(--accent); color: var(--text-2); }
+    .machine strong { color: var(--accent); font-weight: 400; }
+    .keys { display: flex; flex-wrap: wrap; gap: 8px; }
+    .keys span { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text-2); }
+    .keys span:last-child { border-color: var(--accent); color: var(--accent); }
+    .steps { counter-reset: step; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 32px; }
+    .steps li { counter-increment: step; display: grid; align-content: start; gap: 12px; }
+    .steps li::before { content: "0" counter(step); font: 700 36px var(--mono); color: var(--line); }
+    .button { justify-self: start; display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 10px; background: var(--accent); font-weight: 600; text-decoration: none; }
+    .more .button { color: var(--accent-ink); }
+    .table { overflow-x: auto; border: 1px solid var(--rule); border-radius: 14px; }
+    table { width: 100%; min-width: 640px; border-collapse: collapse; font-size: 15px; color: var(--text-2); }
+    th, td { padding: 14px 20px; text-align: left; }
+    th { background: var(--command); color: var(--text); font-weight: 600; }
+    td:first-child { color: var(--text); }
+    tbody tr { border-top: 1px solid var(--rule); }
+    .docs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
+    .docs a { display: grid; gap: 6px; height: 100%; box-sizing: border-box; padding: 20px; border: 1px solid var(--rule); border-radius: 12px; color: var(--text); font-weight: 600; text-decoration: none; }
+    .docs a:hover { border-color: var(--accent); }
+    .docs span { font-size: 15px; font-weight: 400; color: var(--muted); }
+    footer { border-top: 1px solid var(--rule); }
+    footer > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding-block: 32px; font-size: 14px; color: var(--muted); }
+    footer p { margin: 0; }
+    footer .mark { font-size: 16px; }
+    footer a { color: var(--muted); }
     /* On a phone the page is the app itself. */
     @media (max-width: 760px) {
       body { padding: 0; background: var(--bg); overflow: hidden; }
-      .band, .copy { display: none; }
-      main { display: block; padding: 0; }
+      .band, .copy, .more, footer { display: none; }
+      .hero { display: block; padding: 0; }
       /* The app inside the frame cannot see the notch or home indicator, so the page keeps it clear of them. */
       .phone { position: fixed; inset: 0 0 auto; height: var(--viewport-height, 100%); justify-self: stretch; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); border-radius: 0; box-shadow: none; background: var(--app); }
       .screen { width: 100%; height: 100%; aspect-ratio: auto; border-radius: 0; }
@@ -103,23 +156,128 @@
 <body>
   <div class="band" aria-hidden="true"></div>
   <main>
-    <section class="copy" aria-labelledby="headline">
+    <section class="hero" aria-labelledby="headline">
+    <div class="copy">
       <p class="mark">›_ libertty <span>v0.2.11</span></p>
       <h1 id="headline">All terminals are created equal.</h1>
-      <p class="lede">Intelligent dictation and agent integrations to make mobile a first-class terminal.</p>
+      <p class="lede">libertty is an open-source web terminal for your phone. It runs on your own computer, repairs dictated commands against your shell, and lets you steer coding agents from anywhere.</p>
       <div class="install"><code id="install">curl -fsSL https://install.libertty.sh | bash</code><button id="copy" type="button" aria-label="Copy the install command">Copy</button></div>
       <nav aria-label="Project">
-        <a href="https://github.com/nick1udwig/libertty">GitHub</a>
+        <a href="#features">Features</a>
         <a href="./setup/">Setup guide</a>
         <a href="./usage/">Usage</a>
+        <a href="https://github.com/nick1udwig/libertty">GitHub</a>
       </nav>
-    </section>
+      <p class="try"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--prompt)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>The phone runs the real app in your browser. Tap it to try a command.</p>
+    </div>
     <div class="phone"><div class="screen">
       <div class="status" aria-hidden="true"><span>9:41</span><svg width="44" height="12" viewBox="0 0 44 12" fill="currentColor"><path d="M0 9h3v3H0zM5 6h3v6H5zM10 3h3v9h-3zM15 0h3v12h-3z"/><rect x="22.5" y=".5" width="19" height="11" rx="3" fill="none" stroke="currentColor"/><rect x="24.5" y="2.5" width="13" height="7" rx="1.5"/><path d="M43 4v4"/></svg></div>
       <iframe id="app" title="libertty running in a phone" allow="microphone; clipboard-read; clipboard-write; screen-wake-lock"></iframe>
       <div class="home" aria-hidden="true"></div>
     </div></div>
+    </section>
+    <div class="more">
+      <section id="features" aria-labelledby="features-title">
+        <div>
+          <p class="kicker">What it does</p>
+          <h2 id="features-title">Your terminal, built for mobile</h2>
+        </div>
+        <div class="features">
+          <article class="feature">
+            <div class="visual" aria-hidden="true">
+              <div class="choice picked"><b>›_</b><span>cd ~/git/hello-world</span><span class="muted">1</span></div>
+              <div class="choice"><b><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg></b><span class="muted">cd tilde slash git slash hello world</span><span class="muted">2</span></div>
+            </div>
+            <h3>Dictation that knows your shell</h3>
+            <p>Say a command and libertty repairs it against your commands, files and history. The literal transcript stays one tap away as an alternative.</p>
+            <a href="./usage/#dictation">How dictation repair works →</a>
+          </article>
+          <article class="feature">
+            <div class="visual" aria-hidden="true">
+              <div><span style="color: var(--prompt)">●</span> Quick checks passed. The full suite is next.</div>
+              <div class="ask">
+                <strong>Bash command</strong>
+                <span>npm run verify:local</span>
+                <span class="picked">❯ 1. Yes</span>
+                <span class="muted">  2. No, and tell Claude what to do</span>
+              </div>
+              <div class="spaces"><span class="blocked">● feat-1776-theme</span><span>◌ feat-webpage</span><span>✓ daylight-colors</span></div>
+            </div>
+            <h3>Coding agents on your mobile</h3>
+            <p>Open Herdr sessions from any host to watch agents, answer permission prompts and give instructions by voice. A notification tells you when work is done.</p>
+            <a href="./herdr/">Using agents with Herdr →</a>
+          </article>
+          <article class="feature">
+            <div class="visual" aria-hidden="true">
+              <div class="route">
+                <span>phone</span>
+                <span class="tunnel">tailnet · HTTPS</span>
+                <span class="machine"><strong>your computer</strong><span>libertty server</span><span>Voxtype Mobile</span><span>Herdr</span></span>
+              </div>
+            </div>
+            <h3>Self-hosted and private</h3>
+            <p>The server runs on your own Linux or macOS machine, and your phone reaches it over Tailscale. Voxtype Mobile transcribes speech beside the server, so audio stays on your hardware.</p>
+            <a href="./setup/#tailscale-setup">How self-hosting works →</a>
+          </article>
+          <article class="feature">
+            <div class="visual" aria-hidden="true">
+              <div class="keys"><span>Ctrl R</span><span>Tab</span><span>Esc</span><span>Ctrl</span><span>↑</span><span>↓</span><span>Enter ↵</span></div>
+            </div>
+            <h3>A real terminal, made for mobile</h3>
+            <p>Ghostty rendering, a key bar for Ctrl, Tab, Esc and arrows, SSH hosts, file uploads and downloads, and a reader for files and command output.</p>
+            <a href="./usage/#touch-controls">Touch controls in the usage guide →</a>
+          </article>
+        </div>
+      </section>
+      <section aria-labelledby="steps-title">
+        <div>
+          <p class="kicker">Get started</p>
+          <h2 id="steps-title">Set up in three steps</h2>
+        </div>
+        <ol class="steps">
+          <li><h3>Install on your computer</h3><p>Run the one-line installer. It sets up the background service and offers Herdr, Voxtype Mobile and Tailscale.</p></li>
+          <li><h3>Join your tailnet</h3><p>Install Tailscale on your phone and sign in to the same tailnet. Setup configures private HTTPS access for libertty.</p></li>
+          <li><h3>Pair your phone</h3><p>Open the URL that setup prints, enter the pairing token, and add libertty to your home screen.</p></li>
+        </ol>
+        <a class="button" href="./setup/">Read the setup guide</a>
+      </section>
+      <section id="platforms" aria-labelledby="platforms-title">
+        <div>
+          <p class="kicker">Platforms</p>
+          <h2 id="platforms-title">Runs on the machines you already use</h2>
+        </div>
+        <div class="table">
+          <table>
+            <thead><tr><th scope="col">Server</th><th scope="col">Requirements</th><th scope="col">Background service</th><th scope="col">Automatic companions</th></tr></thead>
+            <tbody>
+              <tr><td>Linux x86_64</td><td>glibc 2.39+, Bash 4.4+, Python 3.8+</td><td>systemd user service</td><td>Herdr and Voxtype Mobile</td></tr>
+              <tr><td>Linux ARM64</td><td>glibc 2.39+, Bash 4.4+, Python 3.8+</td><td>systemd user service</td><td>Herdr and Voxtype Mobile</td></tr>
+              <tr><td>macOS Apple Silicon</td><td>macOS 15+, Homebrew, Bash 4.4+, Python 3.8+</td><td>Login LaunchAgent</td><td>Herdr</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>On your phone, use a modern mobile browser and add libertty to your home screen. Windows, Intel Macs, Alpine Linux and 32-bit ARM are not release targets.</p>
+      </section>
+      <section aria-labelledby="docs-title">
+        <h2 id="docs-title">Documentation</h2>
+        <ul class="docs">
+          <li><a href="./setup/">Setup guide<span>Installer, companions, Tailscale and services.</span></a></li>
+          <li><a href="./usage/">Usage guide<span>Hosts, pairing, dictation, touch controls and files.</span></a></li>
+          <li><a href="./herdr/">Herdr agents<span>Sessions, mobile sizing and notifications.</span></a></li>
+          <li><a href="./usage/#dictation">Dictation<span>Command repair, alternatives and Voxtype Mobile.</span></a></li>
+          <li><a href="./reference/">Technical reference<span>Shell integration, deployment and testing.</span></a></li>
+          <li><a href="https://github.com/nick1udwig/libertty/blob/master/docs/pairing-security.md">Pairing security<span>How pairing protects your machine.</span></a></li>
+        </ul>
+      </section>
+    </div>
   </main>
+  <footer>
+    <div>
+      <p class="mark">›_ libertty</p>
+      <p>Open source under the MIT license.</p>
+      <nav aria-label="Footer"><a href="./setup/">Setup</a> · <a href="./usage/">Usage</a> · <a href="https://github.com/nick1udwig/libertty">GitHub</a></nav>
+    </div>
+  </footer>
   <script>
     // Phones get the app full-screen, opening on the README; desktops get it inside the phone, opening on the terminal.
     const phone = matchMedia('(max-width: 760px)').matches, app = document.getElementById('app');

@@ -1,7 +1,8 @@
 # Project site
 
 The project site in `site/` is a landing page around a working demo of libertty.
-On desktop the page shows a phone whose screen runs the real app, and on a phone the page is only the app.
+On desktop the page shows a phone whose screen runs the real app, with sections below that explain the features, setup steps and platforms and link to the guides.
+On a phone the page is only the app.
 The page follows the system appearance, using the 1776 theme in dark mode and the flag theme in light mode.
 
 ## Build and preview
