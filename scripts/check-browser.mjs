@@ -9,6 +9,10 @@ const browser = process.env.CHROME_PATH || process.env.CHROMIUM || (existsSync('
 const env = { ...process.env, CHROME_PATH: browser, CHROMIUM: browser };
 // Each harness owns its ports, servers and browser, so a few can run at once without sharing state.
 const jobs = Math.max(1, Number.parseInt(process.env.BROWSER_JOBS || '', 10) || 3);
+const repeats = Number(process.env.BROWSER_REPEAT || 1);
+const timeout = Number(process.env.BROWSER_TIMEOUT_MS || 480000);
+if (!Number.isSafeInteger(repeats) || repeats < 1) throw new Error('BROWSER_REPEAT must be a positive integer.');
+if (!Number.isSafeInteger(timeout) || timeout < 1) throw new Error('BROWSER_TIMEOUT_MS must be a positive integer.');
 
 execFileSync(process.execPath, ['scripts/install-test-herdr.mjs'], { cwd: root, env, stdio: 'inherit' });
 const herdrBinary = path.join(root, '.test-artifacts/bin/herdr');
@@ -26,34 +30,48 @@ const harnesses = [
     'herdr-space-flash-native.mjs', 'herdr-app-scroll-native.mjs'].map(file => [file, herdr]),
   ['herdr-app-scroll-native.mjs', { ...herdr, TEST_WIRE: 'gzip', TEST_LINK: 'lossy' }],
 ];
+const selected = process.env.BROWSER_HARNESSES?.split(',');
+if (selected?.some(file => !harnesses.some(([name]) => name === file))) throw new Error('Unknown BROWSER_HARNESSES entry.');
+const cases = harnesses.filter(([file]) => !selected || selected.includes(file));
 
 // Buffer each harness so parallel output stays readable, and report every failure instead of stopping at the first.
-async function run([file, overrides]) {
+async function run({ file, overrides, iteration }) {
   const parent = path.join(root, '.test-artifacts/browser');
   await mkdir(parent, { recursive: true });
   const diagnostics = await mkdtemp(path.join(parent, path.basename(file, '.mjs') + '-'));
   return new Promise(resolve => {
     const start = performance.now(), output = [];
-    const child = spawn(process.execPath, ['test/' + file], { cwd: root, env: { ...env, ...overrides, TEST_DIAGNOSTICS_DIR: diagnostics }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, ['test/' + file], { cwd: root, env: { ...env, ...overrides, TEST_DIAGNOSTICS_DIR: diagnostics }, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    let timedOut = false, killTimer;
+    const kill = signal => {
+      try { if (process.platform === 'win32') child.kill(signal); else if (child.pid) process.kill(-child.pid, signal); }
+      catch (error) { if (error.code !== 'ESRCH') output.push(Buffer.from(String(error))); }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true; output.push(Buffer.from(`Harness exceeded ${timeout}ms.\n`));
+      kill('SIGTERM'); killTimer = setTimeout(() => kill('SIGKILL'), 5000);
+    }, timeout);
     child.stdout.on('data', chunk => output.push(chunk)); child.stderr.on('data', chunk => output.push(chunk));
     child.on('error', error => output.push(Buffer.from(error.stack || String(error))));
     child.on('close', async (code, signal) => {
+      clearTimeout(timer); clearTimeout(killTimer);
+      const passed = code === 0 && !timedOut;
       const seconds = ((performance.now() - start) / 1000).toFixed(1);
       process.stdout.write(Buffer.concat(output));
-      console.log(`${code === 0 ? 'PASS' : 'FAIL'} ${file} (${seconds}s${signal ? ', ' + signal : ''})`);
+      console.log(`${passed ? 'PASS' : 'FAIL'} ${file} (${seconds}s, iteration ${iteration}/${repeats}${signal ? ', ' + signal : ''})`);
       try {
-        if (code === 0) await rm(diagnostics, { recursive: true, force: true });
+        if (passed) await rm(diagnostics, { recursive: true, force: true });
         else {
           await writeFile(path.join(diagnostics, 'runner.log'), Buffer.concat(output));
-          await writeFile(path.join(diagnostics, 'result.json'), JSON.stringify({ file, code, signal, seconds, overrides }, null, 2) + '\n');
+          await writeFile(path.join(diagnostics, 'result.json'), JSON.stringify({ file, code, signal, seconds, overrides, iteration, jobs, timedOut, shellDelay: env.TEST_SHELL_DELAY_MS, gestureDelay: env.TEST_GESTURE_DELAY_MS }, null, 2) + '\n');
           console.error('Browser diagnostics: ' + path.relative(root, diagnostics));
         }
-        resolve(code === 0 ? undefined : file);
+        resolve(passed ? undefined : file + '#' + iteration);
       } catch (error) { console.error(error); resolve(file); }
     });
   });
 }
-const queue = [...harnesses], failures = [];
+const queue = Array.from({ length: repeats }, (_, index) => cases.map(([file, overrides]) => ({ file, overrides, iteration: index + 1 }))).flat(), failures = [];
 await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
   for (let harness = queue.shift(); harness; harness = queue.shift()) {
     const failure = await run(harness);

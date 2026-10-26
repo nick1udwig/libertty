@@ -45,6 +45,12 @@ The shared browser launcher saves traces, screenshots, browser errors and termin
 The browser runner keeps failed harness output and diagnostics in `.test-artifacts/browser/` and removes diagnostics for successful harnesses.
 Direct harness commands retain their diagnostics in the same directory.
 Release checks upload these files even after a failure.
+CI and release verification also run `npm run verify:browser-reliability` against the built application.
+This command repeats reading, touch and selection checks three times each with one worker and three workers.
+It delays ready-state and input-line responses by 400 milliseconds in an ordered WebSocket proxy and delays synthetic gesture calls by 400 milliseconds.
+Every repetition must pass, and a later pass does not clear an earlier failure.
+Set `BROWSER_REPEAT` to change the repeat count or `BROWSER_HARNESSES` to select comma-separated harness names when running `verify:browser` directly.
+Each harness has an eight-minute limit, configurable through `BROWSER_TIMEOUT_MS`, after which the runner terminates its process group and preserves its output.
 Use `npm run format:workspace` to format the workspace entry point and modules with the configured 100-column width, or `npm run check:workspace-format` to check them without editing.
 `npm run verify:package -- release/libertty-vVERSION-PLATFORM.tar.gz` retains packaged browser coverage locally by running both smoke checks and the browser suite against the extracted archive.
 The deleted tests covered only the removed CI suite selector and build manifests, while useful package checksum, permission, metadata and companion checks remain in `test/package-release.test.mjs`.

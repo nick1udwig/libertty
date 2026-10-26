@@ -74,7 +74,9 @@ try {
     }
     // Deliberately omit pointer events. These previously got stopped without
     // ever starting a gesture, leaving both scrolling and selection inert.
-    const contacts = (events, measure = false) => frame.evaluate(({ events, measure }) => {
+    const contacts = async (events, measure = false) => {
+      if (process.env.TEST_GESTURE_DELAY_MS) await delay(Number(process.env.TEST_GESTURE_DELAY_MS));
+      return frame.evaluate(({ events, measure }) => {
       const canvas = document.querySelector('#terminal canvas'), bounds = canvas.getBoundingClientRect;
       let measurements = 0;
       if (measure) canvas.getBoundingClientRect = function () { measurements++; return bounds.call(this); };
@@ -93,7 +95,8 @@ try {
         }
       } finally { if (measure) canvas.getBoundingClientRect = bounds; }
       return measurements;
-    }, { events, measure });
+      }, { events, measure });
+    };
     const touch = (type, point, selector = '#terminal canvas') => contacts([{ type, point, selector }]);
     const start = { x: 150, y: 180 }, end = { x: 150, y: 280 };
     const idleWork = await frame.evaluate(() => {

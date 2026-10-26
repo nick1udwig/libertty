@@ -1,9 +1,25 @@
 import { readFile } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';
 import { installLossyLink } from './support/lossy-link.mjs';
+import { decodeWire } from '../src/wire.ts';
 
 /** Browser harnesses inspect the same logical messages on either transport. */
 export async function installWireObserver(context) {
+  const delay = Number(process.env.TEST_SHELL_DELAY_MS || 0);
+  if (delay > 0) await context.routeWebSocket(url => url.pathname.endsWith('/ws'), socket => {
+    const server = socket.connectToServer();
+    let pending = Promise.resolve(), closed = false;
+    socket.onClose((code, reason) => { closed = true; void server.close({ code, reason }); });
+    server.onClose((code, reason) => { closed = true; void socket.close({ code, reason }); });
+    server.onMessage(data => {
+      pending = pending.then(async () => {
+        if (closed) return;
+        const message = await decodeWire(data);
+        if (message.type === 'state' && message.state.ready || message.type === 'input-line') await new Promise(resolve => setTimeout(resolve, delay));
+        if (!closed) socket.send(data);
+      }).catch(error => { console.error(error); closed = true; void socket.close({ code: 1011, reason: 'Shell delay failed' }); });
+    });
+  });
   if (process.env.TEST_LINK === 'lossy') await installLossyLink(context);
   const source = stripTypeScriptTypes(await readFile(new URL('../src/wire.ts', import.meta.url), 'utf8')).replace(/^export /gm, '');
   if (process.env.TEST_WIRE === 'gzip') await context.addInitScript(() => Object.defineProperty(navigator, 'connection', { configurable: true, value: { effectiveType: '3g', downlink: 1 } }));

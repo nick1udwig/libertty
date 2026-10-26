@@ -26,6 +26,7 @@
     "test": "node --test test/*.test.ts test/dependencies.test.mjs test/package-release.test.mjs test/publish-release.test.mjs",
     "verify:local": "node scripts/verify-local.mjs",
     "verify:browser": "node scripts/check-browser.mjs",
+    "verify:browser-reliability": "node scripts/check-browser-reliability.mjs",
     "verify:performance": "node scripts/check-performance.mjs",
     "verify:package": "node scripts/check-package.mjs",
     "test:browser": "node test/browser.mjs",
