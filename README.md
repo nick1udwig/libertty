@@ -2,6 +2,8 @@
 
 A webterm designed for modern mobile.
 
+[Website and live demo](https://libertty.sh/) · [Setup guide](https://libertty.sh/setup/) · [Usage guide](https://libertty.sh/usage/)
+
 Run the server on your Linux machine, connect from your phone over Tailscale, and dictate commands.
 libertty repairs dictation using your shell’s commands, files and history, with the original text available as an alternative.
 
@@ -28,7 +30,7 @@ curl -fsSL https://install.libertty.sh | bash
 ```
 
 The installer bundles the native Rust server and its setup runtime, and asks before installing a user service or optional companions.
-See the [setup guide](docs/setup.md) for supported platforms, upgrade behavior and options.
+See the [setup guide](https://libertty.sh/setup/) for supported platforms, upgrade behavior and options.
 Linux x86_64, Linux ARM64 and macOS Apple Silicon are release targets, with automatic Voxtype Mobile setup available on Linux.
 
 ## Build and run
@@ -89,12 +91,13 @@ Keep libertty running; Tailscale Serve does not start it for you.
 
 ## Documentation
 
-- [Server setup](docs/setup.md): one-line installation, companions, Tailscale and user services.
-- [Project site](docs/site.md): the landing page and its in-browser demo of the app.
+- [Server setup](https://libertty.sh/setup/): one-line installation, companions, Tailscale and user services.
+- [Project site](https://libertty.sh/): product features and a working browser demo.
 - [Releases](docs/releases.md): native build checks, dependency pins and publishing.
-- [Usage guide](docs/usage.md): connections, pairing, dictation, touch controls and file transfers.
-- [Technical reference](docs/reference.md): shell integration, command repair, deployment and testing.
-- [Herdr details](docs/herdr.md): sessions, mobile sizing and notifications.
+- [Usage guide](https://libertty.sh/usage/): connections, pairing, dictation, touch controls and file transfers.
+- [Technical reference](https://libertty.sh/reference/): shell integration, command repair, deployment and testing.
+- [Herdr details](https://libertty.sh/herdr/): sessions, mobile sizing and notifications.
+- [Site development](docs/site.md): the static site build and browser demo.
 - [Runtime plugin experiment](docs/plugins.md): loading packages, plugin API and connection lifetimes.
 - [Workspace architecture](docs/workspace.md) and [shared engine](docs/shared-engine.md).
 - [Pairing security review](docs/pairing-security.md).
