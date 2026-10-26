@@ -1,9 +1,10 @@
 # CI checks
 
-The [CI workflow](../.github/workflows/ci.yml) runs one `CI` job on pull requests and pushes to `master`.
-The main CI target is 30 seconds or less from job start, with a 20-second limit on its JavaScript check command and a one-minute job timeout.
+The [CI workflow](../.github/workflows/ci.yml) runs quick and full verification on pull requests, merge queue candidates and pushes to `master`.
+The quick CI target is 30 seconds or less from job start, with a 20-second limit on its JavaScript check command and a one-minute job timeout.
 It uses the runner's existing Node and Rust tools and a shallow checkout without installing dependencies or restoring caches.
-Only this `CI` check belongs on the required commit path.
+Require the `Integration` check before merging.
+This check succeeds only when both the quick `CI` job and full verification succeed.
 
 ## Main checks
 
@@ -20,7 +21,7 @@ npm run contracts:vocabulary -- --check
 
 ## Full local and release checks
 
-[AGENTS.md](../AGENTS.md) routes agents to the [code changes skill](../.agents/skills/libertty-code-changes/SKILL.md) for required local validation before creating a commit or merging because ordinary pushes and pull requests only run fast CI.
+[AGENTS.md](../AGENTS.md) routes agents to the [code changes skill](../.agents/skills/libertty-code-changes/SKILL.md) for required local validation before creating a commit or merging and CI runs the same full checks before merging.
 Run the following with the Node version pinned in `build/release-config.json`, Rust with native dependency build tools, Chromium, OpenSSH server and Bash completion available.
 
 ```sh
@@ -60,7 +61,9 @@ macOS needs modern Bash, with `LIBERTTY_BASH` pointing to it and `LIBERTTY_GIT_C
 
 The [Release workflow](../.github/workflows/release.yml) runs on `v*` tag pushes and manual dispatch.
 One Linux x64 job runs `npm run verify:local`, and each supported platform then builds, packages and smoke-tests its actual shipped archive once.
-There is no nightly schedule or separate integration or Rust workflow.
+The reusable [verification workflow](../.github/workflows/verify.yml) provides the same Linux job for CI and releases.
+Pull requests verify the synthetic merge commit, merge queues verify the candidate commit and releases verify the resolved release commit.
+There is no nightly schedule or separate Rust workflow.
 Manual runs create downloadable artifacts without publishing a release.
 See [releases.md](releases.md) for pins, packaging and publication.
 

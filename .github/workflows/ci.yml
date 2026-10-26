@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+  merge_group:
   push:
     branches: [master]
   workflow_dispatch:
@@ -28,3 +29,22 @@ jobs:
         run: |
           cargo fmt --all -- --check
           npm run contracts:vocabulary -- --check
+
+  verify:
+    name: Verify
+    uses: ./.github/workflows/verify.yml
+    with:
+      ref: ${{ github.sha }}
+
+  integration:
+    name: Integration
+    needs: [quick, verify]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Require quick and full verification
+        env:
+          QUICK: ${{ needs.quick.result }}
+          VERIFY: ${{ needs.verify.result }}
+        run: '[[ "$QUICK" == success && "$VERIFY" == success ]]'

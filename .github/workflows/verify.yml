@@ -1,0 +1,59 @@
+name: Verify
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      diagnostics-name:
+        default: integration-check-diagnostics
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux x64 verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Read the checked-out Node pin
+        id: pins
+        run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "node=" + require("./build/release-config.json").node + "\n")'
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ steps.pins.outputs.node }}
+          cache: npm
+      - name: Install native test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y openssh-server bash-completion
+          sudo mkdir -p /run/sshd
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: libertty-linux-x64
+          cache-on-failure: true
+          cache-bin: false
+      - run: npm ci --no-audit --no-fund
+      - name: Install the pinned test browser
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: Verify native, JavaScript, installer, saved-data and browser behavior
+        run: npm run verify:local
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ${{ inputs.diagnostics-name }}
+          path: |
+            .test-artifacts/*.json
+            .test-artifacts/browser/**
+          if-no-files-found: ignore
+          include-hidden-files: true

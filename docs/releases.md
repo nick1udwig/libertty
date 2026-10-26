@@ -1,7 +1,8 @@
 # Building and publishing releases
 
 The [Release workflow](../.github/workflows/release.yml) builds native Linux x86_64, Linux ARM64 and macOS Apple Silicon archives when a `v*` tag is pushed.
-Pull requests and updates to `master` run the quick CI described in [ci.md](ci.md), and full local checks are required before committing or merging.
+Pull requests and updates to `master` run quick and full verification through the shared workflow described in [ci.md](ci.md).
+The `Integration` check requires both to pass before merging.
 Manual release runs build and validate the same archives without publishing.
 All Linux release checks and three native packages must pass before the publication job starts.
 The publication job uploads every asset to a draft and publishes it only after confirming that all uploads are complete.
