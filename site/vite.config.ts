@@ -3,6 +3,7 @@ import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSyn
 import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import { externalWasm, terminalPreloads } from '../build/assets.ts';
+import { pages, renderPage } from './pages.ts';
 
 // The site runs the real workspace and terminal documents against an in-page backend, with the landing page around them.
 const root = path.resolve(import.meta.dirname, '..');
@@ -60,10 +61,12 @@ function engine(): Plugin {
 function demoEntries(base: string, site: string): Plugin {
   return {
     name: 'libertty-site-entries',
-    // During development the landing page is served at / and the workspace at /app.html, as in the build.
+    // During development the landing page is served at /, the guides at /SLUG/ and the workspace at /app.html, as in the build.
     configureServer(server) {
-      server.middlewares.use((request, _response, next) => {
+      server.middlewares.use((request, response, next) => {
         const [route, query = ''] = (request.url || '').split('?');
+        const page = pages.find(item => route === `/${item.slug}/`);
+        if (page) { response.setHeader('Content-Type', 'text/html'); response.end(renderPage(root, site, page.slug)); return; }
         if (route === '/' || route === '/index.html') request.url = '/site/index.html' + (query && '?' + query);
         else if (route === '/app.html') request.url = '/index.html' + (query && '?' + query);
         next();
@@ -86,9 +89,10 @@ function demoEntries(base: string, site: string): Plugin {
       // Service workers would cache a backend that does not exist here.
       for (const name of ['site', 'sw.js', 'push-sw.js']) rmSync(path.join(out, name), { recursive: true, force: true });
       copyFileSync(path.join(root, 'site/social.png'), path.join(out, 'social.png'));
+      for (const page of pages) { mkdirSync(path.join(out, page.slug), { recursive: true }); writeFileSync(path.join(out, page.slug, 'index.html'), renderPage(root, site, page.slug)); }
       // Crawlers skip the repository snapshot, which duplicates GitHub.
       writeFileSync(path.join(out, 'robots.txt'), `User-agent: *\nDisallow: ${new URL(site).pathname}repo/\n\nSitemap: ${site}sitemap.xml\n`);
-      writeFileSync(path.join(out, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${site}</loc></url>\n</urlset>\n`);
+      writeFileSync(path.join(out, 'sitemap.xml'), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  ${['', ...pages.map(page => page.slug + '/')].map(page => `<url><loc>${site}${page}</loc></url>`).join('\n  ')}\n</urlset>\n`);
     },
   };
 }
