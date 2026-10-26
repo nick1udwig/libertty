@@ -13,6 +13,11 @@ export async function installWireObserver(context) {
       const previous = owner ? pending.get(owner) || Promise.resolve() : Promise.resolve();
       const next = previous.then(async () => {
         let value = await decodeWire(data);
+        if (value.type === 'state' && owner?.readyState === WebSocket.OPEN) {
+          window.__testShellState = value.state;
+          window.__testShellSocket = owner;
+        }
+        if (value.type === 'input-line') window.__testLineRequests?.get(value.id)?.(value);
         if (owner && value.type === 'screen') histories.set(owner, value);
         else if (owner && value.type === 'screen-delta') {
           const previous = histories.get(owner);

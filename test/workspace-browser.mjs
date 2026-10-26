@@ -1,4 +1,4 @@
-import { launchBrowser, freePort, delay, until, waitForBackend } from './support/browser.mjs';
+import { launchBrowser, freePort, delay, until, waitForBackend, waitForShell, shellCommand } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { spawn, execFile } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access } from 'node:fs/promises';
@@ -28,9 +28,9 @@ async function setFixturePin(fingerprint) {
   if(fingerprint)data.knownHosts.push({host:'127.0.0.1',port:sshPort,fingerprint});
   await writeFile(fixture+'/secondary/vault.json',JSON.stringify(data),{mode:0o600});
 }
-async function activeFrame(page) { const iframe = await page.locator('#terminal-stack iframe:visible').elementHandle(); const frame = await iframe.contentFrame(); await frame.waitForFunction(() => window.__shellState?.ready); return frame; }
+async function activeFrame(page) { const iframe = await page.locator('#terminal-stack iframe:visible').elementHandle(); const frame = await iframe.contentFrame(); await waitForShell(frame); return frame; }
 async function connectNew(page, name) { await page.getByRole('button', { name: new RegExp('^Terminals for ' + name + ' ') }).click(); await page.getByRole('menuitem', { name: 'Connect new terminal', exact: true }).click(); }
-async function command(frame, text) { const prompt = await frame.evaluate(() => window.__shellState.prompt); await frame.locator('#terminal textarea').focus(); await frame.page().keyboard.type(text); await frame.page().keyboard.press('Enter'); await frame.waitForFunction(prompt => window.__shellState.ready && window.__shellState.prompt > prompt, prompt); }
+async function command(frame, text) { await shellCommand(frame, text); }
 try {
   await mkdir(fixture + '/remote/git/pebble-agent', { recursive: true });
   await writeFile(fixture + '/remote/hello_world.py', "import argparse\np=argparse.ArgumentParser()\np.add_argument('--myarg')\n");

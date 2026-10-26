@@ -1,4 +1,4 @@
-import { launchBrowser, freePort, until, delay } from './support/browser.mjs';
+import { launchBrowser, freePort, until, delay, waitForShell } from './support/browser.mjs';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { herdrRequest } from './support/herdr.ts';
@@ -53,7 +53,7 @@ try {
   await page.goto(base); await page.locator('#backend-token').fill(token); await page.locator('#backend-login-form button[type=submit]').click();
   const terminal = async () => {
     const element = await page.locator('.herdr-view:visible .herdr-terminal').elementHandle(), frame = await element.contentFrame();
-    await frame.waitForFunction(() => window.__state?.ready && !frameElement.inert); return frame;
+    await waitForShell(frame); return frame;
   };
   const type = async command => { const frame = await terminal(); await frame.locator('#terminal textarea').focus(); await page.keyboard.type(command); await page.keyboard.press('Enter'); };
   const closeReader = async () => { await showTerminalTabs(page); await page.locator('#tabs [role=tab][aria-selected=true] .tab-close').click(); await terminal(); };

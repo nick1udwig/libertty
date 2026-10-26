@@ -1,4 +1,4 @@
-import { launchBrowser, freePort, delay } from './support/browser.mjs';
+import { launchBrowser, freePort, delay, waitForShell, expectShellPrompt, submitShellCommand, shellCommand, dictateShell } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { spawn, spawnSync, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -44,20 +44,16 @@ try {
   await page.locator('#backend-login').waitFor({ state: 'visible' });
   await page.locator('#backend-token').fill(token); await page.locator('#backend-login-form button[type=submit]').click();
   let frame = await (await page.locator('#terminal-stack iframe').elementHandle()).contentFrame();
-  await frame.waitForFunction(() => window.__shellState?.ready);
+  await waitForShell(frame);
   const prompt = await frame.evaluate(() => window.__shellState.prompt);
-  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at note.txt'); await page.keyboard.press('Enter');
+  await submitShellCommand(frame, 'look at note.txt');
   await page.locator('.reading-view .reading-text').waitFor();
   assert.equal(await page.locator('.reading-text').textContent(), 'A quiet place to read.\nSecond line.\n');
-  await frame.waitForFunction(prompt => window.__shellState.ready && window.__shellState.prompt > prompt, prompt);
+  await waitForShell(frame, { afterPrompt: prompt, visible: false });
   assert.equal(await frame.evaluate(() => window.__shellState.exitCode), 0);
   await page.locator('[role=tab]').first().click();
   const historyFile = path.join(fixture, 'history-inspection');
-  const beforeHistory = await frame.evaluate(() => window.__shellState.prompt);
-  await frame.locator('#terminal textarea').focus();
-  await page.keyboard.type(` builtin history -w '${historyFile}'`);
-  await page.keyboard.press('Enter');
-  await frame.waitForFunction(prompt => window.__shellState.ready && window.__shellState.prompt > prompt, beforeHistory);
+  await shellCommand(frame, ` builtin history -w '${historyFile}'`);
   const history = (await readFile(historyFile, 'utf8')).split('\n').filter(line => line && !/^#\d+$/.test(line));
   assert.deepEqual(history, [], 'Reading Mode and its setup must stay out of shell history');
   await page.locator('[role=tab]').last().click();
@@ -73,8 +69,8 @@ try {
   assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'reading')), reader, 'Reload preserves the selected reader and its source');
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
-  await frame.waitForFunction(() => window.__shellState?.ready);
-  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at README.md'); await page.keyboard.press('Enter');
+  await waitForShell(frame);
+  await submitShellCommand(frame, 'look at README.md');
   await page.locator('.reading-markdown h1').waitFor();
   assert.equal(await page.locator('.reading-markdown h1').textContent(), 'Reader heading');
   assert.equal(await page.locator('.reading-markdown strong').textContent(), 'formatted');
@@ -94,30 +90,30 @@ try {
   await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
   await page.locator('#reading-phrases').fill('inspect\nlook at'); await page.locator('#save-reading-phrases').click();
   await page.locator('#nav-terminals').click();
-  await frame.locator('#terminal textarea').focus();
-  await frame.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'inspect image dot png', bubbles: true, cancelable: true })));
+  await dictateShell(frame, 'inspect image dot png');
   await frame.locator('.reading-choice').filter({ hasText: 'Read image.png' }).waitFor();
+  await expectShellPrompt(frame);
   await frame.locator('.reading-choice').filter({ hasText: 'Read image.png' }).tap();
   await page.locator('.reading-view:not([hidden]) .reading-image').waitFor();
   await page.waitForFunction(() => document.querySelector('.reading-view:not([hidden]) .reading-image')?.naturalWidth === 1);
   await page.locator('[role=tab]').first().click();
-  await frame.locator('#terminal textarea').focus();
-  await frame.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'look at docs slash guide dot md', bubbles: true, cancelable: true })));
+  await dictateShell(frame, 'look at docs slash guide dot md');
   const guideChoice = frame.locator('.reading-choice').filter({ hasText: /Read docs\/guide\.md/i });
   await guideChoice.waitFor();
+  await expectShellPrompt(frame);
   await guideChoice.tap();
   await page.locator('.reading-view:not([hidden]) .reading-markdown h1').waitFor();
   assert.equal(await page.locator('.reading-view:not([hidden]) .reading-markdown h1').textContent(), 'Nested guide');
   await page.locator('[role=tab]').first().click();
-  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at document.pdf'); await page.keyboard.press('Enter');
+  await submitShellCommand(frame, 'look at document.pdf');
   await page.locator('.reading-view .reading-pdf').waitFor();
   assert.equal(await page.locator('.reading-pdf').evaluate(el => getComputedStyle(el).position), 'static');
   // Chromium's PDF viewer can reclaim keyboard focus when later checks reload the page.
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   for (const input of ['git diff | look at', 'look at git diff']) {
     await page.locator('[role=tab]').first().click();
-    await frame.waitForFunction(() => window.__shellState?.ready);
-    await frame.locator('#terminal textarea').focus(); await page.keyboard.type(input); await page.keyboard.press('Enter');
+    await waitForShell(frame);
+    await submitShellCommand(frame, input);
     await page.locator('.reading-view:not([hidden]) .reading-text').waitFor();
     const text = await page.locator('.reading-view:not([hidden]) .reading-text').textContent();
     assert.match(text, /diff --git/); assert.match(text, /-before\n\+after/);
@@ -131,7 +127,7 @@ try {
     assert.equal(await page.locator('[role=tab]').count(), beforeReload, 'Reload must not duplicate a capture');
     await page.locator('[role=tab][aria-selected=true] .tab-close').click();
     frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
-    await frame.waitForFunction(() => window.__shellState?.ready);
+    await waitForShell(frame);
     for (let i = 0; i < 40; i++) {
       const response = await page.request.get(base + '/api/reading/capture?id=' + capture);
       if (response.status() === 404) break;
@@ -139,22 +135,22 @@ try {
     }
   }
   for (const spoken of ['look at git dif', 'git dif pipe inspect']) {
-    await frame.waitForFunction(() => window.__shellState?.ready);
-    await frame.locator('#terminal textarea').focus();
-    await frame.locator('#terminal textarea').evaluate((el, data) => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data, bubbles: true, cancelable: true })), spoken);
+    await waitForShell(frame);
+    await dictateShell(frame, spoken);
     await frame.locator('.reading-choice').filter({ hasText: 'Read git diff' }).waitFor();
+    await expectShellPrompt(frame);
     await frame.locator('.reading-choice').filter({ hasText: 'Read git diff' }).tap();
     await page.locator('.reading-view:not([hidden]) .reading-text').waitFor();
     assert.match(await page.locator('.reading-view:not([hidden]) .reading-text').textContent(), /-before\n\+after/);
     await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   }
-  await frame.waitForFunction(() => window.__shellState?.ready);
-  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('cat image.png | look at'); await page.keyboard.press('Enter');
+  await waitForShell(frame);
+  await submitShellCommand(frame, 'cat image.png | look at');
   await page.waitForFunction(() => document.querySelector('.reading-view:not([hidden]) .reading-image')?.naturalWidth === 1);
   await writeFile(path.join(fixture, 'change.txt'), 'before\n');
   await page.locator('[role=tab]').first().click();
-  await frame.waitForFunction(() => window.__shellState?.ready);
-  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at git diff'); await page.keyboard.press('Enter');
+  await waitForShell(frame);
+  await submitShellCommand(frame, 'look at git diff');
   await page.locator('.reading-view.reading-empty:not([hidden]) .reading-hint').waitFor();
   assert.match(await page.locator('.reading-view.reading-empty:not([hidden])').textContent(), /no unstaged changes/i);
   assert.equal(await page.locator('.reading-view.reading-empty:not([hidden])').evaluate(el => getComputedStyle(el).flexDirection), 'column');
@@ -162,10 +158,10 @@ try {
   await page.locator('.reading-view.reading-empty:not([hidden]) .reading-hint').waitFor();
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
   frame = await (await page.locator('#terminal-stack iframe:visible').elementHandle()).contentFrame();
-  await frame.waitForFunction(() => window.__shellState?.ready);
+  await waitForShell(frame);
   const missingExitCode = spawnSync('ls', ['/definitely/not/present'], { stdio: 'ignore' }).status;
   assert.ok(missingExitCode > 0, 'The missing-file fixture must fail on this platform.');
-  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at ls /definitely/not/present'); await page.keyboard.press('Enter');
+  await submitShellCommand(frame, 'look at ls /definitely/not/present');
   await page.waitForFunction(code => new RegExp(`Exited with status ${code}.*Check the terminal for errors`, 's').test(document.querySelector('.reading-view.reading-empty:not([hidden])')?.textContent || ''), missingExitCode);
   assert.match(await page.locator('.reading-view.reading-empty:not([hidden])').textContent(), new RegExp(`Exited with status ${missingExitCode}.*Check the terminal for errors`, 's'));
   await page.locator('[role=tab][aria-selected=true] .tab-close').click();
@@ -174,8 +170,8 @@ try {
   await page.route('**/api/reading/file?**', route => {
     startedRead(); return new Promise(resolve => finishRead = async () => { await route.fulfill({ contentType: 'text/plain', body: 'Late reader content' }).catch(() => {}); resolve(); });
   });
-  await frame.waitForFunction(() => window.__shellState?.ready);
-  await frame.locator('#terminal textarea').focus(); await page.keyboard.type('look at note.txt'); await page.keyboard.press('Enter');
+  await waitForShell(frame);
+  await submitShellCommand(frame, 'look at note.txt');
   await readingStarted;
   await page.getByText('Opening file…', { exact: true }).waitFor();
   const pendingReader = await page.locator('[role=tab][aria-selected=true]').getAttribute('aria-controls');
@@ -183,15 +179,14 @@ try {
   await finishRead(); await page.unroute('**/api/reading/file?**');
   assert.equal(await page.locator('#' + pendingReader).count(), 0, 'Closing a pending reader disposes its plugin view');
   assert.equal(await page.getByText('Late reader content', { exact: true }).count(), 0);
-  await frame.waitForFunction(() => window.__shellState?.ready);
+  await waitForShell(frame);
   await page.close();
   const standalone = await context.newPage();
   standalone.on('pageerror', error => errors.push(String(error)));
   await standalone.goto(base + '/terminal.html');
-  await standalone.waitForFunction(() => document.querySelector('#shell-status')?.textContent === 'At prompt');
+  await waitForShell(standalone);
   await standalone.locator('.terminal-presentation').waitFor({ state: 'hidden' });
-  await standalone.locator('#terminal textarea').focus();
-  await standalone.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'look at note.txt', bubbles: true, cancelable: true })));
+  await dictateShell(standalone, 'look at note.txt');
   await standalone.locator('.reading-choice').waitFor();
   await standalone.locator('.reading-choice').tap();
   await standalone.waitForURL(base + '/');

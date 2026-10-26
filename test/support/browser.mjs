@@ -49,3 +49,57 @@ export async function pair(base, token) {
   if (!response.ok || !result.accessToken) throw new Error(result.error || 'Pairing failed');
   return result.accessToken;
 }
+
+export async function waitForShell(frame, { afterPrompt, session, line, visible = true } = {}) {
+  await frame.waitForFunction(async ({ afterPrompt, session, line, visible }) => {
+    const state = window.__testShellState;
+    const socket = window.__testShellSocket;
+    const viewport = document.querySelector('#terminal-viewport');
+    const expectedPrompt = afterPrompt ?? window.__testAfterPrompt;
+    if (!state?.ready || state.exited || socket?.readyState !== WebSocket.OPEN) return false;
+    if (expectedPrompt !== undefined && state.prompt <= expectedPrompt) return false;
+    if (session !== undefined && new URL(location.href).searchParams.get('session') !== session) return false;
+    if (visible && (document.hidden || frameElement?.inert || frameElement && !frameElement.checkVisibility())) return false;
+    if (document.querySelector('#connection-label')?.textContent !== 'Connected') return false;
+    if (viewport?.classList.contains('awaiting-herdr-layout') || viewport?.getAttribute('aria-busy') === 'true') return false;
+    if (line === undefined) return true;
+    window.__testLineRequests ??= new Map();
+    const id = crypto.randomUUID();
+    const snapshot = await new Promise(resolve => {
+      const timer = setTimeout(() => { window.__testLineRequests.delete(id); resolve(undefined); }, 1000);
+      window.__testLineRequests.set(id, value => { clearTimeout(timer); window.__testLineRequests.delete(id); resolve(value); });
+      socket.send(JSON.stringify({ type: 'input-line', id, prompt: state.prompt, revision: state.inputRevision }));
+    });
+    return snapshot?.prompt === state.prompt && snapshot.text === line && snapshot.cursor === line.length && window.__testShellSocket === socket && window.__testShellState?.prompt === state.prompt && window.__testShellState.ready;
+  }, { afterPrompt, session, line, visible }, { polling: 100 });
+  return frame.evaluate(() => ({ ...window.__testShellState }));
+}
+
+export async function expectShellPrompt(frame) {
+  const state = await waitForShell(frame);
+  await frame.evaluate(prompt => { window.__testAfterPrompt = prompt; }, state.prompt);
+  return state.prompt;
+}
+
+export async function submitShellCommand(frame, text) {
+  await waitForShell(frame, { line: '' });
+  await frame.locator('#terminal textarea').focus();
+  const page = typeof frame.page === 'function' ? frame.page() : frame;
+  await page.keyboard.type(text);
+  await expectShellPrompt(frame);
+  await page.keyboard.press('Enter');
+}
+
+export async function shellCommand(frame, text) {
+  await submitShellCommand(frame, text);
+  return waitForShell(frame, { line: '' });
+}
+
+export async function dictateShell(frame, text, { replacement = false } = {}) {
+  await waitForShell(frame, { line: '' });
+  const input = frame.locator('#terminal textarea');
+  await input.focus();
+  await input.evaluate((element, { text, replacement }) => element.dispatchEvent(new InputEvent('beforeinput', {
+    inputType: replacement ? 'insertReplacementText' : 'insertText', data: text, bubbles: true, cancelable: true,
+  })), { text, replacement });
+}
