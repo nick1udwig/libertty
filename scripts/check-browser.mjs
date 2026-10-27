@@ -32,7 +32,7 @@ const harnesses = expandBrowserCases([
     'tab-scrolling-browser.mjs', 'terminal-gestures-browser.mjs', 'terminal-touch-browser.mjs', 'terminal-selection-browser.mjs', 'dictation-browser.mjs',
     'transfers-browser.mjs', 'files-browser.mjs', 'workspace-browser.mjs'].map(file => [file, {}]),
   ...['herdr-dictation-browser.mjs', 'herdr-reading-browser.mjs', 'herdr-spaces-browser.mjs', 'herdr-resize-native.mjs',
-    'herdr-space-flash-native.mjs', 'herdr-app-scroll-native.mjs'].map(file => [file, herdr]),
+    'herdr-space-flash-native.mjs'].map(file => [file, herdr]),
   ['herdr-app-scroll-native.mjs', { ...herdr, TEST_WIRE: 'gzip', TEST_LINK: 'lossy' }],
 ]);
 const durations = {

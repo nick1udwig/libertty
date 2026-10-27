@@ -58,7 +58,8 @@ Each scenario creates its own backend, browser and temporary data.
 The original npm commands still run every scenario for their suite, and `BROWSER_HARNESSES` accepts either an original suite name or a scenario file.
 Page clocks advance idle-paint, idle-dictation, renderer-eviction and hidden-plugin timers without real waits.
 Snapshot replay waits for backend completion, while native input delivery and the short held-handshake staging wait retain real time.
-All 33 browser cases passed without retries in the measured local run, with no case over 41 seconds.
+The full suite has 32 browser cases, and no case exceeded 42 seconds in the measured local run.
+Fullscreen Herdr scrolling runs once with lossy gzip, while the real native resize harness also verifies default wire negotiation.
 Each shard builds its own backend and frontend while Rust lints, Rust tests, JavaScript tests and installer checks run in another job.
 Verification uses OpenSSH and Bash completion from the Ubuntu runner image and only creates the SSH daemon runtime directory.
 Chromium is cached by the pinned `playwright-core` version and installed with `--no-shell`, without apt updates or dependency upgrades.
