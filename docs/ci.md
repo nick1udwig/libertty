@@ -55,6 +55,7 @@ Set `BROWSER_SHARD=k/n` to run one shard, with harnesses assigned longest-first 
 The current weights come from the complete local scenario report and can be refreshed from CI result artifacts.
 Terminal, dictation, Herdr and workspace checks each have three independent scenarios, and reconnect has two.
 Each scenario creates its own backend, browser and temporary data.
+Each browser worker uses a separate fixture port range below the Linux ephemeral range to prevent parallel listeners and outgoing connections from claiming its ports before startup.
 The original npm commands still run every scenario for their suite, and `BROWSER_HARNESSES` accepts either an original suite name or a scenario file.
 Page clocks advance idle-paint, idle-dictation, renderer-eviction and hidden-plugin timers without real waits.
 Snapshot replay waits for backend completion, while native input delivery and the short held-handshake staging wait retain real time.

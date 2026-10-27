@@ -1,4 +1,5 @@
 export const quickTests = [
+  'browser-ports.test.mjs',
   'install-test-herdr.test.mjs',
   'documentation-only.test.mjs',
   'browser-groups.test.mjs',

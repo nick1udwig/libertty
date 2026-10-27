@@ -1,10 +1,9 @@
-import { launchBrowser, delay, until as wait } from './support/browser.mjs';
+import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import assert from 'node:assert/strict';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import net from 'node:net';
 import pty from 'node-pty';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 import { shellQuote } from '../src/shell-words.ts';
@@ -16,7 +15,7 @@ const env = { ...process.env, HOME:dir, XDG_CONFIG_HOME:dir+'/config', XDG_DATA_
 let herdr, desktop, backend, browser;
 const errors=[];
 try {
-  const listener = net.createServer(); listener.listen(0,'127.0.0.1'); await once(listener,'listening'); const port=listener.address().port; await new Promise(resolve=>listener.close(resolve));
+  const port = await freePort();
   const base='http://127.0.0.1:'+port;
   await mkdir(dir+'/config',{recursive:true});
   await writeFile(dir+'/responsive.mjs', `

@@ -1,11 +1,10 @@
-import { launchBrowser, delay, until } from './support/browser.mjs';
+import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
 import { showTerminalTabs, connectSSH } from './support/workspace-navigation.mjs';
 import { fingerprint } from './support/ssh-key.ts';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
-import net from 'node:net';
 import os from 'node:os';
 import ssh2 from 'ssh2';
 import { sshdPath, sshFixturePath, sshdConfig } from './support/sshd.mjs';
@@ -13,7 +12,6 @@ import { WebSocket } from 'ws';
 import { herdrFixture } from './herdr-fixture.ts';
 
 const root = new URL('../', import.meta.url).pathname, fixture = await herdrFixture();
-async function freePort() { const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening'); const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port; }
 const port = await freePort(), sshPort = await freePort(), origin = 'http://127.0.0.1:' + port, base = origin + '/plugins-test', processes = [], errors = [];
 let logs = '', browser, page, bearer;
 function start(command, args, env = {}) { const process = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...globalThis.process.env, ...env } }); processes.push(process); process.stdout.on('data', b => logs += b); process.stderr.on('data', b => logs += b); return process; }

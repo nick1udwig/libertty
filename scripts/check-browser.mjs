@@ -6,6 +6,7 @@ import { chromium } from 'playwright-core';
 import { browserShard } from './browser-shards.mjs';
 import { browserSummary, retryHarness } from './browser-results.mjs';
 import { expandBrowserCases, expandBrowserNames } from './browser-groups.mjs';
+import { browserPortRange } from './browser-ports.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const browser = process.env.CHROME_PATH || process.env.CHROMIUM || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : chromium.executablePath());
@@ -75,13 +76,13 @@ if (selected?.some(file => !harnesses.some(([name]) => name === file))) throw ne
 const cases = sharded.filter(([file]) => !selected || selected.includes(file));
 
 // Buffer each harness so parallel output stays readable, and report every failure instead of stopping at the first.
-async function run({ file, overrides, iteration, attempt }) {
+async function run({ file, overrides, iteration, attempt, ports }) {
   const parent = path.join(root, '.test-artifacts/browser');
   await mkdir(parent, { recursive: true });
   const diagnostics = await mkdtemp(path.join(parent, path.basename(file, '.mjs') + '-'));
   return new Promise(resolve => {
     const start = performance.now(), output = [];
-    const child = spawn(process.execPath, ['test/' + file], { cwd: root, env: { ...env, ...overrides, TEST_DIAGNOSTICS_DIR: diagnostics }, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, ['test/' + file], { cwd: root, env: { ...env, ...overrides, TEST_PORT_RANGE: ports, TEST_DIAGNOSTICS_DIR: diagnostics }, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     let timedOut = false, killTimer;
     const kill = signal => {
       try { if (process.platform === 'win32') child.kill(signal); else if (child.pid) process.kill(-child.pid, signal); }
@@ -103,7 +104,7 @@ async function run({ file, overrides, iteration, attempt }) {
         if (passed) await rm(diagnostics, { recursive: true, force: true });
         else {
           await writeFile(path.join(diagnostics, 'runner.log'), Buffer.concat(output));
-          await writeFile(path.join(diagnostics, 'result.json'), JSON.stringify({ file, code, signal, seconds, overrides, iteration, jobs, timedOut, shellDelay: env.TEST_SHELL_DELAY_MS, gestureDelay: env.TEST_GESTURE_DELAY_MS }, null, 2) + '\n');
+          await writeFile(path.join(diagnostics, 'result.json'), JSON.stringify({ file, code, signal, seconds, overrides, ports, iteration, jobs, timedOut, shellDelay: env.TEST_SHELL_DELAY_MS, gestureDelay: env.TEST_GESTURE_DELAY_MS }, null, 2) + '\n');
           console.error('Browser diagnostics: ' + path.relative(root, diagnostics));
         }
         resolve({ passed, code, signal, seconds, timedOut, diagnostics: passed ? undefined : path.relative(root, diagnostics) });
@@ -112,9 +113,10 @@ async function run({ file, overrides, iteration, attempt }) {
   });
 }
 const queue = Array.from({ length: repeats }, (_, index) => cases.map(([file, overrides]) => ({ file, overrides, iteration: index + 1 }))).flat(), results = [];
-await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async () => {
+await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, async (_, worker) => {
+  const ports = browserPortRange(worker);
   for (let harness = queue.shift(); harness; harness = queue.shift()) {
-    const result = await retryHarness(attempt => run({ ...harness, attempt }), retries);
+    const result = await retryHarness(attempt => run({ ...harness, attempt, ports }), retries);
     results.push({ ...result, file: harness.file, variant: harness.overrides.TEST_WIRE, shard: process.env.BROWSER_SHARD || 'all', iteration: harness.iteration, jobs });
     if (result.status === 'flaky') console.warn(`::warning::Flaky browser harness: ${harness.file} passed on retry.`);
   }

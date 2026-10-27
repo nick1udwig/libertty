@@ -1,16 +1,14 @@
-import { launchBrowser, startBackend, delay, until as wait } from './support/browser.mjs';
+import { launchBrowser, startBackend, freePort, delay, until as wait } from './support/browser.mjs';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import assert from 'node:assert/strict';
 import { readFile, mkdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import net from 'node:net';
 import { herdrFixture } from './herdr-fixture.ts';
 import { installWireObserver } from './wire-observer.mjs';
 
 const root = new URL('../', import.meta.url).pathname, fixture = await herdrFixture();
-const listener = net.createServer(); listener.listen(0, '127.0.0.1'); await once(listener, 'listening');
-const port = listener.address().port; await new Promise(resolve => listener.close(resolve));
+const port = await freePort();
 const base = 'http://127.0.0.1:' + port, first = 'loading-first', second = 'loading-second';
 fixture.setScreen(0, 'SCREEN_ALPHA\nAlready ready\n'); fixture.setScreen(1, 'SCREEN_BETA\nNewly loaded\n');
 const backend = startBackend({
