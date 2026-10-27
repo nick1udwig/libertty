@@ -1,7 +1,6 @@
+use crate::herdr_support as support;
 use libertty_server::herdr_poll::HistoryHub as Hub;
 use std::time::Duration;
-#[path = "support/herdr.rs"]
-mod support;
 
 #[tokio::test]
 async fn shared_history_replays_changes_without_duplicate_polls_and_stops_with_last_viewer() {

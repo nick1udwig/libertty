@@ -1,6 +1,5 @@
+use crate::herdr_support;
 use serde_json::{Value, json};
-#[path = "support/herdr.rs"]
-mod herdr_support;
 use std::{
     collections::HashSet,
     io::{Read, Write},

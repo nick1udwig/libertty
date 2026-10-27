@@ -22,7 +22,7 @@ async function build(command, args) {
   if (code !== 0) throw new Error(`${command} failed: ${signal || code}`);
 }
 try {
-  await build('cargo', ['build', '--locked', '-p', 'libertty-server', '--bin', 'libertty']);
+  if (process.env.LIBERTTY_DEV_SKIP_BUILD !== '1') await build('cargo', ['build', '--locked', '-p', 'libertty-server', '--bin', 'libertty']);
   const segments = (process.env.LIBERTTY_BASE_PATH ?? '').split('/').filter(Boolean);
   if (segments.some(segment => !/^[A-Za-z0-9_-]+$/.test(segment))) throw Error('Invalid LIBERTTY_BASE_PATH.');
   const base = '/' + (segments.length ? segments.join('/') + '/' : '');

@@ -1,9 +1,8 @@
+use crate::herdr_support as support;
 use libertty_server::herdr::{Status, Target, metadata};
 use serde_json::json;
 use std::{sync::atomic::Ordering, time::Duration};
 use tokio_util::sync::CancellationToken;
-#[path = "support/herdr.rs"]
-mod support;
 
 fn count(fixture: &support::Fixture, method: &str) -> usize {
     fixture

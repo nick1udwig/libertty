@@ -30,7 +30,17 @@ npx --no-install playwright-core install --with-deps chromium
 npm run verify:local
 ```
 
-[scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native Clippy, Rust tests, the complete build, JavaScript and contract tests, installer fixtures and browser checks in sequence.
+[scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native Clippy, Rust tests, the frontend build, remaining JavaScript and contract tests, installer fixtures and browser checks in sequence.
+It reuses the backend built by `cargo test`.
+Verification sets `LIBERTTY_DEV_SKIP_BUILD=1` so development test launchers use that existing binary.
+Set this flag only after building the backend for the same tree.
+Set `VERIFY_QUICK_DONE=1` only when quick checks, vocabulary and formatting already passed for the same tree.
+The Rust CI job uses this flag because the required quick job runs those checks separately.
+Standalone `npm test` discovers all unit files; full verification omits the quick unit files it already ran.
+The installer fixtures remain in `npm run test:install`.
+Rust integration modules share one `tests/it/main.rs` binary, and crates without documentation examples disable doc-tests.
+CI uses `CARGO_PROFILE_DEV_DEBUG=line-tables-only` to reduce debug linking and cache size.
+An incremental test rebuild with cached dependencies took 22.10 seconds before consolidation and 9.74 seconds after consolidation on the development machine.
 Development builds optimize `scrypt`, `salsa20`, `pbkdf2` and `sha2` so key derivation retains production parameters without slow debug cryptography.
 The silent-viewer test uses a debug-only `LIBERTTY_TEST_HEARTBEAT_MS` override and four output windows of data without expensive repeated terminal scrolling.
 It keeps heartbeat traffic active without acknowledging output until the shell completes, then stops all traffic to check cleanup.
