@@ -1,4 +1,4 @@
-import { launchBrowser, freePort, until } from './support/browser.mjs';
+import { launchBrowser, freePort, until, waitForShell, focusShell, submitShellCommand } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, mkdir, rm, access, readFile } from 'node:fs/promises';
@@ -110,7 +110,7 @@ try {
   page.setDefaultTimeout(20000);
   await page.goto(base + '/terminal.html');
   await page.locator('#token').fill('feature-test-pairing-token-123456789'); await page.locator('#login-form button').click();
-  await page.waitForFunction(() => window.__state?.ready);
+  await waitForShell(page);
   await page.locator('#dictation-install').waitFor({ state: 'visible' });
   await page.locator('#dictation-install input').check();
   let installStatusReads = 0;
@@ -122,14 +122,14 @@ try {
   assert.equal(await access(path.join(fixture, 'installed')).then(() => true, () => false), false, 'Install must not execute');
   let prompt = await page.evaluate(() => window.__state.prompt);
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+e'); await page.keyboard.press('Control+u'); await page.keyboard.press('Enter');
-  await page.waitForFunction(previous => window.__state?.ready && window.__state.prompt > previous, prompt);
+  await waitForShell(page, { afterPrompt: prompt });
   await until(() => installStatusReads > 0, 'Availability refresh after the install prompt');
   page.off('request', installStatus);
-  await page.reload(); await page.waitForFunction(() => window.__state?.ready);
+  await page.reload(); await waitForShell(page);
   await page.waitForTimeout(300); assert.equal(await page.locator('#dictation-install').isVisible(), false);
   prompt = await page.evaluate(() => window.__state.prompt);
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Enter');
-  await page.waitForFunction(previous => window.__state?.ready && window.__state.prompt > previous, prompt);
+  await waitForShell(page, { afterPrompt: prompt });
   // Touch an editable cell, then type there. The running command proves real Readline movement.
   await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo Z12345');
   await page.waitForFunction(() => {
@@ -161,13 +161,13 @@ try {
   assert.equal(await access(path.join(fixture, 'installed')).then(() => true, () => false), false, 'Update must not execute');
   prompt = await page.evaluate(() => window.__state.prompt);
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+e'); await page.keyboard.press('Control+u'); await page.keyboard.press('Enter');
-  await page.waitForFunction(previous => window.__state?.ready && window.__state.prompt > previous, prompt);
+  await waitForShell(page, { afterPrompt: prompt });
   await page.reload(); await page.locator('#dictation-install').waitFor({ state: 'visible' });
   await page.locator('#dictation-install input').check(); await page.locator('[data-later]').click();
-  await page.reload(); await page.waitForFunction(() => window.__state?.ready);
+  await page.reload(); await waitForShell(page);
   await page.waitForTimeout(300); assert.equal(await page.locator('#dictation-install').isVisible(), false);
   capabilities = true;
-  await page.locator('#terminal textarea').focus(); await page.keyboard.type('node ' + path.join(fixture, 'program.mjs')); await page.keyboard.press('Enter');
+  await submitShellCommand(page, 'node ' + path.join(fixture, 'program.mjs'));
   await page.waitForFunction(() => window.__state?.inputTarget === 'program');
   for (const outage of ['request', 'daemon']) {
     let statusReads = 0;
@@ -191,7 +191,7 @@ try {
     await page.unroute('**/api/dictation');
   }
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+c');
-  await page.waitForFunction(() => window.__state?.ready);
+  await waitForShell(page);
   await page.reload(); await page.locator('#libertty-dictation').waitFor({ state: 'visible' });
   assert.equal(await page.evaluate(base => localStorage.getItem('libertty.voxtype:' + base + '/'), base), 'dismissed');
   // A healthy daemon suppresses the offer even without a stored preference.
@@ -320,7 +320,7 @@ try {
   assert.equal(await page.locator('.dictation-panel').evaluate(el => el.classList.contains('panel-right')), true);
   await page.getByLabel('Cancel dictation', { exact: true }).click();
   // Cancellation must not insert anything; editing during a recording rejects its late final.
-  await page.waitForFunction(() => window.__state.ready);
+  await waitForShell(page);
   await page.evaluate(() => { window.__messages = []; });
   await mic.press('Enter');
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
@@ -385,17 +385,18 @@ try {
   await page.evaluate(() => { window.__messages = []; });
   await mic.press('Enter');
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
-  await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo preserved');
+  await focusShell(page); await page.keyboard.type('echo preserved');
   await page.locator('#libertty-dictation').click();
   await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'error' && m.message.includes('terminal changed')));
   assert.equal(await page.evaluate(() => window.__messages.some(m => m.type === 'pasted')), false);
   await page.getByText('Tap to retry', { exact: true }).waitFor(); await page.getByLabel('Cancel dictation', { exact: true }).click();
-  await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+u');
   const repairRequests = [];
   page.on('request', request => { if (/\/api\/(suggest|facts)(?:\?|$)/.test(request.url())) repairRequests.push(request.url()); });
   async function startProgram(command, ready) {
+    await focusShell(page);
+    await page.keyboard.press('Control+u');
     await page.evaluate(() => { window.__messages = []; window.__out = ''; window.__sent = []; window.__paint = []; });
-    await page.locator('#terminal textarea').focus(); await page.keyboard.type(command); await page.keyboard.press('Enter');
+    await submitShellCommand(page, command);
     await page.waitForFunction(() => window.__state?.inputTarget === 'program' && !window.__state.ready);
     await page.waitForFunction(ready);
   }
@@ -418,11 +419,12 @@ try {
       el.dispatchEvent(event);
     }, { text, inputType });
   }
-  async function quitProgram() {
-    const before = await page.evaluate(() => window.__state.prompt);
-    await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+c'); await page.keyboard.press('Control+c');
-    await page.waitForFunction(before => window.__state?.ready && window.__state.prompt > before, before);
-    assert.equal(await page.evaluate(() => window.__state.inputTarget), 'shell');
+  async function quitProgram(interrupts = 1) {
+    const before = await page.evaluate(() => window.__testShellState.prompt);
+    await page.evaluate(() => window.__testTerminal.focus());
+    for (let i = 0; i < interrupts; i++) await page.keyboard.press('Control+c');
+    const state = await waitForShell(page, { afterPrompt: before });
+    assert.equal(state.inputTarget, 'shell');
   }
   for (const mode of ['plain', 'bracketed']) {
     await rm(path.join(fixture, 'program-input'), { force: true });
@@ -483,7 +485,7 @@ try {
       assert.equal(await page.locator('#alternatives-toggle').isVisible(), false);
       assert.equal(repairRequests.length, 0);
       assert.equal(await page.evaluate(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'error')), false);
-      await quitProgram();
+      await quitProgram(2);
     }
   }
   // The next Bash prompt restores command alternatives.
