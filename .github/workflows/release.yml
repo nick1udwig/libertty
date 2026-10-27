@@ -67,85 +67,10 @@ jobs:
 
   companion:
     needs: source
-    name: Prepare pinned dictation daemon on ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            runner: ubuntu-24.04
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Read compiler identity for the daemon cache
-        id: compiler
-        run: echo "hash=$(rustc -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Restore pinned dictation daemon
-        id: voxtype-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: .release-companions/voxtype-mobile/artifacts
-          # Include the source, compiler, runner and every non-default build setting.
-          key: voxtype-v2-${{ matrix.runner }}-${{ matrix.target }}-${{ needs.source.outputs.voxtype_repository }}-${{ needs.source.outputs.voxtype_commit }}-${{ steps.compiler.outputs.hash }}-parakeet-cpu-native-off-avx2-off-avx512-off-fma-off-lto-off-cgu8
-      - name: Check out the pinned Voxtype Mobile source
-        if: steps.voxtype-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ needs.source.outputs.voxtype_repository }}
-          ref: ${{ needs.source.outputs.voxtype_commit }}
-          submodules: recursive
-          path: .release-companions/voxtype-mobile
-          persist-credentials: false
-      - name: Install Linux build dependencies
-        if: steps.voxtype-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libclang-dev libasound2-dev libopus0 libssl-dev
-      - name: Build the compatible CPU dictation daemon
-        if: steps.voxtype-cache.outputs.cache-hit != 'true'
-        env:
-          CARGO_BUILD_JOBS: '2'
-          GGML_NATIVE: 'OFF'
-          GGML_AVX2: 'OFF'
-          GGML_AVX512: 'OFF'
-          GGML_FMA: 'OFF'
-        run: |
-          cargo build --manifest-path .release-companions/voxtype-mobile/daemon/Cargo.toml --locked --release --features parakeet --bin voxtype --config 'profile.release.lto=false' --config 'profile.release.codegen-units=8'
-          mkdir -p .release-companions/voxtype-mobile/artifacts
-          cp .release-companions/voxtype-mobile/daemon/target/release/voxtype .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon
-      - name: Install dictation runtime dependencies
-        if: steps.voxtype-cache.outputs.cache-hit == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2t64 libopus0
-      - name: Verify dictation daemon compatibility
-        run: |
-          .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon --version
-          ldd .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon > "$RUNNER_TEMP/voxtype-libraries.txt"
-          cat "$RUNNER_TEMP/voxtype-libraries.txt"
-          if grep -q 'not found' "$RUNNER_TEMP/voxtype-libraries.txt"; then exit 1; fi
-      - name: Cache verified pinned dictation daemon
-        if: steps.voxtype-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: .release-companions/voxtype-mobile/artifacts
-          key: ${{ steps.voxtype-cache.outputs.cache-primary-key }}
-      - name: Archive the verified daemon
-        run: |
-          mkdir -p .test-artifacts
-          tar -czf .test-artifacts/voxtype.tar.gz -C .release-companions/voxtype-mobile artifacts
-      - uses: actions/upload-artifact@v7
-        with:
-          name: voxtype-${{ matrix.target }}
-          path: .test-artifacts/voxtype.tar.gz
-          if-no-files-found: error
-          include-hidden-files: true
-          compression-level: 0
-          retention-days: 7
-          overwrite: true
+    uses: ./.github/workflows/companion.yml
+    with:
+      repository: ${{ needs.source.outputs.voxtype_repository }}
+      commit: ${{ needs.source.outputs.voxtype_commit }}
 
   build:
     needs: [source, verify, companion]
@@ -170,13 +95,19 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ needs.source.outputs.node }}
-          cache: npm
+          package-manager-cache: false
+      - uses: actions/cache/restore@v5
+        id: npm-cache
+        with:
+          path: ~/.npm
+          key: npm-v1-${{ runner.os }}-${{ runner.arch }}-${{ needs.source.outputs.node }}-${{ hashFiles('package-lock.json') }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: libertty-${{ matrix.target }}
           cache-on-failure: true
           cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Install Linux runtime dependencies
         if: runner.os == 'Linux'
         run: |
@@ -192,6 +123,11 @@ jobs:
           npm ci --no-audit --no-fund
           bash -n install.sh
           npm run build:frontend
+      - uses: actions/cache/save@v5
+        if: github.ref == 'refs/heads/master' && steps.npm-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.npm
+          key: ${{ steps.npm-cache.outputs.cache-primary-key }}
       - name: Check out the pinned companion license and installer
         if: runner.os == 'Linux'
         uses: actions/checkout@v7
@@ -250,6 +186,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ needs.source.outputs.node }}
+          package-manager-cache: false
       - uses: actions/download-artifact@v8
         with:
           pattern: libertty-*

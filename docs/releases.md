@@ -47,6 +47,9 @@ Formatting, lints and full browser validation run once on Linux rather than on e
 The platform jobs do not transport intermediate builds or generate build manifests.
 Local performance checks remain available through the scripts and commit requirements described in [ci.md](ci.md).
 The pinned Linux dictation daemon prepares alongside verification, and its cache depends on the companion source, runner, compiler and CPU build settings.
+CI and releases use the same reusable companion workflow and cache keys.
+The master companion cache workflow warms both Linux architectures after pin or workflow changes and once daily for compiler updates.
+Only master runs save Rust, npm, Chromium and verified companion caches, so tags and pull requests restore the default branch caches without creating isolated copies.
 Voxtype Mobile currently has no published releases, so replacing its source build with checksum-verified downloads first requires upstream release binaries and per-platform pins.
 The npm postinstall hook applies a version-scoped ssh2 Ed25519 key-generation fix and restores the execute permission on macOS node-pty helpers.
 Keep the deterministic leading-zero key test and helper permission checks when updating those dependencies, and remove the compatibility fixes when stable upstream releases include them.

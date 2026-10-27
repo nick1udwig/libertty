@@ -1,0 +1,40 @@
+name: Warm companion cache
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - build/release-config.json
+      - .github/workflows/companion.yml
+      - .github/workflows/companion-cache.yml
+  schedule:
+    - cron: '5 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pins:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      repository: ${{ steps.pins.outputs.repository }}
+      commit: ${{ steps.pins.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: pins
+        run: node -e 'const pins = require("./build/release-config.json").voxtypeMobile; require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "repository=" + pins.repository + "\ncommit=" + pins.commit + "\n")'
+
+  daemon:
+    needs: pins
+    uses: ./.github/workflows/companion.yml
+    with:
+      repository: ${{ needs.pins.outputs.repository }}
+      commit: ${{ needs.pins.outputs.commit }}

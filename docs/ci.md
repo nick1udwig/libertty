@@ -55,6 +55,9 @@ Each shard builds its own backend and frontend while Rust lints, Rust tests, Jav
 Verification uses OpenSSH and Bash completion from the Ubuntu runner image and only creates the SSH daemon runtime directory.
 Chromium is cached by the pinned `playwright-core` version and installed with `--no-shell`, without apt updates or dependency upgrades.
 CI sets `CHROME_PATH` and `CHROMIUM` to the Playwright executable so system Chromium cannot shadow it.
+Rust, npm and Chromium caches are restored on every ref but saved only from `master`.
+The separate companion cache workflow warms both Linux Voxtype architectures when release pins or companion workflows change on `master`.
+Its daily run also covers compiler updates without adding daemon builds to the required `Integration` check.
 Every existing application harness remains available through its original npm command or `node test/<harness>.mjs`.
 The helpers in `test/support/browser.mjs` wait for a connected, visible shell before entering a new command or transcript.
 For native sessions, they also wait for Readline's bracketed-paste enable sequence.

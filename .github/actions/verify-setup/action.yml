@@ -14,7 +14,12 @@ runs:
     - uses: actions/setup-node@v7
       with:
         node-version: ${{ steps.pins.outputs.node }}
-        cache: npm
+        package-manager-cache: false
+    - uses: actions/cache/restore@v5
+      id: npm-cache
+      with:
+        path: ~/.npm
+        key: npm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.node }}-${{ hashFiles('package-lock.json') }}
     - uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
@@ -23,15 +28,22 @@ runs:
         shared-key: libertty-linux-x64
         cache-on-failure: true
         cache-bin: false
+        save-if: ${{ github.ref == 'refs/heads/master' }}
     - shell: bash
       run: npm ci --no-audit --no-fund
+    - uses: actions/cache/save@v5
+      if: github.ref == 'refs/heads/master' && steps.npm-cache.outputs.cache-hit != 'true'
+      with:
+        path: ~/.npm
+        key: ${{ steps.npm-cache.outputs.cache-primary-key }}
     - name: Check native test prerequisites
       shell: bash
       run: |
         command -v sshd
         test -f /usr/share/bash-completion/bash_completion
         sudo mkdir -p /run/sshd
-    - uses: actions/cache@v5
+    - uses: actions/cache/restore@v5
+      id: browser-cache
       if: inputs.browser == 'true'
       with:
         path: ~/.cache/ms-playwright
@@ -42,3 +54,8 @@ runs:
       run: |
         npx --no-install playwright-core install --no-shell chromium
         node --input-type=module -e 'import { chromium } from "playwright-core"; import { appendFileSync } from "node:fs"; const browser = chromium.executablePath(); appendFileSync(process.env.GITHUB_ENV, "CHROME_PATH=" + browser + "\nCHROMIUM=" + browser + "\n");'
+    - uses: actions/cache/save@v5
+      if: inputs.browser == 'true' && github.ref == 'refs/heads/master' && steps.browser-cache.outputs.cache-hit != 'true'
+      with:
+        path: ~/.cache/ms-playwright
+        key: ${{ steps.browser-cache.outputs.cache-primary-key }}
