@@ -32,6 +32,7 @@ console.log(`Verified syntax for ${modules} modules, ${data} JSON files and ${Ob
 // Keep this explicit: adding a native or package-dependent harness must not make
 // the required check install dependencies, build Rust or start a browser.
 const tests = [
+  'browser-shards.test.mjs',
   'api.test.ts',
   'dictation-audio.test.ts',
   'dictation-alternatives.test.ts',

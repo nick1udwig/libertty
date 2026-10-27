@@ -17,47 +17,84 @@ permissions:
   contents: read
 
 jobs:
-  linux:
-    name: Linux x64 verification
+  rust:
+    name: Rust and unit tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
           persist-credentials: false
-      - name: Read the checked-out Node pin
-        id: pins
-        run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "node=" + require("./build/release-config.json").node + "\n")'
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ steps.pins.outputs.node }}
-          cache: npm
-      - name: Install native test prerequisites
+      - uses: ./.github/actions/verify-setup
+      - name: Check native lints and tests
         run: |
-          sudo apt-get update
-          sudo apt-get install -y openssh-server bash-completion
-          sudo mkdir -p /run/sshd
-      - uses: dtolnay/rust-toolchain@stable
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          npm run test:rust
+      - name: Check JavaScript, saved data and installers
+        run: |
+          npm run build
+          npm test
+          npm run test:install
+
+  browser:
+    name: Browser shard ${{ matrix.shard }}/4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v7
         with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: ./.github/actions/verify-setup
         with:
-          shared-key: libertty-linux-x64
-          cache-on-failure: true
-          cache-bin: false
-      - run: npm ci --no-audit --no-fund
-      - name: Install the pinned test browser
-        run: npx --no-install playwright-core install --with-deps chromium
-      - name: Verify native, JavaScript, installer, saved-data and browser behavior
-        run: npm run verify:local
+          browser: 'true'
+      - run: npm run build
+      - name: Check browser and native Herdr behavior
+        env:
+          BROWSER_SHARD: ${{ matrix.shard }}/4
+          BROWSER_JOBS: '2'
+        run: npm run verify:browser
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ${{ inputs.diagnostics-name }}-shard-${{ matrix.shard }}
+          path: |
+            .test-artifacts/*.json
+            .test-artifacts/browser/**
+          if-no-files-found: ignore
+          include-hidden-files: true
+
+  reliability:
+    name: Browser reliability with ${{ matrix.workers }} workers
+    if: inputs.reliability
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        workers: [1, 3]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: ./.github/actions/verify-setup
+        with:
+          browser: 'true'
+      - run: npm run build
       - name: Repeat reading and selection checks with delayed responses and input delivery
-        if: inputs.reliability
+        env:
+          BROWSER_RELIABILITY_JOBS: ${{ matrix.workers }}
         run: npm run verify:browser-reliability
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: ${{ inputs.diagnostics-name }}
+          name: ${{ inputs.diagnostics-name }}-reliability-${{ matrix.workers }}
           path: |
             .test-artifacts/*.json
             .test-artifacts/browser/**

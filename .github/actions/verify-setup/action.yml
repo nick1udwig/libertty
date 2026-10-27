@@ -1,0 +1,37 @@
+name: Prepare verification tools
+description: Install the pinned Node tools, Rust cache and optional browser prerequisites.
+inputs:
+  browser:
+    description: Install Chromium and native browser test prerequisites.
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Read the checked-out Node pin
+      id: pins
+      shell: bash
+      run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "node=" + require("./build/release-config.json").node + "\n")'
+    - uses: actions/setup-node@v7
+      with:
+        node-version: ${{ steps.pins.outputs.node }}
+        cache: npm
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: libertty-linux-x64
+        cache-on-failure: true
+        cache-bin: false
+    - shell: bash
+      run: npm ci --no-audit --no-fund
+    - name: Install native test prerequisites
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y openssh-server bash-completion
+        sudo mkdir -p /run/sshd
+    - name: Install the pinned test browser
+      if: inputs.browser == 'true'
+      shell: bash
+      run: npx --no-install playwright-core install --with-deps chromium

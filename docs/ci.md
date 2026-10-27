@@ -4,7 +4,7 @@ The [CI workflow](../.github/workflows/ci.yml) runs quick and full verification 
 The quick CI target is 30 seconds or less from job start, with a 20-second limit on its JavaScript check command and a one-minute job timeout.
 It uses the runner's existing Node and Rust tools and a shallow checkout without installing dependencies or restoring caches.
 Require the `Integration` check before merging.
-This check succeeds only when both the quick `CI` job and full verification succeed.
+This check succeeds only when the quick `CI` job, Rust and unit tests, all four browser shards and any required reliability jobs succeed.
 
 ## Main checks
 
@@ -34,7 +34,10 @@ npm run verify:local
 [scripts/check-browser.mjs](../scripts/check-browser.mjs) contains the single explicit browser list used by both local validation and the Linux release checking job.
 It covers native repairs, SSH, reading, Herdr, plugins, pairing, reconnects, gestures, touch, dictation, files and workspace behavior.
 It first downloads and verifies the pinned Herdr release, which the dictation, spaces, resize, flash and fullscreen scrolling harnesses use as the real native integration.
-It runs three harnesses at a time and reports every failure at the end; set `BROWSER_JOBS` to change the number.
+Local validation runs three harnesses at a time and reports every failure at the end; set `BROWSER_JOBS` to change the number.
+CI runs four parallel browser jobs with two workers each.
+Set `BROWSER_SHARD=k/n` to run one shard, with harnesses assigned longest-first from recorded CI durations.
+Each shard builds its own backend and frontend while Rust lints, Rust tests, JavaScript tests and installer checks run in another job.
 Every existing application harness remains available through its original npm command or `node test/<harness>.mjs`.
 The helpers in `test/support/browser.mjs` wait for a connected, visible shell before entering a new command or transcript.
 For native sessions, they also wait for Readline's bracketed-paste enable sequence.
@@ -52,6 +55,7 @@ Release checks upload these files even after a failure.
 Pushes to `master`, nightly CI, manual CI and release verification also run `npm run verify:browser-reliability` against the built application.
 Pull requests and merge queue candidates run each harness once and omit these additional repeats.
 This command repeats reading, touch and selection checks three times each with one worker and three workers.
+CI runs these worker counts in separate parallel jobs; set `BROWSER_RELIABILITY_JOBS` to `1` or `3` to select one locally.
 It delays ready-state and input-line responses by 400 milliseconds in an ordered WebSocket proxy and delays synthetic gesture calls by 400 milliseconds.
 Every repetition must pass, and a later pass does not clear an earlier failure.
 Set `BROWSER_REPEAT` to change the repeat count or `BROWSER_HARNESSES` to select comma-separated harness names when running `verify:browser` directly.
@@ -71,8 +75,8 @@ On Linux, ensure the SSH daemon can use its runtime directory, normally `/run/ss
 macOS needs modern Bash, with `LIBERTTY_BASH` pointing to it and `LIBERTTY_GIT_COMPLETIONS_FILE` pointing to Git's Bash completion script when running full local validation.
 
 The [Release workflow](../.github/workflows/release.yml) runs on `v*` tag pushes and manual dispatch.
-One Linux x64 job runs `npm run verify:local`, and each supported platform then builds, packages and smoke-tests its actual shipped archive once.
-The reusable [verification workflow](../.github/workflows/verify.yml) provides the same Linux job for CI and releases.
+Parallel Linux x64 jobs run native checks and browser shards, and each supported platform then builds, packages and smoke-tests its actual shipped archive once.
+The reusable [verification workflow](../.github/workflows/verify.yml) provides the same checks for CI and releases.
 Pull requests verify the synthetic merge commit, merge queues verify the candidate commit and releases verify the resolved release commit.
 Nightly CI retains the strict browser reliability repeats.
 Manual runs create downloadable artifacts without publishing a release.

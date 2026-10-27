@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
+import { browserShard } from './browser-shards.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const browser = process.env.CHROME_PATH || process.env.CHROMIUM || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : chromium.executablePath());
@@ -30,9 +31,15 @@ const harnesses = [
     'herdr-space-flash-native.mjs', 'herdr-app-scroll-native.mjs'].map(file => [file, herdr]),
   ['herdr-app-scroll-native.mjs', { ...herdr, TEST_WIRE: 'gzip', TEST_LINK: 'lossy' }],
 ];
+const durations = {
+  'workspace-browser.mjs': 145, 'herdr-browser.mjs': 117, 'dictation-browser.mjs': 97,
+  'browser.mjs': 87, 'reconnect-browser.mjs': 70, 'herdr-spaces-browser.mjs': 60,
+  'plugins-browser.mjs': 50, 'herdr-reading-browser.mjs': 35, 'herdr-app-scroll-native.mjs': 30,
+};
+const sharded = browserShard(harnesses.map(([file, overrides]) => [file, overrides, durations[file] || 20]), process.env.BROWSER_SHARD);
 const selected = process.env.BROWSER_HARNESSES?.split(',');
 if (selected?.some(file => !harnesses.some(([name]) => name === file))) throw new Error('Unknown BROWSER_HARNESSES entry.');
-const cases = harnesses.filter(([file]) => !selected || selected.includes(file));
+const cases = sharded.filter(([file]) => !selected || selected.includes(file));
 
 // Buffer each harness so parallel output stays readable, and report every failure instead of stopping at the first.
 async function run({ file, overrides, iteration }) {
