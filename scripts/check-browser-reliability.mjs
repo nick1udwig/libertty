@@ -11,6 +11,7 @@ for (const jobs of workers) {
     cwd: root, stdio: 'inherit',
     env: {
       ...process.env, BROWSER_JOBS: String(jobs), BROWSER_REPEAT: process.env.BROWSER_REPEAT || '3',
+      BROWSER_RETRIES: '0', BROWSER_SHARD: '',
       BROWSER_HARNESSES: 'reading-browser.mjs,terminal-touch-browser.mjs,terminal-selection-browser.mjs',
       TEST_SHELL_DELAY_MS: '400', TEST_GESTURE_DELAY_MS: '400',
     },

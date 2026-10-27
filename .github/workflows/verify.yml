@@ -58,6 +58,7 @@ jobs:
         env:
           BROWSER_SHARD: ${{ matrix.shard }}/4
           BROWSER_JOBS: '2'
+          BROWSER_RETRIES: '1'
         run: npm run verify:browser
       - uses: actions/upload-artifact@v7
         if: always()

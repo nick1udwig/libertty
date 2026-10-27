@@ -33,6 +33,7 @@ console.log(`Verified syntax for ${modules} modules, ${data} JSON files and ${Ob
 // the required check install dependencies, build Rust or start a browser.
 const tests = [
   'browser-shards.test.mjs',
+  'browser-results.test.mjs',
   'api.test.ts',
   'dictation-audio.test.ts',
   'dictation-alternatives.test.ts',

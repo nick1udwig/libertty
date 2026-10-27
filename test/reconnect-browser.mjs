@@ -1,4 +1,4 @@
-import { launchBrowser, freePort, startBackend, delay, until } from './support/browser.mjs';
+import { launchBrowser, freePort, startBackend, delay, until, focusShell } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -61,6 +61,14 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   await page.goto(base + 'terminal.html');
   await page.locator('#token').fill(token); await page.locator('#login-form button').click();
+  const focusInput = async () => {
+    if (!new URL(page.url()).searchParams.has('herdrTerminal')) return focusShell(page);
+    await page.locator('#terminal canvas').tap({ position: { x: 10, y: 10 } });
+    await page.waitForFunction(() => {
+      const input = document.querySelector('#terminal textarea');
+      return document.activeElement === input && !input.readOnly;
+    });
+  };
   const connected = async (states, timeout = 12000) => {
     await page.waitForFunction(states => window.__states > states && document.querySelector('#connection-label').textContent === 'Connected', states, { timeout });
     assert.equal(await page.locator('#reconnect-banner').isVisible(), false);
@@ -97,7 +105,7 @@ try {
   // Keys handed to a dead link reach the terminal once: a dead uplink resends them, and a dead downlink does not.
   async function stalledTyping(link, text) {
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
-    await page.locator('#terminal textarea').focus();
+    await focusInput();
     const states = await stateCount();
     await page.evaluate(link => { window.__dead = window[link === 'uplink' ? '__muted' : '__blackhole'] = window.__sockets.at(-1); }, link);
     await page.keyboard.type(text);
@@ -118,7 +126,7 @@ try {
 
   async function queuedTyping(text, changeContext) {
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
-    await page.locator('#terminal textarea').focus();
+    await focusInput();
     await page.evaluate(() => {
       window.__sent = [];
       Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
@@ -169,7 +177,7 @@ try {
   // An online event must replace an existing OPEN socket, without replaying input.
   states = await stateCount();
   await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
-  await page.locator('#terminal textarea').focus(); await page.keyboard.type('echo reconnect-once');
+  await focusInput(); await page.keyboard.type('echo reconnect-once');
   // Once the shell echoes the keys, the replacement learns they arrived and resends none of them.
   await page.waitForFunction(() => window.__output.includes('echo reconnect-once'));
   const inputs = await page.evaluate(() => window.__sent.filter(message => message.type === 'input').length);
@@ -180,6 +188,7 @@ try {
   await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
 
   // Input after acknowledgement waits for the retained screen's final paint.
+  await focusInput();
   await page.evaluate(() => {
     window.__paintRAF = window.requestAnimationFrame;
     window.__pendingPaintFrames = [];
@@ -198,7 +207,7 @@ try {
   await page.locator('.terminal-presentation').waitFor({state:'hidden'});
 
   // Output still queued behind painting is not replayed again, and the replacement keeps acknowledging.
-  await page.locator('#terminal textarea').focus();
+  await focusInput();
   await page.evaluate(() => {
     window.__paintRAF = window.requestAnimationFrame;
     window.__pendingPaintFrames = [];
@@ -249,7 +258,7 @@ try {
   await page.locator('.terminal-presentation').waitFor({state:'hidden'});
 
   // Far more output than a quick replay arrives as one snapshot of the backend's terminal.
-  await page.locator('#terminal textarea').focus();
+  await focusInput();
   await page.keyboard.type('sleep 1; seq 1 60000; echo $((6*7))-snapshot-done'); await page.keyboard.press('Enter');
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });

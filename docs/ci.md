@@ -50,6 +50,9 @@ Synthetic touch sequences dispatch immediate events in one browser call and sele
 Long presses and edge scrolling advance the Playwright clock explicitly, while native taps and selection checks retain real browser event delivery.
 The shared browser launcher saves traces, screenshots, browser errors and terminal state before pages or contexts close.
 The browser runner keeps failed harness output and diagnostics in `.test-artifacts/browser/` and removes diagnostics for successful harnesses.
+Every attempt is recorded in `.test-artifacts/browser-results-*.json` and the GitHub job summary with its harness, shard, repetition, result and duration.
+CI retries a failed main-pass harness once and marks a retry pass as flaky while keeping the first attempt's diagnostics.
+Set `BROWSER_RETRIES=1` to use this policy locally; local validation defaults to no retries.
 Direct harness commands retain their diagnostics in the same directory.
 Release checks upload these files even after a failure.
 Pushes to `master`, nightly CI, manual CI and release verification also run `npm run verify:browser-reliability` against the built application.
@@ -58,6 +61,7 @@ This command repeats reading, touch and selection checks three times each with o
 CI runs these worker counts in separate parallel jobs; set `BROWSER_RELIABILITY_JOBS` to `1` or `3` to select one locally.
 It delays ready-state and input-line responses by 400 milliseconds in an ordered WebSocket proxy and delays synthetic gesture calls by 400 milliseconds.
 Every repetition must pass, and a later pass does not clear an earlier failure.
+Reliability checks always disable retries.
 Set `BROWSER_REPEAT` to change the repeat count or `BROWSER_HARNESSES` to select comma-separated harness names when running `verify:browser` directly.
 Each harness has an eight-minute limit, configurable through `BROWSER_TIMEOUT_MS`, after which the runner terminates its process group and preserves its output.
 Use `npm run format:workspace` to format the workspace entry point and modules with the configured 100-column width, or `npm run check:workspace-format` to check them without editing.
@@ -81,6 +85,22 @@ Pull requests verify the synthetic merge commit, merge queues verify the candida
 Nightly CI retains the strict browser reliability repeats.
 Manual runs create downloadable artifacts without publishing a release.
 See [releases.md](releases.md) for pins, packaging and publication.
+
+## Recorded timeout fixes
+
+The archived runs in `speed-ci.md` predate several existing harness fixes.
+The following evidence comes from their uploaded browser states, traces and job logs.
+
+| Failure | Evidence and correction |
+| --- | --- |
+| Plugins, run 40416916266 | The SSH dialog was still connecting after a trust conflict; `502e6d4` waits for the final session response and dialog close. |
+| Herdr reading, run 40416916266 | Input followed a cancelled mobile touch with the keyboard closed; `232aefb` restores intentional input focus and `7fe79e9` shares shell observation. |
+| Workspace, run 40416916266 | The shell entered program mode without opening the captured SSH tab; `60b506e` waits for passive Readline readiness and asserts the captured command before waiting for a tab. |
+| Reading, run 40413106489 | The reading choice never appeared after input; shared prompt readiness and intentional focus replace direct input into a closed mobile keyboard. |
+| Touch and selection, runs 40413106489 and 39730920060 | Long-press assertions expired; `feedffa` advances gesture timers explicitly and selects outside the edge-scroll zone. |
+| Reconnect, run 40436879331 | The awaited Ctrl+C was absent from sent input and the mobile textarea was read-only; the reconnect harness now restores intentional input focus before freezing replay painting. |
+
+The earlier release runs did not retain browser traces, so their logs identify the failed assertions but cannot prove every event ordering detail.
 
 ## Local performance checks
 
