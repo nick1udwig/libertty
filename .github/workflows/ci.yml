@@ -6,6 +6,8 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
+  schedule:
+    - cron: '23 9 * * *'
 
 permissions:
   contents: read
@@ -35,6 +37,7 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       ref: ${{ github.sha }}
+      reliability: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
 
   integration:
     name: Integration

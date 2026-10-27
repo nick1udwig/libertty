@@ -49,7 +49,8 @@ The shared browser launcher saves traces, screenshots, browser errors and termin
 The browser runner keeps failed harness output and diagnostics in `.test-artifacts/browser/` and removes diagnostics for successful harnesses.
 Direct harness commands retain their diagnostics in the same directory.
 Release checks upload these files even after a failure.
-CI and release verification also run `npm run verify:browser-reliability` against the built application.
+Pushes to `master`, nightly CI, manual CI and release verification also run `npm run verify:browser-reliability` against the built application.
+Pull requests and merge queue candidates run each harness once and omit these additional repeats.
 This command repeats reading, touch and selection checks three times each with one worker and three workers.
 It delays ready-state and input-line responses by 400 milliseconds in an ordered WebSocket proxy and delays synthetic gesture calls by 400 milliseconds.
 Every repetition must pass, and a later pass does not clear an earlier failure.
@@ -73,7 +74,7 @@ The [Release workflow](../.github/workflows/release.yml) runs on `v*` tag pushes
 One Linux x64 job runs `npm run verify:local`, and each supported platform then builds, packages and smoke-tests its actual shipped archive once.
 The reusable [verification workflow](../.github/workflows/verify.yml) provides the same Linux job for CI and releases.
 Pull requests verify the synthetic merge commit, merge queues verify the candidate commit and releases verify the resolved release commit.
-There is no nightly schedule or separate Rust workflow.
+Nightly CI retains the strict browser reliability repeats.
 Manual runs create downloadable artifacts without publishing a release.
 See [releases.md](releases.md) for pins, packaging and publication.
 

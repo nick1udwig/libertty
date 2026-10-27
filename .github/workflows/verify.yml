@@ -9,6 +9,9 @@ on:
       diagnostics-name:
         default: integration-check-diagnostics
         type: string
+      reliability:
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -49,6 +52,7 @@ jobs:
       - name: Verify native, JavaScript, installer, saved-data and browser behavior
         run: npm run verify:local
       - name: Repeat reading and selection checks with delayed responses and input delivery
+        if: inputs.reliability
         run: npm run verify:browser-reliability
       - uses: actions/upload-artifact@v7
         if: always()
