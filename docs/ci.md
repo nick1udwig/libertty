@@ -63,6 +63,8 @@ Fullscreen Herdr scrolling runs once with lossy gzip, while the real native resi
 Each shard builds its own backend and frontend while Rust lints, Rust tests, JavaScript tests and installer checks run in another job.
 Verification uses OpenSSH and Bash completion from the Ubuntu runner image and only creates the SSH daemon runtime directory.
 Chromium is cached by the pinned `playwright-core` version and installed with `--no-shell`, without apt updates or dependency upgrades.
+Installed Node dependencies are cached by platform, architecture, Node version, manifests and the post-install repair script.
+The pinned Herdr binary is cached by version and checksum, and each use verifies its checksum and execute permission.
 CI sets `CHROME_PATH` and `CHROMIUM` to the Playwright executable so system Chromium cannot shadow it.
 Rust, npm and Chromium caches are restored on every ref but saved only from `master`.
 The separate companion cache workflow warms both Linux Voxtype architectures when release pins or companion workflows change on `master`.

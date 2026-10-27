@@ -10,13 +10,19 @@ runs:
     - name: Read the checked-out Node pin
       id: pins
       shell: bash
-      run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "node=" + require("./build/release-config.json").node + "\nplaywright=" + require("./package-lock.json").packages["node_modules/playwright-core"].version + "\n")'
+      run: node -e 'const config = require("./build/release-config.json"); require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "node=" + config.node + "\nplaywright=" + require("./package-lock.json").packages["node_modules/playwright-core"].version + "\nherdr=" + config.herdr.version + "-" + config.herdr.sha256[process.platform + "-" + process.arch] + "\n")'
     - uses: actions/setup-node@v7
       with:
         node-version: ${{ steps.pins.outputs.node }}
         package-manager-cache: false
     - uses: actions/cache/restore@v5
+      id: modules-cache
+      with:
+        path: node_modules
+        key: node-modules-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.node }}-${{ hashFiles('package-lock.json', 'package.json', 'scripts/prepare-dependencies.mjs', '.npmrc') }}
+    - uses: actions/cache/restore@v5
       id: npm-cache
+      if: steps.modules-cache.outputs.cache-hit != 'true'
       with:
         path: ~/.npm
         key: npm-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.node }}-${{ hashFiles('package-lock.json') }}
@@ -30,9 +36,15 @@ runs:
         cache-bin: false
         save-if: ${{ github.ref == 'refs/heads/master' }}
     - shell: bash
+      if: steps.modules-cache.outputs.cache-hit != 'true'
       run: npm ci --no-audit --no-fund
     - uses: actions/cache/save@v5
-      if: github.ref == 'refs/heads/master' && steps.npm-cache.outputs.cache-hit != 'true'
+      if: github.ref == 'refs/heads/master' && steps.modules-cache.outputs.cache-hit != 'true'
+      with:
+        path: node_modules
+        key: ${{ steps.modules-cache.outputs.cache-primary-key }}
+    - uses: actions/cache/save@v5
+      if: github.ref == 'refs/heads/master' && steps.modules-cache.outputs.cache-hit != 'true' && steps.npm-cache.outputs.cache-hit != 'true'
       with:
         path: ~/.npm
         key: ${{ steps.npm-cache.outputs.cache-primary-key }}
@@ -59,3 +71,18 @@ runs:
       with:
         path: ~/.cache/ms-playwright
         key: ${{ steps.browser-cache.outputs.cache-primary-key }}
+    - uses: actions/cache/restore@v5
+      id: herdr-cache
+      if: inputs.browser == 'true'
+      with:
+        path: .test-artifacts/bin/herdr
+        key: herdr-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.herdr }}
+    - name: Verify the pinned Herdr test binary
+      if: inputs.browser == 'true'
+      shell: bash
+      run: node scripts/install-test-herdr.mjs
+    - uses: actions/cache/save@v5
+      if: inputs.browser == 'true' && github.ref == 'refs/heads/master' && steps.herdr-cache.outputs.cache-hit != 'true'
+      with:
+        path: .test-artifacts/bin/herdr
+        key: ${{ steps.herdr-cache.outputs.cache-primary-key }}

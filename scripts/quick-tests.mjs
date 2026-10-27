@@ -1,4 +1,5 @@
 export const quickTests = [
+  'install-test-herdr.test.mjs',
   'documentation-only.test.mjs',
   'browser-groups.test.mjs',
   'unit-files.test.mjs',

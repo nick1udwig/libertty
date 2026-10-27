@@ -48,7 +48,13 @@ jobs:
           node-version: ${{ inputs.node }}
           package-manager-cache: false
       - uses: actions/cache/restore@v5
+        id: modules-cache
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.node }}-${{ hashFiles('package-lock.json', 'package.json', 'scripts/prepare-dependencies.mjs', '.npmrc') }}
+      - uses: actions/cache/restore@v5
         id: npm-cache
+        if: steps.modules-cache.outputs.cache-hit != 'true'
         with:
           path: ~/.npm
           key: npm-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.node }}-${{ hashFiles('package-lock.json') }}
@@ -69,13 +75,20 @@ jobs:
         run: |
           brew install bash
           echo "LIBERTTY_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
-      - name: Install dependencies and build the frontend
+      - name: Install dependencies
+        if: steps.modules-cache.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - name: Check the installer and build the frontend
         run: |
-          npm ci --no-audit --no-fund
           bash -n install.sh
           npm run build:frontend
       - uses: actions/cache/save@v5
-        if: github.ref == 'refs/heads/master' && steps.npm-cache.outputs.cache-hit != 'true'
+        if: github.ref == 'refs/heads/master' && steps.modules-cache.outputs.cache-hit != 'true'
+        with:
+          path: node_modules
+          key: ${{ steps.modules-cache.outputs.cache-primary-key }}
+      - uses: actions/cache/save@v5
+        if: github.ref == 'refs/heads/master' && steps.modules-cache.outputs.cache-hit != 'true' && steps.npm-cache.outputs.cache-hit != 'true'
         with:
           path: ~/.npm
           key: ${{ steps.npm-cache.outputs.cache-primary-key }}
