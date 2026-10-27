@@ -58,6 +58,7 @@ jobs:
     with:
       ref: ${{ github.sha }}
       quick-checked: true
+      base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || '' }}
       reliability: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
       force: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 

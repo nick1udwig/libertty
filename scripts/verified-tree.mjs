@@ -2,8 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { documentationOnly } from './documentation-only.mjs';
 
 export function verificationComplete(env) {
+  if (env.DOCUMENTATION_ONLY === 'true') return env.LOOKUP === 'success' && [env.RUST, env.BROWSER, env.RELIABILITY].every(result => result === 'skipped');
   const passed = (result, marker) => result === 'success' || result === 'skipped' && marker === 'true';
   return env.LOOKUP === 'success' && passed(env.RUST, env.VERIFIED) && passed(env.BROWSER, env.VERIFIED)
     && (env.REQUIRED === 'false' || passed(env.RELIABILITY, env.RELIABILITY_VERIFIED));
@@ -59,14 +61,19 @@ async function main() {
   };
   if (process.argv[2] === 'cancel') return cancelMergedPullRequestRuns(api, process.env.GITHUB_SHA);
   const tree = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { encoding: 'utf8' }).trim();
-  let verified = false, reliability = false;
+  let verified = false, reliability = false, documentation = false;
   if (process.env.VERIFY_FORCE !== 'true') {
+    try { documentation = process.env.VERIFY_QUICK_CHECKED === 'true' && documentationOnly(process.env.VERIFY_BASE); }
+    catch (error) { console.warn('Change comparison unavailable; running checks: ' + error.message); }
     try {
-      verified = await verifiedTree(api, tree);
-      reliability = process.env.VERIFY_RELIABILITY === 'true' && await verifiedTree(api, tree, true);
+      if (!documentation) {
+        verified = await verifiedTree(api, tree);
+        reliability = process.env.VERIFY_RELIABILITY === 'true' && await verifiedTree(api, tree, true);
+      }
     } catch (error) { console.warn('Verification lookup unavailable; running checks: ' + error.message); verified = false; reliability = false; }
   }
-  appendFileSync(process.env.GITHUB_OUTPUT, `tree=${tree}\nverified=${verified}\nreliability=${reliability}\n`);
+  if (documentation) console.log('Only documentation changed; full verification is skipped and required quick checks still run.');
+  appendFileSync(process.env.GITHUB_OUTPUT, `tree=${tree}\nverified=${verified}\nreliability=${reliability}\ndocumentation=${documentation}\n`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

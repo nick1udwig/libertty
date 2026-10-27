@@ -9,6 +9,9 @@ on:
       diagnostics-name:
         default: integration-check-diagnostics
         type: string
+      base:
+        default: ''
+        type: string
       force:
         default: false
         type: boolean
@@ -36,21 +39,25 @@ jobs:
       tree: ${{ steps.tree.outputs.tree }}
       verified: ${{ steps.tree.outputs.verified }}
       reliability: ${{ steps.tree.outputs.reliability }}
+      documentation: ${{ steps.tree.outputs.documentation }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
+          fetch-depth: ${{ inputs.base != '' && '0' || '1' }}
           persist-credentials: false
       - id: tree
         env:
           GH_TOKEN: ${{ github.token }}
           VERIFY_FORCE: ${{ inputs.force }}
+          VERIFY_BASE: ${{ inputs.base }}
+          VERIFY_QUICK_CHECKED: ${{ inputs.quick-checked }}
           VERIFY_RELIABILITY: ${{ inputs.reliability }}
         run: node scripts/verified-tree.mjs
 
   rust:
     needs: lookup
-    if: needs.lookup.outputs.verified != 'true'
+    if: needs.lookup.outputs.verified != 'true' && needs.lookup.outputs.documentation != 'true'
     name: Rust and unit tests
     env:
       VERIFY_QUICK_DONE: '1'
@@ -80,7 +87,7 @@ jobs:
 
   browser:
     needs: lookup
-    if: needs.lookup.outputs.verified != 'true'
+    if: needs.lookup.outputs.verified != 'true' && needs.lookup.outputs.documentation != 'true'
     name: Browser shard ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -116,7 +123,7 @@ jobs:
   reliability:
     needs: lookup
     name: Browser reliability with ${{ matrix.workers }} workers
-    if: inputs.reliability && needs.lookup.outputs.reliability != 'true'
+    if: inputs.reliability && needs.lookup.outputs.reliability != 'true' && needs.lookup.outputs.documentation != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -160,6 +167,7 @@ jobs:
       - name: Require fresh checks or a verified tree for every required suite
         env:
           LOOKUP: ${{ needs.lookup.result }}
+          DOCUMENTATION_ONLY: ${{ needs.lookup.outputs.documentation }}
           VERIFIED: ${{ needs.lookup.outputs.verified }}
           RELIABILITY_VERIFIED: ${{ needs.lookup.outputs.reliability }}
           REQUIRED: ${{ inputs.reliability }}
@@ -168,19 +176,20 @@ jobs:
           RELIABILITY: ${{ needs.reliability.result }}
         run: node scripts/verified-tree.mjs gate
       - name: Write the verification marker
+        if: needs.lookup.outputs.documentation != 'true'
         env:
           TREE: ${{ needs.lookup.outputs.tree }}
         run: |
           mkdir -p .test-artifacts
           printf '%s\n' "$TREE" > .test-artifacts/verified-tree.txt
       - uses: actions/upload-artifact@v7
-        if: needs.lookup.outputs.verified != 'true'
+        if: needs.lookup.outputs.verified != 'true' && needs.lookup.outputs.documentation != 'true'
         with:
           name: verified-${{ needs.lookup.outputs.tree }}
           path: .test-artifacts/verified-tree.txt
           retention-days: 30
       - uses: actions/upload-artifact@v7
-        if: inputs.reliability && needs.lookup.outputs.reliability != 'true'
+        if: inputs.reliability && needs.lookup.outputs.reliability != 'true' && needs.lookup.outputs.documentation != 'true'
         with:
           name: verified-${{ needs.lookup.outputs.tree }}-reliability
           path: .test-artifacts/verified-tree.txt

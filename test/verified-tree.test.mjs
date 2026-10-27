@@ -18,6 +18,11 @@ test('the final gate rejects missing, cancelled or failed checks even with old m
 
 const artifact = { name: 'verified-tree', expired: false, workflow_run: { id: 7 } };
 const run = { status: 'completed', conclusion: 'success', path: '.github/workflows/ci.yml', head_sha: 'commit', repository: { id: 1 }, head_repository: { id: 1 } };
+test('documentation skips accept only a successful lookup and skipped full suites', () => {
+  const docs = { LOOKUP: 'success', DOCUMENTATION_ONLY: 'true', RUST: 'skipped', BROWSER: 'skipped', RELIABILITY: 'skipped' };
+  assert.equal(verificationComplete(docs), true);
+  for (const field of ['LOOKUP', 'RUST', 'BROWSER', 'RELIABILITY']) assert.equal(verificationComplete({ ...docs, [field]: 'failure' }), false);
+});
 test('reuse requires a successful supported run and its independently checked source tree', async () => {
   const lookup = async (changes = {}, sourceTree = 'tree', artifactChanges = {}) => verifiedTree(async route => {
     if (route.startsWith('actions/artifacts?')) return { total_count: 1, artifacts: [{ ...artifact, ...artifactChanges }] };

@@ -111,7 +111,10 @@ Parallel Linux x64 jobs run native checks and browser shards while each supporte
 Linux packaging waits for the pinned companion, macOS packaging starts after source resolution, and publication waits for verification and every package.
 The reusable [verification workflow](../.github/workflows/verify.yml) provides the same checks for CI and releases.
 Pull requests verify the synthetic merge commit, merge queues verify the candidate commit and releases verify the resolved release commit.
-Nightly CI retains the strict browser reliability repeats.
+CI skips full verification when the complete Git comparison contains only Markdown or static documentation files.
+The comparison includes deletions and both sides of renames, and mixed code changes retain full verification.
+The required quick job still runs, and skipped documentation checks do not produce a verified-tree marker.
+Nightly and manual CI always run fresh full checks, including strict browser reliability repeats.
 Successful verification uploads a `verified-<Git tree hash>` marker for 30 days, with a separate reliability marker when those repeats pass.
 CI and releases reuse a marker only after checking that its completed CI or release run succeeded and that the run's source commit has the same tree.
 Expired markers, fork runs, different source trees and failed or incomplete runs do not skip checks.
