@@ -50,7 +50,14 @@ It covers native repairs, SSH, reading, Herdr, plugins, pairing, reconnects, ges
 It first downloads and verifies the pinned Herdr release, which the dictation, spaces, resize, flash and fullscreen scrolling harnesses use as the real native integration.
 Local validation runs three harnesses at a time and reports every failure at the end; set `BROWSER_JOBS` to change the number.
 CI runs four parallel browser jobs with two workers each.
-Set `BROWSER_SHARD=k/n` to run one shard, with harnesses assigned longest-first from recorded CI durations.
+Set `BROWSER_SHARD=k/n` to run one shard, with harnesses assigned longest-first from recorded durations.
+The current weights come from the complete local scenario report and can be refreshed from CI result artifacts.
+Terminal, dictation, Herdr and workspace checks each have three independent scenarios, and reconnect has two.
+Each scenario creates its own backend, browser and temporary data.
+The original npm commands still run every scenario for their suite, and `BROWSER_HARNESSES` accepts either an original suite name or a scenario file.
+Page clocks advance idle-paint, idle-dictation, renderer-eviction and hidden-plugin timers without real waits.
+Snapshot replay waits for backend completion, while native input delivery and the short held-handshake staging wait retain real time.
+All 33 browser cases passed without retries in the measured local run, with no case over 41 seconds.
 Each shard builds its own backend and frontend while Rust lints, Rust tests, JavaScript tests and installer checks run in another job.
 Verification uses OpenSSH and Bash completion from the Ubuntu runner image and only creates the SSH daemon runtime directory.
 Chromium is cached by the pinned `playwright-core` version and installed with `--no-shell`, without apt updates or dependency upgrades.

@@ -1,4 +1,5 @@
 export const quickTests = [
+  'browser-groups.test.mjs',
   'unit-files.test.mjs',
   'browser-shards.test.mjs',
   'browser-results.test.mjs',

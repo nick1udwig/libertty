@@ -5,6 +5,7 @@ import path from 'node:path';
 import { chromium } from 'playwright-core';
 import { browserShard } from './browser-shards.mjs';
 import { browserSummary, retryHarness } from './browser-results.mjs';
+import { expandBrowserCases, expandBrowserNames } from './browser-groups.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const browser = process.env.CHROME_PATH || process.env.CHROMIUM || (existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : chromium.executablePath());
@@ -23,8 +24,8 @@ const herdrBinary = path.join(root, '.test-artifacts/bin/herdr');
 const herdr = { HERDR_BINARY: herdrBinary, PATH: path.dirname(herdrBinary) + path.delimiter + process.env.PATH };
 
 // One explicit list is shared by release validation and local pre-commit checks.
-const harnesses = [
-  ['browser.mjs', { TEST_PORT: '3137', TEST_BASE_PATH: '/terminal' }],
+const harnesses = expandBrowserCases([
+  ['browser.mjs', { TEST_BASE_PATH: '/terminal' }],
   ['reading-browser.mjs', { TEST_BASE_PATH: '/terminal' }],
   ...['herdr-browser.mjs', 'herdr-loading-browser.mjs', 'plugins-browser.mjs', 'rust-herdr.mjs',
     'pairing-browser.mjs', 'reconnect-browser.mjs', 'herdr-reopen-browser.mjs',
@@ -33,14 +34,43 @@ const harnesses = [
   ...['herdr-dictation-browser.mjs', 'herdr-reading-browser.mjs', 'herdr-spaces-browser.mjs', 'herdr-resize-native.mjs',
     'herdr-space-flash-native.mjs', 'herdr-app-scroll-native.mjs'].map(file => [file, herdr]),
   ['herdr-app-scroll-native.mjs', { ...herdr, TEST_WIRE: 'gzip', TEST_LINK: 'lossy' }],
-];
+]);
 const durations = {
-  'workspace-browser.mjs': 145, 'herdr-browser.mjs': 117, 'dictation-browser.mjs': 97,
-  'browser.mjs': 87, 'reconnect-browser.mjs': 70, 'herdr-spaces-browser.mjs': 60,
-  'plugins-browser.mjs': 50, 'herdr-reading-browser.mjs': 35, 'herdr-app-scroll-native.mjs': 30,
+  'dictation-availability-browser.mjs': 39,
+  'dictation-capture-browser.mjs': 23,
+  'dictation-program-browser.mjs': 12,
+  'files-browser.mjs': 12,
+  'herdr-app-scroll-native.mjs': 25,
+  'herdr-dictation-browser.mjs': 14,
+  'herdr-interaction-browser.mjs': 13,
+  'herdr-loading-browser.mjs': 8,
+  'herdr-navigation-browser.mjs': 17,
+  'herdr-reading-browser.mjs': 17,
+  'herdr-reopen-browser.mjs': 4,
+  'herdr-resize-native.mjs': 5,
+  'herdr-space-flash-native.mjs': 12,
+  'herdr-spaces-browser.mjs': 41,
+  'herdr-transport-browser.mjs': 27,
+  'pairing-browser.mjs': 5,
+  'plugins-browser.mjs': 11,
+  'reading-browser.mjs': 9,
+  'reconnect-herdr-browser.mjs': 28,
+  'reconnect-native-browser.mjs': 36,
+  'rust-herdr.mjs': 2,
+  'tab-scrolling-browser.mjs': 6,
+  'terminal-gestures-browser.mjs': 16,
+  'terminal-input-browser.mjs': 16,
+  'terminal-layout-browser.mjs': 10,
+  'terminal-repair-browser.mjs': 12,
+  'terminal-selection-browser.mjs': 9,
+  'terminal-touch-browser.mjs': 4,
+  'transfers-browser.mjs': 6,
+  'workspace-core-browser.mjs': 12,
+  'workspace-ssh-browser.mjs': 25,
+  'workspace-vault-browser.mjs': 23,
 };
 const sharded = browserShard(harnesses.map(([file, overrides]) => [file, overrides, durations[file] || 20]), process.env.BROWSER_SHARD);
-const selected = process.env.BROWSER_HARNESSES?.split(',');
+const selected = expandBrowserNames(process.env.BROWSER_HARNESSES?.split(','));
 if (selected?.some(file => !harnesses.some(([name]) => name === file))) throw new Error('Unknown BROWSER_HARNESSES entry.');
 const cases = sharded.filter(([file]) => !selected || selected.includes(file));
 
