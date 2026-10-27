@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   daemon:
     name: Prepare pinned dictation daemon on ${{ matrix.target }}

@@ -12,6 +12,9 @@ on:
       force:
         default: false
         type: boolean
+      quick-checked:
+        default: false
+        type: boolean
       reliability:
         default: true
         type: boolean
@@ -59,6 +62,12 @@ jobs:
           ref: ${{ inputs.ref }}
           persist-credentials: false
       - uses: ./.github/actions/verify-setup
+      - name: Run quick checks when the caller has no separate quick job
+        if: '!inputs.quick-checked'
+        run: |
+          npm run ci:quick
+          cargo fmt --all -- --check
+          npm run contracts:vocabulary -- --check
       - name: Check native lints and tests
         run: |
           cargo clippy --workspace --all-targets --locked -- -D warnings

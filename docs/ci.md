@@ -36,6 +36,7 @@ Verification sets `LIBERTTY_DEV_SKIP_BUILD=1` so development test launchers use 
 Set this flag only after building the backend for the same tree.
 Set `VERIFY_QUICK_DONE=1` only when quick checks, vocabulary and formatting already passed for the same tree.
 The Rust CI job uses this flag because the required quick job runs those checks separately.
+Release verification runs quick checks in its Rust job unless a caller explicitly supplies a separate required quick check.
 Standalone `npm test` discovers all unit files; full verification omits the quick unit files it already ran.
 The installer fixtures remain in `npm run test:install`.
 Rust integration modules share one `tests/it/main.rs` binary, and crates without documentation examples disable doc-tests.
@@ -106,7 +107,8 @@ On Linux, ensure the SSH daemon can use its runtime directory, normally `/run/ss
 macOS needs modern Bash, with `LIBERTTY_BASH` pointing to it and `LIBERTTY_GIT_COMPLETIONS_FILE` pointing to Git's Bash completion script when running full local validation.
 
 The [Release workflow](../.github/workflows/release.yml) runs on `v*` tag pushes and manual dispatch.
-Parallel Linux x64 jobs run native checks and browser shards, and each supported platform then builds, packages and smoke-tests its actual shipped archive once.
+Parallel Linux x64 jobs run native checks and browser shards while each supported platform builds, packages and smoke-tests its actual shipped archive once.
+Linux packaging waits for the pinned companion, macOS packaging starts after source resolution, and publication waits for verification and every package.
 The reusable [verification workflow](../.github/workflows/verify.yml) provides the same checks for CI and releases.
 Pull requests verify the synthetic merge commit, merge queues verify the candidate commit and releases verify the resolved release commit.
 Nightly CI retains the strict browser reliability repeats.

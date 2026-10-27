@@ -39,10 +39,12 @@ Use **Actions → Release → Run workflow** to build without creating or modify
 Select the workflow branch and optionally supply a branch, tag or commit in the `ref` field.
 Manual runs produce downloadable workflow artifacts and never execute the publication job.
 
-One Linux x64 checking job runs Rust formatting, native Clippy, Rust and JavaScript tests, contracts, installer fixtures and all browser and native Herdr harnesses.
-The release workflow and local validation use the same `npm run verify:local` command.
+Parallel Linux x64 jobs run Rust and unit checks, four browser shards and both strict reliability modes.
+The release workflow and local validation share the same scripts and harness list.
 All full validation and packaging use the Node version pinned in `build/release-config.json`.
 Each platform builds its frontend, then `release:package` compiles the optimized native executable once and creates the archive that both smoke checks exercise.
+Linux package jobs need only the resolved source and companion artifacts, while the macOS package job needs only the source.
+Package builds run alongside verification, and publication requires verification and all three package builds to succeed.
 Formatting, lints and full browser validation run once on Linux rather than on every platform.
 The platform jobs do not transport intermediate builds or generate build manifests.
 Local performance checks remain available through the scripts and commit requirements described in [ci.md](ci.md).

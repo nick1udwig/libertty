@@ -57,6 +57,7 @@ jobs:
     uses: ./.github/workflows/verify.yml
     with:
       ref: ${{ github.sha }}
+      quick-checked: true
       reliability: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
       force: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 
