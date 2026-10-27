@@ -23,7 +23,7 @@
     "build": "npm run build:backend && npm run build:frontend",
     "build:release": "cargo build --release --locked -p libertty-server --bin libertty && npm run build:frontend",
     "start": "cargo run --release --locked -p libertty-server --bin libertty",
-    "test": "node --test test/*.test.ts test/dependencies.test.mjs test/package-release.test.mjs test/publish-release.test.mjs test/wire-observer.test.mjs",
+    "test": "node scripts/test-unit.mjs",
     "verify:local": "node scripts/verify-local.mjs",
     "verify:browser": "node scripts/check-browser.mjs",
     "verify:browser-reliability": "node scripts/check-browser-reliability.mjs",

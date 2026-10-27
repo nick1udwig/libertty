@@ -5,6 +5,7 @@ import { SourceTextModule } from 'node:vm';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { quickTests } from './quick-tests.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const start = performance.now();
@@ -29,44 +30,7 @@ for (const [file, digest] of Object.entries(assets)) {
 }
 console.log(`Verified syntax for ${modules} modules, ${data} JSON files and ${Object.keys(assets).length} asset checksums.`);
 
-// Keep this explicit: adding a native or package-dependent harness must not make
-// the required check install dependencies, build Rust or start a browser.
-const tests = [
-  'api.test.ts',
-  'dictation-audio.test.ts',
-  'dictation-alternatives.test.ts',
-  'dictation-layout.test.ts',
-  'dictation-wake-lock.test.ts',
-  'dictation.test.ts',
-  'file-options.test.ts',
-  'herdr-notifications.test.ts',
-  'herdr-cache.test.ts',
-  'herdr-spaces.test.ts',
-  'inline-suggestions.test.ts',
-  'input-line.test.ts',
-  'lossy-link.test.mjs',
-  'paste-mode.test.ts',
-  'output-scheduler.test.ts',
-  'plugin-file.test.ts',
-  'plugins.test.ts',
-  'push-worker.test.ts',
-  'publish-release.test.mjs',
-  'predicted-echo.test.ts',
-  'queue.test.ts',
-  'reconnecting-socket.test.ts',
-  'service-worker.test.ts',
-  'shell-words.test.ts',
-  'shortcuts.test.ts',
-  'site-urls.test.ts',
-  'terminal-history.test.ts',
-  'terminal-projection.test.ts',
-  'touch-cursor.test.ts',
-  'unsent-input.test.ts',
-  'vault.test.ts',
-  'wire.test.ts',
-  'wire-observer.test.mjs',
-];
-const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--test', '--test-reporter=spec', ...tests.map(file => 'test/' + file)], { cwd: root, stdio: 'inherit' });
+const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--test', '--test-reporter=spec', ...quickTests.map(file => 'test/' + file)], { cwd: root, stdio: 'inherit' });
 if (result.error) throw result.error;
 assert.equal(result.status, 0, 'Quick unit tests failed: ' + (result.signal || result.status));
 console.log(`Quick checks completed in ${((performance.now() - start) / 1000).toFixed(2)}s.`);

@@ -1,11 +1,10 @@
-import { launchBrowser, delay, until } from './support/browser.mjs';
+import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
 import { showTerminalTabs, connectSSH } from './support/workspace-navigation.mjs';
 import { fingerprint } from './support/ssh-key.ts';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { readFile, writeFile, appendFile, mkdir } from 'node:fs/promises';
-import net from 'node:net';
 import os from 'node:os';
 import ssh2 from 'ssh2';
 import { sshdPath, sshFixturePath, sshdConfig } from './support/sshd.mjs';
@@ -13,7 +12,6 @@ import { WebSocket } from 'ws';
 import { herdrFixture } from './herdr-fixture.ts';
 
 const root = new URL('../', import.meta.url).pathname, fixture = await herdrFixture();
-async function freePort() { const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening'); const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port; }
 const port = await freePort(), sshPort = await freePort(), origin = 'http://127.0.0.1:' + port, base = origin + '/plugins-test', processes = [], errors = [];
 let logs = '', browser, page, bearer;
 function start(command, args, env = {}) { const process = spawn(command, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: { ...globalThis.process.env, ...env } }); processes.push(process); process.stdout.on('data', b => logs += b); process.stderr.on('data', b => logs += b); return process; }
@@ -36,6 +34,7 @@ try {
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   page = await context.newPage(); page.setDefaultTimeout(12000); page.on('pageerror', error => errors.push(error.stack || String(error)));
+  await page.clock.install();
   await page.goto(base + '/'); await page.locator('#backend-token').fill('plugin-test-pairing-token-123456789'); await page.locator('#backend-login-form button[type=submit]').click();
   await until(async () => (await page.locator('#terminal-stack > iframe').count()) === 1, 'default terminal');
   const cookieOwner = await page.evaluate(async () => (await (await fetch(new URL('api/connect', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"noSession":true}' })).json()).accessToken);
@@ -70,7 +69,8 @@ try {
   await appendFile(fixture.directory + '/app.log', 'warning updated\n'); await until(async () => (await frame.locator('#log').textContent()).includes('warning updated'), 'live log refresh');
   await frame.locator('#filter').fill('warning'); await until(async () => await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'example.log-viewer')?.pluginState?.filter === 'warning'), 'plugin state');
   let reads = 0; page.on('request', request => { if (request.url().includes('/api/plugins/read')) reads++; });
-  await settings(); await delay(250); const hiddenReads = reads; await delay(2200); assert.equal(reads, hiddenReads, 'Hidden plugin views pause their reads');
+  await settings(); await frame.waitForFunction(() => libertty.visible === false);
+  const hiddenReads = reads; await page.clock.runFor(2200); assert.equal(reads, hiddenReads, 'Hidden plugin views pause their reads');
   await page.locator('#nav-terminals').click(); await page.reload(); frame = await pluginFrame(); assert.equal(await frame.locator('#filter').inputValue(), 'warning');
   await frame.locator('#log').filter({ hasText: 'warning updated' }).waitFor();
   assert.ok(await frame.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Plugin fits a mobile viewport');

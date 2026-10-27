@@ -1,6 +1,5 @@
+use crate::herdr_support;
 use serde_json::{Value, json};
-#[path = "support/herdr.rs"]
-mod herdr_support;
 use std::{
     collections::HashSet,
     io::{Read, Write},
@@ -30,6 +29,9 @@ impl Backend {
         Self::start_with_base(engine, "/terminal")
     }
     fn start_with_base(engine: &str, base: &str) -> Self {
+        Self::start_with_heartbeat(engine, base, None)
+    }
+    fn start_with_heartbeat(engine: &str, base: &str, heartbeat: Option<Duration>) -> Self {
         let root = tempfile::tempdir().unwrap();
         static PORTS: LazyLock<Mutex<HashSet<u16>>> = LazyLock::new(Default::default);
         let port = loop {
@@ -66,6 +68,12 @@ impl Backend {
             .env("LIBERTTY_TOKEN", "test-local-pairing-token-123456789")
             .env("LIBERTTY_ALLOWED_HOSTS", "127.0.0.1,localhost")
             .env("LIBERTTY_ALLOWED_ORIGINS", "")
+            .env(
+                "LIBERTTY_TEST_HEARTBEAT_MS",
+                heartbeat
+                    .map(|value| value.as_millis().to_string())
+                    .unwrap_or_default(),
+            )
             .stdout(Stdio::null())
             .stderr(Stdio::from(stderr))
             .spawn()
@@ -300,7 +308,8 @@ async fn native_and_herdr_sockets_share_ping_audio_and_malformed_frame_rules() {
 async fn a_silent_viewer_neither_pauses_the_shell_nor_stays_attached() {
     use futures::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
-    let backend = Backend::start("server");
+    let heartbeat = Duration::from_secs(if cfg!(debug_assertions) { 1 } else { 30 });
+    let backend = Backend::start_with_heartbeat("server", "/terminal", Some(heartbeat));
     let origin = format!("http://127.0.0.1:{}", backend.port);
     let token = backend.pair();
     let state = || {
@@ -325,7 +334,6 @@ async fn a_silent_viewer_neither_pauses_the_shell_nor_stays_attached() {
         .headers_mut()
         .insert("origin", origin.parse().unwrap());
     let (mut socket, _) = tokio_tungstenite::connect_async(request).await.unwrap();
-    let connected = tokio::time::Instant::now();
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if let Message::Binary(bytes) = socket.next().await.unwrap().unwrap()
@@ -342,13 +350,13 @@ async fn a_silent_viewer_neither_pauses_the_shell_nor_stays_attached() {
     // Far more output than one acknowledgement window, then a computed marker.
     socket
         .send(Message::Text(
-            json!({"type":"input","data":"seq 1 100000; echo $((6*7))-done\r"})
+            json!({"type":"input","data":"printf '%524288s' ''; echo $((6*7))-done\r"})
                 .to_string()
                 .into(),
         ))
         .await
         .unwrap();
-    // Stop reading and acknowledging, like a phone that lost its network without closing.
+    // Keep the heartbeat alive without reading or acknowledging output until the shell completes.
     let deadline = Instant::now() + Duration::from_secs(25);
     loop {
         let current = state();
@@ -359,10 +367,14 @@ async fn a_silent_viewer_neither_pauses_the_shell_nor_stays_attached() {
             Instant::now() < deadline,
             "the shell stayed paused behind a silent viewer: {current}"
         );
+        socket
+            .send(Message::Text(json!({"type":"ping"}).to_string().into()))
+            .await
+            .unwrap();
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    // Reading would answer pings, so wait until the heartbeat must have released the socket.
-    tokio::time::sleep_until(connected + Duration::from_secs(62)).await;
+    // Stop all traffic until the heartbeat must have released the socket.
+    tokio::time::sleep(heartbeat * 2 + Duration::from_secs(1)).await;
     let closed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match socket.next().await {

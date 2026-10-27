@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import net from 'node:net';
 import { chromium } from 'playwright-core';
 import { trackBrowser } from './browser-diagnostics.mjs';
+export { freePort } from '../../scripts/browser-ports.mjs';
 
 const root = new URL('../../', import.meta.url).pathname;
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -13,21 +12,6 @@ export async function until(check, label = 'condition', timeout = 15000) {
     await delay(30);
   }
   throw new Error('Timed out waiting for ' + label);
-}
-const issuedPorts = new Set();
-export async function freePort() {
-  // Releasing ephemeral listeners can immediately recycle a port within one fixture.
-  // Keep each allocation distinct until this test process exits.
-  for (;;) {
-    const listener = net.createServer();
-    listener.listen(0, '127.0.0.1');
-    await once(listener, 'listening');
-    const port = listener.address().port;
-    await new Promise((resolve, reject) => listener.close(error => error ? reject(error) : resolve()));
-    if (issuedPorts.has(port)) continue;
-    issuedPorts.add(port);
-    return port;
-  }
 }
 export function startBackend(options = {}) {
   return spawn(root + 'target/debug/libertty', [], { cwd: root, ...options });

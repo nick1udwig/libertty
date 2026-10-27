@@ -1,0 +1,136 @@
+name: Package a release target
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      node:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      target:
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+      voxtype-repository:
+        required: true
+        type: string
+      voxtype-commit:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  package:
+    name: Build, package and smoke-test ${{ inputs.target }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ inputs.node }}
+          package-manager-cache: false
+      - uses: actions/cache/restore@v5
+        id: modules-cache
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.node }}-${{ hashFiles('package-lock.json', 'package.json', 'scripts/prepare-dependencies.mjs', '.npmrc') }}
+      - uses: actions/cache/restore@v5
+        id: npm-cache
+        if: steps.modules-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.npm
+          key: npm-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.node }}-${{ hashFiles('package-lock.json') }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: libertty-${{ inputs.target }}
+          cache-on-failure: true
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Install Linux runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2t64 libopus0 bash-completion
+      - name: Install modern Bash on macOS
+        if: runner.os == 'macOS'
+        run: |
+          brew install bash
+          echo "LIBERTTY_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
+      - name: Install dependencies
+        if: steps.modules-cache.outputs.cache-hit != 'true'
+        run: npm ci --no-audit --no-fund
+      - name: Check the installer and build the frontend
+        run: |
+          bash -n install.sh
+          npm run build:frontend
+      - uses: actions/cache/save@v5
+        if: github.ref == 'refs/heads/master' && steps.modules-cache.outputs.cache-hit != 'true'
+        with:
+          path: node_modules
+          key: ${{ steps.modules-cache.outputs.cache-primary-key }}
+      - uses: actions/cache/save@v5
+        if: github.ref == 'refs/heads/master' && steps.modules-cache.outputs.cache-hit != 'true' && steps.npm-cache.outputs.cache-hit != 'true'
+        with:
+          path: ~/.npm
+          key: ${{ steps.npm-cache.outputs.cache-primary-key }}
+      - name: Check out the pinned companion license and installer
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.voxtype-repository }}
+          ref: ${{ inputs.voxtype-commit }}
+          path: .release-companions/voxtype-mobile
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        if: runner.os == 'Linux'
+        with:
+          name: voxtype-${{ inputs.target }}
+          path: .test-artifacts
+      - name: Restore and verify the pinned dictation daemon
+        if: runner.os == 'Linux'
+        run: |
+          tar -xzpf .test-artifacts/voxtype.tar.gz -C .release-companions/voxtype-mobile
+          .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon --version
+          ldd .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon > "$RUNNER_TEMP/voxtype-libraries.txt"
+          cat "$RUNNER_TEMP/voxtype-libraries.txt"
+          if grep -q 'not found' "$RUNNER_TEMP/voxtype-libraries.txt"; then exit 1; fi
+          echo "VOXTYPE_MOBILE_CHECKOUT=$GITHUB_WORKSPACE/.release-companions/voxtype-mobile" >> "$GITHUB_ENV"
+      - name: Build, package and verify the actual release
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          npm run release:package
+          node scripts/smoke-release.mjs "release/libertty-$RELEASE_TAG-$TARGET.tar.gz"
+          node scripts/smoke-install.mjs "release/libertty-$RELEASE_TAG-$TARGET.tar.gz"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: libertty-${{ inputs.target }}
+          path: |
+            release/*.tar.gz
+            release/*.sha256
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 14
+          overwrite: true
+

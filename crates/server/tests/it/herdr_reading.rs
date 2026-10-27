@@ -1,8 +1,7 @@
+use crate::herdr_support as support;
 use libertty_server::herdr_reading::{Opened, open};
 use std::sync::atomic::Ordering;
 use tokio_util::sync::CancellationToken;
-#[path = "support/herdr.rs"]
-mod support;
 
 #[tokio::test]
 async fn readers_resolve_pane_paths_and_capture_binary_commands_once_with_status() {

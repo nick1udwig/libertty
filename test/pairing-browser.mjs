@@ -1,15 +1,13 @@
-import { launchBrowser } from './support/browser.mjs';
+import { launchBrowser, freePort } from './support/browser.mjs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import net from 'node:net';
 import http from 'node:http';
 import { WebSocket } from 'ws';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const directory = await mkdtemp('/tmp/libertty-dev-pairing-');
-const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
-const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
+const port = await freePort();
 const origin = `http://127.0.0.1:${port}`; const base = origin + '/audit/';
 const server = spawn(process.execPath, ['scripts/dev.mjs'], { cwd: path.resolve(import.meta.dirname, '..'), env: { ...process.env, NODE_ENV: 'development', HOST: '127.0.0.1', PORT: String(port), HOME: directory, LIBERTTY_CWD: directory, LIBERTTY_NO_RC: '1', LIBERTTY_TOKEN: 'dev-test-pairing-token-123456789', LIBERTTY_DATA_DIR: directory, LIBERTTY_BASE_PATH: '/audit', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', CARGO_HOME: process.env.CARGO_HOME || path.join(process.env.HOME, '.cargo'), RUSTUP_HOME: process.env.RUSTUP_HOME || path.join(process.env.HOME, '.rustup') }, stdio: ['ignore', 'pipe', 'pipe'] });
 let logs = ''; server.stdout.on('data', d => logs += d); server.stderr.on('data', d => logs += d); const exited = once(server, 'exit'); let browser;

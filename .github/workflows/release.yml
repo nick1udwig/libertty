@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: release-${{ inputs.ref || github.ref }}
@@ -66,91 +67,14 @@ jobs:
 
   companion:
     needs: source
-    name: Prepare pinned dictation daemon on ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            runner: ubuntu-24.04
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-    steps:
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Read compiler identity for the daemon cache
-        id: compiler
-        run: echo "hash=$(rustc -vV | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
-      - name: Restore pinned dictation daemon
-        id: voxtype-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: .release-companions/voxtype-mobile/artifacts
-          # Include the source, compiler, runner and every non-default build setting.
-          key: voxtype-v2-${{ matrix.runner }}-${{ matrix.target }}-${{ needs.source.outputs.voxtype_repository }}-${{ needs.source.outputs.voxtype_commit }}-${{ steps.compiler.outputs.hash }}-parakeet-cpu-native-off-avx2-off-avx512-off-fma-off-lto-off-cgu8
-      - name: Check out the pinned Voxtype Mobile source
-        if: steps.voxtype-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ needs.source.outputs.voxtype_repository }}
-          ref: ${{ needs.source.outputs.voxtype_commit }}
-          submodules: recursive
-          path: .release-companions/voxtype-mobile
-          persist-credentials: false
-      - name: Install Linux build dependencies
-        if: steps.voxtype-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libclang-dev libasound2-dev libopus0 libssl-dev
-      - name: Build the compatible CPU dictation daemon
-        if: steps.voxtype-cache.outputs.cache-hit != 'true'
-        env:
-          CARGO_BUILD_JOBS: '2'
-          GGML_NATIVE: 'OFF'
-          GGML_AVX2: 'OFF'
-          GGML_AVX512: 'OFF'
-          GGML_FMA: 'OFF'
-        run: |
-          cargo build --manifest-path .release-companions/voxtype-mobile/daemon/Cargo.toml --locked --release --features parakeet --bin voxtype --config 'profile.release.lto=false' --config 'profile.release.codegen-units=8'
-          mkdir -p .release-companions/voxtype-mobile/artifacts
-          cp .release-companions/voxtype-mobile/daemon/target/release/voxtype .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon
-      - name: Install dictation runtime dependencies
-        if: steps.voxtype-cache.outputs.cache-hit == 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2t64 libopus0
-      - name: Verify dictation daemon compatibility
-        run: |
-          .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon --version
-          ldd .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon > "$RUNNER_TEMP/voxtype-libraries.txt"
-          cat "$RUNNER_TEMP/voxtype-libraries.txt"
-          if grep -q 'not found' "$RUNNER_TEMP/voxtype-libraries.txt"; then exit 1; fi
-      - name: Cache verified pinned dictation daemon
-        if: steps.voxtype-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: .release-companions/voxtype-mobile/artifacts
-          key: ${{ steps.voxtype-cache.outputs.cache-primary-key }}
-      - name: Archive the verified daemon
-        run: |
-          mkdir -p .test-artifacts
-          tar -czf .test-artifacts/voxtype.tar.gz -C .release-companions/voxtype-mobile artifacts
-      - uses: actions/upload-artifact@v7
-        with:
-          name: voxtype-${{ matrix.target }}
-          path: .test-artifacts/voxtype.tar.gz
-          if-no-files-found: error
-          include-hidden-files: true
-          compression-level: 0
-          retention-days: 7
-          overwrite: true
+    uses: ./.github/workflows/companion.yml
+    with:
+      repository: ${{ needs.source.outputs.voxtype_repository }}
+      commit: ${{ needs.source.outputs.voxtype_commit }}
 
   build:
-    needs: [source, verify, companion]
-    name: Build, package and smoke-test ${{ matrix.target }}
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    needs: [source, companion]
+    name: Package ${{ matrix.target }}
     strategy:
       fail-fast: false
       matrix:
@@ -159,84 +83,33 @@ jobs:
             runner: ubuntu-24.04
           - target: linux-arm64
             runner: ubuntu-24.04-arm
-          - target: darwin-arm64
-            runner: macos-15
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.source.outputs.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ needs.source.outputs.node }}
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: libertty-${{ matrix.target }}
-          cache-on-failure: true
-          cache-bin: false
-      - name: Install Linux runtime dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2t64 libopus0 bash-completion
-      - name: Install modern Bash on macOS
-        if: runner.os == 'macOS'
-        run: |
-          brew install bash
-          echo "LIBERTTY_BASH=$(brew --prefix bash)/bin/bash" >> "$GITHUB_ENV"
-      - name: Install dependencies and build the frontend
-        run: |
-          npm ci --no-audit --no-fund
-          bash -n install.sh
-          npm run build:frontend
-      - name: Check out the pinned companion license and installer
-        if: runner.os == 'Linux'
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ needs.source.outputs.voxtype_repository }}
-          ref: ${{ needs.source.outputs.voxtype_commit }}
-          path: .release-companions/voxtype-mobile
-          persist-credentials: false
-      - uses: actions/download-artifact@v8
-        if: runner.os == 'Linux'
-        with:
-          name: voxtype-${{ matrix.target }}
-          path: .test-artifacts
-      - name: Restore and verify the pinned dictation daemon
-        if: runner.os == 'Linux'
-        run: |
-          tar -xzpf .test-artifacts/voxtype.tar.gz -C .release-companions/voxtype-mobile
-          .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon --version
-          ldd .release-companions/voxtype-mobile/artifacts/voxtype-mobile-daemon > "$RUNNER_TEMP/voxtype-libraries.txt"
-          cat "$RUNNER_TEMP/voxtype-libraries.txt"
-          if grep -q 'not found' "$RUNNER_TEMP/voxtype-libraries.txt"; then exit 1; fi
-          echo "VOXTYPE_MOBILE_CHECKOUT=$GITHUB_WORKSPACE/.release-companions/voxtype-mobile" >> "$GITHUB_ENV"
-      - name: Build, package and verify the actual release
-        env:
-          RELEASE_TAG: ${{ needs.source.outputs.tag }}
-          TARGET: ${{ matrix.target }}
-        run: |
-          npm run release:package
-          node scripts/smoke-release.mjs "release/libertty-$RELEASE_TAG-$TARGET.tar.gz"
-          node scripts/smoke-install.mjs "release/libertty-$RELEASE_TAG-$TARGET.tar.gz"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: libertty-${{ matrix.target }}
-          path: |
-            release/*.tar.gz
-            release/*.sha256
-          if-no-files-found: error
-          include-hidden-files: true
-          compression-level: 0
-          retention-days: 14
-          overwrite: true
+    uses: ./.github/workflows/package.yml
+    with:
+      ref: ${{ needs.source.outputs.sha }}
+      node: ${{ needs.source.outputs.node }}
+      tag: ${{ needs.source.outputs.tag }}
+      voxtype-repository: ${{ needs.source.outputs.voxtype_repository }}
+      voxtype-commit: ${{ needs.source.outputs.voxtype_commit }}
+      target: ${{ matrix.target }}
+      runner: ${{ matrix.runner }}
+
+  build-macos:
+    needs: source
+    name: Package darwin-arm64
+    uses: ./.github/workflows/package.yml
+    with:
+      ref: ${{ needs.source.outputs.sha }}
+      node: ${{ needs.source.outputs.node }}
+      tag: ${{ needs.source.outputs.tag }}
+      voxtype-repository: ${{ needs.source.outputs.voxtype_repository }}
+      voxtype-commit: ${{ needs.source.outputs.voxtype_commit }}
+      target: darwin-arm64
+      runner: macos-15
 
   publish:
     name: Publish the complete verified release
     if: github.event_name == 'push'
-    needs: [source, build]
+    needs: [source, verify, build, build-macos]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -249,6 +122,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ needs.source.outputs.node }}
+          package-manager-cache: false
       - uses: actions/download-artifact@v8
         with:
           pattern: libertty-*

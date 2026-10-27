@@ -1,0 +1,27 @@
+mod assets;
+mod completion;
+mod dictation;
+mod directories;
+mod facts;
+mod files;
+mod herdr;
+mod herdr_history;
+mod herdr_initial_size;
+mod herdr_metadata;
+mod herdr_reading;
+#[path = "support/herdr.rs"]
+mod herdr_support;
+mod herdr_terminal_stream;
+mod herdr_view;
+mod http;
+mod markers;
+mod native_engine;
+mod notifications;
+mod pairing;
+mod paste_mode;
+mod plugin_file;
+mod probes;
+mod session;
+mod ssh;
+mod system_ssh;
+mod vault;

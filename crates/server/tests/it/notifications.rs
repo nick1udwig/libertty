@@ -1,5 +1,4 @@
-#[path = "support/herdr.rs"]
-mod support;
+use crate::herdr_support as support;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use libertty_server::notifications::{self, DeliveryError, Notifications, Push, Sender};
 use p256::elliptic_curve::sec1::ToEncodedPoint;

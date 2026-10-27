@@ -1,3 +1,4 @@
+use crate::herdr_support as support;
 use libertty_server::{
     herdr_poll,
     herdr_terminal_stream::{Hub, Size},
@@ -8,8 +9,6 @@ use libertty_server::{
 use serde_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, sync::atomic::Ordering, time::Duration};
 use tokio_util::sync::CancellationToken;
-#[path = "support/herdr.rs"]
-mod support;
 
 #[tokio::test]
 async fn a_closed_terminal_controller_ends_quietly_before_history_detects_the_close() {

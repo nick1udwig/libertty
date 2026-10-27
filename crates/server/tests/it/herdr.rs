@@ -1,7 +1,6 @@
+use crate::herdr_support as support;
 use libertty_server::herdr;
 use serde_json::json;
-#[path = "support/herdr.rs"]
-mod support;
 
 #[tokio::test]
 async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals() {

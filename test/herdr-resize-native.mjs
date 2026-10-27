@@ -8,6 +8,7 @@ import { once } from 'node:events';
 import pty from 'node-pty';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
 import { shellQuote } from '../src/shell-words.ts';
+import { GZIP_FAST_PROTOCOL } from '../src/wire.ts';
 
 const fixturePort3172 = await freePort();
 
@@ -44,6 +45,7 @@ try {
   const token = (await readFile(dir + '/libertty/pairing-token', 'utf8')).trim();
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  if (!process.env.TEST_WIRE) await context.addInitScript(() => Object.defineProperty(navigator, 'connection', { configurable: true, value: { effectiveType: '4g', downlink: 10 } }));
   await installBackgroundGrace(context);
   await context.route('**/assets/terminal-*.js', async route => {
     const response = await route.fetch(), source = await response.text();
@@ -69,6 +71,7 @@ try {
   await phone.goto(base + '/terminal.html?herdrTerminal=' + terminal.terminalId + '&backend=' + encodeURIComponent(base + '/'));
   await phone.locator('#login-form').waitFor({ state: 'visible' }); await phone.locator('#token').fill(token); await phone.locator('#login-form button[type=submit]').click();
   await phone.waitForFunction(() => window.__terminal && document.querySelector('#connection-label').textContent === 'Connected');
+  if (!process.env.TEST_WIRE) assert.equal(await phone.evaluate(() => window.__testShellSocket.protocol), GZIP_FAST_PROTOCOL, 'Real native Herdr covers the default wire protocol');
   await wait(async () => { const actual = await geometry(), wanted = await phone.evaluate(() => ({ cols: window.__terminal.cols, rows: window.__terminal.rows })); return actual.cols < original.cols && JSON.stringify(actual) === JSON.stringify(wanted); }, 'real PTY sized to mobile');
   const mobile = await geometry();
   assert.ok(mobile.cols < original.cols);
