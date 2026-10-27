@@ -38,6 +38,9 @@ Local validation runs three harnesses at a time and reports every failure at the
 CI runs four parallel browser jobs with two workers each.
 Set `BROWSER_SHARD=k/n` to run one shard, with harnesses assigned longest-first from recorded CI durations.
 Each shard builds its own backend and frontend while Rust lints, Rust tests, JavaScript tests and installer checks run in another job.
+Verification uses OpenSSH and Bash completion from the Ubuntu runner image and only creates the SSH daemon runtime directory.
+Chromium is cached by the pinned `playwright-core` version and installed with `--no-shell`, without apt updates or dependency upgrades.
+CI sets `CHROME_PATH` and `CHROMIUM` to the Playwright executable so system Chromium cannot shadow it.
 Every existing application harness remains available through its original npm command or `node test/<harness>.mjs`.
 The helpers in `test/support/browser.mjs` wait for a connected, visible shell before entering a new command or transcript.
 For native sessions, they also wait for Readline's bracketed-paste enable sequence.

@@ -10,7 +10,7 @@ runs:
     - name: Read the checked-out Node pin
       id: pins
       shell: bash
-      run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "node=" + require("./build/release-config.json").node + "\n")'
+      run: node -e 'require("node:fs").appendFileSync(process.env.GITHUB_OUTPUT, "node=" + require("./build/release-config.json").node + "\nplaywright=" + require("./package-lock.json").packages["node_modules/playwright-core"].version + "\n")'
     - uses: actions/setup-node@v7
       with:
         node-version: ${{ steps.pins.outputs.node }}
@@ -25,13 +25,20 @@ runs:
         cache-bin: false
     - shell: bash
       run: npm ci --no-audit --no-fund
-    - name: Install native test prerequisites
+    - name: Check native test prerequisites
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y openssh-server bash-completion
+        command -v sshd
+        test -f /usr/share/bash-completion/bash_completion
         sudo mkdir -p /run/sshd
+    - uses: actions/cache@v5
+      if: inputs.browser == 'true'
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pins.outputs.playwright }}
     - name: Install the pinned test browser
       if: inputs.browser == 'true'
       shell: bash
-      run: npx --no-install playwright-core install --with-deps chromium
+      run: |
+        npx --no-install playwright-core install --no-shell chromium
+        node --input-type=module -e 'import { chromium } from "playwright-core"; import { appendFileSync } from "node:fs"; const browser = chromium.executablePath(); appendFileSync(process.env.GITHUB_ENV, "CHROME_PATH=" + browser + "\nCHROMIUM=" + browser + "\n");'
