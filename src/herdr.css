@@ -1,7 +1,4 @@
 .herdr-view{position:absolute;inset:0;display:flex;flex-direction:column;min-height:0;background:var(--bg);color:var(--text)}
-.key-bar .herdr-copy-response{min-width:calc(13ch + 24px)}
-.herdr-response-dialog{width:min(560px,calc(100vw - 32px))}
-.herdr-response-dialog textarea{width:100%;height:45vh;resize:vertical;font:13px var(--font-mono)}
 .herdr-view,.herdr-agent-strip{--herdr-idle:var(--accent);--herdr-done:var(--info);--herdr-working:var(--warn);--herdr-blocked:var(--danger)}
 /* 1776 and flag have red accents, so idle agents take a ring in the text color and red stays with blocked agents. */
 :root:is([data-theme="1776"],[data-theme=flag]) :is(.herdr-view,.herdr-agent-strip){--herdr-idle:var(--text)}

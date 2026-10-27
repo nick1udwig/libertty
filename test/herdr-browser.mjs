@@ -18,25 +18,6 @@ const fixturePort3168 = await freePort();
 
 const fixture = await herdrFixture(), origin = 'http://127.0.0.1:' + fixturePort3167, base = origin + '/herdr-test';
 const root = new URL('../', import.meta.url).pathname;
-const transcriptDirectory = fixture.directory + '/.claude/projects/fixture', transcriptPath = transcriptDirectory + '/agent.jsonl';
-const agentResponse = '## Agent response\n\n```ts\nconst copied = true;\n```';
-await mkdir(transcriptDirectory, { recursive: true });
-await writeFile(transcriptPath, [
-  { type: 'user', message: { role: 'user', content: 'Private prompt' } },
-  { type: 'assistant', message: { id: 'tool', role: 'assistant', stop_reason: 'tool_use', content: [{ type: 'text', text: 'Work update' }, { type: 'tool_use', name: 'Read' }] } },
-  { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', content: 'Private tool result' }] } },
-  { type: 'assistant', message: { id: 'final', role: 'assistant', content: [{ type: 'text', text: agentResponse }] } },
-].map(record => JSON.stringify(record)).join('\n') + '\n');
-fixture.snapshot.panes[0].agent_session = { source: 'fixture', agent: 'claude', kind: 'path', value: transcriptPath };
-fixture.snapshot.panes[1].agent = 'claude';
-const codexDirectory = fixture.directory + '/.codex/sessions/2026/10/26';
-await mkdir(codexDirectory, { recursive: true });
-await writeFile(codexDirectory + '/rollout-fixture-session-123.jsonl', [
-  { type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Private prompt' }] } },
-  { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'final_answer', content: [{ type: 'output_text', text: agentResponse }] } },
-  { type: 'response_item', payload: { type: 'message', role: 'assistant', phase: 'commentary', content: [{ type: 'output_text', text: 'Work update' }] } },
-].map(record => JSON.stringify(record)).join('\n') + '\n');
-fixture.snapshot.panes[2].agent_session = { source: 'fixture', agent: 'codex', kind: 'id', value: 'session-123' };
 const voiceToken = 'fixture-voice-token-'.repeat(4), daemon = new WebSocketServer({ port: 0, host: '127.0.0.1' });
 await once(daemon, 'listening'); await writeFile(fixture.directory + '/voice-token', voiceToken, { mode: 0o600 });
 let voiceBytes = 0, voiceAcks = 0;
@@ -52,7 +33,7 @@ daemon.on('connection', (socket, request) => {
 const backend = startBackend({ cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: {
   ...process.env, LIBERTTY_VOXTYPE_TOKEN_FILE: fixture.directory + '/voice-token', LIBERTTY_VOXTYPE_URL: 'ws://127.0.0.1:' + daemon.address().port + '/v1/dictate', NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3167), LIBERTTY_BASE_PATH: '/herdr-test',
   LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: origin, LIBERTTY_DATA_DIR: fixture.directory + '/libertty',
-  LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture.directory, HOME: fixture.directory, CODEX_HOME: fixture.directory + '/.codex', CLAUDE_CONFIG_DIR: fixture.directory + '/.claude',
+  LIBERTTY_NO_RC: '1', LIBERTTY_CWD: fixture.directory, HOME: fixture.directory,
   PATH: fixture.directory + ':' + process.env.PATH, LIBERTTY_TOKEN: '', HERDR_SOCKET_PATH: fixture.socketPath,
 } });
 const exited = once(backend, 'exit'), errors = [], network = []; let logs = '', browser, page, sshd, liveOutput;
@@ -64,18 +45,7 @@ try {
   const request = (name, data, bearer) => fetch(base + '/api/' + name, { method: data === undefined ? 'GET' : 'POST',
     headers: { Origin: origin, ...(bearer ? { Authorization: 'Bearer ' + bearer } : {}), ...(data === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   for (const name of ['herdr/snapshot', 'herdr/action', 'herdr/ticket', 'herdr/captured', 'notifications/key', 'notifications/subscribe', 'notifications/unsubscribe', 'notifications/unwatch', 'herdr/notifications']) assert.equal((await request(name, {})).status, 401);
-  assert.equal((await request('herdr/response')).status, 401);
   const bearer = (await (await request('connect', { noSession: true, token })).json()).accessToken;
-  const copiedResponse = await request('herdr/response?terminalId=term_0', undefined, bearer);
-  const copiedBody = await copiedResponse.json();
-  assert.equal(copiedResponse.status, 200, JSON.stringify(copiedBody));
-  assert.deepEqual(copiedBody, { text: agentResponse });
-  const codexResponse = await request('herdr/response?terminalId=term_2', undefined, bearer);
-  assert.equal(codexResponse.status, 200);
-  assert.deepEqual(await codexResponse.json(), { text: agentResponse });
-  const missingTranscript = await request('herdr/response?terminalId=term_1', undefined, bearer);
-  assert.equal(missingTranscript.status, 400);
-  assert.match((await missingTranscript.json()).error, /herdr integration install claude/);
   assert.equal((await request('herdr/snapshot?herdrSession=../../escape', undefined, bearer)).status, 400);
   assert.equal((await request('herdr/action', { action: 'rename', terminalId: 'missing', name: 'x' }, bearer)).status, 400);
   {
@@ -154,7 +124,6 @@ try {
   await page.locator('#backend-login').waitFor({ state: 'visible' }); await page.locator('#backend-token').fill(token); await page.locator('#backend-login-form button[type=submit]').click();
   const shell = await (await page.locator('#terminal-stack > iframe').elementHandle()).contentFrame();
   await shell.waitForFunction(() => window.__state?.ready);
-  assert.equal(await page.locator('.herdr-copy-response').count(), 0, 'Ordinary shells do not offer agent response copying');
   await shell.locator('#terminal textarea').focus(); await page.keyboard.type('herdr'); await page.keyboard.press('Enter');
   await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').waitFor();
   assert.ok(JSON.parse(await page.evaluate(() => localStorage.getItem('libertty.hosts'))).some(host => host.kind === 'herdr'), 'Typing herdr saves its host automatically');
@@ -244,22 +213,7 @@ try {
   assert.ok(bottomControls.tabs.bottom <= bottomControls.spaces.top + 1, 'Terminal tabs sit above Herdr spaces');
   assert.ok(bottomControls.spaces.bottom <= bottomControls.shortcuts.top + 1, 'Herdr spaces sit above configurable buttons');
   assert.equal(bottomControls.shortcuts.bottom, bottomControls.height);
-  assert.equal(await page.locator('.herdr-response-actions').count(), 0, 'Response copying has no separate bar');
   assert.equal(await page.locator('.herdr-view').evaluate(element => element.getBoundingClientRect().top === element.querySelector('.herdr-screen').getBoundingClientRect().top), true, 'The terminal uses all space above the bottom controls');
-  const copyResponse = page.locator('#workspace-shortcut-buttons').getByRole('button', { name: 'Copy latest assistant response', exact: true });
-  await copyResponse.click();
-  await until(async () => await page.evaluate(() => navigator.clipboard.readText()) === agentResponse, 'copy complete Markdown response from hotkeys');
-  await page.screenshot({ path: root + '.test-artifacts/herdr-response-hotkeys.png' });
-  await page.evaluate(() => Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: () => Promise.reject(new Error('Clipboard denied')) }));
-  await copyResponse.click();
-  const responseDialog = page.getByRole('dialog', { name: 'Copy agent response' });
-  await responseDialog.waitFor({ state: 'visible' });
-  assert.equal(await responseDialog.getByRole('textbox', { name: 'Agent response' }).inputValue(), agentResponse);
-  await responseDialog.getByRole('button', { name: 'Copy', exact: true }).click();
-  await responseDialog.waitFor({ state: 'hidden' });
-  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), agentResponse);
-  await page.evaluate(() => { delete navigator.clipboard.write; });
-  await page.locator('#workspace-shortcut-buttons').evaluate(element => element.scrollLeft = 0);
   const inputCanvas = terminal.locator('#terminal canvas');
   await inputCanvas.tap({ position: await inputCanvas.evaluate(element => ({ x: element.clientWidth - 4, y: element.clientHeight - 4 })) });
   await terminal.waitForFunction(() => { const input = document.querySelector('#terminal textarea'); return document.activeElement === input && !input.readOnly; });

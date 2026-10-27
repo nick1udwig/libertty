@@ -388,11 +388,9 @@ export function createWorkspaceNavigation(options: Options) {
       page !== 'terminal' || !(state || (tab && ['terminal', 'herdr'].includes(tabPluginId(tab))));
     positionNotice();
     const ready = !!state && !frame?.inert && (!herdr || herdr.ready);
-    const response = herdr?.responseControl(ready);
     // Reserve the configured controls before the incoming terminal publishes its state.
     const shortcuts = state?.shortcuts || currentShortcuts();
     const presentation = JSON.stringify({
-      tab: workspace.active,
       shortcuts,
       ctrl: ready && state?.ctrl,
       available: state?.available,
@@ -445,7 +443,6 @@ export function createWorkspaceNavigation(options: Options) {
     image.setAttribute('aria-label', 'Attach images');
     image.disabled = !ready || !state?.imageAvailable;
     buttons.append(image);
-    if (response) buttons.append(response);
     buttons.scrollLeft = scroll;
   }
   function showTerminalLoading(id: string, waitForPrompt = false) {

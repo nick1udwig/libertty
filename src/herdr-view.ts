@@ -3,7 +3,6 @@ import { icon } from './icons.ts';
 import { saved } from './persistence.ts';
 import type { ReadingOpen } from './reading-request.ts';
 import { HerdrFrames } from './herdr-frames.ts';
-import { HerdrResponse } from './herdr-response.ts';
 import { wireProtocols } from './wire.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
 import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSnapshot, type HerdrSpace } from './herdr-protocol.ts';
@@ -44,7 +43,6 @@ export class HerdrView {
   private tabsToggle = node('button', 'herdr-tabs-toggle');
   private screen = node('div', 'herdr-screen');
   private frames: HerdrFrames;
-  private response: HerdrResponse;
   private status = node('div', 'herdr-connection');
   private empty = node('div', 'herdr-empty');
   private menu = node('div', 'herdr-tab-menu');
@@ -91,10 +89,6 @@ export class HerdrView {
   private host: Host;
   constructor(host: Host) {
     this.host = host;
-    this.response = new HerdrResponse({
-      response: () => host.api('api/herdr/response?terminalId=' + encodeURIComponent(this.selected)),
-      notice: message => host.notice(message),
-    });
     this.dialogs = new HerdrDialogs({
       api: (path, data) => host.api(path, data), refresh: created => this.refreshSnapshot(created),
       closeMenu: () => this.closeMenu(), closeTab: item => this.closeTab(item), closing: this.closing,
@@ -239,7 +233,6 @@ export class HerdrView {
   }
   get ready() { return this.cached || this.frames.rendered || !!this.status.textContent || this.connected && !this.selected; }
   get navigationElement() { return this.strip; }
-  responseControl(enabled: boolean) { this.response.setEnabled(enabled); return this.response.element; }
   setTerminalTabsExpanded(expanded: boolean) {
     this.tabsToggle.setAttribute('aria-expanded', String(expanded));
     this.tabsToggle.setAttribute('aria-label', expanded ? 'Hide terminal tabs' : 'Show terminal tabs');
@@ -393,7 +386,6 @@ export class HerdrView {
     if (snapshot) try { localStorage.setItem(this.host.key + '.snapshot', JSON.stringify(snapshot)); } catch { /* The next load waits for a live snapshot. */ }
   }
   private render() {
-    this.response.update(this.liveSnapshot && this.tracker.agents.some(agent => agent.terminalId === this.selected));
     this.strip.inert = !this.liveSnapshot;
     this.strip.setAttribute('aria-busy', String(!this.liveSnapshot));
     this.host.changed(this.tracker.attention);
@@ -743,7 +735,7 @@ export class HerdrView {
   copySelection() { this.post({ type: 'settings-action', action: 'copy-selection' }); }
   dispose() {
     if (this.disposed) return; this.disposed = true;
-    this.writeCache(); this.dialogs.active?.close(); this.response.dispose();
+    this.writeCache(); this.dialogs.active?.close();
     this.dropIndicator.remove(); this.treeBridge.remove();
     clearTimeout(this.recoveryRetry); this.transport.suspend(); this.frames.dispose(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
