@@ -83,6 +83,11 @@ Parallel Linux x64 jobs run native checks and browser shards, and each supported
 The reusable [verification workflow](../.github/workflows/verify.yml) provides the same checks for CI and releases.
 Pull requests verify the synthetic merge commit, merge queues verify the candidate commit and releases verify the resolved release commit.
 Nightly CI retains the strict browser reliability repeats.
+Successful verification uploads a `verified-<Git tree hash>` marker for 30 days, with a separate reliability marker when those repeats pass.
+CI and releases reuse a marker only after checking that its completed CI or release run succeeded and that the run's source commit has the same tree.
+Expired markers, fork runs, different source trees and failed or incomplete runs do not skip checks.
+Lookup errors run fresh checks, and nightly or manual CI always runs fresh checks.
+Pushes to `master` cancel unfinished CI runs for the merged pull request.
 Manual runs create downloadable artifacts without publishing a release.
 See [releases.md](releases.md) for pins, packaging and publication.
 

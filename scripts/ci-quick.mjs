@@ -34,6 +34,7 @@ console.log(`Verified syntax for ${modules} modules, ${data} JSON files and ${Ob
 const tests = [
   'browser-shards.test.mjs',
   'browser-results.test.mjs',
+  'verified-tree.test.mjs',
   'api.test.ts',
   'dictation-audio.test.ts',
   'dictation-alternatives.test.ts',

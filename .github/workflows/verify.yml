@@ -9,15 +9,41 @@ on:
       diagnostics-name:
         default: integration-check-diagnostics
         type: string
+      force:
+        default: false
+        type: boolean
       reliability:
         default: true
         type: boolean
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
+  lookup:
+    name: Find verified source tree
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      tree: ${{ steps.tree.outputs.tree }}
+      verified: ${{ steps.tree.outputs.verified }}
+      reliability: ${{ steps.tree.outputs.reliability }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - id: tree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFY_FORCE: ${{ inputs.force }}
+          VERIFY_RELIABILITY: ${{ inputs.reliability }}
+        run: node scripts/verified-tree.mjs
+
   rust:
+    needs: lookup
+    if: needs.lookup.outputs.verified != 'true'
     name: Rust and unit tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -38,6 +64,8 @@ jobs:
           npm run test:install
 
   browser:
+    needs: lookup
+    if: needs.lookup.outputs.verified != 'true'
     name: Browser shard ${{ matrix.shard }}/4
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -71,8 +99,9 @@ jobs:
           include-hidden-files: true
 
   reliability:
+    needs: lookup
     name: Browser reliability with ${{ matrix.workers }} workers
-    if: inputs.reliability
+    if: inputs.reliability && needs.lookup.outputs.reliability != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -101,3 +130,43 @@ jobs:
             .test-artifacts/browser/**
           if-no-files-found: ignore
           include-hidden-files: true
+
+  complete:
+    name: Record verified source tree
+    needs: [lookup, rust, browser, reliability]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Require fresh checks or a verified tree for every required suite
+        env:
+          LOOKUP: ${{ needs.lookup.result }}
+          VERIFIED: ${{ needs.lookup.outputs.verified }}
+          RELIABILITY_VERIFIED: ${{ needs.lookup.outputs.reliability }}
+          REQUIRED: ${{ inputs.reliability }}
+          RUST: ${{ needs.rust.result }}
+          BROWSER: ${{ needs.browser.result }}
+          RELIABILITY: ${{ needs.reliability.result }}
+        run: node scripts/verified-tree.mjs gate
+      - name: Write the verification marker
+        env:
+          TREE: ${{ needs.lookup.outputs.tree }}
+        run: |
+          mkdir -p .test-artifacts
+          printf '%s\n' "$TREE" > .test-artifacts/verified-tree.txt
+      - uses: actions/upload-artifact@v7
+        if: needs.lookup.outputs.verified != 'true'
+        with:
+          name: verified-${{ needs.lookup.outputs.tree }}
+          path: .test-artifacts/verified-tree.txt
+          retention-days: 30
+      - uses: actions/upload-artifact@v7
+        if: inputs.reliability && needs.lookup.outputs.reliability != 'true'
+        with:
+          name: verified-${{ needs.lookup.outputs.tree }}-reliability
+          path: .test-artifacts/verified-tree.txt
+          retention-days: 30

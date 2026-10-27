@@ -11,12 +11,32 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  cancel-merged-pr:
+    name: Cancel superseded pull request checks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Cancel unfinished CI runs for the merged pull request
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verified-tree.mjs cancel
+
   quick:
     name: CI
     runs-on: ubuntu-24.04
@@ -38,6 +58,7 @@ jobs:
     with:
       ref: ${{ github.sha }}
       reliability: ${{ github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
+      force: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
 
   integration:
     name: Integration
