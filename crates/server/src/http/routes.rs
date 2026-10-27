@@ -241,7 +241,6 @@ pub(super) fn router() -> Router<Arc<App>> {
             post(herdr_routes::api_herdr_notifications),
         )
         .route("/api/herdr/snapshot", get(herdr_routes::api_herdr_snapshot))
-        .route("/api/herdr/response", get(herdr_routes::api_herdr_response))
         .route(
             "/api/herdr/images/upload",
             post(herdr_routes::api_herdr_images_upload),
