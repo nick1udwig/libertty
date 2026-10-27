@@ -5,6 +5,7 @@ On desktop the page shows a phone whose screen runs the real app, with sections 
 On a phone the page opens on the headline, a summary, the install command and the features, followed by the full product sections and guides.
 The demo button scrolls to the swipe area after those sections.
 Swiping through that area raises the app as a card over the page, and when the card reaches the top it becomes the full-screen app.
+A swipe that stops past halfway finishes the move, and one that stops short of halfway drops the card back.
 Scrolling up then stays inside the app, and Back returns to the landing page.
 The app loads when a desktop visitor selects Try the demo or a phone visitor reaches the swipe area.
 The `#demo` link loads the app directly on both layouts.
