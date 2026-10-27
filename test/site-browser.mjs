@@ -85,6 +85,19 @@ try {
     if (mobile) await page.waitForFunction(() => document.querySelector('#demo').getBoundingClientRect().top >= innerHeight);
     await page.screenshot({ path: root + `.test-artifacts/site/landing-${width}.png` });
     if (mobile) {
+      await page.evaluate(() => document.documentElement.style.setProperty('--viewport-height', innerHeight - 80 + 'px'));
+      await page.evaluate(() => scrollTo(0, document.getElementById('runway').offsetTop - innerHeight * .8));
+      await page.waitForFunction(() => Math.abs(document.getElementById('runway').getBoundingClientRect().top - innerHeight) < 2);
+      assert.equal(await page.locator('html').evaluate(el => el.classList.contains('in-app')), false, 'A short swipe into the runway drops back');
+      for (let wheel = 0; wheel < 100 && !await page.locator('html').evaluate(el => el.classList.contains('in-app')); wheel++) await page.mouse.wheel(0, 800);
+      await page.waitForFunction(() => document.documentElement.classList.contains('in-app'));
+      assert.equal(await page.locator('#app').getAttribute('src'), 'app.html', 'Scrolling to the end enters the demo when the visual viewport is shorter than the layout viewport');
+      await page.goBack();
+      await page.waitForFunction(() => !document.documentElement.classList.contains('in-app'));
+      await page.evaluate(() => scrollTo(0, document.getElementById('runway').offsetTop - innerHeight * .4));
+      await page.waitForFunction(() => document.documentElement.classList.contains('in-app'));
+      await page.goBack();
+      await page.waitForFunction(() => !document.documentElement.classList.contains('in-app'));
       await page.locator('#cue').click();
       await page.waitForFunction(() => document.documentElement.classList.contains('in-app'));
       assert.equal(new URL(page.url()).hash, '#demo');
