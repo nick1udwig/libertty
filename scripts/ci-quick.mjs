@@ -64,6 +64,7 @@ const tests = [
   'unsent-input.test.ts',
   'vault.test.ts',
   'wire.test.ts',
+  'wire-observer.test.mjs',
 ];
 const result = spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--test', '--test-reporter=spec', ...tests.map(file => 'test/' + file)], { cwd: root, stdio: 'inherit' });
 if (result.error) throw result.error;

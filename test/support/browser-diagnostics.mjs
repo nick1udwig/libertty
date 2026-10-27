@@ -39,6 +39,7 @@ export function trackBrowser(browser) {
           return {
             url: location.href, state: window.__testShellState || window.__shellState || window.__state,
             afterPrompt: window.__testAfterPrompt, visibility: document.visibilityState,
+            readlineReady: window.__testReadlineReady, outputEnd: window.__output?.slice(-3000),
             activeElement: document.activeElement?.outerHTML.slice(0, 1000),
             text: document.body?.innerText.slice(0, 20000),
             copies: window.__copies || window.__clipboardWrites, touches: window.__nativeTouches,

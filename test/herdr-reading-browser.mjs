@@ -41,8 +41,6 @@ try {
     if (location.origin !== origin) return;
     // Dictation setup help is a modal that would capture typed reading commands.
     localStorage.setItem('libertty.voxtype:' + location.origin + '/reading-test/', 'dismissed');
-    const Original = WebSocket;
-    window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'state') window.__state = message.state; }); } };
     if (!localStorage.getItem('libertty.tabs')) {
       const id = crypto.randomUUID();
       localStorage.setItem('libertty.hosts', JSON.stringify([{ id: 'herdr-reader', name: 'Herdr', kind: 'herdr', backendId: 'primary' }]));
@@ -109,13 +107,13 @@ try {
   assert.equal(await readFile(dir + '/work tree/once', 'utf8'), 'x');
   const standalone = await context.newPage(); standalone.on('pageerror', error => errors.push(error.message));
   await standalone.goto(base + 'terminal.html?herdrTerminal=' + pane.terminal_id);
-  await standalone.waitForFunction(() => window.__state?.ready && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && document.querySelector('#terminal-viewport').getAttribute('aria-busy') !== 'true');
+  await waitForShell(standalone);
   await focusShell(standalone); await standalone.keyboard.type('look at note.txt'); await standalone.keyboard.press('Enter');
   await standalone.waitForURL(base); await standalone.locator('.reading-text:visible').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
   assert.deepEqual(errors, []);
   console.log('PASS Herdr reader: typed and dictated files, relative links, prefix and piped command output, reloads, source navigation and SSH context.');
 } catch (error) {
-  for (const frame of browser?.contexts().flatMap(context => context.pages()).flatMap(page => page.frames()) || []) console.error(await frame.evaluate(() => ({ url: location.href, state: window.__state, notice: document.querySelector('#toast')?.textContent, text: document.body.innerText.slice(0, 1000) })).catch(() => ({})));
+  for (const frame of browser?.contexts().flatMap(context => context.pages()).flatMap(page => page.frames()) || []) console.error(await frame.evaluate(() => ({ url: location.href, state: window.__testShellState, notice: document.querySelector('#toast')?.textContent, text: document.body.innerText.slice(0, 1000) })).catch(() => ({})));
   console.error(logs); throw error;
 }
 finally {
