@@ -34,12 +34,6 @@ try {
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   const page = await context.newPage(); const errors = []; page.on('pageerror', error => errors.push(String(error)));
   await installWireObserver(page.context());
-  await page.addInitScript(() => {
-    const Original = window.WebSocket;
-    window.WebSocket = class extends Original {
-      constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'state') window.__shellState = message.state; }); }
-    };
-  });
   await page.goto(base + '/');
   await page.locator('#backend-login').waitFor({ state: 'visible' });
   await page.locator('#backend-token').fill(token); await page.locator('#backend-login-form button[type=submit]').click();
