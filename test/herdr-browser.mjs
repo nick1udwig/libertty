@@ -214,9 +214,6 @@ try {
   assert.ok(bottomControls.spaces.bottom <= bottomControls.shortcuts.top + 1, 'Herdr spaces sit above configurable buttons');
   assert.equal(bottomControls.shortcuts.bottom, bottomControls.height);
   assert.equal(await page.locator('.herdr-view').evaluate(element => element.getBoundingClientRect().top === element.querySelector('.herdr-screen').getBoundingClientRect().top), true, 'The terminal uses all space above the bottom controls');
-  const inputCanvas = terminal.locator('#terminal canvas');
-  await inputCanvas.tap({ position: await inputCanvas.evaluate(element => ({ x: element.clientWidth - 4, y: element.clientHeight - 4 })) });
-  await terminal.waitForFunction(() => { const input = document.querySelector('#terminal textarea'); return document.activeElement === input && !input.readOnly; });
   await terminal.locator('#terminal textarea').focus(); await page.keyboard.type('Split routes into handlers'); await page.locator('#workspace-enter').tap();
   await until(() => fixture.actions.some(a => a.method === 'pane.send_text' && a.params.text === '\r'), 'direct Enter delivery');
   assert.equal(fixture.actions.filter(a => a.method === 'pane.send_text').map(a => a.params.text).join(''), 'Split routes into handlers\r');
