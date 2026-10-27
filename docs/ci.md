@@ -31,6 +31,10 @@ npm run verify:local
 ```
 
 [scripts/verify-local.mjs](../scripts/verify-local.mjs) runs fast checks, formatting, native Clippy, Rust tests, the complete build, JavaScript and contract tests, installer fixtures and browser checks in sequence.
+Development builds optimize `scrypt`, `salsa20`, `pbkdf2` and `sha2` so key derivation retains production parameters without slow debug cryptography.
+The silent-viewer test uses a debug-only `LIBERTTY_TEST_HEARTBEAT_MS` override and four output windows of data without expensive repeated terminal scrolling.
+It keeps heartbeat traffic active without acknowledging output until the shell completes, then stops all traffic to check cleanup.
+Release builds retain the fixed 30-second heartbeat and ignore the test override.
 [scripts/check-browser.mjs](../scripts/check-browser.mjs) contains the single explicit browser list used by both local validation and the Linux release checking job.
 It covers native repairs, SSH, reading, Herdr, plugins, pairing, reconnects, gestures, touch, dictation, files and workspace behavior.
 It first downloads and verifies the pinned Herdr release, which the dictation, spaces, resize, flash and fullscreen scrolling harnesses use as the real native integration.

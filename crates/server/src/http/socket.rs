@@ -169,10 +169,21 @@ pub(super) struct Policy {
 impl Policy {
     /// A vanished viewer must not hold the shell's output window closed.
     pub fn native() -> Self {
+        static HEARTBEAT: std::sync::LazyLock<Duration> = std::sync::LazyLock::new(|| {
+            #[cfg(debug_assertions)]
+            if let Some(milliseconds) = std::env::var("LIBERTTY_TEST_HEARTBEAT_MS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .filter(|value| *value > 0)
+            {
+                return Duration::from_millis(milliseconds);
+            }
+            Duration::from_secs(30)
+        });
         Self {
             cancel: CancellationToken::new(),
             slow: CancellationToken::new(),
-            heartbeat: Some(Duration::from_secs(30)),
+            heartbeat: Some(*HEARTBEAT),
             send_timeout: Some(Duration::from_secs(20)),
         }
     }
