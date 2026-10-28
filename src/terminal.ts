@@ -120,7 +120,7 @@ function toast(message: string) {
 }
 function connection(label: string, online = false) {
   $('connection-label').textContent = label;
-  const updated = lastOutputAt ? ` · last output ${new Date(lastOutputAt).toLocaleTimeString()}` : '';
+  const updated = lastOutputAt || cachedUpdated ? ` · last output ${new Date(lastOutputAt || cachedUpdated).toLocaleTimeString()}` : '';
   $('reconnect-banner').textContent = label === 'Session ended' ? 'This terminal has ended; open its saved host to reconnect.' : label.startsWith('Connection stalled') ? label : 'Reconnecting' + updated;
   $('reconnect-banner').hidden = online || label === 'Connecting' || label === 'Locked';
   updateRun();
@@ -204,8 +204,8 @@ const cachedScroll = new TerminalScrollFallback(lines => {
   reader.scroll(lines);
 });
 let cachedUpdated = 0, cachedStream = '', clearedScreen: string | undefined, cacheRestored = false, streamStarted = false;
-// Retained output painted through the terminal itself until live output replaces it.
-let cachePainted = false, picture: TerminalPicture = { last: 0, x: 0, y: 0, cursor: false };
+// Retained output painted through the terminal itself until live output replaces it at the same distance from the bottom.
+let cachePainted = false, handoffPosition = 0, picture: TerminalPicture = { last: 0, x: 0, y: 0, cursor: false };
 let backfillNeeded = false, backfill: AbortController | undefined;
 let backfillTimer: ReturnType<typeof setTimeout> | undefined;
 let transcriptTimer: ReturnType<typeof setTimeout> | undefined, cacheTimer: ReturnType<typeof setTimeout> | undefined;
@@ -239,7 +239,10 @@ function paintCache(position: number) {
   if (presentation.pending) presentation.wait();
   updateRun(); notifyCachedRendered();
 }
-function livePainted() { if (cachePainted && !projection?.stale) cachePainted = false; }
+function livePainted(position: number) {
+  if (!cachePainted || projection?.stale) return;
+  cachePainted = false; if (position) term.scrollToLine(position);
+}
 /** Hold the painted picture while the terminal changes, unless it already shows retained output. */
 function hold() { if (cachePainted) presentation.wait(); else presentation.freeze(); }
 function layout(options: Parameters<HerdrLayout['set']>[0]) { herdrLayout.set(cachePainted ? { ...options, cover: false } : options); }
@@ -258,7 +261,8 @@ void cache.read(cacheKey).then(saved => {
   }
   cachedUpdated = saved.updated; cachedStream = saved.stream; picture = saved.picture; cacheRestored = true;
   paintCache(saved.position);
-  if (transport.socket?.readyState !== WebSocket.OPEN) connection('Offline');
+  // A working connection replaces retained output without announcing a reconnect.
+  if (!navigator.onLine) connection('Offline');
   notify('terminal-ready');
 });
 function flushTranscript() { captureTranscript(); saveTranscript(); }
@@ -319,6 +323,7 @@ function synchronizeInput() {
 }
 function revealReplay() {
   if (!herdrTerminal && replayState && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) {
+    if (handoffPosition) { term.scrollToLine(handoffPosition); handoffPosition = 0; }
     presentation.reveal(); synchronizeInput();
   }
 }
@@ -633,7 +638,8 @@ function scheduleHerdrRendered() {
 }
 function applyDeferredScreen() {
   if (deferredScreen === undefined || herdrLayout.pending || herdrParked || !tabVisible || document.hidden) return;
-  projection?.update(deferredScreen); deferredScreen = undefined; livePainted(); scheduleTranscript();
+  const position = Math.floor(term.getViewportY());
+  projection?.update(deferredScreen); deferredScreen = undefined; livePainted(position); scheduleTranscript();
 }
 function discardHerdrFrames() {
   frameScheduler.cancel();
@@ -651,8 +657,9 @@ function paintHerdrFrame(message: HerdrFrameMessage) {
   try {
     if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) return;
     if (herdrLayout.pending && !herdrLayout.accept(message.width === term.cols && message.height === term.rows, message.full)) return;
+    const position = Math.floor(term.getViewportY());
     if (projection?.frame(message) && !herdrLayout.pending) scheduleHerdrRendered();
-    livePainted(); lastOutputAt = Date.now(); cachedScroll.updated(); scheduleTranscript();
+    livePainted(position); lastOutputAt = Date.now(); cachedScroll.updated(); scheduleTranscript();
     revealHerdrLayout();
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame();
   } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
@@ -746,7 +753,7 @@ const handlers: Handlers = {
     streamId = message.streamId; streamStarted = true;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
-    if (message.reset) { if (!changedStream && !cachePainted) { captureTranscript(); if (!reader.open && term.getViewportY() > 0) { showCachedTerminal(); reader.scroll(-term.getViewportY()); cacheRestored = true; } } transcript.gap('The connection resumed from a screen snapshot; older output may be missing.'); backfillNeeded = true; presentation.freeze(); cachePainted = false; queue.clear(); after = received = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
+    if (message.reset) { if (!changedStream && !cachePainted) { captureTranscript(); if (!reader.open && term.getViewportY() > 0) { showCachedTerminal(); reader.scroll(-term.getViewportY()); cacheRestored = true; } } transcript.gap('The connection resumed from a screen snapshot; older output may be missing.'); backfillNeeded = true; if (cachePainted) handoffPosition = Math.floor(term.getViewportY()); presentation.freeze(!cachePainted); cachePainted = false; queue.clear(); after = received = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
     if (message.truncated) {
       term.write('\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n');
       toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.');
@@ -793,7 +800,7 @@ function socketClosed(event?: CloseEvent) {
   if (directAttempt && !replayState) authorized = false;
   herdrDormant = herdrParked;
   disconnectedContext = inputContext() || disconnectedContext;
-  dictation.connected(false); synchronizedConnection = false; streamStarted = false;
+  dictation.connected(false); synchronizedConnection = false; streamStarted = false; handoffPosition = 0;
   echo.reset();
   presentation.wait(); replayState = false;
   herdrReady = false;

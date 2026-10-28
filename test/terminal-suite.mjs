@@ -69,6 +69,12 @@ try {
   await page.addInitScript(() => {
     const paint = CanvasRenderingContext2D.prototype.fillText;
     window.__paintStyled = sessionStorage.getItem('test.paint-styles') ? [] : undefined;
+    window.__handoff = { banner: false, progress: false };
+    new MutationObserver(() => {
+      const banner = document.getElementById('reconnect-banner'), layer = document.querySelector('.terminal-presentation');
+      if (banner && !banner.hidden) window.__handoff.banner = true;
+      if (layer && !layer.hidden && !layer.querySelector('.terminal-loading-bar')?.hidden) window.__handoff.progress = true;
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden'] });
     CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); window.__paintStyled?.push([text, String(this.fillStyle)]); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
@@ -473,7 +479,23 @@ try {
       const cells = window.__paintStyled || [], chars = [...text];
       for (let i = cells.length - chars.length; i >= 0; i--) if (chars.every((char, j) => cells[i + j][0] === char)) return cells.slice(i, i + chars.length).map(([, style]) => style);
     }, text);
+    // A slow but working connection replaces retained output without a banner, progress or a moved reading position.
     await page.evaluate(() => sessionStorage.setItem('test.paint-styles', '1'));
+    let releaseConnect; const connectGate = new Promise(resolve => releaseConnect = resolve);
+    const holdConnect = async route => { await connectGate; await route.continue(); };
+    await page.route('**/api/connect', holdConnect);
+    await page.reload(); await until(async () => !!await paintedStyles('red-proof'), 'retained output before the connection');
+    const track = page.locator('.terminal-scrollbar');
+    await track.press('PageUp');
+    const distance = async () => Number(await track.getAttribute('aria-valuemax')) - Number(await track.getAttribute('aria-valuenow'));
+    const reading = await distance();
+    assert.ok(reading > 0, 'Retained output scrolls while the connection is pending');
+    releaseConnect(); await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected');
+    await page.waitForFunction(() => document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+    await page.unroute('**/api/connect', holdConnect);
+    assert.deepEqual(await page.evaluate(() => window.__handoff), { banner: false, progress: false }, 'The live replay replaces retained output unnoticed');
+    assert.equal(await distance(), reading, 'Live output keeps the reading position');
+    await track.press('End');
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');
     await page.waitForSelector('#terminal canvas');
     await until(async () => !!await paintedStyles('red-proof'), 'retained output painted by the terminal');

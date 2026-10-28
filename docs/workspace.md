@@ -272,7 +272,9 @@ A full-screen application's unobserved history still needs the remote applicatio
 Geometry changes retain the separate layout handshake so stale frames do not replace a resized pane.
 
 A reload paints persisted output through the terminal renderer with its colors, attributes, screen layout and cursor.
-The next live replay or Herdr frame replaces it in the same terminal.
+The next live replay or Herdr frame replaces it in the same terminal at the same distance from the bottom.
+The replacement shows no reconnect banner or progress indicator, so a working connection swaps the two unnoticed.
+Retained output appears at once, and the banner appears only while the browser is offline or a connection attempt fails.
 A normal scroll uses retained text when the connection is unavailable or a remote scroll receives no output within 200 ms.
 Scrolling back to the bottom returns to the live terminal after synchronization.
 Cached text keeps reading positions and selections stable during recovery and marks gaps with an ellipsis.

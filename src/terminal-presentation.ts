@@ -19,9 +19,11 @@ export class TerminalPresentation {
     viewport.parentElement!.append(this.layer);
   }
   get pending() { return this.waiting; }
-  freeze() {
+  /** A handoff from retained output to its live replay shows no progress, so the swap is not noticeable. */
+  freeze(progress = true) {
     ++this.generation; this.waiting = true;
     if (this.held) return;
+    this.progress.hidden = !progress;
     const canvas = this.viewport.querySelector<HTMLCanvasElement>('#terminal canvas');
     const bounds = this.viewport.getBoundingClientRect();
     if (!canvas?.width || !bounds.width || !bounds.height) return;

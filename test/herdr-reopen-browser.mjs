@@ -27,6 +27,12 @@ try {
     localStorage.setItem('libertty.tabs', JSON.stringify([{ id: 'saved-herdr', session: '11111111-1111-4111-8111-111111111111', name: 'Herdr', backendId: 'primary', hostId: 'herdr', pluginId: 'herdr', pluginVersion: '1', ownsSession: true, herdrSource: '11111111-1111-4111-8111-111111111111' }]));
     localStorage.setItem('libertty.activeTab', JSON.stringify('saved-herdr'));
   }, { base, owner });
+  await context.addInitScript(() => {
+    if (parent === window) return;
+    window.__bannerShown = false;
+    new MutationObserver(() => { if (document.getElementById('reconnect-banner')?.hidden === false) window.__bannerShown = true; })
+      .observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden'] });
+  });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   let tickets = 0, terminalTickets = 0; page.on('request', request => { if (request.url().includes('/api/herdr/ticket')) tickets++; if (request.url().includes('/api/herdr/ticket') && new URL(request.url()).searchParams.has('terminalId')) terminalTickets++; });
   await page.goto(base);
@@ -41,7 +47,10 @@ try {
   await page.reload();
   await page.waitForFunction(() => { const tab = JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === 'saved-herdr'); return tab && !tab.ended && tab.herdrSource === tab.session && tab.session !== '22222222-2222-4222-8222-222222222222'; });
   await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
-  await delay(500);
+  await until(() => page.evaluate(() => new Promise(resolve => {
+    const request = indexedDB.open('libertty-terminal-history');
+    request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.some(record => record.key.includes('herdr') && record.records.length)); }; };
+  })), 'retained pane output');
   let cachedTicket, releaseCache;
   const cacheGate = new Promise(resolve => releaseCache = resolve);
   const holdCache = async route => {
@@ -59,12 +68,21 @@ try {
   const previewTickets = terminalTickets; await delay(500);
   assert.equal(terminalTickets, previewTickets, 'Cached metadata cannot attach stale terminal identities');
   const previewElement = await preview.elementHandle();
+  await preview.waitFor({ state: 'visible' });
+  await previewElement.evaluate(frame => {
+    window.__previewHidden = false;
+    new MutationObserver(() => { if (frame.style.visibility === 'hidden' || frame.classList.contains('herdr-terminal-pending')) window.__previewHidden = true; })
+      .observe(frame, { attributes: true, attributeFilter: ['style', 'class'] });
+  });
   assert.equal(await page.locator('#herdr-strip-saved-herdr').evaluate(element => element.inert), false, 'Normal navigation remains available for cached panes');
   assert.equal(await page.locator('#herdr-strip-saved-herdr .herdr-agent-add').isDisabled(), true);
   releaseCache(); await page.unroute('**/api/herdr/ticket?**', holdCache);
   await page.waitForFunction(() => document.querySelector('#herdr-strip-saved-herdr').getAttribute('aria-busy') === 'false');
   await until(() => terminalTickets > previewTickets, 'verified preview connection');
   assert.equal(await previewElement.evaluate(element => element.isConnected), true, 'Live metadata authorizes the same preview frame');
+  await page.frameLocator('.herdr-screen iframe').locator('#terminal-viewport[aria-busy="false"]').waitFor();
+  assert.equal(await page.evaluate(() => window.__previewHidden), false, 'Retained output stays displayed while live output replaces it');
+  assert.equal(await (await previewElement.contentFrame()).evaluate(() => window.__bannerShown), false, 'A working connection shows no reconnect banner');
   await delay(500);
   const before = tickets;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
