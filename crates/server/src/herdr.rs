@@ -94,10 +94,35 @@ pub(crate) struct ResourceKey {
 }
 #[derive(Clone, Default)]
 pub struct RepairSessions(Arc<tokio::sync::Mutex<HashMap<String, RepairContext>>>);
+#[derive(Clone)]
 struct RepairContext {
     identity: String,
     engine: crate::engine::NativeEngine,
     help: crate::help::HelpProvider,
+    commands: Arc<CommandCatalog>,
+}
+type CachedCommands = Option<(std::time::Instant, Arc<Vec<String>>)>;
+#[derive(Default)]
+struct CommandCatalog(tokio::sync::Mutex<CachedCommands>);
+impl CommandCatalog {
+    async fn get(
+        &self,
+        cancel: &CancellationToken,
+        discover: impl std::future::Future<Output = Result<Vec<String>, String>>,
+    ) -> Result<Arc<Vec<String>>, String> {
+        let work = async {
+            let mut cached = self.0.lock().await;
+            if let Some((at, names)) = &*cached
+                && at.elapsed() < Duration::from_secs(2)
+            {
+                return Ok(names.clone());
+            }
+            let names = Arc::new(discover.await?);
+            *cached = Some((std::time::Instant::now(), names.clone()));
+            Ok(names)
+        };
+        tokio::select! { biased; _ = cancel.cancelled() => Err(crate::probes::ABORTED.into()), result = work => result }
+    }
 }
 impl std::fmt::Debug for RepairSessions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -110,10 +135,10 @@ impl RepairSessions {
         terminal: &str,
         identity: String,
         services: &crate::host::HostServices,
-    ) -> Result<(crate::engine::NativeEngine, crate::help::HelpProvider), String> {
+    ) -> Result<RepairContext, String> {
         let mut contexts = self.0.lock().await;
         if let Some(context) = contexts.get(terminal).filter(|c| c.identity == identity) {
-            return Ok((context.engine.clone(), context.help.clone()));
+            return Ok(context.clone());
         }
         if let Some(previous) = contexts.remove(terminal) {
             previous.help.dispose();
@@ -128,8 +153,9 @@ impl RepairSessions {
             identity,
             engine: crate::engine::NativeEngine::new()?,
             help: crate::help::HelpProvider::new(services.pool.clone()),
+            commands: Arc::default(),
         };
-        let result = (context.engine.clone(), context.help.clone());
+        let result = context.clone();
         contexts.insert(terminal.into(), context);
         Ok(result)
     }
@@ -220,12 +246,26 @@ impl Target {
             }
         }
         env.insert("PWD".into(), shell.cwd.clone());
-        let commands = if let Some(remote) = &self.remote {
-            let result = remote.exec("bash -c 'compgen -c'", cancel).await?;
-            result.stdout.lines().map(str::to_owned).collect::<Vec<_>>()
-        } else {
-            services.catalog.executable_names(&env, cancel).await?
-        };
+        let identity = crate::facts::digest(&json!([shell.pid, shell.cwd, env]));
+        let RepairContext {
+            engine,
+            help,
+            commands,
+            ..
+        } = self.repairs.get(terminal, identity, &services).await?;
+        let commands = commands
+            .get(cancel, async {
+                if let Some(remote) = &self.remote {
+                    let result = remote.exec("bash -c 'compgen -c'", cancel).await?;
+                    if result.code != 0 {
+                        return Err("Cannot discover remote commands.".into());
+                    }
+                    Ok(result.stdout.lines().map(str::to_owned).collect())
+                } else {
+                    services.catalog.executable_names(&env, cancel).await
+                }
+            })
+            .await?;
         let paths = Default::default();
         let history = if self.remote.is_none() {
             crate::history::history_sources(&env).await.into()
@@ -239,8 +279,6 @@ impl Target {
             history,
             ..Default::default()
         };
-        let identity = crate::facts::digest(&json!([shell.pid, shell.cwd, env]));
-        let (engine, help) = self.repairs.get(terminal, identity, &services).await?;
         let mut host = crate::host::NativeHost::new(services, catalog, env, help);
         host.remote = self.remote.clone();
         let candidates = engine.suggest(text, &host, cancel).await?;
@@ -911,6 +949,50 @@ pub(crate) fn pane_key(snapshot: &Snapshot) -> Vec<String> {
 mod repair_cache_tests {
     use super::*;
     #[tokio::test]
+    async fn command_catalog_shares_success_and_refreshes_after_expiry() {
+        let cache = CommandCatalog::default();
+        let cancel = CancellationToken::new();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let scan = || async {
+            calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            tokio::task::yield_now().await;
+            Ok(vec!["tool".into()])
+        };
+        let (first, second) = tokio::join!(cache.get(&cancel, scan()), cache.get(&cancel, scan()));
+        assert!(Arc::ptr_eq(&first.unwrap(), &second.unwrap()));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        tokio::time::sleep(Duration::from_millis(2010)).await;
+        cache.get(&cancel, scan()).await.unwrap();
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+    #[tokio::test]
+    async fn command_catalog_retries_errors_and_cancelled_scans() {
+        let cache = CommandCatalog::default();
+        let cancel = CancellationToken::new();
+        assert!(
+            cache
+                .get(&cancel, async { Err("failed".into()) })
+                .await
+                .is_err()
+        );
+        let stopped = CancellationToken::new();
+        let pending = cache.get(&stopped, std::future::pending());
+        let stop = async {
+            tokio::task::yield_now().await;
+            stopped.cancel();
+        };
+        let (result, _) = tokio::join!(pending, stop);
+        assert!(result.is_err());
+        assert_eq!(
+            cache
+                .get(&cancel, async { Ok(vec!["new".into()]) })
+                .await
+                .unwrap()
+                .as_slice(),
+            ["new"]
+        );
+    }
+    #[tokio::test]
     async fn learned_metadata_survives_requests_but_not_terminal_or_shell_changes() {
         let services = crate::host::HostServices::new();
         let cache = RepairSessions::default();
@@ -920,7 +1002,8 @@ mod repair_cache_tests {
             ..Default::default()
         };
         let environment = Environment::new();
-        let (engine, help) = cache.get("one", "shell-a".into(), &services).await.unwrap();
+        let RepairContext { engine, help, .. } =
+            cache.get("one", "shell-a".into(), &services).await.unwrap();
         let host = crate::host::NativeHost::new(
             services.clone(),
             catalog.clone(),
@@ -934,7 +1017,7 @@ mod repair_cache_tests {
             ("two", "shell-a", false),
             ("one", "shell-b", false),
         ] {
-            let (engine, _) = cache
+            let RepairContext { engine, .. } = cache
                 .get(terminal, identity.into(), &services)
                 .await
                 .unwrap();
