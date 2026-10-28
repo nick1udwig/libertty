@@ -574,7 +574,6 @@ try {
     });
     assert.match(await preview.getAttribute('src'), /herdrPreview=1/, 'Cached metadata mounts only an unauthorized preview');
     const previewFrame = page.frameLocator('.herdr-screen > iframe.herdr-terminal');
-    assert.equal(await previewFrame.locator('.terminal-reader:visible').count(), 0, 'Retained output uses the terminal renderer');
     assert.ok(await previewFrame.locator('#terminal canvas').evaluate(canvas => {
       const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data, background = pixels.slice(0, 3);
       let painted = 0;

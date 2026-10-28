@@ -499,7 +499,6 @@ try {
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');
     await page.waitForSelector('#terminal canvas');
     await until(async () => !!await paintedStyles('red-proof'), 'retained output painted by the terminal');
-    assert.equal(await page.locator('.terminal-reader:visible').count(), 0, 'No separate text reader replaces the terminal');
     const cachedRed = await paintedStyles('red-proof'), cachedPlain = await paintedStyles('offline-history-proof');
     assert.equal(new Set(cachedRed).size, 1); assert.notEqual(cachedRed[0], cachedPlain[0], 'Retained output keeps its colors');
     await page.waitForFunction(() => [...document.fonts].some(font => font.family === 'JetBrains Mono' && font.status === 'loaded'));

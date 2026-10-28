@@ -179,6 +179,15 @@ try {
   await drag(300, 180); await wait(async () => (await state()).offset < older.offset, 'reverse drag scrolls toward latest output');
   assert.equal(await page.locator('#terminal textarea').evaluate(el => el === document.activeElement), false);
   assert.deepEqual((await state()).mouse, [], 'Links, scrolling and hold-to-copy send no clicks');
+  // A dropped connection continues the swipe through retained output, and recovery returns to the application without a gesture.
+  const wheels = (await state()).wheels;
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+  await drag(180, 300);
+  await page.waitForFunction(() => window.__terminal.getViewportY() > 0);
+  assert.equal((await state()).wheels, wheels, 'Retained output scrolls locally while disconnected');
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+  await page.waitForFunction(() => window.__terminal.getViewportY() === 0 && window.__terminal.buffer.active.length === window.__terminal.rows);
   const tapCell = async (column, row) => {
     const point = await page.evaluate(({ column, row }) => {
       const t = window.__terminal, r = document.querySelector('#terminal canvas').getBoundingClientRect();

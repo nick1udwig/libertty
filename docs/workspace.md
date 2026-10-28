@@ -275,10 +275,11 @@ A reload paints persisted output through the terminal renderer with its colors, 
 The next live replay or Herdr frame replaces it in the same terminal at the same distance from the bottom.
 The replacement shows no reconnect banner or progress indicator, so a working connection swaps the two unnoticed.
 Retained output appears at once, and the banner appears only while the browser is offline or a connection attempt fails.
-A normal scroll uses retained text when the connection is unavailable or a remote scroll receives no output within 200 ms.
-Scrolling back to the bottom returns to the live terminal after synchronization.
-Cached text keeps reading positions and selections stable during recovery and marks gaps with an ellipsis.
-The reader stays fixed while the live terminal changes.
+During use, retained output takes over a scroll only after the connection drops or stalls, when the live terminal has no more local rows to show.
+A remote scroll on a slow but working connection waits for the application instead.
+Retained output scrolls and selects like live output and marks gaps with an ellipsis.
+The first live paint after recovery replaces it automatically, so no gesture returns to the live terminal.
+A snapshot reset also keeps the reading distance from the bottom.
 The browser retains up to 64 observed records and 512 Ki UTF-16 code units of text.
 Normal scrollback can extend earlier records when their overlap matches.
 Full-screen redraws remain separate observed excerpts with possible gaps, because Herdr does not supply a stable application conversation log through this interface.

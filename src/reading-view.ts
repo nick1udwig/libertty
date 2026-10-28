@@ -1,5 +1,4 @@
 import MarkdownIt from 'markdown-it';
-import { readingText } from './reading-text.ts';
 import './reading-view.css';
 
 export interface ReadingView { element: HTMLElement; dispose(): void }
@@ -104,7 +103,8 @@ export function readingView(file: string, blob: Blob, resources?: ReadingResourc
     });
   } else if (type.startsWith('text/') || ['application/json', 'application/xml'].includes(type)) {
     const paper = document.createElement('article'); paper.className = 'reading-paper';
-    const text = readingText('Loading text…'); paper.append(text); stage.append(paper);
+    const text = document.createElement('pre'); text.className = 'reading-text';
+    text.textContent = 'Loading text…'; paper.append(text); stage.append(paper);
     void blob.text().then(value => { if (!disposed) text.textContent = value; });
   } else if (type.startsWith('image/')) {
     const image = document.createElement('img'); image.src = objectURL(blob); image.alt = file.split('/').at(-1) || 'Image'; image.className = 'reading-image';

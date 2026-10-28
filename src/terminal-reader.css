@@ -1,3 +1,0 @@
-.terminal-reader{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;background:var(--bg);color:var(--text);min-height:0}
-.terminal-reader-content{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;user-select:text;-webkit-user-select:text}
-.terminal-reader-content .reading-text{margin:0;padding:0 4px;font:inherit;font-size:var(--cache-font-size,14px);line-height:var(--cache-line-height,1.2);white-space:pre-wrap;overflow-wrap:anywhere;min-height:100%;box-sizing:border-box}
