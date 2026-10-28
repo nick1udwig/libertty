@@ -20,6 +20,7 @@ import { terminalLinkAt } from './terminal-links.ts';
 import { TerminalFocus } from './terminal-focus.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
 import { TerminalEcho } from './predicted-echo.ts';
+import { TerminalCache, terminalCacheKey } from './terminal-cache.ts';
 import { TerminalTranscript } from './terminal-transcript.ts';
 import { TerminalReader, terminalText } from './terminal-reader.ts';
 import { TerminalHistory } from './terminal-history.ts';
@@ -187,15 +188,43 @@ const jumpToLive = $('jump-to-live');
 term.onScroll(() => { jumpToLive.hidden = term.getViewportY() === 0; });
 jumpToLive.onclick = () => { term.scrollToBottom(); jumpToLive.hidden = true; };
 const transcript = new TerminalTranscript();
-const reader = new TerminalReader(terminalViewport.parentElement!, () => { reader.hide(); term.scrollToBottom(); }, copyTerminalText);
-let transcriptTimer: ReturnType<typeof setTimeout> | undefined;
+const cache = new TerminalCache();
+const cacheKey = terminalCacheKey(baseURL.href, herdrTerminal ? params.get('herdrSession') || '' : session, herdrTerminal || '', params.get('herdrSource') || '', params.get('herdrPane') || '');
+const reader = new TerminalReader(terminalViewport.parentElement!, () => { if (cacheRestored && !synchronizedConnection) { toast('Cached history is available while reconnecting.'); return; } reader.hide(); term.scrollToBottom(); }, copyTerminalText, clearTranscript);
+let cachedUpdated = 0, cachedStream = '', cachedScreen = '', clearedScreen: string | undefined, cacheRestored = false, cacheCleared = false;
+let transcriptTimer: ReturnType<typeof setTimeout> | undefined, cacheTimer: ReturnType<typeof setTimeout> | undefined;
+function saveTranscript() {
+  clearTimeout(cacheTimer); cacheTimer = undefined;
+  if (!transcript.records.length || !synchronizedConnection && !cacheRestored) return;
+  const screen = terminalText(term) || cachedScreen;
+  if (synchronizedConnection && screen !== clearedScreen) transcript.observe(screen, !term.wasmTerm?.isAlternateScreen() && (!herdrTerminal || state.ready));
+  void cache.save({ key: cacheKey, version: 1, updated: lastOutputAt || cachedUpdated || Date.now(), stream: streamId || cachedStream,
+    records: transcript.records.map(record => ({ ...record })), screen: screen.slice(-512 * 1024), ...reader.position, ...(!reader.open ? { position: Number.MAX_SAFE_INTEGER } : {}) });
+}
 function captureTranscript() {
   clearTimeout(transcriptTimer); transcriptTimer = undefined;
-  transcript.observe(terminalText(term), !term.wasmTerm?.isAlternateScreen() && (!herdrTerminal || state.ready));
+  const text = terminalText(term);
+  if (text === clearedScreen) return;
+  if (transcript.observe(text, !term.wasmTerm?.isAlternateScreen() && (!herdrTerminal || state.ready))) cacheTimer ??= setTimeout(saveTranscript, 2000);
 }
 function scheduleTranscript() { transcriptTimer ??= setTimeout(captureTranscript, 1500); }
 $('read-history').onclick = () => { captureTranscript(); reader.show(transcript.text()); };
-window.addEventListener('pagehide', () => { captureTranscript(); });
+function clearTranscript() {
+  cacheCleared = true; clearedScreen = terminalText(term); clearTimeout(cacheTimer); cacheTimer = undefined; transcript.restore([]); reader.hide();
+  void cache.clear(cacheKey).then(ok => toast(ok ? 'Saved terminal history cleared.' : 'Saved history could not be cleared.'));
+}
+$('clear-history').onclick = clearTranscript;
+reader.viewport.addEventListener('scroll', () => { cacheTimer ??= setTimeout(saveTranscript, 1000); }, { passive: true });
+void cache.read(cacheKey).then(saved => {
+  if (!saved || lastOutputAt || cacheCleared) return;
+  transcript.restore(saved.records); transcript.observe(saved.screen, saved.records.at(-1)?.kind === 'history', saved.updated); cachedUpdated = saved.updated; cachedStream = saved.stream; cachedScreen = saved.screen; cacheRestored = true;
+  reader.show(transcript.text() || saved.screen, saved.position, saved.lines);
+  if (transport.socket?.readyState !== WebSocket.OPEN) connection('Offline');
+  notify('terminal-ready');
+});
+function flushTranscript() { captureTranscript(); saveTranscript(); }
+window.addEventListener('pagehide', flushTranscript);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushTranscript(); });
 function inputContext(): InputContext | undefined {
   const target = dictationTarget(state);
   if (!target || state.exited || capturedConnection) return;
@@ -229,6 +258,7 @@ function synchronizeInput() {
     else toast('Queued input belongs to a changed prompt and was not sent.');
   }
   if (!synchronizedConnection) { synchronizedConnection = true; disconnectedContext = undefined; dictation.connected(true); }
+  if (cacheRestored && !reader.interacted) { reader.hide(); cacheRestored = false; }
 }
 function revealReplay() {
   if (!herdrTerminal && replayState && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) {
@@ -648,6 +678,7 @@ const handlers: Handlers = {
   },
   'hello': message => {
     replayTarget = message.lastSeq;
+    if (cachedStream && cachedStream !== message.streamId) { transcript.restore([]); cachedStream = cachedScreen = ''; }
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
@@ -693,7 +724,7 @@ function socketMessage(event: MessageEvent) {
   (handlers[message.type] as ((message: ServerMessage) => void) | undefined)?.(message);
 }
 function socketClosed(event?: CloseEvent) {
-  captureTranscript();
+  flushTranscript();
   discardHerdrFrames();
   if (directAttempt && !replayState) authorized = false;
   herdrDormant = herdrParked;
@@ -823,7 +854,7 @@ if (embedded) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;
       herdrParked = parked; dictation.visibility(!parked && tabVisible);
-      if (parked) { gestures.cancelGesture(); discardHerdrFrames(); }
+      if (parked) { flushTranscript(); gestures.cancelGesture(); discardHerdrFrames(); }
       rendering.setVisible(!parked && tabVisible);
       clearTimeout(parkTimer);
       if (parked) parkTimer = setTimeout(() => { if (herdrParked) { herdrDormant = true; transport.suspend(); } }, inactiveGrace);
@@ -838,7 +869,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { gestures.cancelGesture(); presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { flushTranscript(); gestures.cancelGesture(); presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);

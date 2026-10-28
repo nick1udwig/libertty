@@ -277,3 +277,11 @@ The browser retains up to 64 observed records and 512 Ki UTF-16 code units of te
 Normal scrollback can extend earlier records when their overlap matches.
 Full-screen redraws remain separate observed excerpts with possible gaps, because Herdr does not supply a stable application conversation log through this interface.
 Sampling occurs at most once per 1.5 seconds during output, plus explicit reads and disconnects.
+
+IndexedDB retains recent output, the last text screen, and the reader position for offline reloads.
+Records are scoped to the backend, session, Herdr source, terminal, and pane identity.
+A changed native stream starts a separate history.
+The cache expires after seven days and retains at most 16 terminals and 8 MiB in total.
+Storage failure or eviction leaves the live terminal usable.
+Clear saved history is available in the reader and terminal settings.
+Cached Herdr output opens through a read-only reader until live metadata verifies the pane.

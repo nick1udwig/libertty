@@ -21,10 +21,12 @@ export class TerminalReader {
   private status = document.createElement('span');
   private text = '';
   private limit = 500;
+  interacted = false;
   private older = document.createElement('button');
-  constructor(parent: HTMLElement, close: () => void, copy: (text: string) => Promise<void>) {
+  constructor(parent: HTMLElement, close: () => void, copy: (text: string) => Promise<void>, clear?: () => void) {
     this.element.className = 'terminal-reader'; this.element.hidden = true;
     this.element.setAttribute('aria-label', 'Cached terminal history');
+    for (const event of ['pointerdown', 'wheel', 'keydown']) this.element.addEventListener(event, () => { this.interacted = true; }, { passive: true });
     const toolbar = document.createElement('div'); toolbar.className = 'terminal-reader-toolbar';
     this.search.type = 'search'; this.search.placeholder = 'Search cached history'; this.search.setAttribute('aria-label', 'Search cached history');
     const live = document.createElement('button'); live.textContent = 'Jump to live'; live.onclick = close;
@@ -37,12 +39,14 @@ export class TerminalReader {
     this.search.oninput = () => { this.limit = 500; this.render(); this.viewport.scrollTop = 0; };
     this.status.role = 'status';
     toolbar.append(this.search, copyButton, live);
+    if (clear) { const button = document.createElement('button'); button.textContent = 'Clear'; button.setAttribute('aria-label', 'Clear saved history'); button.onclick = clear; toolbar.append(button); }
     this.viewport.className = 'terminal-reader-content'; this.viewport.tabIndex = 0; this.viewport.append(this.older, this.content);
     this.element.append(toolbar, this.status, this.viewport); parent.append(this.element);
   }
   get open() { return !this.element.hidden; }
-  show(text: string, position?: number) {
-    this.text = text; this.search.value = ''; this.limit = 500;
+  get position() { return { position: this.viewport.scrollTop, lines: this.limit }; }
+  show(text: string, position?: number, lines = 500) {
+    this.text = text; this.search.value = ''; this.limit = lines; this.interacted = false;
     this.element.hidden = false; this.render();
     this.viewport.scrollTop = position ?? this.viewport.scrollHeight;
   }

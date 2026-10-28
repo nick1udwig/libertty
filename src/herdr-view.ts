@@ -1,3 +1,6 @@
+import { TerminalCache, terminalCacheKey } from './terminal-cache.ts';
+import { TerminalReader } from './terminal-reader.ts';
+import { TerminalTranscript } from './terminal-transcript.ts';
 import { node } from './dom.ts';
 import { icon } from './icons.ts';
 import { saved } from './persistence.ts';
@@ -60,6 +63,9 @@ export class HerdrView {
   private connected = false;
   private liveSnapshot = false;
   private cached = false;
+  private offlineReader?: TerminalReader;
+  private offlineKey = '';
+  private offlineGeneration = 0;
   private quietSnapshot = true;
   private selected = '';
   private requestedTerminal = '';
@@ -133,7 +139,7 @@ export class HerdrView {
       url: host.url, session: host.session, source: host.source,
       token: () => host.token(), authenticate: () => host.authenticate(), notice: message => host.notice(message), reading: (terminalId, request) => host.reading(terminalId, request),
       visible: () => this.visible, held: () => this.handoffHeld, agentName: terminalId => this.terminals.find(agent => agent.terminalId === terminalId)?.name,
-      painted: () => { viewed(); this.host.ready?.(); },
+      painted: () => { if (!this.offlineReader?.interacted) this.offlineReader?.hide(); viewed(); this.host.ready?.(); },
       ended: () => void this.refreshSnapshot().catch(error => { if (error.status !== 404) this.connectionError(error); }),
     });
     this.screen.append(this.status, this.empty, this.frames.loading);
@@ -258,7 +264,36 @@ export class HerdrView {
   }
   private post(message: object) { this.frames.post(message); }
   get terminalFrame() { return this.frames.frame; }
-  private mountTerminal(force = false) { if (this.liveSnapshot && !this.disposed) this.frames.mount(this.terminals, this.selected, force); }
+  private mountTerminal(force = false) {
+    if (this.disposed) return;
+    if (this.liveSnapshot) this.frames.mount(this.terminals, this.selected, force);
+    if (this.visible && !this.frames.rendered) void this.restoreCachedTerminal();
+  }
+  private async restoreCachedTerminal() {
+    const terminal = this.terminals.find(terminal => terminal.terminalId === this.selected);
+    if (!terminal) return;
+    const key = terminalCacheKey(this.host.url, this.host.session, terminal.terminalId, this.host.source || '', terminal.paneId);
+    if (key === this.offlineKey) return;
+    this.offlineKey = key; this.offlineReader?.hide();
+    const generation = ++this.offlineGeneration, cache = new TerminalCache(), saved = await cache.read(key);
+    if (!saved || this.disposed || generation !== this.offlineGeneration || this.frames.rendered) return;
+    this.offlineReader?.element.remove();
+    const transcript = new TerminalTranscript(); transcript.restore(saved.records);
+    let positionTimer: ReturnType<typeof setTimeout> | undefined, cleared = false;
+    const reader = this.offlineReader = new TerminalReader(this.screen, () => {
+      if (this.frames.rendered) reader.hide(); else this.host.notice('Cached history is available while reconnecting.');
+    }, text => navigator.clipboard.writeText(text), () => {
+      cleared = true; clearTimeout(positionTimer);
+      void cache.clear(key).then(ok => { if (ok) { reader.hide(); this.host.notice('Saved terminal history cleared.'); } });
+    });
+    reader.viewport.addEventListener('scroll', () => { clearTimeout(positionTimer); if (!cleared) positionTimer = setTimeout(() => { void cache.save({ ...saved, ...reader.position }); }, 1000); }, { passive: true });
+    this.unsubscribers.push(() => clearTimeout(positionTimer));
+    const panes = node('select'); panes.setAttribute('aria-label', 'Cached terminal');
+    for (const pane of this.terminals) { const option = node('option', '', pane.name); option.value = pane.terminalId; option.selected = pane.terminalId === this.selected; panes.append(option); }
+    panes.onchange = () => { this.selected = panes.value; this.save(); this.render(); this.mountTerminal(); };
+    reader.element.querySelector('.terminal-reader-toolbar')!.prepend(panes);
+    reader.show(transcript.text() || saved.screen, saved.position, saved.lines); this.host.ready?.();
+  }
   private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
   private connect() { return this.transport.connect(); }
   private connectionError(error: unknown) {

@@ -461,10 +461,25 @@ try {
     await page.waitForFunction(() => { const r = document.querySelector('#alternatives-menu').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= document.querySelector('.input-dock').getBoundingClientRect().top; });
     await page.screenshot({ path: path.join(root, '.test-artifacts/keyboard-viewport.png') });
     await page.keyboard.press('Control+c'); await ready(page);
+    await command(page, "printf 'offline-history-proof\\n'");
     await page.evaluate(() => navigator.serviceWorker.ready);
-    await page.reload(); await ready(page);
+    await until(() => page.evaluate(() => new Promise(resolve => {
+      const request = indexedDB.open('libertty-terminal-history');
+      request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(JSON.stringify(read.result).includes('offline-history-proof')); }; };
+    })));
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');
     await page.waitForSelector('#terminal canvas');
+    await page.locator('.terminal-reader').waitFor({ state: 'visible' });
+    await page.locator('.terminal-reader input[type=search]').fill('offline-history-proof');
+    assert.match(await page.locator('.terminal-reader .reading-text').textContent(), /offline-history-proof/, JSON.stringify(await page.evaluate(() => new Promise(resolve => {
+      const request = indexedDB.open('libertty-terminal-history'); request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.map(record => ({ key: record.key, stream: record.stream, screen: record.screen.slice(-600), records: record.records.map(item => ({ kind: item.kind, tail: item.text.slice(-600) })) }))); }; };
+    }))));
+    await page.locator('.terminal-reader input[type=search]').fill('');
+    await page.locator('.terminal-reader').getByRole('button', { name: 'Clear saved history' }).click();
+    await until(() => page.evaluate(() => new Promise(resolve => {
+      const request = indexedDB.open('libertty-terminal-history');
+      request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.length === 0); }; };
+    })));
     await page.waitForFunction(() => [...document.fonts].some(font => font.family === 'JetBrains Mono' && font.status === 'loaded'));
     await context.setOffline(false); await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected', {}, { timeout: 15000 });
     await page.locator('#menu-button').click();

@@ -117,7 +117,7 @@ export class HerdrFrames {
       const frame = node('iframe','herdr-terminal'); frame.title = 'Herdr agent terminal'; frame.dataset.terminal = selected; frame.dataset.pane = agent.paneId; frame.style.visibility = 'hidden';
       frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write';
       const url = new URL('terminal.html',document.baseURI);
-      url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:selected,herdrSession:this.host.session,...(this.host.source?{herdrSource:this.host.source}:{})}).toString();
+      url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:selected,herdrPane:agent.paneId,herdrSession:this.host.session,...(this.host.source?{herdrSource:this.host.source}:{})}).toString();
       frame.src = url.href; this.frame = frame;
       const entry = {frame,session,pane:agent.paneId,rendered:false}; this.entries.set(selected,entry); this.screen.append(frame); this.prepare(entry);
     }

@@ -61,7 +61,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     { version: BUILTIN_VERSION, id: 'herdr', name: 'Herdr', connectLabel: 'Connect Herdr', icon: 'H', iconHTML: herdrIcon, panelPrefix: 'herdr-', className: 'herdr-tab', available: () => true,
       connect: host => s.connect(host, 'herdr'),
       async mount(tab) {
-        const backend = s.backend(tab); await s.authenticate(backend);
+        const backend = s.backend(tab);
         const { HerdrView } = await import('./herdr-view.ts');
         if (!s.active(tab)) throw new Error('This tab has closed.');
         const session = herdrSession(tab.herdrSession), source = tab.herdrSource, sourceHost = s.host(tab.hostId)?.herdrSourceHostId;

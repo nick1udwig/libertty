@@ -65,7 +65,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 600, height: 850 }, colorScheme: 'light', hasTouch: true, serviceWorkers: 'block' });
   const page = await context.newPage();
   if (scenario === 'capture') await page.clock.install();
-  await page.route('**/assets/terminal-*.js', async route => {
+  await page.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
     assert.notEqual(body, original); await route.fulfill({ response, body });

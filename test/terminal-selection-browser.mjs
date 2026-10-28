@@ -39,7 +39,7 @@ try {
       window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'state') window.__state = message.state; }); } };
       if (parent === window) addEventListener('message', event => { if (event.data?.type === 'terminal-loaded') event.source.postMessage({ type: 'authorize', accessToken }, location.origin); });
     }, { accessToken, theme });
-    await context.route('**/assets/terminal-*.js', async route => {
+    await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
       const response = await route.fetch(), original = await response.text();
       const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
       assert.notEqual(body, original); await route.fulfill({ response, body });

@@ -47,7 +47,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
   if (!process.env.TEST_WIRE) await context.addInitScript(() => Object.defineProperty(navigator, 'connection', { configurable: true, value: { effectiveType: '4g', downlink: 10 } }));
   await installBackgroundGrace(context);
-  await context.route('**/assets/terminal-*.js', async route => {
+  await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), source = await response.text();
     const body = source.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
     assert.notEqual(body, source); await route.fulfill({ response, body });

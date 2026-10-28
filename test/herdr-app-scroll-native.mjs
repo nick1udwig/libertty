@@ -101,7 +101,7 @@ try {
   });
   await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Native terminal link</title>' }));
   await context.route('https://github.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Wrapped GitHub link</title>' }));
-  await context.route('**/assets/terminal-*.js', async route => {
+  await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text(), body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
   });
