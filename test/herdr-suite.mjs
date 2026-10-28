@@ -154,6 +154,20 @@ try {
   const firstSpaceTab = await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').elementHandle();
   const label = fixture.snapshot.panes[0].label; fixture.rename(0, label + ' renamed'); await delay(800);
   assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), true, 'An unrelated snapshot keeps the strip');
+  await delay(300);
+  await page.evaluate(() => {
+    window.__preferenceWrites = 0;
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (key.startsWith('libertty.herdr.') && !key.endsWith('.snapshot')) window.__preferenceWrites++;
+      return original.call(this, key, value);
+    };
+  });
+  const previousCwd = fixture.snapshot.workspaces[0].cwd;
+  fixture.snapshot.workspaces[0].cwd = '/changed-metadata'; fixture.pauseEvents(false); await delay(800);
+  assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), true, 'Undisplayed metadata keeps existing strip controls');
+  assert.equal(await page.evaluate(() => window.__preferenceWrites), 0, 'Unchanged preferences are not written again');
+  fixture.snapshot.workspaces[0].cwd = previousCwd;
   fixture.rename(0, label); fixture.snapshot.workspaces[0].label = 'libertty renamed'; fixture.pauseEvents(false);
   await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').filter({ hasText: 'libertty renamed' }).waitFor();
   assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), false);
