@@ -38,11 +38,6 @@ fn edit(previous: &str, text: &str, drop: usize) -> Edit {
     }
 }
 impl History {
-    pub fn at(&self, version: Option<u64>) -> Option<Arc<str>> {
-        (version == Some(self.version))
-            .then(|| self.previous.clone())
-            .flatten()
-    }
     pub fn reset(&mut self) {
         self.previous = None;
     }

@@ -267,11 +267,11 @@ BENCH_BEFORE=b2a0fb4 BENCH_BEFORE_WORKSPACE=1 BENCH_REPEATS=9 node test/workspac
 ## Reading during connection loss
 
 A reconnect keeps the terminal renderer available for local scrolling and selection.
-The status banner shows when output last arrived, and Jump to live returns from scrollback.
+The status banner shows when output last arrived.
 A full-screen application's own scrolling still needs the remote application.
 Geometry changes retain the separate layout handshake so stale frames do not replace a resized pane.
 
-History opens a separate Reading Mode text surface with local search, selection, copy, and pages of 500 lines.
+Persisted output opens automatically during offline reloads.
 The reader stays fixed while the live terminal changes.
 The browser retains up to 64 observed records and 512 Ki UTF-16 code units of text.
 Normal scrollback can extend earlier records when their overlap matches.
@@ -283,7 +283,7 @@ Records are scoped to the backend, session, Herdr source, terminal, and pane ide
 A changed native stream starts a separate history.
 The cache expires after seven days and retains at most 16 terminals and 8 MiB in total.
 Storage failure or eviction leaves the live terminal usable.
-Clear saved history is available in the reader and terminal settings.
+The terminal has no additional history toolbar or draft actions.
 Cached Herdr output opens through a read-only reader until live metadata verifies the pane.
 
 Native sessions retain 5,000 server scrollback rows, while the foreground reconnect snapshot stays limited to 1,000 rows.
@@ -297,12 +297,3 @@ Unsent redraws continue to merge into the latest screen, and input keeps its sep
 Browser heartbeat timing and outbound queue pressure also defer local history sampling and background backfill.
 An offline event pauses connection attempts for ten seconds, then probes resume even without an online event.
 An online event resumes immediately, and hidden tabs retain their existing suspension rules.
-
-Draft opens a local multiline editor with native Unicode, selection, and backspace support.
-It saves up to 16 drafts of 16,000 UTF-16 code units for seven days, scoped to the same terminal cache identity.
-Offline Herdr readers can also create drafts, which the live terminal loads when reopened.
-Insert draft checks the stream or foreground process, prompt, and input revision before delivery.
-Herdr shell insertion also checks the observed history against the live remote screen.
-Insertion does not press Enter, and pending, delivered, and uncertain states remain separate.
-A lost acknowledgment retains the text and requires review before another insertion.
-Drafts never resend automatically after reconnect or reload.

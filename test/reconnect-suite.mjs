@@ -290,8 +290,6 @@ try {
     const archivePrompt = await page.evaluate(() => window.__testShellState.prompt);
     await page.keyboard.type("printf 'archive-before-outage\\n'"); await page.keyboard.press('Enter');
     await page.waitForFunction(prompt => window.__testShellState.ready && window.__testShellState.prompt > prompt, archivePrompt);
-    await page.locator('#read-history').click();
-    await page.locator('.terminal-reader').getByRole('button', { name: 'Jump to live', exact: true }).click();
     // Far more output than a quick replay arrives as one snapshot of the backend's terminal.
     await focusInput();
     const snapshotPrompt = await page.evaluate(() => window.__testShellState.prompt);
@@ -336,13 +334,6 @@ try {
       const request = indexedDB.open('libertty-terminal-history');
       request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.some(record => record.records.some(item => item.text.includes('57000')))); }; };
     })), 'background history backfill');
-    await page.locator('#read-history').click();
-    await page.locator('.terminal-reader input').fill('archive-before-outage');
-    assert.match(await page.locator('.terminal-reader .reading-text').textContent(), /archive-before-outage/);
-    await page.locator('.terminal-reader input').fill('57000');
-    assert.match(await page.locator('.terminal-reader .reading-text').textContent(), /57000/);
-    await page.locator('.terminal-reader').getByRole('button', { name: 'Jump to live', exact: true }).click();
-  
     connectionPhase = 'background cancellation';
     // A request stranded by backgrounding cannot block the next foreground attempt.
     stalled = await stallNext('/ws'); states = await stateCount();
@@ -357,18 +348,9 @@ try {
     assert.ok(retainedPixels > 100, 'Retain readable text while authorization is pending');
     const track = page.locator('.terminal-scrollbar');
     await track.press('Home');
-    await page.locator('#jump-to-live').waitFor({ state: 'visible' });
     assert.equal(await track.getAttribute('aria-valuenow'), '0', 'Cached history scrolls without a connection');
-    await page.locator('#jump-to-live').click();
+    await track.press('End');
     assert.equal(await track.getAttribute('aria-valuenow'), await track.getAttribute('aria-valuemax'));
-    await page.locator('#read-history').click();
-    const reader = page.locator('.terminal-reader');
-    await reader.getByRole('searchbox').fill('snapshot-done');
-    await page.waitForFunction(() => document.querySelector('.terminal-reader .reading-text').textContent.includes('snapshot-done'));
-    const cachedText = await reader.locator('.reading-text').textContent();
-    await page.evaluate(() => getSelection().selectAllChildren(document.querySelector('.terminal-reader .reading-text')));
-    assert.equal(await page.evaluate(() => getSelection().toString()), cachedText, 'Cached output is selectable while connection setup is stalled');
-    await reader.getByRole('button', { name: 'Jump to live', exact: true }).click();
     await background(); await page.evaluate(() => window.__expireBackground()); await foreground(); await connected(states);
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
     await page.waitForFunction(() => window.__sockets.filter(socket => socket.readyState === WebSocket.OPEN).length === 1);

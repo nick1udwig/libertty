@@ -5,7 +5,6 @@ export type Candidate = { command: string, score: number, /** User-facing explan
 export type Catalog = { cwd: string, commands: Array<string>, paths: Array<string>, history: Array<string>, functions?: Array<string>, historyCwds?: { [key in string]: string }, };
 
 export type ClientMessage = { "type": "ping", checkpoint?: boolean, }
-  | { "type": "draft" } & Draft
   | { "type": "repair" } & RepairRequest
   | { "type": "repair-cancel", id: string, }
   | { "type": "dictation" } & DictationRequest
@@ -34,8 +33,6 @@ export type DictationState = "ready" | "done" | "error";
 
 /** Where dictated text goes: the shell prompt or a running program. */
 export type DictationTarget = "shell" | "program";
-
-export type Draft = { text: string, id: string, prompt: number, revision: number, context: string, target: DictationTarget, history?: number, };
 
 export type EngineMode = "server";
 

@@ -1,6 +1,0 @@
-.terminal-draft{position:absolute;inset:auto 0 0;z-index:8;display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--bg);color:var(--text);border-top:1px solid var(--line);max-height:80%;overflow:auto;font:14px var(--font-ui)}
-.terminal-draft textarea{width:100%;min-height:140px;height:30vh;resize:vertical;flex-shrink:1;font:16px var(--font-ui);color:var(--text);background:var(--surface);border:1px solid var(--line-strong);border-radius:var(--r-md);padding:10px;touch-action:pan-y}
-.terminal-draft p{margin:0;color:var(--muted)}
-.terminal-draft>div{display:flex;gap:8px;flex-wrap:wrap}
-.terminal-draft button{min-height:44px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--raised);color:var(--text)}
-.terminal-draft button:disabled{opacity:.5}

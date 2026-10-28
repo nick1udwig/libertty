@@ -1,7 +1,3 @@
-.terminal-reader{position:absolute;inset:0;z-index:7;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font:13px var(--font-ui);min-height:0}
-.terminal-reader-toolbar{display:flex;gap:6px;padding:8px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
-.terminal-reader button{min-height:44px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--raised);color:var(--text);padding:0 10px}
-.terminal-reader input{min-width:100px;flex:1;width:100%;min-height:44px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--surface);color:var(--text);padding:0 10px;font-size:16px}
-.terminal-reader [role=status]{padding:4px 10px;color:var(--muted)}
-.terminal-reader-content{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;padding:12px;user-select:text;-webkit-user-select:text}
+.terminal-reader{position:absolute;inset:0;z-index:7;display:flex;flex-direction:column;background:var(--bg);color:var(--text);min-height:0}
+.terminal-reader-content{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;user-select:text;-webkit-user-select:text}
 .terminal-reader-content .reading-text{font-size:14px}

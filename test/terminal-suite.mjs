@@ -72,7 +72,6 @@ try {
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'repair-result') window.__lastRepairResult = message; if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
-      set onmessage(handler) { super.onmessage = event => { if (window.__dropDraftResults) void window.__wireMessage(event.data, this).then(message => { if (message.type !== 'result') handler(event); }); else handler(event); }; }
       send(data) { const message = window.__wireSent(data); (window.__sent ||= []).push(message); if (message.type === 'resize') window.__terminalSize = message; if (message.type === 'input' && window.__echoDelay) setTimeout(() => { if (this.readyState === 1) super.send(data); }, window.__echoDelay); else if (['repair', 'repair-cancel'].includes(message.type) && window.__repairDelay) setTimeout(() => { if (this.readyState === 1) super.send(data); }, window.__repairDelay); else super.send(data); }
     };
   });
@@ -453,8 +452,8 @@ try {
     await dictate(page, 'ls dash all');
     await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'ls --all');
     await page.screenshot({ path: path.join(root, '.test-artifacts/mobile.png') });
-    assert.equal(await page.locator('.terminal-tools').evaluate(el => el.getBoundingClientRect().top), 0);
-    assert.equal(await page.locator('#terminal').evaluate(el => el.getBoundingClientRect().top), await page.locator('.terminal-tools').evaluate(el => el.getBoundingClientRect().bottom));
+    assert.equal(await page.locator('.terminal-tools, #read-history, #write-draft, #jump-to-live').count(), 0);
+    assert.equal(await page.locator('#terminal').evaluate(el => el.getBoundingClientRect().top), 0);
     assert.equal(await page.locator('#composer-panel, #compose-mode, #raw-mode').count(), 0);
     assert.ok(await page.locator('.input-dock').evaluate(el => el.clientHeight) <= 54);
     await page.setViewportSize({ width: 390, height: 460 });
@@ -471,48 +470,12 @@ try {
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');
     await page.waitForSelector('#terminal canvas');
     await page.locator('.terminal-reader').waitFor({ state: 'visible' });
-    await page.locator('.terminal-reader input[type=search]').fill('offline-history-proof');
-    assert.match(await page.locator('.terminal-reader .reading-text').textContent(), /offline-history-proof/, JSON.stringify(await page.evaluate(() => new Promise(resolve => {
-      const request = indexedDB.open('libertty-terminal-history'); request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.map(record => ({ key: record.key, stream: record.stream, screen: record.screen.slice(-600), records: record.records.map(item => ({ kind: item.kind, tail: item.text.slice(-600) })) }))); }; };
-    }))));
-    await page.locator('.terminal-reader input[type=search]').fill('');
-    await page.locator('.terminal-reader').getByRole('button', { name: 'Clear saved history' }).click();
-    await until(() => page.evaluate(() => new Promise(resolve => {
-      const request = indexedDB.open('libertty-terminal-history');
-      request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.length === 0); }; };
-    })));
+    assert.match(await page.locator('.terminal-reader .reading-text').textContent(), /offline-history-proof/);
+    assert.equal(await page.locator('.terminal-reader button, .terminal-reader input').count(), 0);
+    await page.evaluate(() => getSelection().selectAllChildren(document.querySelector('.terminal-reader .reading-text')));
+    assert.match(await page.evaluate(() => getSelection().toString()), /offline-history-proof/);
     await page.waitForFunction(() => [...document.fonts].some(font => font.family === 'JetBrains Mono' && font.status === 'loaded'));
-    await page.locator('#write-draft').click();
-    const draft = page.locator('.terminal-draft');
-    await draft.getByRole('textbox').fill("printf 'draft-界😀\\n'");
-    await page.screenshot({ path: path.join(root, '.test-artifacts/local-draft.png') });
-    assert.equal(await draft.getByRole('button', { name: 'Insert draft', exact: true }).isDisabled(), true);
-    await page.waitForFunction(() => localStorage.getItem('libertty.terminal-drafts')?.includes('draft-界😀'));
-    await page.reload(); await page.waitForSelector('#terminal canvas'); await page.locator('#write-draft').click();
-    assert.equal(await draft.getByRole('textbox').inputValue(), "printf 'draft-界😀\\n'");
-    assert.equal(await page.evaluate(() => (window.__sent || []).some(message => message.type === 'draft')), false);
     await context.setOffline(false); await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected', {}, { timeout: 15000 });
-    await draft.getByRole('button', { name: 'Use current input target' }).click();
-    const draftPrompt = await shellPrompt(page);
-    await draft.getByRole('button', { name: 'Insert draft', exact: true }).click();
-    await page.waitForFunction(() => document.querySelector('.terminal-draft [role=status]').textContent.startsWith('Delivered'));
-    assert.equal(await shellPrompt(page), draftPrompt, 'Inserting a draft does not execute it');
-    await draft.getByRole('button', { name: 'Close draft' }).click();
-    await page.locator('#terminal-enter').click(); await ready(page, draftPrompt);
-    await page.waitForFunction(() => window.__terminalOutput.includes('draft-界😀'));
-    await page.locator('#write-draft').click(); await draft.getByRole('button', { name: 'Clear draft' }).click();
-    await draft.getByRole('textbox').fill('echo uncertain-draft');
-    await page.evaluate(() => { window.__dropDraftResults = true; });
-    await draft.getByRole('button', { name: 'Insert draft', exact: true }).click();
-    await page.waitForFunction(() => window.__terminalOutput.includes('uncertain-draft'));
-    await context.setOffline(true);
-    await page.waitForFunction(() => document.querySelector('.terminal-draft [role=status]').textContent.includes('not confirmed'));
-    const sentDrafts = await page.evaluate(() => window.__sent.filter(message => message.type === 'draft').length);
-    await context.setOffline(false); await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected');
-    await page.evaluate(() => { window.__dropDraftResults = false; });
-    assert.equal(await page.evaluate(() => window.__sent.filter(message => message.type === 'draft').length), sentDrafts, 'Uncertain drafts are never resent automatically');
-    assert.equal(await draft.getByRole('textbox').inputValue(), 'echo uncertain-draft');
-    await draft.getByRole('button', { name: 'Close draft' }).click();
     await page.locator('#menu-button').click();
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#new-shell').click();

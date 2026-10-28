@@ -47,19 +47,11 @@ pub(crate) struct DictationGuard {
     revision: u64,
     shell: bool,
 }
-struct DraftGuard {
-    prompt: u64,
-    revision: u64,
-    context: String,
-    target: DictationTarget,
-    screen: Option<Arc<str>>,
-}
 struct Input {
     click: Option<(Size, u16, u16, u64)>,
     text: String,
     paste: bool,
     guard: Option<(u64, String)>,
-    draft: Option<DraftGuard>,
     command: Option<String>,
     complete: Option<tokio::sync::oneshot::Sender<Result<(), String>>>,
     _permit: tokio::sync::OwnedSemaphorePermit,
@@ -256,7 +248,6 @@ impl View {
                         input.paste,
                         guard,
                         input.replacement.as_ref(),
-                        input.draft.as_ref(),
                         delivery.as_ref().map(|(_, ledger, seq)| (*ledger, *seq)),
                     )
                     .await;
@@ -565,7 +556,6 @@ impl View {
                 click: None,
                 text: text.into(),
                 paste,
-                draft: None,
                 guard: guard.map(|(revision, id)| (revision, id.into())),
                 command: None,
                 complete: Some(complete),
@@ -599,7 +589,6 @@ impl View {
             seqs: seq.map(|seq| (seq, text.len())).into_iter().collect(),
             text,
             paste,
-            draft: None,
             guard: None,
             command,
             complete: None,
@@ -658,7 +647,6 @@ impl View {
         paste: bool,
         guard: Option<(u64, &str)>,
         replacement: Option<&Replacement>,
-        draft: Option<&DraftGuard>,
         delivery: Option<(&Ledger, u64)>,
     ) -> Result<(), String> {
         if utf16_len(text) > MAX_TEXT {
@@ -687,36 +675,6 @@ impl View {
                     .flatten();
                 if current_shell != self.inner.lock().unwrap().shell {
                     return Err("Terminal input changed during dictation.".into());
-                }
-            }
-            if let Some(draft) = draft {
-                let (shell, context) = self.target.input_state(&self.agent.pane_id).await?;
-                let target = if shell.is_some() {
-                    DictationTarget::Shell
-                } else {
-                    DictationTarget::Program
-                };
-                if context != draft.context || target != draft.target {
-                    return Err(
-                        "The input target changed. Review the draft before inserting it.".into(),
-                    );
-                }
-                if let Some(screen) = &draft.screen {
-                    let reply = self.target.request("pane.read", json!({"pane_id":self.agent.pane_id,"source":"recent_unwrapped","lines":1000,"format":"ansi","strip_ansi":false})).await?;
-                    if reply["read"]["text"].as_str() != Some(screen.as_ref()) {
-                        return Err(
-                            "The shell input changed. Review the draft before inserting it.".into(),
-                        );
-                    }
-                }
-                let inner = self.inner.lock().unwrap();
-                if inner.prompt != draft.prompt
-                    || inner.revision != draft.revision
-                    || inner.context.as_deref() != Some(draft.context.as_str())
-                {
-                    return Err(
-                        "The input target changed. Review the draft before inserting it.".into(),
-                    );
                 }
             }
             let text = if let Some(replacement) = replacement {
@@ -968,7 +926,6 @@ impl View {
                         click: Some((Size { cols, rows }, column, row, *self.layout.borrow())),
                         text: String::new(),
                         paste: false,
-                        draft: None,
                         guard: None,
                         command: None,
                         complete: None,
@@ -999,80 +956,6 @@ impl View {
                     inner.editable = None;
                 }
                 self.queue_input(text, None, false, None, seq);
-                Ok(())
-            }
-            ClientMessage::Draft(draft) => {
-                let screen = self.history_delta.lock().unwrap().at(draft.history);
-                let guard = {
-                    let mut inner = self.inner.lock().unwrap();
-                    let target = if inner.shell.is_some() {
-                        DictationTarget::Shell
-                    } else {
-                        DictationTarget::Program
-                    };
-                    if !draft.valid()
-                        || draft.prompt != inner.prompt
-                        || draft.revision != inner.revision
-                        || inner.context.as_deref() != Some(draft.context.as_str())
-                        || target != draft.target
-                        || target == DictationTarget::Shell && screen.is_none()
-                    {
-                        None
-                    } else {
-                        inner.revision += 1;
-                        Some(DraftGuard {
-                            prompt: inner.prompt,
-                            revision: inner.revision,
-                            context: draft.context,
-                            target,
-                            screen: if target == DictationTarget::Shell {
-                                screen
-                            } else {
-                                None
-                            },
-                        })
-                    }
-                };
-                let Some(guard) = guard else {
-                    self.input_complete(
-                        Some(&draft.id),
-                        Err(
-                            "The input target changed. Review the draft before inserting it."
-                                .into(),
-                        ),
-                    );
-                    return Ok(());
-                };
-                let Ok(permit) = self.capacity.clone().try_acquire_owned() else {
-                    self.input_complete(
-                        Some(&draft.id),
-                        Err("Terminal input exceeded its limit.".into()),
-                    );
-                    return Ok(());
-                };
-                let id = draft.id;
-                if self
-                    .pending_input
-                    .try_send(Input {
-                        click: None,
-                        text: draft.text,
-                        paste: true,
-                        guard: None,
-                        draft: Some(guard),
-                        command: Some(id.clone()),
-                        complete: None,
-                        _permit: permit,
-                        replacement: None,
-                        seqs: Vec::new(),
-                    })
-                    .is_err()
-                {
-                    self.input_complete(
-                        Some(&id),
-                        Err("Terminal input exceeded its limit.".into()),
-                    );
-                }
-                self.send_state();
                 Ok(())
             }
             ClientMessage::Paste { text } => {

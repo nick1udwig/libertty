@@ -127,18 +127,6 @@ try {
   assert.equal(fixture.actions.filter(a => a.method === 'pane.send_input').at(-1).params.text, 'Dictated directly into Herdr');
   phone.ws.send(JSON.stringify({ type: 'dictation', action: 'start', id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', target: 'program', prompt: 1, revision: 2 }));
   await until(() => phone.inbox.some(m => m.type === 'dictation' && m.id.startsWith('eeee') && m.state === 'error'), 'stale dictation rejected');
-  const draftView = await open('term_0');
-  await until(() => draftView.inbox.some(message => message.type === 'state' && message.state.inputContext), 'draft input context');
-  const draftState = () => draftView.inbox.filter(message => message.type === 'state').at(-1).state;
-  const draftMessage = id => ({ type: 'draft', id, text: 'Local draft 界😀\nsecond line', target: 'program', context: draftState().inputContext, prompt: draftState().prompt, revision: draftState().inputRevision });
-  draftView.ws.send(JSON.stringify(draftMessage('draft-ok')));
-  await until(() => draftView.inbox.some(message => message.type === 'result' && message.id === 'draft-ok' && message.accepted), 'guarded draft inserted');
-  assert.equal(fixture.actions.filter(action => action.method === 'pane.send_input').at(-1).params.text, 'Local draft 界😀\nsecond line');
-  const staleDraft = draftMessage('draft-stale'); fixture.setProcessGroup(3);
-  draftView.ws.send(JSON.stringify(staleDraft));
-  await until(() => draftView.inbox.some(message => message.type === 'result' && message.id === 'draft-stale' && !message.accepted), 'changed process rejects draft');
-  assert.equal(fixture.actions.filter(action => action.method === 'pane.send_input' && action.params.text.startsWith('Local draft')).length, 1);
-  fixture.setProcessGroup(2); draftView.ws.close();
   phone.resize(42, 31);
   await until(() => desktop.inbox.some(m => m.width === 42 && m.height === 31), 'mobile controller frame');
   phone.resize(38, 17);

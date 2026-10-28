@@ -68,6 +68,3 @@ dialog{font-family:var(--font-ui);color:var(--text);background:var(--overlay);bo
 
 .predicted-echo>span{opacity:.45}
 .predicted-echo::after{content:"";position:absolute;left:100%;height:100%;width:1px;background:var(--term-cursor);opacity:.45}
-
-.terminal-tools{display:flex;gap:6px;padding:4px 8px;border-bottom:1px solid var(--line);background:var(--bg);color:var(--text);font:13px var(--font-ui)}
-.terminal-tools button{min-height:36px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--raised)}

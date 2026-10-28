@@ -13,7 +13,6 @@
   <button id="menu-button" class="icon-button floating-menu" aria-label="Session options"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
   <main class="workspace">
     <section class="terminal-pane" aria-label="Shell session">
-      <div class="terminal-tools" role="toolbar" aria-label="Terminal tools"><button id="read-history" type="button">History</button><button id="write-draft" type="button">Draft</button><button id="jump-to-live" type="button" hidden>Jump to live</button></div>
       <div id="terminal-viewport"><div id="terminal" aria-label="Terminal output"></div></div>
       <button id="alternatives-toggle" class="alternatives-toggle" aria-label="Show alternatives" aria-expanded="false" aria-controls="alternatives-menu" hidden><span class="spinner" aria-hidden="true"></span><span class="chevron" aria-hidden="true">⌄</span></button>
       <div id="alternatives-menu" class="alternatives-menu" role="group" aria-label="Command alternatives" hidden><div id="alternative-items"></div></div>
@@ -33,7 +32,7 @@
 <label for="font-size">Terminal font size (pt)</label><input id="font-size" type="number" min="6" max="24" step="0.5" value="10" required>
 <label class="setting-toggle"><input id="auto-alternatives" type="checkbox" checked><span>Open alternatives after dictation</span></label>
 <label class="setting-toggle"><input id="tap-alternate-send" type="checkbox" checked><span>Tap alternate to send</span></label>
-<button id="customize-shortcuts" class="secondary-button">Customize shortcuts</button><button id="new-shell" class="secondary-button">Start a new shell</button><button id="clear-history" class="secondary-button">Clear saved terminal history</button><button id="copy-selection" class="secondary-button">Copy terminal selection</button></dialog>
+<button id="customize-shortcuts" class="secondary-button">Customize shortcuts</button><button id="new-shell" class="secondary-button">Start a new shell</button><button id="copy-selection" class="secondary-button">Copy terminal selection</button></dialog>
 <dialog id="shortcuts-dialog"><div class="dialog-heading"><h2>Shortcuts</h2><button class="icon-button" data-close="shortcuts-dialog" aria-label="Close shortcuts"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
 <p>Run a saved command with one tap, or send keys such as Ctrl+R, Tab, Escape, Alt+B or Up. Separate keys with spaces to send a sequence. Use Ctrl alone for the modifier.</p>
 <form id="shortcuts-form"><div id="shortcut-editor"></div><button id="add-shortcut" type="button" class="secondary-button">+ Add shortcut</button><p id="shortcut-error" role="alert"></p><div class="run-row"><button id="reset-shortcuts" type="button" class="text-button">Restore defaults</button><button type="submit" class="run-button">Save shortcuts</button></div></form></dialog>

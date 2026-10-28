@@ -571,16 +571,7 @@ try {
     });
     assert.ok((await offlineReader.locator('.reading-text').textContent()).length > 20);
     assert.equal(await page.locator('.herdr-terminal').count(), 0, 'Cached panes do not attach before live identity verification');
-    await offlineReader.getByRole('button', { name: 'Draft', exact: true }).click();
-    await offlineReader.getByRole('textbox', { name: 'Draft text' }).fill('offline Herdr draft 界😀');
-    await context.setOffline(false);
-    await offlineReader.getByRole('button', { name: 'Continue in live terminal' }).click(); terminal = await agentFrame();
-    assert.equal(await terminal.getByRole('textbox', { name: 'Draft text' }).inputValue(), 'offline Herdr draft 界😀');
-    await terminal.getByRole('button', { name: 'Use current input target' }).click();
-    await terminal.getByRole('button', { name: 'Insert draft', exact: true }).click();
-    await terminal.waitForFunction(() => document.querySelector('.terminal-draft [role=status]').textContent.startsWith('Delivered'));
-    assert.ok(fixture.actions.some(action => action.method === 'pane.send_input' && action.params.text === 'offline Herdr draft 界😀'));
-    await terminal.getByRole('button', { name: 'Close draft' }).click();
+    await context.setOffline(false); await page.reload(); await tab(0).waitFor();
     await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
     assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control'));
     assert.equal(await page.locator('.herdr-view').count(), 0); assert.equal(fixture.snapshot.agents.length, 3);

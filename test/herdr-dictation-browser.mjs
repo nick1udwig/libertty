@@ -97,18 +97,6 @@ try {
   await page.waitForFunction(() => window.__messages.some(message => message.type === 'result' && !message.accepted));
   assert.ok((await screen()).includes('echo prefix cd ..X tail'), 'An edit from another viewer prevents replacement and execution');
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+a'); await page.keyboard.press('Control+k');
-  await until(async () => {
-    const text = (await screen()).trimEnd();
-    return text.endsWith('fixture>') && await page.evaluate(text => window.__messages.some(message => message.type === 'screen' && message.text.replaceAll('\r\n', '\n').trimEnd() === text.replaceAll('\r\n', '\n')), text);
-  }, 'current shell history for draft guard');
-  await page.locator('#write-draft').click();
-  const draft = page.locator('.terminal-draft');
-  await draft.getByRole('textbox').fill('echo local-shell-draft');
-  await draft.getByRole('button', { name: 'Insert draft', exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('.terminal-draft [role=status]').textContent.startsWith('Delivered'));
-  assert.ok((await screen()).trimEnd().endsWith('echo local-shell-draft'), 'The guarded draft is inserted without pressing Enter');
-  await draft.getByRole('button', { name: 'Close draft' }).click();
-  await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+a'); await page.keyboard.press('Control+k');
   await page.keyboard.type('node ' + directory + '/program.mjs'); await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__state?.inputTarget === 'program');
   await dictate('C D work space');

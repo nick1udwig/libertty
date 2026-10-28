@@ -354,32 +354,6 @@ pub fn dictation_target(value: &Value) -> Option<DictationTarget> {
 }
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
-pub struct Draft {
-    #[serde(deserialize_with = "input_text")]
-    pub text: String,
-    #[serde(deserialize_with = "id")]
-    pub id: String,
-    #[serde(deserialize_with = "safe")]
-    pub prompt: u64,
-    #[serde(deserialize_with = "safe")]
-    pub revision: u64,
-    #[serde(deserialize_with = "id")]
-    pub context: String,
-    pub target: DictationTarget,
-    #[serde(default, deserialize_with = "optional_safe")]
-    pub history: Option<u64>,
-}
-impl Draft {
-    pub fn valid(&self) -> bool {
-        !self.text.is_empty()
-            && !self
-                .text
-                .chars()
-                .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
-    }
-}
-#[derive(Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ClientMessage {
     Ping {
@@ -387,7 +361,6 @@ pub enum ClientMessage {
         #[cfg_attr(test, ts(optional = nullable))]
         checkpoint: bool,
     },
-    Draft(Draft),
     Repair(Repair),
     RepairCancel {
         #[serde(deserialize_with = "id")]
@@ -477,7 +450,6 @@ impl TryFrom<Value> for ClientMessage {
 impl ClientMessage {
     pub fn prompt(&self) -> Option<u64> {
         match self {
-            Self::Draft(draft) => Some(draft.prompt),
             Self::Repair(r) => Some(r.prompt),
             Self::Dictation(d) => d.prompt,
             Self::Replace { prompt, .. }
@@ -490,9 +462,7 @@ impl ClientMessage {
     pub fn edits_input(&self) -> bool {
         match self {
             Self::Input { data, .. } => !matches!(data.as_str(), "\x1b[I" | "\x1b[O"),
-            Self::Draft(_) | Self::Paste { .. } | Self::Replace { .. } | Self::Command { .. } => {
-                true
-            }
+            Self::Paste { .. } | Self::Replace { .. } | Self::Command { .. } => true,
             _ => false,
         }
     }
@@ -626,7 +596,6 @@ mod tests {
         let id = "11111111-1111-4111-8111-111111111111";
         let samples = [
             json!({"type":"ping"}),
-            json!({"type":"draft","id":id,"text":"local 界😀\ntext","context":"stream","target":"shell","prompt":1,"revision":2,"history":3}),
             json!({"type":"repair","id":id,"text":"echo 🌍","prompt":1,"revision":2}),
             json!({"type":"repair-cancel","id":id}),
             json!({"type":"input-line","id":id,"prompt":1,"revision":2}),
