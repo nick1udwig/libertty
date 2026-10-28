@@ -1,6 +1,8 @@
 import { decodeWire } from './wire.ts';
 const minimumReply = 2000, maximumReply = 8000, activeDownlink = 1000;
 const activeHeartbeat = 2000, idleHeartbeat = 25000, activityWindow = 10000;
+/** A clock time stays the same through a stall, so the label does not change every second. */
+export const stalledLabel = (lastContact: number) => 'Connection stalled · last contact ' + new Date(lastContact).toLocaleTimeString();
 interface ReconnectingSocketOptions {
   prepare(signal: AbortSignal, token?: string): Promise<URL>;
   available(): boolean;
@@ -9,7 +11,8 @@ interface ReconnectingSocketOptions {
   message(event: MessageEvent): void;
   close(event?: CloseEvent): boolean;
   error(error: unknown, token?: string): boolean;
-  stalled?(seconds: number): void;
+  /** Called on each heartbeat check while replies are missing, with the time of the last contact. */
+  stalled?(lastContact: number): void;
   probe?(): void;
   checkpoint?(): boolean;
 }
@@ -170,7 +173,7 @@ export class ReconnectingSocket {
         this.stalled = true;
         void this.begin(undefined, true);
       }
-      this.options.stalled?.(Math.floor((Date.now() - this.lastContact) / 1000));
+      this.options.stalled?.(this.lastContact);
     } else if (this.socket?.readyState === WebSocket.OPEN && this.pingAt === undefined && Date.now() - this.lastContact >= this.heartbeatInterval()) {
       this.pingAt = Date.now();
       this.socket.send(JSON.stringify({ type: 'ping', ...(this.options.checkpoint?.() ? { checkpoint: true } : {}) }));

@@ -13,7 +13,7 @@ import { dictationTarget } from './protocol.ts';
 import { SentInput, UnsentInput, type InputContext } from './unsent-input.ts';
 import { applyTheme, terminalThemes, watchSystemTheme } from './theme.ts';
 import { adaptDarkAppColors } from './terminal-colors.ts';
-import { ReconnectingSocket } from './reconnecting-socket.ts';
+import { ReconnectingSocket, stalledLabel } from './reconnecting-socket.ts';
 import { HerdrLayout } from './herdr-layout.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { terminalLinkAt } from './terminal-links.ts';
@@ -68,7 +68,7 @@ const transport = new ReconnectingSocket({
   available: () => !herdrPreview && (keepingGeometry() || dictation.active) && (herdrTerminal ? tabVisible && !(herdrParked && herdrDormant) : tabVisible || !tabExpired || dictation.active),
   protocols: wireProtocols,
   checkpoint: () => sentInput.pending,
-  stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
+  stalled: lastContact => connection(stalledLabel(lastContact)),
   prepare: prepareConnection, open: socketOpened, message: socketMessage, close: socketClosed, error: connectionError,
 });
 let state: ShellState = { cwd: '', inputRevision: 0, promptRevision: 0, ready: false, prompt: 0, exited: false };

@@ -4,7 +4,7 @@ import { saved } from './persistence.ts';
 import type { ReadingOpen } from './reading-request.ts';
 import { HerdrFrames } from './herdr-frames.ts';
 import { wireProtocols } from './wire.ts';
-import { ReconnectingSocket } from './reconnecting-socket.ts';
+import { ReconnectingSocket, stalledLabel } from './reconnecting-socket.ts';
 import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSnapshot, type HerdrStatus, type HerdrSpace } from './herdr-protocol.ts';
 import { HerdrDialogs, type Created, type StripItem } from './herdr-dialogs.ts';
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
@@ -203,7 +203,7 @@ export class HerdrView {
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
         return url;
       },
-      stalled: seconds => this.status(`Connection stalled · last contact ${seconds}s ago`),
+      stalled: lastContact => this.status(stalledLabel(lastContact)),
       probe: () => { if (Date.now() - this.presenceAt >= 20000) this.updatePresence(); },
       open: () => { this.quietSnapshot = true; this.updatePresence(); },
       message: event => {

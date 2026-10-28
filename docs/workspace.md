@@ -42,6 +42,7 @@ A tap on the orb lists the current notices and the history.
 A drag parks the orb on the nearer side, and a drag back to the top-right corner returns it there.
 Local storage keeps the parked position.
 The orb shows only while a notice or state is current, so it does not cover the terminal at other times.
+A stalled connection shows the clock time of its last contact, so its state does not change every second.
 States last while they are true, so the user can hide them from the bubble but cannot dismiss them.
 Embedded terminals send `terminal-notice` and `terminal-status` messages and do not draw notices.
 The workspace shows only the selected tab's states, and sends action ids back with `notice-action`.
