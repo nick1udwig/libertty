@@ -329,6 +329,28 @@ async fn listings_preserve_hidden_names_links_numeric_collation_and_parent_paths
         assert!(!files::valid_name(name));
     }
 }
+#[tokio::test]
+async fn listings_bound_entries_and_keep_dangling_links() {
+    let root = tempfile::tempdir().unwrap();
+    let fs = libertty_server::filesystem::FileSystem::default();
+    let directory = root.path().to_str().unwrap();
+    symlink("missing", root.path().join("dangling")).unwrap();
+    let (entries, truncated) = fs.read_entries(directory).await.unwrap();
+    assert!(!truncated);
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].symlink);
+    assert!(!entries[0].directory);
+    for index in 1..10000 {
+        std::fs::write(root.path().join(index.to_string()), "").unwrap();
+    }
+    let (entries, truncated) = fs.read_entries(directory).await.unwrap();
+    assert_eq!(entries.len(), 10000);
+    assert!(!truncated);
+    std::fs::write(root.path().join("extra"), "").unwrap();
+    let (entries, truncated) = fs.read_entries(directory).await.unwrap();
+    assert_eq!(entries.len(), 10000);
+    assert!(truncated);
+}
 #[test]
 fn reading_snapshots_preserve_binary_strip_terminal_codes_and_bound_retention() {
     assert_eq!(reading::mime("page.html", b"<script>"), "text/plain");

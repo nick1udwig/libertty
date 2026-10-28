@@ -2,6 +2,7 @@ use crate::{
     files::{Entry, Error, Result},
     ssh::SSHHost,
 };
+use futures::{StreamExt, stream};
 use russh_sftp::{
     client::error::Error as SftpError,
     protocol::{FileAttributes, OpenFlags, Packet, StatusCode},
@@ -120,6 +121,40 @@ fn rename_exclusive(from: CString, to: CString) -> std::io::Result<()> {
         Err(std::io::Error::last_os_error())
     }
 }
+fn listing_entry(name: String, info: Metadata, directory: bool) -> Entry {
+    Entry {
+        name,
+        directory,
+        symlink: info.is_symlink(),
+        size: info.size,
+        modified: info.modified,
+        mode: info.mode,
+    }
+}
+fn local_entries(directory: &str) -> Result<(Vec<Entry>, bool)> {
+    let mut entries = Vec::new();
+    for item in std::fs::read_dir(directory)? {
+        let item = item?;
+        if entries.len() >= 10000 {
+            return Ok((entries, true));
+        }
+        let Ok(info) = std::fs::symlink_metadata(item.path()) else {
+            continue;
+        };
+        let info = Metadata::from(info);
+        let is_directory = if info.is_symlink() {
+            std::fs::metadata(item.path()).is_ok_and(|m| m.is_dir())
+        } else {
+            info.is_dir()
+        };
+        entries.push(listing_entry(
+            item.file_name().to_string_lossy().into_owned(),
+            info,
+            is_directory,
+        ));
+    }
+    Ok((entries, false))
+}
 impl FileSystem {
     pub async fn metadata(&self, file: &str, follow: bool) -> Result<Metadata> {
         if let Some(host) = &self.remote {
@@ -139,86 +174,58 @@ impl FileSystem {
         }
     }
     pub async fn read_entries(&self, directory: &str) -> Result<(Vec<Entry>, bool)> {
+        let Some(host) = &self.remote else {
+            let directory = directory.to_owned();
+            return tokio::task::spawn_blocking(move || local_entries(&directory))
+                .await
+                .map_err(|error| Error::new(error.to_string(), 500))?;
+        };
+        let guard = DirectoryGuard {
+            host: host.clone(),
+            handle: call(host.raw.opendir(directory)).await?.handle,
+        };
         let mut entries = Vec::new();
         let mut truncated = false;
-        if let Some(host) = &self.remote {
-            let guard = DirectoryGuard {
-                host: host.clone(),
-                handle: call(host.raw.opendir(directory)).await?.handle,
+        loop {
+            let reply =
+                tokio::time::timeout(Duration::from_secs(15), host.raw.readdir(&guard.handle))
+                    .await
+                    .map_err(|_| Error::new("The remote filesystem did not respond.", 504))?;
+            let batch = match reply {
+                Ok(batch) => batch.files,
+                Err(SftpError::Status(status)) if status.status_code == StatusCode::Eof => break,
+                Err(error) => return Err(error.into()),
             };
-            loop {
-                let reply =
-                    tokio::time::timeout(Duration::from_secs(15), host.raw.readdir(&guard.handle))
-                        .await
-                        .map_err(|_| Error::new("The remote filesystem did not respond.", 504))?;
-                let batch = match reply {
-                    Ok(batch) => batch.files,
-                    Err(SftpError::Status(status)) if status.status_code == StatusCode::Eof => {
-                        break;
-                    }
-                    Err(error) => return Err(error.into()),
-                };
-                if batch.is_empty() {
-                    break;
-                }
-                for item in batch {
-                    if item.filename == "." || item.filename == ".." {
-                        continue;
-                    }
-                    if entries.len() >= 10000 {
-                        truncated = true;
-                        break;
-                    }
-                    let info = Metadata::from(item.attrs);
-                    let symlink = info.is_symlink();
-                    let directory = if symlink {
-                        self.metadata(
-                            &libertty_engine::path::join(&[directory, &item.filename]),
-                            true,
-                        )
-                        .await
-                        .is_ok_and(|m| m.is_dir())
-                    } else {
-                        info.is_dir()
-                    };
-                    entries.push(Entry {
-                        name: item.filename,
-                        directory,
-                        symlink,
-                        size: info.size,
-                        modified: info.modified,
-                        mode: info.mode,
-                    });
-                }
-                if truncated {
-                    break;
-                }
+            if batch.is_empty() {
+                break;
             }
-        } else {
-            let mut reader = fs::read_dir(directory).await?;
-            while let Some(item) = reader.next_entry().await? {
-                if entries.len() >= 10000 {
-                    truncated = true;
-                    break;
-                }
-                let file = item.path().to_string_lossy().into_owned();
-                let Ok(info) = self.metadata(&file, false).await else {
-                    continue;
-                };
-                let symlink = info.is_symlink();
-                let directory = if symlink {
-                    self.metadata(&file, true).await.is_ok_and(|m| m.is_dir())
+            let mut batch: Vec<_> = batch
+                .into_iter()
+                .filter(|item| item.filename != "." && item.filename != "..")
+                .collect();
+            let remaining = 10000 - entries.len();
+            truncated = batch.len() > remaining;
+            batch.truncate(remaining);
+            let resolved = stream::iter(batch.into_iter().map(|item| async move {
+                let info = Metadata::from(item.attrs);
+                let is_directory = if info.is_symlink() {
+                    self.metadata(
+                        &libertty_engine::path::join(&[directory, &item.filename]),
+                        true,
+                    )
+                    .await
+                    .is_ok_and(|m| m.is_dir())
                 } else {
                     info.is_dir()
                 };
-                entries.push(Entry {
-                    name: item.file_name().to_string_lossy().into_owned(),
-                    directory,
-                    symlink,
-                    size: info.size,
-                    modified: info.modified,
-                    mode: info.mode,
-                });
+                listing_entry(item.filename, info, is_directory)
+            }))
+            .buffered(16)
+            .collect::<Vec<_>>()
+            .await;
+            entries.extend(resolved);
+            if truncated {
+                break;
             }
         }
         Ok((entries, truncated))
