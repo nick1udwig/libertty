@@ -54,11 +54,17 @@ export class TerminalProjection {
   private paintedSafe = false;
   private paintedCols = 0;
   private paintedRows = 0;
+  /** Another picture occupies the shared terminal until the next complete paint. */
+  stale = false;
   constructor(term: Terminal, ghostty: Ghostty) {
     this.term = term; this.ghostty = ghostty; this.columns = term.cols; this.rows = term.rows;
     term.write('\x1b[?25l');
   }
   get nativeColumns() { return this.native?.cols; }
+  /** Herdr's history decides whether native frames or the history projection own the screen. */
+  get hasHistory() { return this.initialized; }
+  /** Retained output replaced the terminal, so the next history or live frame repaints it completely in the same mode. */
+  invalidate() { this.stale = true; this.live = this.awaitingFrame = false; this.painted = ''; this.cursorControl = ''; }
   get clickable() { return this.live && !this.awaitingNativeResize && this.canRenderLive(); }
   nativeCell(column: number, row: number) {
     const native = this.native;
@@ -81,7 +87,7 @@ export class TerminalProjection {
   update(text: string, reflow = false) {
     // Exported rows end with a delimiter; it is not an additional terminal row.
     const normalized = text.replace(/\r?\n/g, '\r\n').replace(/\r\n$/, '');
-    if (!reflow && this.initialized && normalized === this.previous) return;
+    if (!reflow && this.initialized && !this.stale && normalized === this.previous) return;
     this.previous = normalized; this.initialized = true;
     if (!reflow && (this.awaitingNativeResize || this.live && this.canRenderLive()) && this.fitsNative(normalized)) {
       this.historyDirty = true; return;
@@ -120,7 +126,7 @@ export class TerminalProjection {
         else if (frame.full) this.term.write('\x1b[0m\x1b[2J\x1b[H');
         this.term.write(bytes);
       });
-      this.live = true; this.cursorControl = '';
+      this.live = true; this.stale = false; this.cursorControl = '';
       return true;
     }
     if (wasLive) this.paint();
@@ -183,13 +189,14 @@ export class TerminalProjection {
       && this.previous.startsWith(this.painted) && appendSafe(this.previous.slice(this.painted.length));
     preserveScrollback(this.term, () => this.term.write((append ? '\x1b8' + this.previous.slice(this.painted.length)
       : '\x1bc\x1b[3J\x1b[2J\x1b[H\x1b[?25l' + this.previous) + '\x1b7\x1b[?25l'));
-    this.painted = this.previous; this.paintedSafe = !!append || appendSafe(this.previous);
+    this.painted = this.previous; this.paintedSafe = !!append || appendSafe(this.previous); this.stale = false;
     this.paintedCols = this.term.cols; this.paintedRows = this.term.rows;
     this.cursorControl = '\x1b[?25l';
     this.cursor(point);
   }
   private writeCursor(control: string) {
-    if (control === this.cursorControl) return;
+    // Retained output keeps its own cursor until a complete paint replaces it.
+    if (this.stale || control === this.cursorControl) return;
     this.cursorControl = control;
     preserveScrollback(this.term, () => this.term.write(control));
   }

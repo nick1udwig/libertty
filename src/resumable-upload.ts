@@ -1,3 +1,5 @@
+import { abortableDelay } from './abortable-delay.ts';
+
 /** One upload attempt: the body is written at `offset`, and the reply names the finished file or the bytes that arrived. */
 export type UploadAttempt = (offset: number, body: Blob) => Promise<{ received?: number; name?: string }>;
 /** Send a file, continuing after an interruption from the bytes the backend already holds. */
@@ -13,10 +15,7 @@ export async function uploadResumable(send: UploadAttempt, file: Blob, signal: A
     } catch (error) {
       signal.throwIfAborted();
       if ((error as { status?: number }).status || ++failures >= attempts) throw error;
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, Math.min(8000, delay * 2 ** (failures - 1)));
-        signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
-      });
+      await abortableDelay(Math.min(8000, delay * 2 ** (failures - 1)), signal);
       probe = true;
     }
   }

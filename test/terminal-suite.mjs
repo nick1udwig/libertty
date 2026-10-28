@@ -68,7 +68,14 @@ try {
   await installWireObserver(page.context());
   await page.addInitScript(() => {
     const paint = CanvasRenderingContext2D.prototype.fillText;
-    CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); return paint.call(this, text, ...args); };
+    window.__paintStyled = sessionStorage.getItem('test.paint-styles') ? [] : undefined;
+    window.__handoff = { banner: false, cover: false };
+    new MutationObserver(() => {
+      const banner = document.getElementById('reconnect-banner'), layer = document.querySelector('.terminal-presentation');
+      if (banner && !banner.hidden) window.__handoff.banner = true;
+      if (layer && !layer.hidden) window.__handoff.cover = true;
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden'] });
+    CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); window.__paintStyled?.push([text, String(this.fillStyle)]); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'repair-result') window.__lastRepairResult = message; if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
@@ -452,6 +459,7 @@ try {
     await dictate(page, 'ls dash all');
     await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'ls --all');
     await page.screenshot({ path: path.join(root, '.test-artifacts/mobile.png') });
+    assert.equal(await page.locator('.terminal-tools, #read-history, #write-draft, #jump-to-live').count(), 0);
     assert.equal(await page.locator('#terminal').evaluate(el => el.getBoundingClientRect().top), 0);
     assert.equal(await page.locator('#composer-panel, #compose-mode, #raw-mode').count(), 0);
     assert.ok(await page.locator('.input-dock').evaluate(el => el.clientHeight) <= 54);
@@ -460,12 +468,45 @@ try {
     await page.waitForFunction(() => { const r = document.querySelector('#alternatives-menu').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= document.querySelector('.input-dock').getBoundingClientRect().top; });
     await page.screenshot({ path: path.join(root, '.test-artifacts/keyboard-viewport.png') });
     await page.keyboard.press('Control+c'); await ready(page);
+    await command(page, "printf 'offline-history-proof \\033[31mred-proof\\033[0m\\n'");
     await page.evaluate(() => navigator.serviceWorker.ready);
-    await page.reload(); await ready(page);
+    await until(() => page.evaluate(() => new Promise(resolve => {
+      const request = indexedDB.open('libertty-terminal-history');
+      request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(JSON.stringify(read.result).includes('offline-history-proof')); }; };
+    })));
+    // Retained output repaints through the terminal renderer with the colors it had while live.
+    const paintedStyles = text => page.evaluate(text => {
+      const cells = window.__paintStyled || [], chars = [...text];
+      for (let i = cells.length - chars.length; i >= 0; i--) if (chars.every((char, j) => cells[i + j][0] === char)) return cells.slice(i, i + chars.length).map(([, style]) => style);
+    }, text);
+    // A slow but working connection replaces retained output without a banner, progress or a moved reading position.
+    await page.evaluate(() => sessionStorage.setItem('test.paint-styles', '1'));
+    let releaseConnect; const connectGate = new Promise(resolve => releaseConnect = resolve);
+    const holdConnect = async route => { await connectGate; await route.continue(); };
+    await page.route('**/api/connect', holdConnect);
+    await page.reload(); await until(async () => !!await paintedStyles('red-proof'), 'retained output before the connection');
+    const track = page.locator('.terminal-scrollbar');
+    await track.press('PageUp');
+    const distance = async () => Number(await track.getAttribute('aria-valuemax')) - Number(await track.getAttribute('aria-valuenow'));
+    const reading = await distance();
+    assert.ok(reading > 0, 'Retained output scrolls while the connection is pending');
+    releaseConnect(); await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected');
+    await page.waitForFunction(() => document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+    await page.unroute('**/api/connect', holdConnect);
+    assert.deepEqual(await page.evaluate(() => window.__handoff), { banner: false, cover: false }, 'The complete replay replaces retained output in one paint without a cover');
+    assert.equal(await distance(), reading, 'Live output keeps the reading position');
+    await track.press('End');
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');
     await page.waitForSelector('#terminal canvas');
+    await until(async () => !!await paintedStyles('red-proof'), 'retained output painted by the terminal');
+    const cachedRed = await paintedStyles('red-proof'), cachedPlain = await paintedStyles('offline-history-proof');
+    assert.equal(new Set(cachedRed).size, 1); assert.notEqual(cachedRed[0], cachedPlain[0], 'Retained output keeps its colors');
     await page.waitForFunction(() => [...document.fonts].some(font => font.family === 'JetBrains Mono' && font.status === 'loaded'));
+    await page.evaluate(() => { window.__paintStyled = []; sessionStorage.removeItem('test.paint-styles'); });
     await context.setOffline(false); await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected', {}, { timeout: 15000 });
+    await until(async () => !!await paintedStyles('red-proof'), 'live output repainted');
+    assert.deepEqual(await paintedStyles('red-proof'), cachedRed, 'Live output and retained output use the same colors');
+    await page.evaluate(() => { window.__paintStyled = undefined; });
     await page.locator('#menu-button').click();
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#new-shell').click();

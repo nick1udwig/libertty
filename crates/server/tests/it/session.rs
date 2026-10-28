@@ -115,7 +115,6 @@ impl Browser {
     }
 }
 
-#[tokio::test]
 async fn native_suggestions_refresh_paths_and_honor_cancellation() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir(root.path().join("Workspace")).unwrap();
@@ -127,11 +126,13 @@ async fn native_suggestions_refresh_paths_and_honor_cancellation() {
     let session = Session::start(
         root.path().to_str().unwrap().into(),
         vec!["cd".into(), "python3".into()],
-        true,
+        false,
         HostServices::new(),
     )
     .await
     .unwrap();
+    let mut browser = Browser::attach(session.clone(), 0, None);
+    browser.ready(0).await;
     let cancel = tokio_util::sync::CancellationToken::new();
     // A light directory repair must not poison the next full script catalog.
     let candidates = session.suggest("cd work space", &cancel).await.unwrap();
@@ -275,6 +276,7 @@ async fn pty_contract_child() {
     let Ok(cwd) = std::env::var("LIBERTTY_PTY_TEST_ROOT") else {
         return;
     };
+    native_suggestions_refresh_paths_and_honor_cancellation().await;
     let session = Session::start(
         cwd.clone(),
         vec![

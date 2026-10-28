@@ -197,6 +197,10 @@ pub(super) fn router() -> Router<Arc<App>> {
         .route("/api/dictation", get(terminal_routes::api_dictation))
         .route("/api/ping", get(terminal_routes::api_ping))
         .route(
+            "/api/terminal/history",
+            get(terminal_routes::api_terminal_history),
+        )
+        .route(
             "/api/keychain",
             get(keychain_routes::api_keychain).post(keychain_routes::api_keychain),
         )

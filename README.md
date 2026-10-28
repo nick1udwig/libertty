@@ -92,6 +92,7 @@ Keep libertty running; Tailscale Serve does not start it for you.
 ## Documentation
 
 - [Server setup](https://libertty.sh/setup/): one-line installation, companions, Tailscale and user services.
+- [Local source deployment](docs/local-deployment.md): deploy a worktree or return an existing user service to master.
 - [Project site](https://libertty.sh/): product features and a working browser demo.
 - [Releases](docs/releases.md): native build checks, dependency pins and publishing.
 - [Usage guide](https://libertty.sh/usage/): connections, pairing, dictation, touch controls and file transfers.

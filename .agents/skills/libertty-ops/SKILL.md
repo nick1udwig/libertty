@@ -26,6 +26,28 @@ systemctl --user show libertty.service --property=FragmentPath --property=ExecSt
 tailscale serve status
 ```
 
+Prefer [scripts/deploy-local.mjs](../../../scripts/deploy-local.mjs) for this source service and use the manual commands below only as a fallback.
+Read [docs/local-deployment.md](../../../docs/local-deployment.md) for prerequisites and configuration.
+Keep the service name and mounted application URLs in `.deploy.local.json` in the script's checkout root.
+This machine-specific configuration is ignored by Git.
+Use the Node version pinned in the target checkout's `build/release-config.json`.
+Deploy the script's current worktree with:
+
+```sh
+node scripts/deploy-local.mjs
+```
+
+Build and deploy the existing `master` worktree with:
+
+```sh
+node scripts/deploy-local.mjs --master
+```
+
+Add `--dry-run` to either command to inspect the plan without building or restarting.
+The helper installs locked dependencies, builds the release, sets or removes `branch.conf`, restarts the service, and checks the version, frontend assets and running executable.
+It preserves the working directory, application data and Tailscale routes, and does not run tests.
+On deployment failure, it restores the previous service command but cannot restore replaced build files.
+
 Use the Node version pinned in `build/release-config.json` and run deployment tests only when the user explicitly requests them.
 If the service runs this checkout's `target/release/libertty`, rebuild the optimized native server and frontend before restarting it.
 For an installer-managed service, use the installed release upgrade procedure below instead.

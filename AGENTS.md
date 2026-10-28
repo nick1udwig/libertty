@@ -4,6 +4,7 @@ Write all prose with one and only one sentence per line, including Markdown, com
 When a request contains multiple work items, complete them one at a time in the requested order.
 For each item, implement it, run the applicable checks, fix any bugs and rerun the affected checks, then commit it before moving to the next item.
 Keep unrelated existing changes out of each item's commit.
+Get explicit developer confirmation before adding UI elements that reduce space for main content, because mobile screens must prioritize the main content.
 Do not credit Claude or any other AI assistant in commits or pull requests, so omit `Co-Authored-By` trailers and generated-by lines.
 
 For requests to deploy or push, do not run tests unless the user explicitly requests them for that request.

@@ -60,7 +60,7 @@ try {
       else parent.postMessage(message, origin);
     };
   }, {first,second});
-  await context.route('**/assets/terminal-*.js', async route => {
+  await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:').replaceAll('parent.postMessage(', 'window.__postToParent(');
     assert.notEqual(body, original); assert.ok(body.includes('window.__postToParent')); await route.fulfill({response,body});

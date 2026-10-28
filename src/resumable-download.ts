@@ -1,3 +1,5 @@
+import { abortableDelay } from './abortable-delay.ts';
+
 /** Fetch a download ticket's bytes, resuming with a range request after an interruption or a stall. */
 export interface ResumableOptions {
   size: number;
@@ -10,12 +12,6 @@ export interface ResumableOptions {
   delay?: number;
 }
 const flushBytes = 8 << 20;
-function pause(ms: number, signal: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
-  });
-}
 class Final extends Error {}
 export async function fetchResumable(url: URL, { size, signal, progress, stall = 20000, attempts = 6, delay = 1000 }: ResumableOptions): Promise<Blob> {
   // Bytes move into Blob parts as they arrive, so the browser can spool large files instead of holding a chunk array.
@@ -51,7 +47,7 @@ export async function fetchResumable(url: URL, { size, signal, progress, stall =
       signal.throwIfAborted();
       if (error instanceof Final) throw error;
       if (attempt >= attempts) throw new Error('Download interrupted. Check your connection and try again.');
-      await pause(Math.min(8000, delay * 2 ** (attempt - 1)), signal);
+      await abortableDelay(Math.min(8000, delay * 2 ** (attempt - 1)), signal);
     }
   }
 }

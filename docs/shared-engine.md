@@ -16,6 +16,8 @@ Its `alternatives` and `detectIntent` operations run the backend's dictation alt
 Tools can request suggestions through `/api/suggest`.
 
 `crates/server/src/engine.rs` supplies native host facts and delegates to the library's bounded asynchronous runtime.
+Native suggestions and prewarming use typed calls and results without JSON catalog or candidate conversions.
+The WASM adapter retains the existing JSON protocol.
 Native help, script and completion adapters retain probe-pool capacity and cancellation.
 `src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
 Cancellation, attachment, prompt and revision guards protect concurrent edits.
@@ -42,6 +44,9 @@ Herdr additionally checks ownership, foreground shell identity and the last dict
 Each engine owns its learned metadata, while request-owned host futures isolate cancellation and fact memoization.
 Prompt-time metadata prewarming remains shared by local and SSH sessions.
 Herdr retains an engine and help provider per terminal context and invalidates them when the shell or environment changes.
+Herdr shares command discovery within each terminal context for two seconds after a successful scan.
+Concurrent requests reuse the same scan, while shell, directory or environment changes create a fresh context.
+Failed or cancelled scans are not cached, and executable changes appear after the short cache expires.
 Terminal edits and execution remain outside the engine library.
 
 ## Validation and performance

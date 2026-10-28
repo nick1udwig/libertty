@@ -78,9 +78,13 @@ try {
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
   await context.addInitScript(() => {
+    // Delaying the redraw barrier or the first history keeps any picture that precedes it on screen long enough to observe.
+    window.__delayBarrier = sessionStorage.getItem('test.delay-barrier') === '1';
+    window.__delayHistory = sessionStorage.getItem('test.delay-history') === '1';
     window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0; window.__historyDeltas = 0;
+    window.__visible = () => { const t = window.__terminal, buffer = t.buffer.active, top = buffer.length - t.rows - Math.floor(t.getViewportY()); return Array.from({ length: t.rows }, (_, row) => buffer.getLine(top + row)?.translateToString(true) ?? '').join('\n'); };
     window.WebSocket = class extends WebSocket {
-      constructor(...args) { super(...args); window.__socket = this; }
+      constructor(...args) { super(...args); window.__socket = this; window.__barrier = false; }
       send(data) {
         if (window.__holdAcks && window.__wireSent(data).type === 'ack') {
           window.__releaseFrames = () => super.send(data);
@@ -90,18 +94,22 @@ try {
       }
       set onmessage(handler) {
         window.__receive = message => handler.call(this, { data: JSON.stringify(message) });
-        super.onmessage = async event => {
+        let ordered = Promise.resolve();
+        const deliver = async event => {
           const message = await window.__wireMessage(event.data, this);
+          if (message.type === 'herdr-layout' && message.ready) { if (window.__delayBarrier) await new Promise(resolve => setTimeout(resolve, 400)); window.__barrier = true; }
+          if (message.type === 'screen' && window.__delayHistory && !window.__historyDelayed) { window.__historyDelayed = true; await new Promise(resolve => setTimeout(resolve, 600)); }
           if (message.type === 'herdr-frame') { window.__frames++; if (!message.full) window.__deltas++; if (atob(message.bytes).includes('Host scrollback')) window.__nativeHistoryFrame = true; }
           if (message.type === 'screen') { if (message.delta) window.__historyDeltas++; window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }
           handler.call(this, event);
         };
+        super.onmessage = event => { if (window.__delayBarrier || window.__delayHistory) ordered = ordered.then(() => deliver(event)); else void deliver(event); };
       }
     };
   });
   await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Native terminal link</title>' }));
   await context.route('https://github.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Wrapped GitHub link</title>' }));
-  await context.route('**/assets/terminal-*.js', async route => {
+  await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text(), body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
   });
@@ -179,6 +187,44 @@ try {
   await drag(300, 180); await wait(async () => (await state()).offset < older.offset, 'reverse drag scrolls toward latest output');
   assert.equal(await page.locator('#terminal textarea').evaluate(el => el === document.activeElement), false);
   assert.deepEqual((await state()).mouse, [], 'Links, scrolling and hold-to-copy send no clicks');
+  // A dropped connection continues the swipe through retained output, and recovery returns to the application without a gesture.
+  const wheels = (await state()).wheels;
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+  await drag(180, 300);
+  await page.waitForFunction(() => window.__terminal.getViewportY() > 0);
+  assert.equal((await state()).wheels, wheels, 'Retained output scrolls locally while disconnected');
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+  await page.waitForFunction(() => window.__terminal.getViewportY() === 0 && window.__terminal.buffer.active.length === window.__terminal.rows);
+  // Reload from retained output with the live ticket held, and sample every uncovered animation frame until the live picture is revealed.
+  const reloadFromRetained = async delays => {
+    let releaseTicket; const ticketGate = new Promise(resolve => releaseTicket = resolve);
+    const holdTicket = async route => { await ticketGate; await route.continue(); };
+    await page.route('**/api/herdr/ticket**', holdTicket);
+    await page.evaluate(delays => { for (const name of delays) sessionStorage.setItem('test.delay-' + name, '1'); }, delays);
+    await delay(2500); await page.reload();
+    await page.waitForFunction(() => window.__terminal && window.__visible().trim());
+    await page.evaluate(() => {
+      window.__samples = [];
+      const sample = () => {
+        const t = window.__terminal, covered = [...document.querySelectorAll('.terminal-presentation')].some(layer => !layer.hidden);
+        window.__samples.push({ barrier: window.__barrier, covered, text: window.__visible(), scrollback: t.buffer.active.length > t.rows });
+        if (document.querySelector('#terminal-viewport').getAttribute('aria-busy') !== 'false') requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    releaseTicket();
+    await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+    await page.unroute('**/api/herdr/ticket**', holdTicket);
+    return page.evaluate(() => {
+      for (const key of Object.keys(sessionStorage)) if (key.startsWith('test.delay-')) sessionStorage.removeItem(key);
+      window.__delayBarrier = window.__delayHistory = false;
+      return window.__samples.filter(sample => !sample.covered);
+    });
+  };
+  // A reload keeps retained output, unchanged, until a frame after Herdr's redraw barrier replaces it.
+  const nativeReload = await reloadFromRetained(['barrier']);
+  assert.ok(nativeReload.every(sample => sample.barrier || sample.text === nativeReload[0].text), 'Frames before the redraw barrier do not repaint retained output');
   const tapCell = async (column, row) => {
     const point = await page.evaluate(({ column, row }) => {
       const t = window.__terminal, r = document.querySelector('#terminal canvas').getBoundingClientRect();
@@ -280,7 +326,7 @@ try {
     try {
       await page.waitForFunction(() => document.querySelector('#connection-label').textContent.startsWith('Connection stalled'), undefined, { timeout: 8000 });
       await wait(() => !!heldTicket, 'replacement ticket during the outage');
-      assert.equal(await page.locator('.terminal-presentation').isVisible(), true, 'An outage retains the previous terminal picture');
+      assert.equal(await page.locator('.terminal-presentation').isVisible(), false, 'An outage keeps the terminal readable without a frozen cover');
     } finally { release(); await page.unroute('**/api/herdr/ticket?**', hold); }
     await page.waitForFunction(tick => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('.terminal-presentation').hidden
       && Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) > tick + 150, stalledTick, { timeout: 12000 });
@@ -319,6 +365,10 @@ try {
   await tapCell(7, 4);
   await delay(200);
   assert.equal((await state()).mouse.length, normalClicks, 'Reading older local history sends no clicks');
+  // In history mode, retained output covers the native grid that precedes Herdr's history projection.
+  await page.evaluate(() => window.__terminal.scrollToBottom());
+  const historyReload = await reloadFromRetained(['history']);
+  assert.ok(historyReload.length && historyReload.every(sample => sample.scrollback), 'A reload never exposes the native grid before the history projection');
   assert.deepEqual(errors, []);
   console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; native tap/edit ordering, wide cells, rotation, mouse mode, reconnects, scrolling, hold/copy, links and fullscreen recovery passed.');
 } finally {

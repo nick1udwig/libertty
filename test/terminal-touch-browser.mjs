@@ -49,7 +49,7 @@ try {
       window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; }); } send(data) { if (window.__wireSent(data).type === 'input') window.__inputs.push(JSON.stringify(window.__wireSent(data))); return super.send(data); } };
       if (parent === window) addEventListener('message', async e => { if (e.data?.type === 'terminal-loaded') e.source.postMessage({ type: 'authorize', accessToken }, location.origin); });
     }, { accessToken });
-    await context.route('**/assets/terminal-*.js', async route => {
+    await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
       const response = await route.fetch(), original = await response.text();
       const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
       assert.notEqual(body, original); await route.fulfill({ response, body });

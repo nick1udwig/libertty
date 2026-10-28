@@ -42,7 +42,7 @@ try {
   browser=await launchBrowser({args:['--use-gl=angle','--use-angle=gl']});
   const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
   await installWireObserver(context);
-  await context.route('**/assets/terminal-*.js',async route=>{const response=await route.fetch(),source=await response.text();const body=source.replace(/new ([\w$]+)\(\{ghostty:/,'window.__terminal=new $1({ghostty:');assert.notEqual(body,source);await route.fulfill({response,body});});
+  await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/,async route=>{const response=await route.fetch(),source=await response.text();const body=source.replace(/new ([\w$]+)\(\{ghostty:/,'window.__terminal=new $1({ghostty:');assert.notEqual(body,source);await route.fulfill({response,body});});
   await context.addInitScript(()=>{
     // Folded status lanes would hide the idle spaces this test switches between.
     if(window===parent&&!localStorage.getItem('libertty.tabs')) {localStorage.setItem('libertty.herdrStripOrder',JSON.stringify('manual'));const id=crypto.randomUUID();localStorage.setItem('libertty.hosts',JSON.stringify([{id:'herdr-native',name:'Herdr',kind:'herdr',backendId:'primary'}]));localStorage.setItem('libertty.tabs',JSON.stringify([{id,session:'default',name:'Herdr',pluginId:'herdr',pluginVersion:'1',backendId:'primary',hostId:'herdr-native'}]));localStorage.setItem('libertty.activeTab',JSON.stringify(id));}
@@ -63,6 +63,8 @@ try {
         requestAnimationFrame(inspect);
       };requestAnimationFrame(inspect);return;
     }
+    // A write records the grid that Herdr drew for, so a later local resize is visible as a mismatch.
+    let terminal;Object.defineProperty(window,'__terminal',{configurable:true,get:()=>terminal,set:value=>{terminal=value;const write=value.write.bind(value);value.write=(...args)=>{window.__writtenSize=value.cols+'x'+value.rows;return write(...args);};}});
     window.__frames=[];const Original=WebSocket;window.WebSocket=class extends Original {constructor(...args){super(...args);this.addEventListener('message',async event=>{const m=await window.__wireMessage(event.data,this);if(m.type==='herdr-layout') (window.__layoutSignals ||= []).push(m); if(m.type==='herdr-frame')window.__frames.push({width:m.width,height:m.height,full:m.full});});}};
   });
   const page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));
@@ -82,6 +84,30 @@ try {
   const initialPaints = await page.evaluate(() => window.__flashPaints);
   assert.ok(initialPaints.every(p => !p.title.includes(':DESKTOP')), 'Cold opening must wait for application redraw');
   const visited=new Set(initialPaints.map(p=>p.terminal));
+  // Opening or closing terminal tabs by tap or swipe never shows the stale canvas or a local reflow before Herdr redraws.
+  await page.evaluate(()=>{
+    window.__drawerFaults=[];window.__drawerSampling=true;
+    const sample=()=>{
+      for(const frame of document.querySelectorAll('.herdr-screen iframe')) {
+        if(!frame.checkVisibility({checkVisibilityCSS:true})) continue;
+        const child=frame.contentWindow,t=child.__terminal,document=child.document,viewport=document.querySelector('#terminal-viewport'),canvas=document.querySelector('#terminal canvas');
+        if(!t||!viewport||!canvas||[...document.querySelectorAll('.terminal-resize-cover,.terminal-presentation')].some(layer=>!layer.hidden)) continue;
+        const height=canvas.getBoundingClientRect().height,stale=viewport.clientHeight-height>=height/t.rows||height>viewport.clientHeight+1,reflowed=child.__writtenSize!==t.cols+'x'+t.rows;
+        if(stale||reflowed) window.__drawerFaults.push({stale,reflowed,viewport:viewport.clientHeight,canvas:height,size:t.cols+'x'+t.rows,written:child.__writtenSize});
+      }
+      if(window.__drawerSampling) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  const input=await context.newCDPSession(page),swipeDrawer=async direction=>{
+    const strip=await page.locator('.herdr-agent-strip:visible').boundingBox(),x=strip.x+strip.width/2,y=strip.y+strip.height/2;
+    await input.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y,id:1}]});
+    for(let i=1;i<=12;i++){await delay(20);await input.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+direction*i*5,id:1}]});}
+    await delay(100);await input.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
+  };
+  for(const gesture of [()=>page.locator('.herdr-tabs-toggle:visible').click(),()=>page.locator('.herdr-tabs-toggle:visible').click(),()=>swipeDrawer(-1),()=>swipeDrawer(1)]) { await gesture(); await delay(1500); }
+  const drawerFaults=await page.evaluate(()=>{window.__drawerSampling=false;return window.__drawerFaults;});
+  assert.deepEqual(drawerFaults,[],'Terminal tab gestures keep the previous picture until Herdr redraws the resized pane');
   const timings=[];
   for(let i=0;i<Number(process.env.TEST_SWITCHES||10);i++) {
     const space=spaces[i%spaces.length],before=await page.evaluate(()=>{window.__flashPaints=[];return Date.now();});

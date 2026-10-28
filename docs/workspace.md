@@ -263,3 +263,60 @@ Reproduce after building:
 BENCH_BEFORE=b2a0fb4 BENCH_BEFORE_WORKSPACE=1 BENCH_REPEATS=9 node test/workspace-benchmark.mjs
 # Repeat with BENCH_REVERSE=1 and pool both sample sets.
 ```
+
+## Reading during connection loss
+
+A reconnect keeps the terminal renderer available for local scrolling and selection.
+The status banner shows when output last arrived.
+A full-screen application's unobserved history still needs the remote application.
+Geometry changes retain the separate layout handshake so stale frames do not replace a resized pane.
+
+A reload paints persisted output through the terminal renderer with its colors, attributes, screen layout and cursor.
+The next live replay or Herdr frame replaces it in the same terminal at the same distance from the bottom.
+A shell replay over retained output is queued until it is complete, then written with its reset in one step, so no cover or intermediate screen paints.
+A Herdr pane keeps retained output as its preserved picture, so only a full frame after Herdr's redraw barrier replaces it.
+A first native frame can precede the history projection that owns a pane with scrollback.
+An exact pixel copy of retained output therefore covers the pane until Herdr's history decides the final picture, or for at most 1.5 seconds.
+Held pictures copy the canvas bitmap without resampling, so the cover is identical to the terminal beneath it.
+Retained output also keeps its own cursor until that replacement.
+The replacement shows no reconnect banner or progress indicator.
+Retained output appears at once, and the banner appears only while the browser is offline or a connection attempt fails.
+During use, retained output takes over a scroll only after the connection drops or stalls, when the live terminal has no more local rows to show.
+A remote scroll on a slow but working connection waits for the application instead.
+Retained output scrolls and selects like live output and marks gaps with an ellipsis.
+The first live paint after recovery replaces it automatically, so no gesture returns to the live terminal.
+A snapshot reset also keeps the reading distance from the bottom.
+The browser retains up to 64 observed records and 512 Ki UTF-16 code units of text.
+Normal scrollback can extend earlier records when their overlap matches.
+Full-screen redraws remain separate observed excerpts with possible gaps, because Herdr does not supply a stable application conversation log through this interface.
+Sampling occurs at most once per 1.5 seconds during output, plus remote scroll gestures and disconnects.
+
+IndexedDB retains recent styled rows, the screen layout, and the reading position for reloads.
+Each row starts from default attributes and stores true colors, so overlapping samples compare as text.
+A recovery that continues the record before a gap removes that gap instead of repeating the history.
+Records are scoped to the backend, session, Herdr source, terminal, and pane identity.
+A changed native stream starts a separate history.
+The cache expires after seven days and retains at most 16 terminals and 8 MiB in total.
+Storage failure or eviction leaves the live terminal usable.
+The terminal has no additional history toolbar or draft actions.
+Cached Herdr metadata mounts the selected pane as an unauthorized preview that paints its persisted output.
+The preview requests no ticket, opens no socket and accepts no input until live metadata verifies its terminal and pane.
+Verification authorizes the same frame, and a changed pane replaces it.
+
+Native sessions retain 5,000 server scrollback rows, while the foreground reconnect snapshot stays limited to 1,000 rows.
+After synchronization, an authenticated background request retrieves up to 512 KiB of plain history from the same stream.
+Plain history only extends the styled archive where the two overlap.
+The local archive survives snapshot resets and marks gaps that exceed server retention.
+Background history stops when the connection closes or the page hides, and it never delays input or moves an open reader.
+
+Herdr frame acknowledgments measure round-trip delay and delivered bytes per second.
+A slow link or an aging frame queue reduces the frame window from two to one and slows optional history delivery to one update per one to three seconds.
+Unsent redraws continue to merge into the latest screen, and input keeps its separate delivery path.
+Browser heartbeat timing and outbound queue pressure also defer local history sampling and background backfill.
+An offline event pauses connection attempts for ten seconds, then probes resume even without an online event.
+An online event or return to the foreground clears the offline delay and retry backoff.
+Returning to an open connection checks its heartbeat immediately instead of waiting for the idle interval.
+Only a socket with initial application state is healthy.
+Authorization has a 15-second budget, followed by eight seconds without progress for a WebSocket handshake or initial state.
+Measured slow links and repeated failures can extend that idle budget to 15 seconds, and the complete attempt is bounded to 45 seconds.
+Each successful connection phase or initial replay message renews the idle deadline.

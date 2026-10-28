@@ -38,6 +38,64 @@ fn executable(file: &std::path::Path, content: &str) {
 }
 
 #[tokio::test]
+async fn typed_native_calls_match_json_and_warm_the_same_discovery() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    executable(
+        &root.path().join("orbit"),
+        "#!/bin/sh\nprintf '  --first VALUE  First\\n'\n",
+    );
+    let services = HostServices::new();
+    let mut catalog = catalog(cwd, &["orbit"]);
+    catalog.history = vec!["orbit".into()].into();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog,
+        BTreeMap::from([("HOME".into(), cwd.into()), ("PATH".into(), cwd.into())]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    let cancel = CancellationToken::new();
+    let targets = engine.prewarm_targets(&host, &cancel).await.unwrap();
+    let json_targets = engine
+        .invoke(
+            request("prewarmTargets", json!([host.catalog, host.environment])),
+            &host,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(json!(targets), json_targets);
+    engine.warm_command("orbit", &host, &cancel).await.unwrap();
+    let metadata = engine
+        .invoke(
+            request("cachedMetadata", json!([host.catalog, host.environment])),
+            &host,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(metadata["flags"]["orbit"][0]["name"], "--first");
+    let typed = engine
+        .suggest("orbit first value", &host, &cancel)
+        .await
+        .unwrap();
+    let json = engine
+        .invoke(
+            request(
+                "suggest",
+                json!(["orbit first value", host.catalog, host.environment]),
+            ),
+            &host,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(json!(typed), json);
+    assert_eq!(typed[0].command, "orbit --first value");
+}
+
+#[tokio::test]
 async fn fact_deadlines_preserve_fast_results_when_an_optional_probe_is_slow() {
     use libertty_engine::host::HostOperation;
     let root = tempfile::tempdir().unwrap();

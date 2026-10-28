@@ -25,7 +25,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'], serviceWorkers: 'block' });
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Opened terminal link</title>' }));
-  await context.route('**/assets/terminal-*.js', async route => {
+  await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
@@ -49,7 +49,7 @@ try {
     const Original = WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; if (m.type === 'output') window.__outputSeq = m.seq; }); }
-      send(data) { if (window.__wireSent(data).type !== 'audio') window.__sent.push(window.__wireSent(data)); super.send(data); }
+      send(data) { const message = window.__wireSent(data); if (message.type !== 'audio') window.__sent.push(message); if (window.__holdInput && message.type === 'input') return; super.send(data); }
     };
   });
   const page = await context.newPage(), errors = []; page.on('pageerror', e => errors.push(String(e)));
@@ -408,6 +408,31 @@ try {
   assert.equal(await frame.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Workspace automatic copying must leave the keyboard closed');
   assert.equal(await page.locator('#notice:visible').count(), 0, 'Selection confirmation must appear only once beside the text');
   await checkLinks(frame);
+  // A slow but working connection keeps scrolling the application instead of switching to retained output.
+  await frame.evaluate(() => {
+    getSelection()?.removeAllRanges();
+    window.__testTerminal.clearSelection();
+    window.__testTerminal.write('\x1b[?1049h\x1b[2J\x1b[HCACHED-APP-SCREEN');
+    window.__sent = []; window.__holdInput = true;
+  });
+  const swipe = async () => { await touch('touchStart', embeddedStart); await touch('touchMove', { x: embeddedStart.x, y: embeddedStart.y + 100 }); await touch('touchEnd'); };
+  const bufferText = () => frame.evaluate(() => { const buffer = window.__testTerminal.buffer.active, lines = []; for (let row = 0; row < buffer.length; row++) lines.push(buffer.getLine(row).translateToString(true)); return lines.join('\n'); });
+  await swipe(); await delay(500);
+  assert.ok(await frame.evaluate(() => window.__sent.some(message => message.type === 'input')), 'The swipe scrolls the remote application');
+  assert.equal(await frame.evaluate(() => window.__testTerminal.wasmTerm.isAlternateScreen()), true, 'An unanswered remote scroll keeps the live application');
+  await frame.evaluate(() => { window.__holdInput = false; });
+  // A dropped connection continues the same swipe through retained output, and recovery replaces it without a gesture.
+  await frame.evaluate(() => { window.dispatchEvent(new Event('offline')); window.__sent = []; });
+  await swipe();
+  await frame.waitForFunction(() => !window.__testTerminal.wasmTerm.isAlternateScreen() && window.__testTerminal.getViewportY() > 0);
+  assert.equal(await frame.locator('.terminal-reader').count(), 0, 'Retained output uses the terminal renderer');
+  const retained = await bufferText();
+  assert.match(retained, /EMBEDDED-.*alpha beta gamma.*CACHED-APP-SCREEN/s, 'Retained output ends with the application screen');
+  assert.equal(await frame.evaluate(() => window.__sent.filter(m => m.type === 'terminal-scroll' || m.type === 'input').length), 0);
+  await frame.evaluate(() => window.dispatchEvent(new Event('online')));
+  await frame.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected');
+  await frame.waitForFunction(() => document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+  assert.doesNotMatch(await bufferText(), /CACHED-APP-SCREEN/, 'Live output replaces retained output as soon as it is ready');
   assert.deepEqual(errors, []);
   await page.screenshot({ path: path.join(root, '.test-artifacts/terminal-gestures.png') });
   console.log('PASS: tapped plain/wrapped/labeled/scrollback links open safely in standalone/workspace terminals; automatic copy, selection, cancellation, scrolling, keyboard focus, preserved history, Backspace');

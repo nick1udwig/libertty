@@ -8,10 +8,7 @@ use crate::{
 };
 use libertty_engine::{
     command_policy::subcommands_for,
-    help::{
-        commands_from_help, commands_from_manual, flags_from_help, has_command_slot,
-        required_from_help,
-    },
+    help::{apply_manual, needs_manual, parse_help},
     host::{FactValue, HostOperation},
     path,
     repair::{shell_quote, tokens},
@@ -481,21 +478,8 @@ impl SSHHost {
             .unwrap_or("/usr/bin:/bin");
         let output = self.exec(&format!("cd {} && env -i HOME={} PATH={} BASH_ENV=/dev/null ENV=/dev/null PAGER=cat GIT_PAGER=cat TERM=dumb LC_ALL=C {args}",shell_quote(&catalog.cwd),shell_quote(home),shell_quote(path)),cancel).await?;
         let text = format!("{}\n{}", output.stdout, output.stderr);
-        let scope = std::iter::once(command)
-            .chain(route.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut help = Help {
-            flags: flags_from_help(&text),
-            subcommands: commands_from_help(&text, Some(&scope)),
-            required: required_from_help(&text, &scope),
-            ..Help::default()
-        };
-        if command != "git"
-            && route.is_empty()
-            && help.subcommands.is_empty()
-            && has_command_slot(&text)
-        {
+        let mut help = parse_help(command, route, &text);
+        if needs_manual(command, route, &text, &help) {
             let manual = self.exec(&format!("cd {} && env -i PATH=/usr/bin:/bin HOME={} MANWIDTH=100 MANPAGER=cat MANOPT= LC_ALL=C /usr/bin/man -P cat -- {}",shell_quote(&catalog.cwd),shell_quote(home),shell_quote(command)),cancel).await;
             if cancel.is_cancelled() {
                 return Err(ABORTED.into());
@@ -503,10 +487,7 @@ impl SSHHost {
             if let Ok(manual) = manual
                 && manual.code == 0
             {
-                help.subcommands = commands_from_manual(&manual.stdout);
-                if !help.subcommands.is_empty() {
-                    help.probe_subcommands = Some(vec![]);
-                }
+                apply_manual(&mut help, &manual.stdout);
             }
         }
         if command == "git" {

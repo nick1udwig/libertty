@@ -27,9 +27,12 @@ export interface BackgroundOptions {
 export class ReconnectingSocket {
   socket?: WebSocket;
   private attempt?: AbortController;
+  private attemptStarted = 0;
   private deadline?: ReturnType<typeof setTimeout>;
   private retry?: ReturnType<typeof setTimeout>;
   private delay = 1000;
+  private offlineUntil = 0;
+  private decodeLag = 0;
   private stopped = false;
   private retained?: WebSocket;
   private heartbeat?: ReturnType<typeof setTimeout>;
@@ -77,7 +80,18 @@ export class ReconnectingSocket {
   /** Acknowledged input proves that the return path worked without an extra probe. */
   confirmed() { if (this.pingAt === undefined) { this.lastContact = Date.now(); this.armHeartbeat(); } }
 
-  get healthy() { return !this.stalled && this.socket?.readyState === WebSocket.OPEN; }
+  /** Defer optional work when measured latency or browser queues grow. */
+  get backgroundDelay() {
+    return Math.min(10000, Math.max(1500, (this.rtt?.smoothed || 0) * 4, this.decodeLag * 4, (this.socket?.bufferedAmount || 0) > 16384 ? 5000 : 0));
+  }
+  get healthy() { return !this.stalled && this.established === this.socket && this.socket?.readyState === WebSocket.OPEN; }
+  /** Browser timers may have stopped while the app was hidden, even with an open socket. */
+  foreground() {
+    if (this.stopped) return;
+    this.offlineUntil = 0; this.delay = 1000; this.lastActivity = Date.now();
+    if (this.healthy) this.checkHeartbeat();
+    else if (!this.attempt || Date.now() - this.attemptStarted >= 1000) void this.resume(true);
+  }
   /** The page has stayed hidden past its background grace. */
   get backgroundExpired() { return this.expired; }
 
@@ -88,11 +102,12 @@ export class ReconnectingSocket {
       if (document.hidden) {
         this.expired = false; background.hidden?.();
         this.background = setTimeout(() => { this.expired = true; if (background.expired?.() !== false) this.suspend(); }, background.grace);
-      } else { this.expired = false; void this.resume(!this.healthy); background.shown?.(); }
+      } else { this.expired = false; this.foreground(); background.shown?.(); }
     };
     // Every load fires pageshow, but only a page restored from the back-forward cache needs a fresh connection.
     const restored = (event: PageTransitionEvent) => { if (event.persisted) visibility(); };
-    const online = () => void this.resume(true), offline = () => this.suspend();
+    const online = () => { this.offlineUntil = 0; this.delay = 1000; this.lastActivity = Date.now(); void this.resume(true); };
+    const offline = () => { this.suspend(); this.offlineUntil = Date.now() + 10000; this.schedule(); };
     document.addEventListener('visibilitychange', visibility); window.addEventListener('pageshow', restored);
     window.addEventListener('online', online); window.addEventListener('offline', offline);
     return () => {
@@ -189,29 +204,37 @@ export class ReconnectingSocket {
       return;
     }
     if (!this.options.available()) return;
-    this.retry = setTimeout(() => void this.begin(), this.delay);
+    this.retry = setTimeout(() => void this.begin(), Math.max(this.delay, this.offlineUntil - Date.now()));
     this.delay = Math.min(10000, this.delay * 1.5);
   }
 
   private async begin(token?: string, replace = false) {
     if (!this.options.available()) return;
+    if (Date.now() < this.offlineUntil) { this.schedule(); return; }
     if (!replace && (this.attempt || this.socket?.readyState === WebSocket.OPEN)) return;
     clearTimeout(this.retry);
     this.release(undefined, replace);
     if (this.stopped) return;
     const attempt = new AbortController();
     this.attempt = attempt;
-    // Covers stalled fetches, WebSocket handshakes, and missing initial state.
-    this.deadline = setTimeout(() => {
+    const started = this.attemptStarted = Date.now();
+    const progress = (idle = Math.min(15000, Math.max(8000, this.delay * 8, (this.rtt?.smoothed || 0) * 4))) => {
       if (this.attempt !== attempt) return;
-      this.release();
-      if (!this.options.error(new Error('Terminal connection timed out.'), token)) this.stopped = true;
-      this.schedule();
-    }, 15000);
+      clearTimeout(this.deadline);
+      this.deadline = setTimeout(() => {
+        if (this.attempt !== attempt) return;
+        this.release();
+        if (!this.options.error(new Error('Terminal connection timed out.'), token)) this.stopped = true;
+        this.schedule();
+      }, Math.max(1, Math.min(idle, 45000 - (Date.now() - started))));
+    };
+    // Authorization has its own budget, followed by an idle deadline for each transport phase.
+    progress(15000);
     try {
       const url = await this.options.prepare(attempt.signal, token);
       if (this.attempt !== attempt) return;
       if (!this.options.available()) { this.release(); return; }
+      progress();
       const socket = new WebSocket(url, this.options.protocols?.() || []);
       socket.binaryType = 'arraybuffer';
       let decoded = Promise.resolve();
@@ -219,17 +242,19 @@ export class ReconnectingSocket {
       socket.onopen = () => {
         if (this.socket !== socket) return;
         this.retained?.close(); this.retained = undefined;
-        this.options.open();
+        progress(); this.options.open();
       };
       socket.onmessage = event => {
+        const receivedAt = Date.now();
         if (this.socket !== socket) return;
         const deliver = (value: unknown) => {
           if (this.socket !== socket) return;
+          this.decodeLag = this.decodeLag * 0.75 + (Date.now() - receivedAt) * 0.25;
           if (value === '{"type":"pong"}' || typeof value === 'object' && value !== null && 'type' in value && value.type === 'pong') {
             if (this.pingAt !== undefined) this.replied();
             return;
           }
-          this.lastMessage = Date.now();
+          progress(); this.lastMessage = Date.now();
           this.options.message(new MessageEvent('message', { data: value }));
           this.armHeartbeat();
         };

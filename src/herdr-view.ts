@@ -5,7 +5,7 @@ import type { ReadingOpen } from './reading-request.ts';
 import { HerdrFrames } from './herdr-frames.ts';
 import { wireProtocols } from './wire.ts';
 import { ReconnectingSocket } from './reconnecting-socket.ts';
-import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSnapshot, type HerdrSpace } from './herdr-protocol.ts';
+import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSnapshot, type HerdrStatus, type HerdrSpace } from './herdr-protocol.ts';
 import { HerdrDialogs, type Created, type StripItem } from './herdr-dialogs.ts';
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
 import { herdrCache } from './herdr-cache.ts';
@@ -79,6 +79,9 @@ export class HerdrView {
   private cacheTimer?: ReturnType<typeof setTimeout>;
   /** What the strip last rendered, so an update that changes nothing it shows keeps its buttons. */
   private stripKey = '';
+  private statuses = new Map<string, HerdrStatus>();
+  private savedPreferences = '';
+  private preferenceTimer?: ReturnType<typeof setTimeout>;
   private dropTarget?: { id: string; drop: SpaceDrop };
   private pinnedLane?: { id: string; lane: HerdrLane };
   private movingSpace = false;
@@ -189,7 +192,7 @@ export class HerdrView {
     window.addEventListener('resize', reposition); visualViewport?.addEventListener('resize', reposition);
     this.unsubscribers.push(() => window.removeEventListener('resize', reposition), () => visualViewport?.removeEventListener('resize', reposition));
     this.transport = new ReconnectingSocket({
-      available: () => !this.disposed && !this.recovering && (!document.hidden || !this.transport.backgroundExpired) && navigator.onLine,
+      available: () => !this.disposed && !this.recovering && (!document.hidden || !this.transport.backgroundExpired),
       protocols: wireProtocols,
       prepare: async signal => {
         const { ticket } = await this.host.api<{ ticket: string }>('api/herdr/ticket', {}, signal);
@@ -213,7 +216,7 @@ export class HerdrView {
       error: error => { this.connectionError(error); return true; },
     });
     // Hiding or leaving the page writes the snapshot cache.
-    const leave = () => this.writeCache();
+    const leave = () => { this.writePreferences(); this.writeCache(); };
     window.addEventListener('pagehide', leave);
     this.unsubscribers.push(this.transport.follow({ grace: 20000, hidden: leave }), () => window.removeEventListener('pagehide', leave));
     this.element.addEventListener('pointerdown', () => this.transport.activity(), { passive: true });
@@ -229,7 +232,7 @@ export class HerdrView {
     const before = this.frames.frame; this.mountTerminal();
     if (visible && before === this.frames.frame) this.frames.represent();
     this.frames.broadcast({ type:'tab-visibility', visible });
-    if (visible && !this.connected) void this.connect();
+    if (visible) this.transport.foreground();
   }
   get ready() { return this.cached || this.frames.rendered || !!this.status.textContent || this.connected && !this.selected; }
   get navigationElement() { return this.strip; }
@@ -243,8 +246,12 @@ export class HerdrView {
     this.screen.classList.add('herdr-navigation-resizing');
     return () => {
       if (generation !== this.navigationResize) return;
-      if (frame) frame.style.flexBasis = '';
-      this.screen.classList.remove('herdr-navigation-resizing');
+      const resize = () => {
+        if (generation !== this.navigationResize) return;
+        if (frame) frame.style.flexBasis = '';
+        this.screen.classList.remove('herdr-navigation-resizing');
+      };
+      if (frame) void this.frames.prepareResize(frame).then(resize); else resize();
     };
   }
   setHeld(held: boolean) {
@@ -255,7 +262,8 @@ export class HerdrView {
   }
   private post(message: object) { this.frames.post(message); }
   get terminalFrame() { return this.frames.frame; }
-  private mountTerminal(force = false) { if (this.liveSnapshot && !this.disposed) this.frames.mount(this.terminals, this.selected, force); }
+  /** Cached metadata mounts an unauthorized preview; the live snapshot verifies the pane before it connects. */
+  private mountTerminal(force = false) { if (!this.disposed) this.frames.mount(this.terminals, this.selected, force, this.liveSnapshot); }
   private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
   private connect() { return this.transport.connect(); }
   private connectionError(error: unknown) {
@@ -321,11 +329,15 @@ export class HerdrView {
     });
   }
   private statusFor(item: StripItem) {
+    const cached = this.statuses.get(item.terminalId);
+    if (cached) return cached;
     if (!item.space) return this.tracker.status(item);
-    const terminals = (item.repo?.spaces || [item.space]).flatMap(space => space.terminalIds);
-    const statuses = this.tracker.agents.filter(agent => terminals.includes(agent.terminalId)).map(agent => this.tracker.status(agent));
-    return (['blocked', 'done', 'working'] as const).find(status => statuses.includes(status)) || 'idle';
+    const statuses = (item.repo?.spaces || [item.space]).flatMap(space => space.terminalIds.map(id => this.statuses.get(id)));
+    const status = (['blocked', 'done', 'working'] as const).find(status => statuses.includes(status)) || 'idle';
+    this.statuses.set(item.terminalId, status);
+    return status;
   }
+
   private laneFor(item: StripItem) {
     const lane = herdrLane(this.statusFor(item));
     if (item.terminalId !== this.stripSelection) return lane;
@@ -364,8 +376,8 @@ export class HerdrView {
     this.selected = id; this.save(); this.render(); this.mountTerminal();
   }
   private ordered() {
-    const entries = this.entries();
-    return this.order.map(id => entries.find(item => item.terminalId === id)).filter((item): item is StripItem => !!item);
+    const entries = new Map(this.entries().map(item => [item.terminalId, item]));
+    return this.order.map(id => entries.get(id)).filter((item): item is StripItem => !!item);
   }
   private save() {
     this.preferences.selected = this.selected;
@@ -373,7 +385,13 @@ export class HerdrView {
     const workspace = this.terminals.find(terminal => terminal.terminalId === this.selected)?.workspaceId, repo = this.repoOf(workspace);
     if (repo) this.preferences.repoSpaces![repo.id] = workspace!;
     this.preferences.state = this.tracker.checkpoint();
-    try { localStorage.setItem(this.host.key, JSON.stringify(this.preferences)); } catch { /* This view still works without persistence. */ }
+    this.preferenceTimer ??= setTimeout(() => this.writePreferences(), 250);
+  }
+  private writePreferences() {
+    clearTimeout(this.preferenceTimer); this.preferenceTimer = undefined;
+    const serialized = JSON.stringify(this.preferences);
+    if (serialized === this.savedPreferences) return;
+    try { localStorage.setItem(this.host.key, serialized); this.savedPreferences = serialized; } catch { /* This view still works without persistence. */ }
   }
   private cacheLater(snapshot: unknown) {
     this.uncached = snapshot;
@@ -386,15 +404,16 @@ export class HerdrView {
     if (snapshot) try { localStorage.setItem(this.host.key + '.snapshot', JSON.stringify(snapshot)); } catch { /* The next load waits for a live snapshot. */ }
   }
   private render() {
-    this.strip.inert = !this.liveSnapshot;
+    this.statuses = new Map(this.tracker.agents.map(agent => [agent.terminalId, this.tracker.status(agent)]));
     this.strip.setAttribute('aria-busy', String(!this.liveSnapshot));
     this.host.changed(this.tracker.attention);
     this.strip.setAttribute('aria-label', this.spaceMode ? 'Herdr spaces' : 'Herdr agents');
     this.empty.hidden = !!this.selected;
     this.empty.textContent = this.spaceMode ? 'Create a space with + in the strip below.' : 'No agents are running. Use + to create a space.';
     if (this.held) {
+      const entries = new Map(this.entries().map(item => [item.terminalId, item]));
       for (const tab of this.strip.querySelectorAll<HTMLElement>('.herdr-agent-tab')) {
-        const agent = this.entries().find(agent => agent.terminalId === tab.dataset.terminal);
+        const agent = entries.get(tab.dataset.terminal!);
         if (agent) tab.dataset.status = this.statusFor(agent);
       }
       return;
@@ -403,8 +422,8 @@ export class HerdrView {
     if (!lanes) this.pinnedLane = undefined;
     const agents = lanes ? lanes.flatMap(lane => lane.items) : this.ordered();
     const key = JSON.stringify([this.liveSnapshot, this.spaceMode, this.creatingSpace, this.stripSelection, this.preferences.collapsedLanes, this.preferences.collapsedGroups,
-      this.preferences.spaceGroups, lanes?.map(lane => [lane.lane, lane.items.map(item => item.terminalId)]), agents.map(agent => [agent, this.statusFor(agent)])]);
-    if (key === this.stripKey) return;
+      this.preferences.spaceGroups, lanes?.map(lane => [lane.lane, lane.items.map(item => item.terminalId)]), agents.map(agent => [agent.terminalId, agent.name, agent.kind, agent.workspace, agent.space?.name, agent.repo?.spaces.length, this.statusFor(agent)])]);
+    if (key === this.stripKey) { if (this.tree) this.refreshTree(); return; }
     this.stripKey = key;
     const scroll = this.strip.scrollLeft; this.strip.replaceChildren(this.tabsToggle);
     const stacks = new Map<string, HTMLElement>(), laneGroups = new Map<HerdrLane, HTMLElement>();
@@ -456,7 +475,7 @@ export class HerdrView {
       }
       tab.addEventListener('pointerdown', event => { if (event.button === 0) this.held = true; });
       tabGestures(tab, {
-        select: () => this.select(agent.terminalId), hold: () => agent.repo ? this.openTree(tab, agent.repo) : this.openMenu(tab, agent), scroll: this.strip,
+        select: () => this.select(agent.terminalId), hold: () => { const current = this.entries().find(item => item.terminalId === agent.terminalId); if (current) { if (current.repo) this.openTree(tab, current.repo); else this.openMenu(tab, current); } }, scroll: this.strip,
         dragging: () => { this.closeMenu(); this.clearDrop(); },
         // Status lanes own the order, so holding a tab only opens its actions.
         drag: lanes ? undefined : x => {
@@ -488,7 +507,7 @@ export class HerdrView {
       };
       parent.append(tab);
     }
-    const add = node('button', 'herdr-agent-add', '+'); add.type = 'button'; add.setAttribute('aria-label', 'Create space'); add.disabled = this.creatingSpace; add.onclick = () => void this.createSpace(); this.strip.append(add); this.strip.scrollLeft = scroll;
+    const add = node('button', 'herdr-agent-add', '+'); add.type = 'button'; add.setAttribute('aria-label', 'Create space'); add.disabled = !this.liveSnapshot || this.creatingSpace; add.onclick = () => void this.createSpace(); this.strip.append(add); this.strip.scrollLeft = scroll;
     if (this.tree) this.refreshTree();
   }
   private clearDrop() {
@@ -561,10 +580,11 @@ export class HerdrView {
     this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 5) + 'px';
   }
   private openMenu(anchor: HTMLElement, agent: StripItem) {
+    if (!this.liveSnapshot) return;
     this.menu.replaceChildren();
     this.menu.setAttribute('aria-label', agent.name + ' tab actions');
     const rename = node('button', '', 'Rename'); rename.role = 'menuitem'; rename.onclick = () => this.dialogs.rename(agent);
-    const close = node('button', '', 'Close tab'); close.role = 'menuitem'; close.disabled = this.closing.has(agent.terminalId); close.onclick = () => void this.closeTab(agent);
+    const close = node('button', '', 'Close tab'); close.role = 'menuitem'; close.disabled = !this.liveSnapshot || this.closing.has(agent.terminalId); close.onclick = () => void this.closeTab(agent);
     this.menu.append(rename, close); this.popup(anchor); rename.focus({ preventScroll: true });
   }
   private closeMenu() {
@@ -634,7 +654,7 @@ export class HerdrView {
     const actions = node('div', 'herdr-tree-actions');
     for (const [label, action, svg] of [['New worktree', 'new-worktree', icons.plus], ['Open worktree…', 'open-worktree', icons.open]] as const) {
       const button = node('button'); button.type = 'button'; button.innerHTML = svg; button.append(label);
-      button.disabled = !root; if (!root) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
+      button.disabled = !this.liveSnapshot || !root; if (!root) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
       button.onclick = () => { if (root) { const item = this.spaceItem(root); void this.dialogs.spaceAction(item, action, this.terminalFor(item)); } };
       actions.append(button);
     }
@@ -649,7 +669,7 @@ export class HerdrView {
     title.setAttribute('aria-label', 'Open ' + space.name + (current ? ', the current space' : '') + '. Hold to rename.');
     tabGestures(title, { select: () => { const terminal = this.terminalFor(item); if (terminal) this.selectTerminal(terminal); }, hold: () => this.renameInline(head, item) });
     const close = node('button', 'herdr-tree-close'); close.type = 'button'; close.innerHTML = icons.close;
-    close.setAttribute('aria-label', 'Close ' + space.name); close.disabled = this.closing.has(item.terminalId); close.onclick = () => this.dialogs.closeSpace(item);
+    close.setAttribute('aria-label', 'Close ' + space.name); close.disabled = !this.liveSnapshot || this.closing.has(item.terminalId); close.onclick = () => this.dialogs.closeSpace(item);
     head.append(title, close);
     const panes = node('div', 'herdr-tree-panes'); panes.role = 'group'; panes.setAttribute('aria-label', space.name + ' panes');
     for (const id of space.terminalIds) {
@@ -662,16 +682,16 @@ export class HerdrView {
       if (id === this.selected) focus.setAttribute('aria-current', 'true');
       tabGestures(focus, { select: () => this.selectTerminal(id), hold: () => this.renameInline(pill, terminal) });
       const remove = node('button', 'herdr-pane-close'); remove.type = 'button'; remove.innerHTML = icons.close;
-      remove.setAttribute('aria-label', 'Close ' + terminal.name); remove.disabled = this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
+      remove.setAttribute('aria-label', 'Close ' + terminal.name); remove.disabled = !this.liveSnapshot || this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
       pill.append(focus, remove); panes.append(pill);
     }
-    const split = node('button', 'herdr-pane-add', '+ split'); split.type = 'button'; split.setAttribute('aria-label', 'Split a pane in ' + space.name); split.onclick = () => void this.dialogs.spaceAction(item, 'split', this.terminalFor(item));
+    const split = node('button', 'herdr-pane-add', '+ split'); split.type = 'button'; split.disabled = !this.liveSnapshot; split.setAttribute('aria-label', 'Split a pane in ' + space.name); split.onclick = () => void this.dialogs.spaceAction(item, 'split', this.terminalFor(item));
     panes.append(split); box.append(head, panes);
     return box;
   }
   /** Holding a space or pane name edits it in place; the shared label also changes on the desktop. */
   private renameInline(target: HTMLElement, item: StripItem) {
-    if (this.renaming || !this.tree) return;
+    if (!this.liveSnapshot || this.renaming || !this.tree) return;
     this.renaming = true;
     const form = node('form', 'herdr-tree-rename ' + (item.space ? 'herdr-tree-head' : 'herdr-pane')), input = node('input'), save = node('button', 'herdr-tree-save');
     input.value = item.name; input.maxLength = 100; input.required = true; input.autocomplete = 'off'; input.spellcheck = false;
@@ -735,7 +755,7 @@ export class HerdrView {
   copySelection() { this.post({ type: 'settings-action', action: 'copy-selection' }); }
   dispose() {
     if (this.disposed) return; this.disposed = true;
-    this.writeCache(); this.dialogs.active?.close();
+    this.writePreferences(); this.writeCache(); this.dialogs.active?.close();
     this.dropIndicator.remove(); this.treeBridge.remove();
     clearTimeout(this.recoveryRetry); this.transport.suspend(); this.frames.dispose(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();

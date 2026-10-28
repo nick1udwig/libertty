@@ -75,7 +75,7 @@ try {
   page.on('response', response => { if (response.status() >= 400) network.push(response.status() + ' ' + response.url()); });
   page.on('requestfailed', request => network.push(request.url() + ' ' + request.failure()?.errorText));
   page.on('request', request => { if (/herdr-view|api\/herdr/.test(request.url())) network.push('request ' + request.url()); });
-  await context.route('**/assets/terminal-*.js', async route => {
+  await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
     const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:').replace(/([\w$]+)=([\w$]+)\?new ([\w$]+)\(([\w$]+),([\w$]+)\):void 0/, '$1=$2?(window.__testProjection=new $3($4,$5)):void 0');
     assert.notEqual(body, original); assert.ok(body.includes('window.__testProjection')); await route.fulfill({ response, body });
@@ -154,6 +154,20 @@ try {
   const firstSpaceTab = await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').elementHandle();
   const label = fixture.snapshot.panes[0].label; fixture.rename(0, label + ' renamed'); await delay(800);
   assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), true, 'An unrelated snapshot keeps the strip');
+  await delay(300);
+  await page.evaluate(() => {
+    window.__preferenceWrites = 0;
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (key.startsWith('libertty.herdr.') && !key.endsWith('.snapshot')) window.__preferenceWrites++;
+      return original.call(this, key, value);
+    };
+  });
+  const previousCwd = fixture.snapshot.workspaces[0].cwd;
+  fixture.snapshot.workspaces[0].cwd = '/changed-metadata'; fixture.pauseEvents(false); await delay(800);
+  assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), true, 'Undisplayed metadata keeps existing strip controls');
+  assert.equal(await page.evaluate(() => window.__preferenceWrites), 0, 'Unchanged preferences are not written again');
+  fixture.snapshot.workspaces[0].cwd = previousCwd;
   fixture.rename(0, label); fixture.snapshot.workspaces[0].label = 'libertty renamed'; fixture.pauseEvents(false);
   await page.locator('.herdr-agent-tab[data-terminal="space:w1"]').filter({ hasText: 'libertty renamed' }).waitFor();
   assert.equal(await firstSpaceTab.evaluate(element => element.isConnected), false);
@@ -541,6 +555,35 @@ try {
       const name = new URL(url).pathname.includes('/done-') ? 'done' : 'request';
       assert.equal(sha(Buffer.from(await response.arrayBuffer())), sha(await readFile(root + 'src/assets/herdr/' + name + '.mp3')));
     }
+    await tab(0).click(); terminal = await agentFrame();
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await until(() => page.evaluate(() => new Promise(resolve => {
+      const request = indexedDB.open('libertty-terminal-history');
+      request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.some(record => record.key.includes('herdr') && record.records.length)); }; };
+    })));
+    let previewTickets = 0;
+    const countPreviewTicket = request => { const url = new URL(request.url()); if (url.pathname.endsWith('/api/herdr/ticket') && url.searchParams.has('terminalId')) previewTickets++; };
+    page.on('request', countPreviewTicket);
+    await context.setOffline(true); await page.reload();
+    const preview = page.locator('.herdr-screen > iframe.herdr-terminal');
+    await preview.waitFor({ state: 'visible' }).catch(async error => {
+      console.error('Offline cache state', await page.evaluate(() => new Promise(resolve => {
+        const request = indexedDB.open('libertty-terminal-history'); request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve({ keys: read.result.map(record => record.key), preferences: Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('libertty.herdr.'))), frames: [...document.querySelectorAll('.herdr-screen iframe')].map(frame => frame.src) }); }; };
+      })));
+      throw error;
+    });
+    assert.match(await preview.getAttribute('src'), /herdrPreview=1/, 'Cached metadata mounts only an unauthorized preview');
+    const previewFrame = page.frameLocator('.herdr-screen > iframe.herdr-terminal');
+    assert.ok(await previewFrame.locator('#terminal canvas').evaluate(canvas => {
+      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data, background = pixels.slice(0, 3);
+      let painted = 0;
+      for (let i = 0; i < pixels.length; i += 4) if (Math.abs(pixels[i] - background[0]) + Math.abs(pixels[i + 1] - background[1]) + Math.abs(pixels[i + 2] - background[2]) > 60) painted++;
+      return painted > 100;
+    }), 'The preview paints retained output');
+    await delay(300);
+    assert.equal(previewTickets, 0, 'Cached panes do not attach before live identity verification');
+    page.off('request', countPreviewTicket);
+    await context.setOffline(false); await page.reload(); await tab(0).waitFor();
     await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
     assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control'));
     assert.equal(await page.locator('.herdr-view').count(), 0); assert.equal(fixture.snapshot.agents.length, 3);

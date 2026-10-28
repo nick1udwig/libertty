@@ -4,6 +4,7 @@ dist/
 release/
 .release-companions/
 .env
+.deploy.local.json
 *.log
 /target/
 dist-site/
