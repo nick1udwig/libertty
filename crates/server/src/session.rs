@@ -1065,6 +1065,34 @@ impl Session {
                     *delivered = seq;
                 }
             }
+            ClientMessage::Draft(draft) => {
+                if let Some(previous) = inner.command_result(&draft.id) {
+                    inner.send(previous);
+                    return;
+                }
+                let allowed = draft.valid()
+                    && draft.context == self.stream_id
+                    && inner.state.prompt == draft.prompt
+                    && inner.state.input_revision == draft.revision
+                    && inner.state.dictation_target() == Some(draft.target)
+                    && !inner.handoffs.active();
+                let failure = if allowed {
+                    inner.write(&bracketed(&draft.text)).err()
+                } else {
+                    Some("The input target changed. Review the draft before inserting it.")
+                };
+                let result = ServerMessage::Result {
+                    id: draft.id.clone(),
+                    accepted: failure.is_none(),
+                    message: failure.map(str::to_owned),
+                };
+                inner.remember_command(&draft.id, result.clone());
+                if failure.is_none() {
+                    inner.state.input_revision += 1;
+                    inner.state();
+                }
+                inner.send(result);
+            }
             ClientMessage::Replace {
                 text, id, revision, ..
             } => {
@@ -1918,6 +1946,44 @@ mod tests {
         session.dispose().await;
         let (_, mut receive) = session.attach(0, None, None);
         assert!(matches!(receive.try_recv(), Ok(Transport::Close(1000, _))));
+    }
+    #[tokio::test]
+    async fn drafts_are_literal_guarded_and_never_submitted_or_repeated() {
+        let (session, stub, attachment, _) = fixture().await;
+        let draft = json!({"type":"draft", "id":"draft-one", "text":"界😀\nsecond line", "context":session.stream_id, "target":"shell", "prompt":1, "revision":0});
+        session.receive(attachment, draft.clone());
+        session.receive(attachment, draft.clone());
+        assert_eq!(
+            *stub.writes.lock().unwrap(),
+            ["\x1b[200~界😀\nsecond line\x1b[201~"]
+        );
+        assert!(session.state().ready);
+        for change in [
+            json!({"revision":0}),
+            json!({"prompt":2}),
+            json!({"context":"other"}),
+            json!({"target":"program"}),
+            json!({"text":"escape\x1b"}),
+        ] {
+            let mut rejected = draft.clone();
+            rejected["id"] = json!(format!("rejected-{change}"));
+            rejected["revision"] = json!(1);
+            for (key, value) in change.as_object().unwrap() {
+                rejected[key] = value.clone();
+            }
+            session.receive(attachment, rejected);
+        }
+        assert_eq!(stub.writes.lock().unwrap().len(), 1);
+        {
+            let mut inner = session.inner.lock().unwrap();
+            inner.state.ready = false;
+            inner.state.input_target = Some(DictationTarget::Program);
+        }
+        session.receive(attachment, json!({"type":"draft", "id":"program", "text":"agent message", "context":session.stream_id, "target":"program", "prompt":1, "revision":1}));
+        assert_eq!(
+            stub.writes.lock().unwrap().last().unwrap(),
+            "\x1b[200~agent message\x1b[201~"
+        );
     }
     #[tokio::test]
     async fn paste_guards_brackets_and_program_input_target_match_reference() {

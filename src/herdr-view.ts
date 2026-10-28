@@ -1,3 +1,5 @@
+import { TerminalDraft } from './terminal-draft.ts';
+import './terminal-draft.css';
 import { TerminalCache, terminalCacheKey } from './terminal-cache.ts';
 import { TerminalReader } from './terminal-reader.ts';
 import { TerminalTranscript } from './terminal-transcript.ts';
@@ -64,6 +66,8 @@ export class HerdrView {
   private liveSnapshot = false;
   private cached = false;
   private offlineReader?: TerminalReader;
+  private offlineDraft?: TerminalDraft;
+  private resumeDraft?: HTMLButtonElement;
   private offlineKey = '';
   private offlineGeneration = 0;
   private quietSnapshot = true;
@@ -139,7 +143,7 @@ export class HerdrView {
       url: host.url, session: host.session, source: host.source,
       token: () => host.token(), authenticate: () => host.authenticate(), notice: message => host.notice(message), reading: (terminalId, request) => host.reading(terminalId, request),
       visible: () => this.visible, held: () => this.handoffHeld, agentName: terminalId => this.terminals.find(agent => agent.terminalId === terminalId)?.name,
-      painted: () => { if (!this.offlineReader?.interacted) this.offlineReader?.hide(); viewed(); this.host.ready?.(); },
+      painted: () => { if (this.resumeDraft) this.resumeDraft.hidden = false; if (!this.offlineReader?.interacted) this.offlineReader?.hide(); viewed(); this.host.ready?.(); },
       ended: () => void this.refreshSnapshot().catch(error => { if (error.status !== 404) this.connectionError(error); }),
     });
     this.screen.append(this.status, this.empty, this.frames.loading);
@@ -277,7 +281,7 @@ export class HerdrView {
     this.offlineKey = key; this.offlineReader?.hide();
     const generation = ++this.offlineGeneration, cache = new TerminalCache(), saved = await cache.read(key);
     if (!saved || this.disposed || generation !== this.offlineGeneration || this.frames.rendered) return;
-    this.offlineReader?.element.remove();
+    this.offlineDraft?.dispose(); this.offlineReader?.element.remove();
     const transcript = new TerminalTranscript(); transcript.restore(saved.records);
     let positionTimer: ReturnType<typeof setTimeout> | undefined, cleared = false;
     const reader = this.offlineReader = new TerminalReader(this.screen, () => {
@@ -292,6 +296,10 @@ export class HerdrView {
     for (const pane of this.terminals) { const option = node('option', '', pane.name); option.value = pane.terminalId; option.selected = pane.terminalId === this.selected; panes.append(option); }
     panes.onchange = () => { this.selected = panes.value; this.save(); this.render(); this.mountTerminal(); };
     reader.element.querySelector('.terminal-reader-toolbar')!.prepend(panes);
+    const draft = this.offlineDraft = new TerminalDraft(reader.element, key, () => undefined, async () => undefined);
+    const resume = this.resumeDraft = node('button', '', 'Continue in live terminal'); resume.hidden = true;
+    resume.onclick = () => { draft.hide(); reader.hide(); this.post({ type: 'open-draft' }); }; draft.element.lastElementChild!.append(resume);
+    const compose = node('button', '', 'Draft'); compose.onclick = () => draft.show(); reader.element.querySelector('.terminal-reader-toolbar')!.append(compose);
     reader.show(transcript.text() || saved.screen, saved.position, saved.lines); this.host.ready?.();
   }
   private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
@@ -784,6 +792,7 @@ export class HerdrView {
   openTerminal(id: string) { if (this.terminals.some(agent => agent.terminalId === id)) this.selectTerminal(id); else this.requestedTerminal = id; }
   copySelection() { this.post({ type: 'settings-action', action: 'copy-selection' }); }
   dispose() {
+    this.offlineDraft?.dispose();
     if (this.disposed) return; this.disposed = true;
     this.writePreferences(); this.writeCache(); this.dialogs.active?.close();
     this.dropIndicator.remove(); this.treeBridge.remove();

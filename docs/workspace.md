@@ -297,3 +297,12 @@ Unsent redraws continue to merge into the latest screen, and input keeps its sep
 Browser heartbeat timing and outbound queue pressure also defer local history sampling and background backfill.
 An offline event pauses connection attempts for ten seconds, then probes resume even without an online event.
 An online event resumes immediately, and hidden tabs retain their existing suspension rules.
+
+Draft opens a local multiline editor with native Unicode, selection, and backspace support.
+It saves up to 16 drafts of 16,000 UTF-16 code units for seven days, scoped to the same terminal cache identity.
+Offline Herdr readers can also create drafts, which the live terminal loads when reopened.
+Insert draft checks the stream or foreground process, prompt, and input revision before delivery.
+Herdr shell insertion also checks the observed history against the live remote screen.
+Insertion does not press Enter, and pending, delivered, and uncertain states remain separate.
+A lost acknowledgment retains the text and requires review before another insertion.
+Drafts never resend automatically after reconnect or reload.

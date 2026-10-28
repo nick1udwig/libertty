@@ -92,6 +92,7 @@ impl Ledgers {
 fn plain(input: &Input) -> bool {
     !input.paste
         && input.guard.is_none()
+        && input.draft.is_none()
         && input.command.is_none()
         && input.complete.is_none()
         && input.replacement.is_none()
@@ -138,6 +139,7 @@ mod tests {
             text: text.into(),
             paste: false,
             guard: None,
+            draft: None,
             command: None,
             complete: None,
             replacement: None,

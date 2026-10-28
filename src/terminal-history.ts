@@ -8,6 +8,7 @@ export class TerminalHistory {
   private requested = false;
   private refresh: () => void;
   constructor(refresh: () => void) { this.refresh = refresh; }
+  get currentVersion() { return this.version; }
   reset() { this.text = ''; this.version = undefined; this.requested = false; }
   receive(message: HistoryMessage): string | undefined {
     if (message.type === 'screen') {
