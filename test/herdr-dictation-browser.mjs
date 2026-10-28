@@ -112,7 +112,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS Herdr shell dictation: real process detection, focus reports before and during dictation and before selection, retained microphone audio through reconnect, microphone and keyboard C D alternatives, scoped repair, preserved prefix/suffix, rejected external edits, selected command execution, literal foreground input');
 } catch (error) {
-  for (const page of browser?.contexts().flatMap(context => context.pages()) || []) console.error(await page.evaluate(() => ({ messages: window.__messages, state: window.__state, choices: [...document.querySelectorAll('.choice-command')].map(item => item.textContent), notice: document.querySelector('#toast')?.textContent })));
+  for (const page of browser?.contexts().flatMap(context => context.pages()) || []) console.error(await page.evaluate(() => ({ messages: window.__messages, state: window.__state, choices: [...document.querySelectorAll('.choice-command')].map(item => item.textContent), notice: document.querySelector('#notice-bubble')?.textContent })));
   throw error;
 } finally {
   await browser?.close();

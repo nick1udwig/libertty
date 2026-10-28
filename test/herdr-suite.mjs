@@ -109,7 +109,7 @@ try {
     };
     window.__sounds = []; window.__focused = true;
     window.__notices = [];
-    if (window.parent === window && !location.pathname.endsWith('terminal.html')) document.addEventListener('DOMContentLoaded', () => new MutationObserver(() => window.__notices.push(document.querySelector('#notice')?.textContent)).observe(document.querySelector('#notice'), { childList: true }));
+    if (window.parent === window && !location.pathname.endsWith('terminal.html')) document.addEventListener('DOMContentLoaded', () => new MutationObserver(() => window.__notices.push(document.querySelector('#notice-bubble')?.textContent)).observe(document.querySelector('#notice-bubble'), { childList: true }));
     window.__herdrMessages = [];
     const Original = window.WebSocket; window.WebSocket = class extends Original { constructor(...args) { super(...args); this.addEventListener('message', async e => { const m = await window.__wireMessage(e.data, this); if (m.type === 'state') window.__state = m.state; }); if (String(args[0]).includes('/herdr/ws')) { this.addEventListener('message', async e => window.__herdrMessages.push(await window.__wireMessage(e.data, this))); this.addEventListener('close', e => window.__herdrMessages.push({ closed: e.code })); } } send(data) { try { const message = window.__wireSent(data); if (message.type === 'notification-presence') window.__presence.push(message); } catch {} return super.send(data); } };
     Object.defineProperty(document, 'hasFocus', { value: () => window.__focused });
@@ -697,7 +697,7 @@ try {
     await tab(5).waitFor(); assert.equal(await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').count(), 5);
     fixture.rejectClose('Server refused to close pane.');
     await hold(tab(5)); await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
-    await until(async () => (await page.locator('#notice').textContent()).includes('Server refused to close pane.'), 'server close failure shown');
+    await until(async () => (await page.locator('#notice-bubble').textContent()).includes('Server refused to close pane.'), 'server close failure shown');
     assert.equal(await tab(5).count(), 1); assert.equal(fixture.snapshot.agents.length, 5, 'Rejected close keeps the server pane and mobile tab');
     fixture.rejectClose();
     await hold(tab(5)); await page.locator('.herdr-tab-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();

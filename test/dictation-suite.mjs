@@ -348,7 +348,7 @@ try {
         await page.getByLabel('Cancel dictation', { exact: true }).click();
       } else {
         await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
-        assert.match(await page.locator('#toast').textContent(), /Microphone audio did not start or resume/);
+        assert.match(await page.locator('#notice-bubble').textContent(), /Microphone audio did not start or resume/);
         assert.equal(audioBytes, previous, 'A permanently stalled microphone never pretends to send audio');
       }
       await page.evaluate(() => { window.__stallCapture = false; });
@@ -360,7 +360,7 @@ try {
     await page.waitForFunction(() => window.__captureProcessor?.context === window.__captureContext);
     await page.evaluate(() => window.__captureProcessor.dispatchEvent(new Event('processorerror')));
     await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
-    assert.match(await page.locator('#toast').textContent(), /audio processing stopped/);
+    assert.match(await page.locator('#notice-bubble').textContent(), /audio processing stopped/);
     for (const interruption of ['suspend', 'ended', 'pagehide', 'denied', 'permission', 'disconnect']) {
       await page.evaluate(kind => { window.__messages = []; window.__denyWakeLock = kind === 'denied'; window.__denyMicrophone = kind === 'permission'; }, interruption);
       await mic.press('Enter');

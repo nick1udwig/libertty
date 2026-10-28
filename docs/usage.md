@@ -375,6 +375,16 @@ Run `npm run test:herdr-spaces` for native space creation, repository grouping, 
 Run `node test/dictation-browser.mjs` for installation, cursor and fake-microphone integration checks.
 Audio accuracy and Android accessibility behavior still need verification on a real phone with the installed daemon.
 
+## Notices
+
+Errors, confirmations and connection problems appear from one round button in the top-right corner.
+The button shows only when something needs your attention, and its ring turns while a terminal reconnects.
+A new notice opens beside the button with any actions, such as **Retry**.
+Errors and warnings stay until you close them; confirmations close on their own unless you touch them.
+Swipe a notice to the side to dismiss it, or swipe it up to keep it for later.
+Tap the button to see current notices and the earlier ones.
+Drag the button to the left or right edge to park it there, or back to the corner to restore it.
+
 ## Files and transfers
 
 Tap **Image** beside the terminal shortcuts to select PNG, JPEG, WebP or GIF images with the device’s file picker.

@@ -161,7 +161,7 @@ export function createWorkspaceConnections(options: Options) {
           if (result.native) {
             await request({ action: 'ack' });
             hideTerminalLoading(parent.id);
-            if (result.message) notice(result.message);
+            if (result.message) notice(result.message, 'info');
             return true;
           }
           const existing = workspace.tabs.find(

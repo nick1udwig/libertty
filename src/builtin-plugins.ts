@@ -3,6 +3,7 @@ import { folderIcon, terminalIcon, herdrIcon } from './icons.ts';
 import { fileBrowser } from './file-browser.ts';
 import { fileClient } from './file-client.ts';
 import { herdrSession } from './herdr-protocol.ts';
+import type { NoticeAction, NoticeInput, NoticeKind } from './notice-model.ts';
 import type { HerdrView } from './herdr-view.ts';
 import { BUILTIN_VERSION, type TabPlugin } from './plugins.ts';
 import { readingPlugin, type ReadingServices } from './reading-plugin.ts';
@@ -17,7 +18,8 @@ export interface BuiltinServices extends ReadingServices {
   openReadingCapture(tab: TerminalTab, capture: string, name: string, exitCode?: number): void;
   reconnectHerdr(tab: TerminalTab): Promise<void>;
   store(): void;
-  notice(message: string): void;
+  notice(message: string, kind?: NoticeKind, actions?: NoticeAction[]): void;
+  tabState(tab: TerminalTab, key: string, state?: NoticeInput): void;
   terminalURL(backend: BackendProfile, session: string): string;
   frame(tab: TerminalTab, frame?: HTMLIFrameElement): void;
   herdr(tab: TerminalTab, view?: HerdrView): void;
@@ -77,7 +79,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
             try { return await s.api<T>(backend, name + (name.includes('?') ? '&' : '?') + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }
             catch (error: any) { if (!signal?.aborted && error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
           },
-          changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice });
+          changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice, state: (key, state) => s.tabState(tab, key, state) });
         view.element.id = 'herdr-' + tab.id; view.navigationElement.id = 'herdr-strip-' + tab.id; s.herdr(tab, view);
         void s.watch(tab).then(() => view.updatePresence()).catch(error => s.notice(error.message));
         return { element: view.element, setVisible: visible => view.setVisible(visible), setHeld: held => view.setHeld(held), applySettings: () => view.applySettings(), copySelection: () => view.copySelection(),

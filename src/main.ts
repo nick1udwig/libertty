@@ -21,7 +21,7 @@ import { type PluginPackage } from './plugin-package.ts';
 import { BUILTIN_VERSION, PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
 import { createWorkspaceConnections } from './workspace-connections.ts';
 import { createWorkspaceLibrary } from './workspace-library.ts';
-import { createWorkspaceNavigation } from './workspace-navigation.ts';
+import { createWorkspaceNavigation, loginCancelled } from './workspace-navigation.ts';
 import { createWorkspaceSettings } from './workspace-settings.ts';
 import { loadWorkspace, saveWorkspace, type WorkspaceServices } from './workspace-storage.ts';
 import './workspace.css';
@@ -51,7 +51,7 @@ const services: WorkspaceServices = {
   backendFor,
   tokenFor,
   store,
-  notice: (message) => navigation.notice(message),
+  notice: (...args) => navigation.notice(...args),
 };
 const navigation = createWorkspaceNavigation({
   ...services,
@@ -153,6 +153,7 @@ for (const plugin of builtinPlugins({
   reconnectHerdr,
   store,
   notice,
+  tabState: navigation.tabState,
   terminalURL,
   openReading,
   openReadingCapture,
@@ -299,7 +300,7 @@ function authenticate(backend: BackendProfile, force = false): Promise<void> {
           const modal = dialog('backend-login');
           const close = () => {
             modal.removeEventListener('close', close);
-            reject(new Error('Backend login cancelled.'));
+            reject(new Error(loginCancelled));
           };
           modal.addEventListener('close', close);
           $<HTMLFormElement>('backend-login-form').onsubmit = async (event) => {
@@ -386,7 +387,7 @@ void boot();
 async function openHerdrNotification(tabId: unknown, terminalId: unknown) {
   const tab = workspace.tabs.find((tab) => tab.id === tabId && tabPluginId(tab) === 'herdr');
   if (!tab) {
-    notice('This Herdr connection has closed. Open its host to view the agent.');
+    notice('This Herdr connection has closed. Open its host to view the agent.', 'warning');
     return;
   }
   workspace.active = tab.id;

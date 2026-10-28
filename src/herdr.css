@@ -37,7 +37,6 @@
 .herdr-screen{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}.herdr-terminal{position:static!important;flex:1;min-height:0;width:100%;height:100%;border:0}
 .herdr-screen.herdr-navigation-resizing{overflow:hidden;justify-content:flex-end}
 .herdr-navigation-resizing > .herdr-terminal{flex-grow:0;flex-shrink:0}
-.herdr-connection{flex:none;color:var(--text-2);background:var(--bg);font:13px var(--font-ui);padding:8px 12px}.herdr-connection:empty{display:none}
 .herdr-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--muted);font:14px/1.6 var(--font-ui)}
 .herdr-tab-menu{position:absolute;z-index:12;min-width:180px;max-width:calc(100% - 16px);max-height:65%;overflow:auto;background:var(--overlay);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);padding:6px}
 .herdr-menu-backdrop{position:fixed;inset:0;z-index:11;touch-action:none}

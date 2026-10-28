@@ -75,7 +75,7 @@ export function createWorkspaceSettings(options: Options) {
     try {
       localStorage.setItem('libertty.' + key, JSON.stringify(value));
     } catch {
-      notice('Browser storage is unavailable. Settings could not be saved.');
+      notice('Browser storage is unavailable. Settings could not be saved.', 'warning');
       return;
     }
     for (const view of pluginViews.values()) view.applySettings?.();
@@ -204,7 +204,7 @@ export function createWorkspaceSettings(options: Options) {
         registerExternal(pkg);
         plugins.enable(pkg.manifest.id, true);
         refreshPluginTabs(pkg.manifest.id);
-        notice(pkg.manifest.name + ' loaded. Open a host’s menu to connect.');
+        notice(pkg.manifest.name + ' loaded. Open a host’s menu to connect.', 'done');
       } catch (error: any) {
         $('plugin-install-error').textContent = error.message || 'Could not load this package.';
       } finally {
@@ -260,7 +260,7 @@ export function createWorkspaceSettings(options: Options) {
     }
     $('reading-phrases-error').textContent = '';
     preferencesChanged('readingPhrases', phrases);
-    notice('Reading phrases saved.');
+    notice('Reading phrases saved.', 'done');
   };
   const prepareEditor = shortcutEditor(
     currentShortcuts,

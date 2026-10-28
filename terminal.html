@@ -17,7 +17,6 @@
       <button id="alternatives-toggle" class="alternatives-toggle" aria-label="Show alternatives" aria-expanded="false" aria-controls="alternatives-menu" hidden><span class="spinner" aria-hidden="true"></span><span class="chevron" aria-hidden="true">⌄</span></button>
       <div id="alternatives-menu" class="alternatives-menu" role="group" aria-label="Command alternatives" hidden><div id="alternative-items"></div></div>
       <span id="suggestion-status" class="sr-only" role="status"></span>
-      <div id="reconnect-banner" hidden role="status">Reconnecting. Your shell is still running.</div>
     </section>
     <section class="input-dock" aria-label="Shell controls">
       <div class="keys key-controls" aria-label="Shortcuts"><div id="shortcut-buttons" class="key-scroll key-bar"></div><button id="terminal-enter" class="terminal-enter" type="button" title="Send Return without opening the keyboard" disabled>Enter ↵</button></div>
@@ -36,6 +35,5 @@
 <dialog id="shortcuts-dialog"><div class="dialog-heading"><h2>Shortcuts</h2><button class="icon-button" data-close="shortcuts-dialog" aria-label="Close shortcuts"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
 <p>Run a saved command with one tap, or send keys such as Ctrl+R, Tab, Escape, Alt+B or Up. Separate keys with spaces to send a sequence. Use Ctrl alone for the modifier.</p>
 <form id="shortcuts-form"><div id="shortcut-editor"></div><button id="add-shortcut" type="button" class="secondary-button">+ Add shortcut</button><p id="shortcut-error" role="alert"></p><div class="run-row"><button id="reset-shortcuts" type="button" class="text-button">Restore defaults</button><button type="submit" class="run-button">Save shortcuts</button></div></form></dialog>
-<div id="toast" role="status" hidden></div>
 <script type="module" src="/src/terminal.ts"></script>
 </body></html>

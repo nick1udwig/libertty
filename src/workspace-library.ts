@@ -188,13 +188,13 @@ export function createWorkspaceLibrary(options: Options) {
           backendIcon,
           () =>
             void authenticate(backend)
-              .then(() => notice('Connected to ' + backend.name))
+              .then(() => notice('Connected to ' + backend.name, 'done'))
               .catch((error) => notice(error.message)),
           backend.id === 'primary'
             ? undefined
             : () => {
                 if (workspace.tabs.some((t) => t.backendId === backend.id)) {
-                  notice('Close this backend’s tabs before removing it.');
+                  notice('Close this backend’s tabs before removing it.', 'warning');
                   return;
                 }
                 if (
@@ -258,7 +258,7 @@ export function createWorkspaceLibrary(options: Options) {
                 item.host + ':' + item.port,
                 item.fingerprint,
                 shieldIcon,
-                () => notice(item.fingerprint),
+                () => notice(item.fingerprint, 'info'),
                 () => {
                   if (
                     confirm(

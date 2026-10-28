@@ -71,10 +71,10 @@ try {
     window.__paintStyled = sessionStorage.getItem('test.paint-styles') ? [] : undefined;
     window.__handoff = { banner: false, cover: false };
     new MutationObserver(() => {
-      const banner = document.getElementById('reconnect-banner'), layer = document.querySelector('.terminal-presentation');
-      if (banner && !banner.hidden) window.__handoff.banner = true;
+      const orb = document.getElementById('notice-orb'), layer = document.querySelector('.terminal-presentation');
+      if (orb && !orb.hidden && orb.dataset.states.split(' ').includes('connection')) window.__handoff.banner = true;
       if (layer && !layer.hidden) window.__handoff.cover = true;
-    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden'] });
+    }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-states'] });
     CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); window.__paintStyled?.push([text, String(this.fillStyle)]); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {

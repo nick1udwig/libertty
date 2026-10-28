@@ -2,12 +2,13 @@ import { $, input, select, dialog } from './dom.ts';
 import type { BackendProfile, KeyInfo } from './connections.ts';
 import type { BrowserKeyInfo } from './browser-key.ts';
 import type { BrowserVault } from './browser-vault.ts';
+import type { NoticeKind } from './notice-model.ts';
 interface VaultServices {
   browserVault: BrowserVault; primary: BackendProfile;
   backends(): BackendProfile[]; backendFor(id: string): BackendProfile;
   authenticate(backend: BackendProfile): Promise<void>;
   api<T>(backend: BackendProfile, name: string, data?: unknown): Promise<T>;
-  notice(message: string): void; renderCards(): Promise<void>; clearRoutes(): void;
+  notice(message: string, kind?: NoticeKind): void; renderCards(): Promise<void>; clearRoutes(): void;
 }
 export function vaultUI(services: VaultServices) {
   const { browserVault, primary, backendFor, authenticate, api, notice, renderCards } = services;
@@ -25,7 +26,7 @@ function downloadKey(contents: string, name: string, extension: string) {
   const url = URL.createObjectURL(new Blob([contents], { type: 'application/octet-stream' })), link = document.createElement('a');
   link.href = url; link.download = (name.replace(/[^a-zA-Z0-9_-]/g, '_') || 'ssh-key') + extension; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
-$('copy-key').onclick = () => void navigator.clipboard.writeText($<HTMLTextAreaElement>('public-key').value).then(() => notice('Public key copied.')).catch(() => notice('Select the public key to copy it.'));
+$('copy-key').onclick = () => void navigator.clipboard.writeText($<HTMLTextAreaElement>('public-key').value).then(() => notice('Public key copied.', 'done')).catch(() => notice('Select the public key to copy it.', 'warning'));
 $('rename-key').onclick = () => {
   if (!keyDetail) return; const { backend, key } = keyDetail;
   void (backend ? api(backend, 'api/keychain', { action: 'rename', id: key.id, name: input('key-rename').value }) : browserVault.rename(key.id, input('key-rename').value)).then(() => { dialog('key-details').close(); void renderCards(); }).catch(error => notice(error.message));
@@ -77,7 +78,7 @@ $<HTMLFormElement>('key-transfer-form').onsubmit = async event => {
         }
         keyDetails(undefined, (await browserVault.list()).find(k => k.id === key.id)!);
         if (failures.length) throw new Error('Successful backups were saved. Could not back up to: ' + failures.join('; '));
-        notice('Backed up to ' + destinations.map(b => b.name).join(', ') + '.');
+        notice('Backed up to ' + destinations.map(b => b.name).join(', ') + '.', 'done');
       }
     }
     dialog('key-transfer').close(); void renderCards();

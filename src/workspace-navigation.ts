@@ -5,6 +5,14 @@ import { herdrName } from './herdr-protocol.ts';
 import type { HerdrView } from './herdr-view.ts';
 import { imagePicker } from './image-upload.ts';
 import { menuEvents } from './menu.ts';
+import {
+  remoteActions,
+  remoteNotice,
+  type NoticeAction,
+  type NoticeInput,
+  type NoticeKind,
+} from './notice-model.ts';
+import { NoticeCenter } from './notices.ts';
 import { validCapture } from './persistence.ts';
 import { PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
 import { readingMessage } from './reading-view.ts';
@@ -35,6 +43,8 @@ interface Options
   capturedHerdr: (backend: BackendProfile, parent: TerminalTab, id: string) => Promise<void>;
   cancelReconnect: (id: string) => void;
 }
+/** A cancelled login is the user's own choice, so it informs instead of waiting as an error. */
+export const loginCancelled = 'Backend login cancelled.';
 export function createWorkspaceNavigation(options: Options) {
   const {
     workspace,
@@ -83,21 +93,26 @@ export function createWorkspaceNavigation(options: Options) {
   let terminalLoading: { id: string; waitForPrompt: boolean } | undefined;
   let presentedTab = '',
     herdrLoading = false;
-  let notification: ReturnType<typeof setTimeout>;
-  function positionNotice() {
-    const bars =
-      ($('terminal-tabs-drawer').inert ? 0 : $('terminal-header').offsetHeight) +
-      (herdrViews.get(workspace.active)?.navigationElement.offsetHeight || 0) +
-      $('workspace-shortcuts').offsetHeight;
-    $('notice').style.bottom =
-      page === 'terminal' ? 'calc(' + (bars + 12) + 'px + env(safe-area-inset-bottom))' : '30px';
+  const notices = new NoticeCenter();
+  const tabStates = new Map<string, Map<string, NoticeInput>>();
+  let presentedStates = new Set<string>();
+  function notice(message: string, kind: NoticeKind = 'error', actions: NoticeAction[] = []) {
+    notices.notify({ message, kind: message === loginCancelled ? 'info' : kind, actions });
   }
-  function notice(message: string) {
-    $('notice').textContent = message;
-    $('notice').hidden = false;
-    positionNotice();
-    clearTimeout(notification);
-    notification = setTimeout(() => ($('notice').hidden = true), 6000);
+  /** Keep each tab's connection state, and show only the selected terminal's. */
+  function tabState(tab: TerminalTab, key: string, state?: NoticeInput) {
+    const states = tabStates.get(tab.id) ?? new Map<string, NoticeInput>();
+    if (state) states.set(key, { ...state, source: tab.name });
+    else states.delete(key);
+    if (states.size) tabStates.set(tab.id, states);
+    else tabStates.delete(tab.id);
+    presentStates();
+  }
+  function presentStates() {
+    const states = page === 'terminal' ? tabStates.get(workspace.active) : undefined;
+    for (const key of presentedStates) if (!states?.has(key)) notices.set(key);
+    for (const [key, state] of states ?? []) notices.set(key, state);
+    presentedStates = new Set(states?.keys());
   }
   function show(view: typeof page) {
     closeHostMenu();
@@ -108,6 +123,8 @@ export function createWorkspaceNavigation(options: Options) {
     $('workspace-navigation').hidden = !terminal;
     $('terminal-stack').hidden = !terminal;
     $('library').hidden = terminal;
+    // The library header keeps its corner buttons clear of the notice orb.
+    document.documentElement.style.setProperty('--notice-orb-offset', terminal ? '0px' : '56px');
     updateViewVisibility();
     if (terminal) {
       renderTabs();
@@ -346,6 +363,7 @@ export function createWorkspaceNavigation(options: Options) {
     updateWorkspaceNavigation();
     updateTerminalLoading();
     renderWorkspaceShortcuts();
+    presentStates();
   }
   function updateWorkspaceNavigation() {
     if (drawerDrag && (page !== 'terminal' || drawerDrag.view !== herdrViews.get(workspace.active)))
@@ -365,7 +383,6 @@ export function createWorkspaceNavigation(options: Options) {
       view.navigationElement.hidden = id !== workspace.active;
       view.setTerminalTabsExpanded(terminalTabsExpanded);
     }
-    positionNotice();
   }
   function shortcutFrame() {
     return frames.get(workspace.active) || herdrViews.get(workspace.active)?.terminalFrame;
@@ -374,7 +391,7 @@ export function createWorkspaceNavigation(options: Options) {
   const images = imagePicker((files) => {
     if (imageTarget && shortcutFrame()?.contentWindow === imageTarget)
       imageTarget.postMessage({ type: 'terminal-images', files }, location.origin);
-    else notice('Select the original terminal and attach the image again.');
+    else notice('Select the original terminal and attach the image again.', 'warning');
   });
   document.body.append(images);
   $('workspace-enter').addEventListener('pointerdown', (event) => event.preventDefault());
@@ -386,7 +403,6 @@ export function createWorkspaceNavigation(options: Options) {
       herdr = herdrViews.get(workspace.active);
     $('workspace-shortcuts').hidden =
       page !== 'terminal' || !(state || (tab && ['terminal', 'herdr'].includes(tabPluginId(tab))));
-    positionNotice();
     const ready = !!state && !frame?.inert && (!herdr || herdr.ready);
     // Reserve the configured controls before the incoming terminal publishes its state.
     const shortcuts = state?.shortcuts || currentShortcuts();
@@ -571,6 +587,8 @@ export function createWorkspaceNavigation(options: Options) {
     mounting.delete(tab.id);
     pluginViews.get(tab.id)?.dispose();
     pluginViews.delete(tab.id);
+    tabStates.delete(tab.id);
+    presentStates();
   }
   async function mount(tab: TerminalTab): Promise<void> {
     if (pluginViews.has(tab.id) || !workspace.tabs.includes(tab)) return;
@@ -732,7 +750,9 @@ export function createWorkspaceNavigation(options: Options) {
       if (page === 'hosts') void renderCards();
     } catch (error: any) {
       frames.get(tab.id)?.contentWindow?.postMessage({ type: 'recovery-failed' }, location.origin);
-      notice(`Could not start ${tab.name}: ${error.message}`);
+      notice(`Could not start ${tab.name}: ${error.message}`, 'error', [
+        { label: 'Retry', run: () => void recoverTerminal(tab, backend) },
+      ]);
     }
   }
   window.addEventListener('message', (event) => {
@@ -776,6 +796,7 @@ export function createWorkspaceNavigation(options: Options) {
     )
       authorizeTerminals(backend, event.data.accessToken);
     if (event.data?.type === 'terminal-loaded') {
+      tabState(tab, 'terminal');
       frame.contentWindow!.postMessage({ type: 'shortcut-host' }, location.origin);
       // Visibility arrives first so a hidden tab does not connect until it is shown.
       frame.contentWindow!.postMessage(
@@ -811,8 +832,17 @@ export function createWorkspaceNavigation(options: Options) {
       showTerminalLoading(tab.id);
       void capturedHerdr(backend, tab, event.data.id);
     }
-    if (event.data?.type === 'terminal-notice' && typeof event.data.message === 'string')
-      notice(event.data.message);
+    const reply = (id: string) =>
+      frame.contentWindow?.postMessage({ type: 'notice-action', id }, location.origin);
+    if (event.data?.type === 'terminal-notice') {
+      const remote = remoteNotice(event.data, 'error');
+      if (remote)
+        notices.notify({ ...remote, source: tab.name, actions: remoteActions(remote, reply) });
+    }
+    if (event.data?.type === 'terminal-status') {
+      const remote = remoteNotice(event.data.status, 'progress');
+      tabState(tab, 'terminal', remote && { ...remote, actions: remoteActions(remote, reply) });
+    }
     if (
       event.data?.type === 'reading-open' &&
       typeof event.data.path === 'string' &&
@@ -860,7 +890,9 @@ export function createWorkspaceNavigation(options: Options) {
         if (page === 'hosts') void renderCards();
       }
       if (event.data.type === 'terminal-ended' && host?.kind !== 'http')
-        notice(tab.name + ' has ended. Open its saved host to reconnect.');
+        notice(tab.name + ' has ended. Open its saved host to reconnect.', 'warning', [
+          { label: 'Open hosts', run: () => show('hosts') },
+        ]);
     }
   });
   $('terminal-back').onclick = $('empty-open').onclick = () => show('hosts');
@@ -945,6 +977,7 @@ export function createWorkspaceNavigation(options: Options) {
     unmount,
     mount,
     notice,
+    tabState,
     hideTerminalLoading,
     showTerminalLoading,
     activate,

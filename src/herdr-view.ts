@@ -12,6 +12,7 @@ import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
 import { dropSpace, repoSpace, repoTap, spaceLayout, spaceRepos, spaceTerminal, type RepoTap, type SpaceDrop, type SpaceRepo } from './herdr-spaces.ts';
 import { herdrLane, herdrLaneNames, statusLanes, type HerdrLane } from './herdr-lanes.ts';
+import type { NoticeAction, NoticeInput, NoticeKind } from './notice-model.ts';
 import './herdr.css';
 
 const herdrIcon = (body: string, size = 15) => icon(body, size, 2);
@@ -29,7 +30,9 @@ interface Host {
   token(): string | undefined; authenticate(): Promise<void>;
   api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
-  notice(message: string): void;
+  notice(message: string, kind?: NoticeKind, actions?: NoticeAction[]): void;
+  /** Show a connection state for this view (`herdr`) or its selected pane (`terminal`). */
+  state?(key: 'herdr' | 'terminal', state?: NoticeInput): void;
   reading(terminalId: string, request: ReadingOpen): void;
   reconnect?(): Promise<void>;
   ready?(): void;
@@ -43,7 +46,7 @@ export class HerdrView {
   private tabsToggle = node('button', 'herdr-tabs-toggle');
   private screen = node('div', 'herdr-screen');
   private frames: HerdrFrames;
-  private status = node('div', 'herdr-connection');
+  private statusText = '';
   private empty = node('div', 'herdr-empty');
   private menu = node('div', 'herdr-tab-menu');
   private dropIndicator = node('div', 'herdr-drop-indicator');
@@ -127,16 +130,15 @@ export class HerdrView {
     this.menu.role = 'menu'; this.menu.hidden = true; this.treeBridge.hidden = true; this.treeBridge.setAttribute('aria-hidden', 'true');
     this.dropIndicator.hidden = true; this.dropIndicator.setAttribute('aria-hidden', 'true');
     this.dropIndicator.append(this.dropLabel); document.body.append(this.dropIndicator, this.treeBridge);
-    this.status.setAttribute('role', 'status');
     const viewed = () => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     this.frames = new HerdrFrames(this.screen, {
       url: host.url, session: host.session, source: host.source,
-      token: () => host.token(), authenticate: () => host.authenticate(), notice: message => host.notice(message), reading: (terminalId, request) => host.reading(terminalId, request),
+      token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), state: state => host.state?.('terminal', state), reading: (terminalId, request) => host.reading(terminalId, request),
       visible: () => this.visible, held: () => this.handoffHeld, agentName: terminalId => this.terminals.find(agent => agent.terminalId === terminalId)?.name,
       painted: () => { viewed(); this.host.ready?.(); },
       ended: () => void this.refreshSnapshot().catch(error => { if (error.status !== 404) this.connectionError(error); }),
     });
-    this.screen.append(this.status, this.empty, this.frames.loading);
+    this.screen.append(this.empty, this.frames.loading);
     const backdrop = node('div', 'herdr-menu-backdrop'); backdrop.setAttribute('aria-hidden', 'true');
     let dismissMenu = false;
     backdrop.onpointerdown = event => { event.stopPropagation(); dismissMenu = true; };
@@ -201,7 +203,7 @@ export class HerdrView {
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.searchParams.set('ticket', ticket);
         return url;
       },
-      stalled: seconds => { this.status.textContent = `Connection stalled · last contact ${seconds}s ago`; },
+      stalled: seconds => this.status(`Connection stalled · last contact ${seconds}s ago`),
       probe: () => { if (Date.now() - this.presenceAt >= 20000) this.updatePresence(); },
       open: () => { this.quietSnapshot = true; this.updatePresence(); },
       message: event => {
@@ -210,7 +212,7 @@ export class HerdrView {
       },
       close: () => {
         if (this.disposed) return false;
-        this.connected = false; this.status.textContent = 'Herdr disconnected. Reconnecting…'; this.render();
+        this.connected = false; this.status('Herdr disconnected. Reconnecting…'); this.render();
         this.frames.setLoading(false); this.host.ready?.(); return true;
       },
       error: error => { this.connectionError(error); return true; },
@@ -234,7 +236,7 @@ export class HerdrView {
     this.frames.broadcast({ type:'tab-visibility', visible });
     if (visible) this.transport.foreground();
   }
-  get ready() { return this.cached || this.frames.rendered || !!this.status.textContent || this.connected && !this.selected; }
+  get ready() { return this.cached || this.frames.rendered || !!this.statusText || this.connected && !this.selected; }
   get navigationElement() { return this.strip; }
   setTerminalTabsExpanded(expanded: boolean) {
     this.tabsToggle.setAttribute('aria-expanded', String(expanded));
@@ -266,15 +268,22 @@ export class HerdrView {
   private mountTerminal(force = false) { if (!this.disposed) this.frames.mount(this.terminals, this.selected, force, this.liveSnapshot); }
   private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
   private connect() { return this.transport.connect(); }
+  private status(message = '', kind: NoticeKind = 'progress') {
+    if (message === this.statusText) return;
+    this.statusText = message;
+    this.host.state?.('herdr', message ? { message, kind } : undefined);
+  }
   private connectionError(error: unknown) {
     if (this.disposed) return;
     const failure = error as { status?: number; message?: string; name?: string };
-    this.status.textContent = failure.name === 'TimeoutError' ? 'Herdr connection timed out. Retrying…' : failure.message || 'Herdr connection failed.'; this.frames.setLoading(false); this.host.ready?.();
+    if (failure.name === 'TimeoutError') this.status('Herdr connection timed out. Retrying…');
+    else this.status(failure.message || 'Herdr connection failed.', 'error');
+    this.frames.setLoading(false); this.host.ready?.();
     if (failure.status !== 404 || !this.host.source || !this.host.reconnect || !this.visible || this.recovering) return;
-    this.status.textContent = 'Reconnecting to Herdr…';
+    this.status('Reconnecting to Herdr…');
     let cancelled = false;
     this.recovering = this.host.reconnect().catch((reason: { message?: string; cancelled?: boolean }) => {
-      if (!this.disposed) this.status.textContent = reason.message || 'Herdr connection failed.';
+      if (!this.disposed) this.status(reason.message || 'Herdr connection failed.', 'error');
       cancelled = reason.cancelled === true;
     }).finally(() => {
       this.recovering = undefined;
@@ -282,12 +291,12 @@ export class HerdrView {
     });
   }
   private receive(message: HerdrMessage) {
-    if (message.type === 'error') { this.status.textContent = message.message; this.frames.setLoading(false); this.host.ready?.(); return; }
+    if (message.type === 'error') { this.status(message.message, 'error'); this.frames.setLoading(false); this.host.ready?.(); return; }
     if (message.type !== 'snapshot') return;
     this.transport.ready(); this.connected = this.ws?.readyState === WebSocket.OPEN;
     this.liveSnapshot = true; this.cached = false; this.cacheLater(message.snapshot);
     const previousSpace = this.terminals.find(terminal => terminal.terminalId === this.selected)?.workspaceId;
-    this.status.textContent = '';
+    this.status();
     this.terminals = message.snapshot.terminals; this.spaces = message.snapshot.spaces; this.repos = spaceRepos(this.spaces);
     const notifications = this.tracker.update(message.snapshot);
     this.acknowledge(this.quietSnapshot ? this.currentNotifications() : notifications);

@@ -28,6 +28,25 @@ User packages load from Settings into isolated frames with a scoped file-read br
 Settings has its own pane in the bottom navigation and applies preferences to open terminals.
 Default font size is 10 pt (13⅓ CSS px).
 
+## Notices
+
+`notices.ts` draws one orb that shows every error, warning, confirmation and connection state.
+`notice-model.ts` keeps the current notices, the keyed states and a history of the last 20 notices.
+Errors and warnings stay until the user dismisses them.
+Info notices leave after 6 seconds, and done notices leave after 3 seconds.
+Touch, hover or focus on the bubble stops the timer.
+A new notice opens from the orb as a bubble.
+A swipe to the side or Esc dismisses the bubble, and a swipe up puts it away without dismissing it.
+A tap on the orb lists the current notices and the history.
+A drag parks the orb on the nearer side, and a drag back to the top-right corner returns it there.
+Local storage keeps the parked position.
+The orb shows only while a notice or state is current, so it does not cover the terminal at other times.
+States last while they are true, so the user can hide them from the bubble but cannot dismiss them.
+Embedded terminals send `terminal-notice` and `terminal-status` messages and do not draw notices.
+The workspace shows only the selected tab's states, and sends action ids back with `notice-action`.
+A Herdr tab shows its own connection state and the state of its selected pane in the same orb.
+Contextual selection feedback, loading covers and dialog form errors stay beside their content.
+
 Each frame connects directly to its chosen backend.
 Origin/source-checked messages supply access credentials; iframe URLs contain a backend URL and session ID, never tokens or passphrases.
 Cross-origin backends require an explicit frontend origin allowlist.
@@ -267,7 +286,7 @@ BENCH_BEFORE=b2a0fb4 BENCH_BEFORE_WORKSPACE=1 BENCH_REPEATS=9 node test/workspac
 ## Reading during connection loss
 
 A reconnect keeps the terminal renderer available for local scrolling and selection.
-The status banner shows when output last arrived.
+The orb's connection state shows when output last arrived.
 A full-screen application's unobserved history still needs the remote application.
 Geometry changes retain the separate layout handshake so stale frames do not replace a resized pane.
 
@@ -279,8 +298,8 @@ A first native frame can precede the history projection that owns a pane with sc
 An exact pixel copy of retained output therefore covers the pane until Herdr's history decides the final picture, or for at most 1.5 seconds.
 Held pictures copy the canvas bitmap without resampling, so the cover is identical to the terminal beneath it.
 Retained output also keeps its own cursor until that replacement.
-The replacement shows no reconnect banner or progress indicator.
-Retained output appears at once, and the banner appears only while the browser is offline or a connection attempt fails.
+The replacement shows no connection state or progress indicator.
+Retained output appears at once, and the connection state appears only while the browser is offline or a connection attempt fails.
 During use, retained output takes over a scroll only after the connection drops or stalls, when the live terminal has no more local rows to show.
 A remote scroll on a slow but working connection waits for the application instead.
 Retained output scrolls and selects like live output and marks gaps with an ellipsis.

@@ -73,7 +73,7 @@ try {
   };
   const connected = async (states, timeout = 12000) => {
     await page.waitForFunction(states => window.__states > states && document.querySelector('#connection-label').textContent === 'Connected', states, { timeout });
-    assert.equal(await page.locator('#reconnect-banner').isVisible(), false);
+    assert.equal(await page.locator('#notice-orb').getAttribute('data-states'), '', 'A connected terminal shows no connection state');
   };
   await connected(0);
   const connectRequests = []; let connectionPhase = 'typing';
@@ -139,7 +139,7 @@ try {
     });
     await connected(states); await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
     if (changeContext) {
-      await page.waitForFunction(() => document.querySelector('#toast').textContent.includes('changed prompt'));
+      await page.waitForFunction(() => document.querySelector('#notice-bubble').textContent.includes('changed prompt'));
       assert.equal(await inputs(), '', 'Changed prompts or processes cannot receive queued keys');
     } else {
       await page.waitForFunction(text => window.__sent.filter(message => message.type === 'input').map(message => message.data).join('').includes(text), text);

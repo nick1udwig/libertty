@@ -1,0 +1,57 @@
+/* One orb owns every notice, so errors, confirmations and connection state share a single place. */
+.notice-orb{position:fixed;z-index:30;top:calc(max(10px,env(safe-area-inset-top) + 10px) + var(--notice-orb-offset,0px));right:max(10px,env(safe-area-inset-right) + 10px);display:grid;place-items:center;box-sizing:border-box;width:44px;height:44px;padding:0;border:1px solid var(--line-strong);border-radius:50%;background:var(--glass-surface);color:var(--text);font:600 13px var(--font-ui);box-shadow:var(--shadow-pop);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);touch-action:none;cursor:pointer}
+.notice-orb:hover,.notice-orb[aria-expanded=true]{background:var(--press)}
+.notice-orb[data-edge=left]{left:0;right:auto;width:36px;height:56px;padding-right:4px;border-left:0;border-radius:0 28px 28px 0}
+.notice-orb[data-edge=right]{right:0;left:auto;width:36px;height:56px;padding-left:4px;border-right:0;border-radius:28px 0 0 28px}
+.notice-orb.dragging{width:44px;height:44px;padding:0;border:1px solid var(--accent-line);border-radius:50%;cursor:grabbing}
+.notice-ring{position:absolute;top:-1px;left:-1px;width:44px;height:44px;display:none;pointer-events:none}
+.notice-ring circle{fill:none;stroke:var(--warn);stroke-width:2;stroke-dasharray:30 102;stroke-linecap:round}
+.notice-orb.progress[data-edge=corner] .notice-ring{display:block;animation:spin 1s linear infinite}
+.notice-orb-mark{display:grid;place-items:center}
+.notice-badge{position:absolute;top:-6px;right:-6px;box-sizing:border-box;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--text);color:var(--bg);font:700 11px/18px var(--font-ui);text-align:center}
+.notice-orb[data-edge=right] .notice-badge{right:auto;left:-6px}
+
+/* Shapes keep the kinds distinct on grayscale screens: error is a square, warning a triangle, info a ring and done a dot. */
+.notice-mark{display:inline-grid;place-items:center;flex:none;width:14px;height:20px}
+.notice-mark::before{content:'';display:block;box-sizing:border-box}
+.notice-mark[data-kind=error]::before{width:10px;height:10px;border-radius:2px;background:var(--danger)}
+.notice-mark[data-kind=warning]::before{width:12px;height:11px;background:var(--warn);clip-path:polygon(50% 0,100% 100%,0 100%)}
+.notice-mark[data-kind=info]::before{width:10px;height:10px;border:1.6px solid var(--info);border-radius:50%}
+.notice-mark[data-kind=done]::before{width:9px;height:9px;border-radius:50%;background:var(--accent)}
+.notice-mark[data-kind=progress]::before{width:14px;height:14px;border:2px solid var(--line-strong);border-top-color:var(--warn);border-right-color:var(--warn);border-radius:50%;animation:spin .9s linear infinite}
+
+.notice-pop{position:fixed;z-index:31;box-sizing:border-box;width:min(320px,calc(100vw - 24px));background:var(--overlay);color:var(--text);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);font-family:var(--font-ui);animation:notice-in .16s ease-out}
+.notice-pop::before{content:'';position:absolute;box-sizing:border-box;width:14px;height:14px;background:var(--overlay);border:1px solid var(--line-strong);transform:rotate(45deg)}
+.notice-pop[data-edge=corner]::before{top:-8px;right:var(--notch,16px);border-right:0;border-bottom:0}
+.notice-pop[data-edge=left]::before{left:-8px;top:var(--notch,16px);border-top:0;border-right:0}
+.notice-pop[data-edge=right]::before{right:-8px;top:var(--notch,16px);border-bottom:0;border-left:0}
+@keyframes notice-in{from{opacity:0;transform:scale(.96)}}
+.notice-bubble{padding:12px 6px 12px 14px;touch-action:none;user-select:none;-webkit-user-select:none}
+.notice-panel{width:min(340px,calc(100vw - 20px));padding:6px;overflow-y:auto;overscroll-behavior:contain}
+
+.notice-item{display:grid;grid-template-columns:14px minmax(0,1fr) 44px;column-gap:10px;align-items:start}
+.notice-body{min-width:0}
+.notice-text{margin:0;font:14px/20px var(--font-ui);color:var(--text);overflow-wrap:anywhere;white-space:pre-wrap}
+.notice-meta{margin:2px 0 0;font:12px/18px var(--font-mono);color:var(--muted);overflow-wrap:anywhere}
+.notice-close{display:grid;place-items:center;width:44px;height:44px;margin:-12px 0;padding:0;border:0;border-radius:var(--r-md);background:none;color:var(--muted);cursor:pointer}
+.notice-close:hover{background:var(--hover);color:var(--text)}
+.notice-close svg{width:16px;height:16px}
+.notice-actions{grid-column:2/4;display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.notice-action{min-height:44px;padding:0 16px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--raised);color:var(--text);font:500 14px var(--font-ui);cursor:pointer}
+.notice-action:hover{background:var(--hover)}
+.notice-action:first-child{border-color:var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:600}
+.notice-action:first-child:hover{background:var(--accent-hover)}
+.notice-close:focus-visible,.notice-action:focus-visible,.notice-clear:focus-visible,.notice-orb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.notice-panel header{display:flex;align-items:center;justify-content:space-between;min-height:44px;padding-left:10px}
+.notice-panel h2{margin:0;font:600 15px var(--font-ui);letter-spacing:0}
+.notice-clear{min-height:44px;padding:0 12px;border:0;border-radius:var(--r-md);background:none;color:var(--text-2);font:500 14px var(--font-ui);cursor:pointer}
+.notice-clear:hover{background:var(--hover);color:var(--text)}
+.notice-section{margin:6px 10px 4px;font:600 11px var(--font-ui);letter-spacing:.6px;text-transform:uppercase;color:var(--muted)}
+.notice-panel .notice-item{padding:10px 0 10px 10px}
+.notice-panel hr{margin:6px 8px;border:0;border-top:1px solid var(--line)}
+.notice-earlier{display:grid;grid-template-columns:14px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:40px;padding:0 12px 0 10px}
+.notice-earlier .notice-text{color:var(--text-2)}
+.notice-earlier time{font:12px var(--font-mono);color:var(--muted)}
+.notice-empty{margin:8px 10px 12px;font:14px var(--font-ui);color:var(--muted)}
+@media(prefers-reduced-motion:reduce){.notice-pop{animation:none}.notice-orb.progress[data-edge=corner] .notice-ring,.notice-mark[data-kind=progress]::before{animation-duration:2.4s}}
