@@ -56,7 +56,7 @@ dialog{font-family:var(--font-ui);color:var(--text);background:var(--overlay);bo
 
 #terminal-viewport.awaiting-herdr-layout{visibility:hidden}
 .terminal-presentation,.dictation-presentation{position:absolute;left:0;top:0;width:100%;overflow:hidden;background:var(--bg);z-index:3;pointer-events:none}
-.terminal-presentation canvas,.dictation-presentation canvas{display:block;width:100%;height:100%}
+.terminal-presentation canvas,.dictation-presentation canvas{position:absolute;display:block}
 .terminal-loading-bar{position:absolute;left:0;right:0;top:0;height:2px;overflow:hidden;background:var(--line)}
 .terminal-loading-bar::after{content:'';position:absolute;inset:0;background:var(--accent);transform:translateX(-100%);animation:terminal-progress 1.4s ease-in-out infinite}
 @keyframes terminal-progress{to{transform:translateX(100%)}}

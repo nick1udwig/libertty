@@ -61,8 +61,10 @@ export class TerminalProjection {
     term.write('\x1b[?25l');
   }
   get nativeColumns() { return this.native?.cols; }
-  /** Retained output replaced the terminal, so the next history or live frame repaints it completely. */
-  invalidate() { this.stale = true; this.live = this.initialized = this.awaitingFrame = false; this.painted = ''; this.cursorControl = ''; }
+  /** Herdr's history decides whether native frames or the history projection own the screen. */
+  get hasHistory() { return this.initialized; }
+  /** Retained output replaced the terminal, so the next history or live frame repaints it completely in the same mode. */
+  invalidate() { this.stale = true; this.live = this.awaitingFrame = false; this.painted = ''; this.cursorControl = ''; }
   get clickable() { return this.live && !this.awaitingNativeResize && this.canRenderLive(); }
   nativeCell(column: number, row: number) {
     const native = this.native;
@@ -85,7 +87,7 @@ export class TerminalProjection {
   update(text: string, reflow = false) {
     // Exported rows end with a delimiter; it is not an additional terminal row.
     const normalized = text.replace(/\r?\n/g, '\r\n').replace(/\r\n$/, '');
-    if (!reflow && this.initialized && normalized === this.previous) return;
+    if (!reflow && this.initialized && !this.stale && normalized === this.previous) return;
     this.previous = normalized; this.initialized = true;
     if (!reflow && (this.awaitingNativeResize || this.live && this.canRenderLive()) && this.fitsNative(normalized)) {
       this.historyDirty = true; return;

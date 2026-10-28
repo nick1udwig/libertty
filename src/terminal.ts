@@ -194,6 +194,8 @@ let cachedUpdated = 0, cachedStream = '', clearedScreen: string | undefined, str
 let cachePainted = false, handoffPosition = 0, picture: TerminalPicture = { last: 0, x: 0, y: 0, cursor: false };
 // The reset that a complete replay writes over retained output, so the swap paints once.
 let handoff: string | undefined;
+// A Herdr pane that replaced retained output under a cover reveals it once its history decides the final picture.
+let herdrHandoffUntil = 0, herdrHandoffTimer: ReturnType<typeof setTimeout> | undefined;
 let backfillNeeded = false, backfill: AbortController | undefined;
 let backfillTimer: ReturnType<typeof setTimeout> | undefined;
 let transcriptTimer: ReturnType<typeof setTimeout> | undefined, cacheTimer: ReturnType<typeof setTimeout> | undefined;
@@ -238,9 +240,16 @@ function showRetained(lines: number) {
   if (!herdrTerminal) { after = received = 0; queue.clear(); }
   term.scrollLines(lines);
 }
-function livePainted(position: number) {
-  if (!cachePainted || projection?.stale) return;
-  cachePainted = false; if (position) term.scrollToLine(position);
+/** Cover retained output with its exact picture while a Herdr paint replaces it, since a native grid can precede the history projection. */
+function coverRetained() {
+  if (!cachePainted || !presentation.pending) return false;
+  presentation.freeze(false); return true;
+}
+function livePainted(position: number, covered: boolean) {
+  if (!cachePainted) return;
+  if (projection?.stale) { if (covered) presentation.wait(); return; }
+  cachePainted = false; if (covered) herdrHandoffUntil = Date.now() + 1500;
+  if (position) term.scrollToLine(position);
 }
 /** Hold the painted picture while the terminal changes, unless it already shows retained output. */
 function hold() { if (cachePainted) presentation.wait(); else presentation.freeze(); }
@@ -628,6 +637,9 @@ function revealHerdrLayout() {
 function notifyHerdrRendered(presentationId = herdrPresentation) {
   if (!herdrLayout.pending && !herdrParked && presentationId === herdrPresentation) {
     applyDeferredScreen();
+    clearTimeout(herdrHandoffTimer);
+    if (herdrHandoffUntil > Date.now() && !projection?.hasHistory) { herdrHandoffTimer = setTimeout(() => notifyHerdrRendered(presentationId), herdrHandoffUntil - Date.now()); return; }
+    herdrHandoffUntil = 0;
     presentation.reveal(); synchronizeInput();
     notify('terminal-rendered', { presentation: presentationId, cols:term.cols, rows:term.rows });
   }
@@ -641,8 +653,8 @@ function scheduleHerdrRendered() {
 }
 function applyDeferredScreen() {
   if (deferredScreen === undefined || herdrLayout.pending || herdrParked || !tabVisible || document.hidden) return;
-  const position = Math.floor(term.getViewportY());
-  projection?.update(deferredScreen); deferredScreen = undefined; livePainted(position); scheduleTranscript();
+  const position = Math.floor(term.getViewportY()), covered = coverRetained();
+  projection?.update(deferredScreen); deferredScreen = undefined; livePainted(position, covered); scheduleTranscript();
 }
 function discardHerdrFrames() {
   frameScheduler.cancel();
@@ -660,9 +672,9 @@ function paintHerdrFrame(message: HerdrFrameMessage) {
   try {
     if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) return;
     if (herdrLayout.pending && !herdrLayout.accept(message.width === term.cols && message.height === term.rows, message.full)) return;
-    const position = Math.floor(term.getViewportY());
+    const position = Math.floor(term.getViewportY()), covered = coverRetained();
     if (projection?.frame(message) && !herdrLayout.pending) scheduleHerdrRendered();
-    livePainted(position); lastOutputAt = Date.now(); scheduleTranscript();
+    livePainted(position, covered); lastOutputAt = Date.now(); scheduleTranscript();
     revealHerdrLayout();
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame();
   } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
@@ -812,7 +824,7 @@ function socketClosed(event?: CloseEvent) {
   if (directAttempt && !replayState) authorized = false;
   herdrDormant = herdrParked;
   disconnectedContext = inputContext() || disconnectedContext;
-  dictation.connected(false); synchronizedConnection = false; streamStarted = false; handoffPosition = 0;
+  dictation.connected(false); synchronizedConnection = false; streamStarted = false; handoffPosition = 0; herdrHandoffUntil = 0; clearTimeout(herdrHandoffTimer);
   // An unfinished replay leaves retained output in place, so the next connection replays from the start.
   if (handoff !== undefined) { handoff = undefined; queue.clear(); after = received = 0; }
   echo.reset();

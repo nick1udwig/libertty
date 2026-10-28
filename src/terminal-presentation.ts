@@ -19,19 +19,20 @@ export class TerminalPresentation {
     viewport.parentElement!.append(this.layer);
   }
   get pending() { return this.waiting; }
-  freeze() {
+  /** Copy the canvas bitmap without resampling and place it over the original, so held glyphs match the terminal pixel for pixel. */
+  freeze(progress = true) {
     ++this.generation; this.waiting = true;
     if (this.held) return;
     const canvas = this.viewport.querySelector<HTMLCanvasElement>('#terminal canvas');
-    const bounds = this.viewport.getBoundingClientRect();
+    const bounds = this.viewport.getBoundingClientRect(), parent = this.viewport.parentElement!.getBoundingClientRect();
     if (!canvas?.width || !bounds.width || !bounds.height) return;
-    const source = canvas.getBoundingClientRect(), scale = devicePixelRatio || 1;
-    this.snapshot.width = Math.ceil(bounds.width * scale); this.snapshot.height = Math.ceil(bounds.height * scale);
-    const context = this.snapshot.getContext('2d')!;
-    context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg'); context.fillRect(0, 0, this.snapshot.width, this.snapshot.height);
-    context.drawImage(canvas, (source.left - bounds.left) * scale, (source.top - bounds.top) * scale, source.width * scale, source.height * scale);
-    this.layer.style.top = bounds.top - this.viewport.parentElement!.getBoundingClientRect().top + 'px';
+    const source = canvas.getBoundingClientRect();
+    this.snapshot.width = canvas.width; this.snapshot.height = canvas.height;
+    this.snapshot.getContext('2d')!.drawImage(canvas, 0, 0);
+    Object.assign(this.snapshot.style, { left: source.left - parent.left + 'px', top: source.top - bounds.top + 'px', width: source.width + 'px', height: source.height + 'px' });
+    this.layer.style.top = bounds.top - parent.top + 'px';
     this.layer.style.height = bounds.height + 'px';
+    this.progress.hidden = !progress;
     this.layer.hidden = false; this.held = true;
     this.viewport.setAttribute('aria-busy', 'true');
   }

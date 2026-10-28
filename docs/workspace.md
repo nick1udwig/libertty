@@ -275,6 +275,9 @@ A reload paints persisted output through the terminal renderer with its colors, 
 The next live replay or Herdr frame replaces it in the same terminal at the same distance from the bottom.
 A shell replay over retained output is queued until it is complete, then written with its reset in one step, so no cover or intermediate screen paints.
 A Herdr pane keeps retained output as its preserved picture, so only a full frame after Herdr's redraw barrier replaces it.
+A first native frame can precede the history projection that owns a pane with scrollback.
+An exact pixel copy of retained output therefore covers the pane until Herdr's history decides the final picture, or for at most 1.5 seconds.
+Held pictures copy the canvas bitmap without resampling, so the cover is identical to the terminal beneath it.
 Retained output also keeps its own cursor until that replacement.
 The replacement shows no reconnect banner or progress indicator.
 Retained output appears at once, and the banner appears only while the browser is offline or a connection attempt fails.
