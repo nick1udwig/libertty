@@ -55,8 +55,8 @@ dialog{font-family:var(--font-ui);color:var(--text);background:var(--overlay);bo
 .transfer-dialog{width:min(460px,calc(100% - 24px));padding:22px}.transfer-dialog h2{font-size:20px;margin:0 0 12px}.transfer-dialog p{font-size:14px;color:var(--text-2);line-height:1.5;overflow-wrap:anywhere}.transfer-dialog .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}.transfer-dialog button{min-height:44px;padding:0 18px;border-radius:var(--r-md);color:var(--text);border:1px solid var(--line-strong);font:500 14px var(--font-ui);background:var(--raised)}.transfer-dialog button:hover{background:var(--hover)}.transfer-dialog .primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}.transfer-dialog .primary:hover{background:var(--accent-hover)}.transfer-dialog button:disabled{opacity:.5}
 
 #terminal-viewport.awaiting-herdr-layout{visibility:hidden}
-.terminal-presentation,.dictation-presentation{position:absolute;left:0;top:0;width:100%;overflow:hidden;background:var(--bg);z-index:3;pointer-events:none}
-.terminal-presentation canvas,.dictation-presentation canvas{position:absolute;display:block}
+.terminal-presentation,.dictation-presentation,.terminal-resize-cover{position:absolute;left:0;top:0;width:100%;overflow:hidden;background:var(--bg);z-index:3;pointer-events:none}
+.terminal-presentation canvas,.dictation-presentation canvas,.terminal-resize-cover canvas{position:absolute;display:block}
 .terminal-loading-bar{position:absolute;left:0;right:0;top:0;height:2px;overflow:hidden;background:var(--line)}
 .terminal-loading-bar::after{content:'';position:absolute;inset:0;background:var(--accent);transform:translateX(-100%);animation:terminal-progress 1.4s ease-in-out infinite}
 @keyframes terminal-progress{to{transform:translateX(100%)}}

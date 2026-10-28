@@ -26,6 +26,7 @@ export class HerdrFrames {
   readonly loading = node('div', 'herdr-loading');
   private loadingLabel = node('span');
   private entries = new Map<string, CachedTerminal>();
+  private resizing = new Map<HTMLIFrameElement, () => void>();
   private disposed = false;
   private screen: HTMLElement;
   private host: FramesHost;
@@ -57,6 +58,7 @@ export class HerdrFrames {
       const bounds = entry.frame.getBoundingClientRect(); entry.width = bounds.width; entry.height = bounds.height;
       this.rendered = true; this.setLoading(false); this.host.painted();
     }
+    if (event.data.type === 'herdr-resize-ready') this.resizing.get(entry.frame)?.();
     if (active && event.data.type === 'terminal-notice') this.host.notice(event.data.message);
     if (event.data.type === 'reading-open' && readingOpen(event.data)) this.host.reading(entry.frame.dataset.terminal!, event.data);
     if (event.data.type === 'terminal-ended') this.host.ended();
@@ -83,6 +85,15 @@ export class HerdrFrames {
       frame.className = keepVisible ? 'herdr-terminal-previous' : 'herdr-terminal-cached'; frame.style.visibility = keepVisible ? '' : 'hidden';
       frame.contentWindow?.postMessage({type:'herdr-park',parked:true},location.origin);
     } else { frame.remove(); this.entries.delete(id); }
+  }
+  /** Let a frame cover its picture before its size changes, so neither its stale canvas nor its local reflow paints. */
+  prepareResize(frame: HTMLIFrameElement) {
+    return new Promise<void>(resolve => {
+      const done = () => { clearTimeout(timer); if (this.resizing.get(frame) === done) this.resizing.delete(frame); resolve(); };
+      const timer = setTimeout(done, 150);
+      this.resizing.get(frame)?.(); this.resizing.set(frame, done);
+      frame.contentWindow?.postMessage({ type: 'herdr-resize-cover' }, location.origin);
+    });
   }
   post(message: object) { this.frame?.contentWindow?.postMessage(message, location.origin); }
   broadcast(message: object) { for (const entry of this.entries.values()) entry.frame.contentWindow?.postMessage(message, location.origin); }

@@ -25,7 +25,7 @@ import { TerminalTranscript } from './terminal-transcript.ts';
 import { paintSnapshot, terminalSnapshot, type TerminalPicture } from './terminal-snapshot.ts';
 import { TerminalHistory } from './terminal-history.ts';
 import { TerminalProjection } from './terminal-projection.ts';
-import { TerminalPresentation } from './terminal-presentation.ts';
+import { TerminalPresentation, TerminalResizeCover } from './terminal-presentation.ts';
 import { TerminalRendering } from './terminal-rendering.ts';
 import { OutputScheduler } from './output-scheduler.ts';
 import { mergeHerdrFrames, type HerdrFrameMessage } from './terminal-frame-batch.ts';
@@ -369,6 +369,18 @@ function drain() {
   if (queue.length) scheduleDrain();
   else revealReplay();
 }
+// A resized mobile Herdr pane keeps its previous picture at its previous bottom edge until Herdr redraws the application, instead of painting the stale canvas and a local reflow first.
+const resizeCover = new TerminalResizeCover(terminalViewport);
+let fittedHeight = 0, resizeTarget = '', resizeCoverTimer: ReturnType<typeof setTimeout> | undefined;
+function canCoverResize() { return !!fittedHeight && mobileTerminal() && synchronizedConnection && herdrLayout.rendered && !presentation.pending && !cachePainted && !herdrParked && tabVisible; }
+function coverResize() {
+  if (!canCoverResize()) return;
+  const dimensions = fit.proposeDimensions();
+  if (!dimensions || dimensions.cols === term.cols && dimensions.rows === term.rows) return;
+  resizeTarget = dimensions.cols + 'x' + dimensions.rows; resizeCover.hold(fittedHeight);
+  clearTimeout(resizeCoverTimer); resizeCoverTimer = setTimeout(releaseResizeCover, 3000);
+}
+function releaseResizeCover() { clearTimeout(resizeCoverTimer); resizeCover.release(); }
 function sizeTerminal() {
   if (herdrParked) {
     if (!mobileTerminal() && herdrReady) send({ type:'resize', cols:term.cols, rows:term.rows, mobile:false });
@@ -400,6 +412,7 @@ function sizeTerminal() {
       if (cachePainted) paintCache(Math.floor(term.getViewportY()));
       notifyHerdrSizing();
     }
+    fittedHeight = terminalViewport.clientHeight;
     if (projection?.resize(mobileTerminal())) scheduleHerdrRendered();
     // Herdr resolves the selected pane asynchronously after the WS upgrade.
     // Send geometry only after its state acknowledges that the handler is ready.
@@ -415,7 +428,7 @@ fontSizeInput.oninput = () => {
 };
 fontSizeInput.onchange = () => { fontSizeInput.value = String(term.options.fontSize! * 3 / 4); };
 let resizeFrame = 0;
-new ResizeObserver(() => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(sizeTerminal); }).observe(terminalViewport);
+new ResizeObserver(() => { coverResize(); cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(sizeTerminal); }).observe(terminalViewport);
 mobileViewport.addEventListener('change', sizeTerminal);
 function viewport() { document.documentElement.style.setProperty('--app-height', `${window.visualViewport?.height || window.innerHeight}px`); }
 window.visualViewport?.addEventListener('resize', viewport); window.addEventListener('resize', viewport); viewport();
@@ -641,6 +654,7 @@ function notifyHerdrRendered(presentationId = herdrPresentation) {
     if (herdrHandoffUntil > Date.now() && !projection?.hasHistory) { herdrHandoffTimer = setTimeout(() => notifyHerdrRendered(presentationId), herdrHandoffUntil - Date.now()); return; }
     herdrHandoffUntil = 0;
     presentation.reveal(); synchronizeInput();
+    if (resizeCover.held && resizeTarget === term.cols + 'x' + term.rows) { clearTimeout(resizeCoverTimer); resizeCover.reveal(); }
     notify('terminal-rendered', { presentation: presentationId, cols:term.cols, rows:term.rows });
   }
 }
@@ -819,7 +833,7 @@ function socketMessage(event: MessageEvent) {
   (handlers[message.type] as ((message: ServerMessage) => void) | undefined)?.(message);
 }
 function socketClosed(event?: CloseEvent) {
-  cancelBackfill(); flushTranscript();
+  cancelBackfill(); flushTranscript(); releaseResizeCover();
   discardHerdrFrames();
   if (directAttempt && !replayState) authorized = false;
   herdrDormant = herdrParked;
@@ -869,7 +883,7 @@ document.addEventListener('wheel', terminalActivity, { passive: true });
 $('login-form').onsubmit = e => { e.preventDefault(); void connect($<HTMLInputElement>('token').value); };
 transport.follow({ grace: backgroundGrace, hidden: () => {
   echo.cancel(); cancelAnimationFrame(outputFrame); frameQueued = false;
-  discardHerdrFrames();
+  discardHerdrFrames(); releaseResizeCover();
   if (herdrTerminal && !herdrParked) {
     layout({ pending: mobileTerminal(), preserve: true, barrierReady: herdrLayout.barrierReady });
     send({ type: 'herdr-active', active: false });
@@ -940,10 +954,18 @@ if (embedded) {
     if (event.data?.type === 'terminal-images' && tabVisible && !herdrParked && Array.isArray(event.data.files) && event.data.files.every((file: unknown) => file instanceof File)) void attachImages(event.data.files);
     if (event.data?.type === 'herdr-present' && herdrTerminal && typeof event.data.presentation === 'string') {
       discardHerdrFrames(); rendering.activity(); frameScheduler.activity();
-      hold();
+      releaseResizeCover(); hold();
       herdrPresentation = event.data.presentation; herdrLayout.cancel();
       notifyHerdrSizing(); notifyCachedRendered();
       return;
+    }
+    if (event.data?.type === 'herdr-resize-cover' && herdrTerminal) {
+      // The workspace resizes this pane after the reply, so the stale canvas never paints before the cover.
+      if (canCoverResize() && !resizeCover.held) {
+        resizeTarget = ''; resizeCover.hold(fittedHeight);
+        clearTimeout(resizeCoverTimer); resizeCoverTimer = setTimeout(() => { if (!resizeTarget) releaseResizeCover(); }, 500);
+      }
+      notify('herdr-resize-ready'); return;
     }
     if (event.data?.type === 'authorize') { herdrPreview = false; accessToken = event.data.accessToken; void transport.connect(undefined, true); }
     if (event.data?.type === 'recovery-failed') connection('Session ended');
@@ -951,7 +973,7 @@ if (embedded) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;
       herdrParked = parked; dictation.visibility(!parked && tabVisible);
-      if (parked) { flushTranscript(); gestures.cancelGesture(); discardHerdrFrames(); }
+      if (parked) { flushTranscript(); releaseResizeCover(); gestures.cancelGesture(); discardHerdrFrames(); }
       rendering.setVisible(!parked && tabVisible);
       clearTimeout(parkTimer);
       if (parked) parkTimer = setTimeout(() => { if (herdrParked) { herdrDormant = true; transport.suspend(); } }, inactiveGrace);
@@ -966,7 +988,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); flushTranscript(); gestures.cancelGesture(); hold(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) layout({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length || handoff !== undefined) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); notifyCachedRendered(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); flushTranscript(); releaseResizeCover(); gestures.cancelGesture(); hold(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) layout({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length || handoff !== undefined) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); notifyCachedRendered(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else transport.foreground();

@@ -246,8 +246,12 @@ export class HerdrView {
     this.screen.classList.add('herdr-navigation-resizing');
     return () => {
       if (generation !== this.navigationResize) return;
-      if (frame) frame.style.flexBasis = '';
-      this.screen.classList.remove('herdr-navigation-resizing');
+      const resize = () => {
+        if (generation !== this.navigationResize) return;
+        if (frame) frame.style.flexBasis = '';
+        this.screen.classList.remove('herdr-navigation-resizing');
+      };
+      if (frame) void this.frames.prepareResize(frame).then(resize); else resize();
     };
   }
   setHeld(held: boolean) {
