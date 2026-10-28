@@ -166,7 +166,7 @@ struct Inner {
     paste: PasteMode,
     history: History,
     replay: Replay,
-    screen: screen::Screen,
+    screen: Option<screen::Screen>,
     socket: Option<Attachment>,
     attachment: u64,
     detached: Instant,
@@ -194,7 +194,7 @@ pub struct Session {
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
     services: HostServices,
     help: HelpProvider,
-    engine: NativeEngine,
+    engine: Option<NativeEngine>,
     base_commands: libertty_engine::types::SharedList<String>,
     lifetime: CancellationToken,
     prewarming: AtomicBool,
@@ -392,7 +392,9 @@ impl Inner {
         if visible.is_empty() {
             return;
         }
-        self.screen.feed(&visible);
+        if let Some(screen) = &mut self.screen {
+            screen.feed(&visible);
+        }
         self.replay.record(visible.into(), self.socket.is_some());
         self.flush();
     }
@@ -409,7 +411,11 @@ impl Inner {
         self.send_snapshot();
     }
     fn send_snapshot(&mut self) {
-        let data = self.screen.snapshot();
+        let data = self
+            .screen
+            .as_mut()
+            .map(screen::Screen::snapshot)
+            .unwrap_or_default();
         let seq = self.replay.snapshot_sent(data.len());
         self.send(ServerMessage::Output {
             seq,
@@ -509,7 +515,11 @@ impl Session {
             plugin_files: tokio::sync::Mutex::new(Default::default()),
             remote,
             help: HelpProvider::new(services.pool.clone()),
-            engine: NativeEngine::new()?,
+            engine: if files_only {
+                None
+            } else {
+                Some(NativeEngine::new()?)
+            },
             services,
             base_commands: base_commands.into(),
             lifetime: CancellationToken::new(),
@@ -533,7 +543,7 @@ impl Session {
                 paste: PasteMode::default(),
                 history: History::new(history),
                 replay: Replay::default(),
-                screen: screen::Screen::new(24, 80),
+                screen: (!files_only).then(|| screen::Screen::new(24, 80)),
                 socket: None,
                 attachment: 0,
                 detached: Instant::now(),
@@ -1019,7 +1029,9 @@ impl Session {
                 {
                     let (cols, rows) = (cols.clamp(2, 300), rows.clamp(2, 120));
                     pty.resize(cols, rows);
-                    inner.screen.resize(rows, cols);
+                    if let Some(screen) = &mut inner.screen {
+                        screen.resize(rows, cols);
+                    }
                 }
             }
             ClientMessage::Input { data, seq } => {
@@ -1246,6 +1258,7 @@ impl Session {
         text: &str,
         cancel: &CancellationToken,
     ) -> Result<Suggestions, String> {
+        let engine = self.engine.as_ref().ok_or("This session has no shell.")?;
         let (catalog, env, prompt) = self.snapshot().await?;
         let key = facts::context_key(prompt, &catalog, &env);
         let mut host = NativeHost::new(
@@ -1258,7 +1271,7 @@ impl Session {
         let mut candidates = None;
         for _ in 0..3 {
             host.verify_listings();
-            let result = self.engine.suggest(text, &host, cancel).await?;
+            let result = engine.suggest(text, &host, cancel).await?;
             if host.listings_unchanged(cancel).await? {
                 candidates = Some(result);
                 break;
@@ -1384,11 +1397,10 @@ impl Session {
                 session.help.clone(),
             );
             host.remote = session.remote.clone();
-            let Ok(targets) = session
-                .engine
-                .prewarm_targets(&host, &session.lifetime)
-                .await
-            else {
+            let Some(engine) = &session.engine else {
+                return;
+            };
+            let Ok(targets) = engine.prewarm_targets(&host, &session.lifetime).await else {
                 return;
             };
             for target in targets {
@@ -1403,7 +1415,7 @@ impl Session {
                 let cancel = session.lifetime.child_token();
                 let deadline = tokio::time::timeout(
                     Duration::from_secs(4),
-                    session.engine.warm_command(&target, &host, &cancel),
+                    engine.warm_command(&target, &host, &cancel),
                 )
                 .await;
                 cancel.cancel();
@@ -1417,7 +1429,9 @@ impl Session {
     pub async fn dispose(&self) {
         self.lifetime.cancel();
         self.help.dispose();
-        let _ = self.engine.reset();
+        if let Some(engine) = &self.engine {
+            let _ = engine.reset();
+        }
         {
             let mut inner = self.inner.lock().unwrap();
             inner.reject_input_line();
@@ -1621,6 +1635,28 @@ mod tests {
         fn resize(&self, _: u16, _: u16) {}
         fn kill(&self) {}
     }
+    #[tokio::test]
+    async fn file_sessions_do_not_allocate_shell_resources() {
+        let session = Session::start("/tmp".into(), vec![], true, HostServices::new())
+            .await
+            .unwrap();
+        assert!(session.engine.is_none());
+        {
+            let inner = session.inner.lock().unwrap();
+            assert!(inner.screen.is_none());
+            assert!(inner.pty.is_none());
+        }
+        assert!(session.directory.is_empty());
+        assert_eq!(
+            session
+                .suggest("echo", &CancellationToken::new())
+                .await
+                .err()
+                .as_deref(),
+            Some("This session has no shell.")
+        );
+        session.dispose().await;
+    }
     async fn fixture() -> (Arc<Session>, Stub, u64, mpsc::UnboundedReceiver<Transport>) {
         let session = Session::start("/tmp".into(), vec![], true, HostServices::new())
             .await
@@ -1629,6 +1665,7 @@ mod tests {
         {
             let mut inner = session.inner.lock().unwrap();
             inner.pty = Some(Box::new(stub.clone()));
+            inner.screen = Some(screen::Screen::new(24, 80));
             inner.state.prompt = 1;
         }
         let (attachment, mut receive) = session.attach(0, None, None);
