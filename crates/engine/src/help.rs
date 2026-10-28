@@ -1,5 +1,28 @@
-use crate::types::{Flag, ValueKind, ValueSchema};
+use crate::types::{Flag, Help, ValueKind, ValueSchema};
 use crate::{regex, replace, test};
+
+pub fn parse_help(command: &str, route: &[String], text: &str) -> Help {
+    let scope = std::iter::once(command)
+        .chain(route.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Help {
+        flags: flags_from_help(text),
+        subcommands: commands_from_help(text, Some(&scope)),
+        required: required_from_help(text, &scope),
+        ..Help::default()
+    }
+}
+pub fn needs_manual(command: &str, route: &[String], text: &str, help: &Help) -> bool {
+    command != "git" && route.is_empty() && help.subcommands.is_empty() && has_command_slot(text)
+}
+pub fn apply_manual(help: &mut Help, text: &str) {
+    help.subcommands = commands_from_manual(text);
+    if !help.subcommands.is_empty() {
+        help.probe_subcommands = Some(vec![]);
+    }
+}
+
 fn clean(text: &str) -> String {
     replace!(r###"\[[0-9;]*m"###, text, "")
 }
@@ -234,4 +257,25 @@ pub fn flags_from_help(help: &str) -> Vec<Flag> {
         }
     }
     flags
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+    #[test]
+    fn manual_fallback_never_authorizes_command_execution() {
+        let text = "Usage: orbit <command>\n  --verbose  Show details\n";
+        let mut help = parse_help("orbit", &[], text);
+        assert_eq!(help.flags[0].name, "--verbose");
+        assert!(needs_manual("orbit", &[], text, &help));
+        assert!(!needs_manual("git", &[], text, &help));
+        assert!(!needs_manual("orbit", &["run".into()], text, &help));
+        apply_manual(
+            &mut help,
+            "COMMANDS\n     run [options]\n         Run a task.\nOPTIONS\n",
+        );
+        assert_eq!(help.subcommands, ["run"]);
+        assert_eq!(help.probe_subcommands, Some(vec![]));
+        assert!(!needs_manual("orbit", &[], text, &help));
+    }
 }

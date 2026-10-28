@@ -5,10 +5,7 @@ use crate::{
 };
 use libertty_engine::{
     command_policy::subcommands_for,
-    help::{
-        commands_from_help, commands_from_manual, flags_from_help, has_command_slot,
-        required_from_help,
-    },
+    help::{apply_manual, needs_manual, parse_help},
     path,
     types::{Catalog, CommandMetadata, Help},
 };
@@ -307,21 +304,8 @@ impl HelpProvider {
                 )
             })
             .unwrap_or_default();
-        let scope = std::iter::once(command)
-            .chain(route.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut found = Help {
-            flags: flags_from_help(&text),
-            subcommands: commands_from_help(&text, Some(&scope)),
-            required: required_from_help(&text, &scope),
-            ..Help::default()
-        };
-        if command != "git"
-            && route.is_empty()
-            && found.subcommands.is_empty()
-            && has_command_slot(&text)
-        {
+        let mut found = parse_help(command, route, &text);
+        if needs_manual(command, route, &text, &found) {
             let manual_options = ProbeOptions {
                 cwd: catalog.cwd.clone(),
                 env: [
@@ -354,10 +338,7 @@ impl HelpProvider {
             .await
                 && manual.success
             {
-                found.subcommands = commands_from_manual(&String::from_utf8_lossy(&manual.stdout));
-                if !found.subcommands.is_empty() {
-                    found.probe_subcommands = Some(vec![]);
-                }
+                apply_manual(&mut found, &String::from_utf8_lossy(&manual.stdout));
             }
         }
         if command == "git" && route.is_empty() {
