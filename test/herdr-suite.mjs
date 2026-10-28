@@ -357,7 +357,7 @@ try {
     });
     let liveRevision = 0; liveOutput = setInterval(() => fixture.setScreen(0, touchHistory + '\nLIVE ' + String(++liveRevision).padStart(6, '0')), 80);
     await touch('touchStart', canvas.x + historyWord.x, canvas.y + historyWord.y); await delay(450); await touch('touchEnd');
-    await terminal.locator('.selection-notice').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
+    await page.locator('#notice-bubble').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'alpha', 'Live cursor frames must not clear touch selection in scrollback');
     await touch('touchStart', canvas.x + historyWord.x, canvas.y + historyWord.y);
     await touch('touchMove', canvas.x + historyWord.x + 9 * historyWord.cell, canvas.y + historyWord.y); await delay(200); await touch('touchEnd');
@@ -374,7 +374,7 @@ try {
       throw new Error('No word for selection');
     });
     await touch('touchStart', canvas.x + wordPoint.x, canvas.y + wordPoint.y); await delay(450); await touch('touchEnd');
-    await terminal.locator('.selection-notice').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
+    await page.locator('#notice-bubble').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
     assert.equal(await terminal.evaluate(() => navigator.clipboard.readText()), 'alpha', 'Hold selects and copies through normal terminal gestures');
     const plainURL = 'https://example.com/herdr/a/long/path?from=terminal#touch', helpURL = 'https://example.com/herdr/help';
     fixture.setScreen(0, touchHistory + '\nRead ' + plainURL + '\n\x1b]8;;' + helpURL + '\x07Open help\x1b]8;;\x07\nLive footer');
@@ -430,7 +430,7 @@ try {
     });
     const wideCanvas = await terminal.locator('#terminal canvas').boundingBox();
     await touch('touchStart', wideCanvas.x + wideWord.x, wideCanvas.y + wideWord.y); await delay(450); await touch('touchEnd');
-    await terminal.locator('.selection-notice').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
+    await page.locator('#notice-bubble').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'alpha', 'Full-width mode retains hold-to-copy');
     assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Copying focuses the document without opening terminal input');
     fixture.setScreen(0, '╭' + '─'.repeat(78) + '╮\n│ › prompt' + ' '.repeat(69) + '│\n╰' + '─'.repeat(78) + '╯\nfooter\n', { x: 4, y: 1 });
@@ -759,5 +759,5 @@ try {
     fixture.pauseEvents(false);
   }
   assert.deepEqual(errors, []); console.log('PASS Herdr ' + scenario + ' scenario');
-} catch (error) { await page?.screenshot({ path: '/tmp/libertty-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all((page?.frames() || []).map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('.selection-notice')?.textContent, pending: document.querySelector('#terminal-viewport')?.className, parentVisible: frameElement && getComputedStyle(frameElement).visibility, layout: window.__herdrMessages?.filter(m => m.type === 'herdr-layout'), rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: JSON.stringify(window.__herdrMessages?.filter(m => m.type === 'herdr-frame').map(m => ({width:m.width,height:m.height,full:m.full}))), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('libertty.hosts'), tabs: localStorage.getItem('libertty.tabs') })).catch(() => ({}))); throw error; }
+} catch (error) { await page?.screenshot({ path: '/tmp/libertty-herdr-failure.png' }).catch(() => {}); console.error(await Promise.all((page?.frames() || []).map(frame => frame.evaluate(() => ({ url: location.href, notice: document.querySelector('#notice-bubble')?.textContent, pending: document.querySelector('#terminal-viewport')?.className, parentVisible: frameElement && getComputedStyle(frameElement).visibility, layout: window.__herdrMessages?.filter(m => m.type === 'herdr-layout'), rows: window.__testTerminal?.rows, cols: window.__testTerminal?.cols, view: window.__testTerminal?.getViewportY(), cursor: window.__testTerminal ? {x: window.__testTerminal.buffer.active.cursorX, y: window.__testTerminal.buffer.active.cursorY} : undefined, frames: JSON.stringify(window.__herdrMessages?.filter(m => m.type === 'herdr-frame').map(m => ({width:m.width,height:m.height,full:m.full}))), selected: window.__testTerminal?.getSelection() })).catch(() => ({}))))); console.error(logs, errors, network, await page?.evaluate(() => ({ text: document.body.innerText, notices: window.__notices, messages: window.__herdrMessages, hosts: localStorage.getItem('libertty.hosts'), tabs: localStorage.getItem('libertty.tabs') })).catch(() => ({}))); throw error; }
 finally { clearInterval(liveOutput); await browser?.close(); backend.kill('SIGTERM'); await exited; sshd?.kill('SIGTERM'); for (const socket of daemon.clients) socket.terminate(); await new Promise(resolve => daemon.close(resolve)); await fixture.close(); }

@@ -27,6 +27,7 @@
 .notice-pop[data-edge=right]::before{right:-8px;top:var(--notch,16px);border-bottom:0;border-left:0}
 @keyframes notice-in{from{opacity:0;transform:scale(.96)}}
 .notice-bubble{padding:12px 6px 12px 14px;touch-action:none;user-select:none;-webkit-user-select:none}
+.notice-bubble.notice-passive{pointer-events:none}
 .notice-panel{width:min(340px,calc(100vw - 20px));padding:6px;overflow-y:auto;overscroll-behavior:contain}
 
 .notice-item{display:grid;grid-template-columns:14px minmax(0,1fr) 44px;column-gap:10px;align-items:start}

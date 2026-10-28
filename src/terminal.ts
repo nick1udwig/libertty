@@ -575,7 +575,7 @@ function copyTerminalText(text: string) {
   window.focus(); return navigator.clipboard.writeText(text);
 }
 const gestures = new TerminalGestures(term, {
-  focus,
+  focus, notice: toast,
   link: (col, row) => terminalLinkAt(term, col, row, projection?.clickable),
   pan: { enabled: () => fullWidth() && terminalViewport.scrollWidth > terminalViewport.clientWidth, move: pixels => { terminalViewport.scrollLeft += pixels; } },
   scroll: {

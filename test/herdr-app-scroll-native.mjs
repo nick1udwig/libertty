@@ -181,7 +181,7 @@ try {
   assert.equal(await page.evaluate(() => window.__terminal.getViewportY()), 0, 'The application, rather than local scrollback, moves');
   // Holding the displayed app text must continue to use local selection/copy.
   const word = await page.evaluate(() => { const t = window.__terminal, r = document.querySelector('#terminal canvas').getBoundingClientRect(), col = t.buffer.active.getLine(1).translateToString(true).indexOf('alpha'); return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + 1.5 * r.height / t.rows }; });
-  await touch('touchStart', word.x, word.y); await delay(450); await touch('touchEnd'); await page.locator('.selection-notice').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
+  await touch('touchStart', word.x, word.y); await delay(450); await touch('touchEnd'); await page.locator('#notice-bubble').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'alpha');
   assert.equal((await state()).offset, older.offset, 'Selecting does not scroll the app');
   await drag(300, 180); await wait(async () => (await state()).offset < older.offset, 'reverse drag scrolls toward latest output');

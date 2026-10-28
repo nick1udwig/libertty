@@ -22,6 +22,8 @@ function mark(kind: NoticeKind) {
   return element;
 }
 
+/** A plain confirmation lets touches through, so it never blocks the terminal beneath it, and leaves on its own. */
+const passive = (notice: Notice) => notice.key === undefined && ['done', 'info'].includes(notice.kind) && !notice.actions.length;
 const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 /** One orb owns every notice: new ones unfurl beside it, and tapping it lists current and earlier notices. */
@@ -65,8 +67,9 @@ export class NoticeCenter {
     this.bubble.addEventListener('pointermove', event => this.moveSwipe(event));
     this.bubble.addEventListener('pointerup', event => this.endSwipe(event));
     this.bubble.addEventListener('pointercancel', () => this.resetSwipe());
-    for (const type of ['pointerenter', 'focusin']) this.bubble.addEventListener(type, () => { if (this.shown) this.model.hold(this.shown); });
-    for (const type of ['pointerleave', 'focusout']) this.bubble.addEventListener(type, () => { if (this.shown) this.model.resume(this.shown); });
+    // A press or keyboard focus holds a notice; hover does not, because a resting cursor would hold it forever.
+    for (const type of ['pointerdown', 'focusin']) this.bubble.addEventListener(type, () => { if (this.shown) this.model.hold(this.shown); });
+    for (const type of ['pointerup', 'pointercancel', 'focusout']) this.bubble.addEventListener(type, () => { if (this.shown) this.model.resume(this.shown); });
     for (const element of [this.orb, this.bubble, this.panel]) element.addEventListener('keydown', event => this.key(event));
     document.addEventListener('pointerdown', event => {
       if (this.open && !this.panel.contains(event.target as Node) && !this.orb.contains(event.target as Node)) this.toggle(false);
@@ -108,6 +111,7 @@ export class NoticeCenter {
       // The bubble is its own live region, so its role is set before its new content shows.
       if (presented) {
         this.bubble.role = ['error', 'warning'].includes(presented.kind) ? 'alert' : 'status';
+        this.bubble.classList.toggle('notice-passive', passive(presented));
         this.bubble.replaceChildren(this.item(presented, true));
       }
       this.bubble.hidden = !presented;
@@ -124,7 +128,7 @@ export class NoticeCenter {
     body.append(node('p', 'notice-text', notice.message));
     if (notice.source) body.append(node('p', 'notice-meta', notice.source));
     item.append(mark(notice.kind), body);
-    if (bubble || notice.key === undefined) {
+    if (bubble ? !passive(notice) : notice.key === undefined) {
       const close = node('button', 'notice-close');
       close.type = 'button'; close.innerHTML = closeIcon;
       close.ariaLabel = notice.key === undefined ? 'Dismiss' : 'Hide';

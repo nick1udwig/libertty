@@ -34,7 +34,8 @@ Default font size is 10 pt (13⅓ CSS px).
 `notice-model.ts` keeps the current notices, the keyed states and a history of the last 20 notices.
 Errors and warnings stay until the user dismisses them.
 Info notices leave after 6 seconds, and done notices leave after 3 seconds.
-Touch, hover or focus on the bubble stops the timer.
+A done or info notice without actions lets touches through to the terminal, so it never blocks it.
+A press or keyboard focus on any other bubble stops its timer.
 A new notice opens from the orb as a bubble.
 A swipe to the side or Esc dismisses the bubble, and a swipe up puts it away without dismissing it.
 A tap on the orb lists the current notices and the history.
@@ -45,7 +46,8 @@ States last while they are true, so the user can hide them from the bubble but c
 Embedded terminals send `terminal-notice` and `terminal-status` messages and do not draw notices.
 The workspace shows only the selected tab's states, and sends action ids back with `notice-action`.
 A Herdr tab shows its own connection state and the state of its selected pane in the same orb.
-Contextual selection feedback, loading covers and dialog form errors stay beside their content.
+Selection copies and selection warnings also use the orb.
+Loading covers and dialog form errors stay beside their content.
 
 Each frame connects directly to its chosen backend.
 Origin/source-checked messages supply access credentials; iframe URLs contain a backend URL and session ID, never tokens or passphrases.
