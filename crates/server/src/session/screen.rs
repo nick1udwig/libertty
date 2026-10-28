@@ -1,8 +1,9 @@
 //! The current terminal picture of a native session, so a viewer can resume from it instead of raw output.
 use std::fmt::Write as _;
 
-/// Rows kept above the screen for snapshots, matching the Herdr history window.
-const SCROLLBACK: usize = 1000;
+/// Keep a larger archive without increasing the foreground reconnect snapshot.
+const SCROLLBACK: usize = 5000;
+const SNAPSHOT_ROWS: usize = 1000;
 const ALTERNATE: [&str; 2] = ["\x1b[?1049h", "\x1b[?47h"];
 
 pub(super) struct Screen {
@@ -42,6 +43,39 @@ impl Screen {
             self.main = None;
         }
     }
+    pub fn history(&mut self) -> String {
+        let screen = self
+            .main
+            .as_mut()
+            .unwrap_or_else(|| self.parser.screen_mut());
+        let (rows, cols) = screen.size();
+        screen.set_scrollback(usize::MAX);
+        let mut offset = screen.scrollback();
+        let mut text = String::new();
+        loop {
+            screen.set_scrollback(offset);
+            let taken = if offset == 0 {
+                usize::from(rows)
+            } else {
+                offset.min(usize::from(rows))
+            };
+            for (row, line) in screen.rows(0, cols).take(taken).enumerate() {
+                text.push_str(&line);
+                if !screen.row_wrapped(row as u16) {
+                    text.push('\n');
+                }
+            }
+            if offset == 0 {
+                break;
+            }
+            offset -= taken;
+        }
+        let mut start = text.len().saturating_sub(512 * 1024);
+        while !text.is_char_boundary(start) {
+            start += 1;
+        }
+        text[start..].trim_end().to_owned()
+    }
     /// ANSI that rebuilds this picture in a freshly reset terminal; lines reflow at the viewer's own width.
     pub fn snapshot(&mut self) -> String {
         let mut out = String::new();
@@ -70,7 +104,7 @@ fn write_screen(out: &mut String, screen: &mut vt100::Screen, scrollback: bool) 
     let (rows, cols) = screen.size();
     let (cursor_row, cursor_col) = screen.cursor_position();
     if scrollback {
-        screen.set_scrollback(usize::MAX);
+        screen.set_scrollback(SNAPSHOT_ROWS);
         let mut offset = screen.scrollback();
         while offset > 0 {
             screen.set_scrollback(offset);
@@ -219,6 +253,23 @@ fn color(out: &mut String, color: vt100::Color, base: u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn history_is_larger_than_snapshots_and_keeps_the_main_screen() {
+        let mut screen = Screen::new(4, 40);
+        for row in 0..6000 {
+            screen.feed(&format!("row {row} 界😀\r\n"));
+        }
+        let history = screen.history();
+        assert!(!history.contains("row 0 "));
+        assert!(history.contains("row 2000 界😀"));
+        assert!(history.contains("row 5999 界😀"));
+        let snapshot = screen.snapshot();
+        assert!(!snapshot.contains("row 2000 "));
+        assert!(snapshot.contains("row 5999 "));
+        screen.feed("\x1b[?1049happlication screen");
+        assert_eq!(screen.history(), history);
+        assert!(screen.snapshot().contains("application screen"));
+    }
     /// Rebuild a snapshot in a fresh terminal of the same size.
     fn replay(screen: &mut Screen, rows: u16, cols: u16) -> vt100::Parser {
         let mut viewer = vt100::Parser::new(rows, cols, SCROLLBACK);

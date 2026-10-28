@@ -192,6 +192,8 @@ const cache = new TerminalCache();
 const cacheKey = terminalCacheKey(baseURL.href, herdrTerminal ? params.get('herdrSession') || '' : session, herdrTerminal || '', params.get('herdrSource') || '', params.get('herdrPane') || '');
 const reader = new TerminalReader(terminalViewport.parentElement!, () => { if (cacheRestored && !synchronizedConnection) { toast('Cached history is available while reconnecting.'); return; } reader.hide(); term.scrollToBottom(); }, copyTerminalText, clearTranscript);
 let cachedUpdated = 0, cachedStream = '', cachedScreen = '', clearedScreen: string | undefined, cacheRestored = false, cacheCleared = false;
+let backfillNeeded = false, backfill: AbortController | undefined;
+let backfillTimer: ReturnType<typeof setTimeout> | undefined;
 let transcriptTimer: ReturnType<typeof setTimeout> | undefined, cacheTimer: ReturnType<typeof setTimeout> | undefined;
 function saveTranscript() {
   clearTimeout(cacheTimer); cacheTimer = undefined;
@@ -210,14 +212,20 @@ function captureTranscript() {
 function scheduleTranscript() { transcriptTimer ??= setTimeout(captureTranscript, 1500); }
 $('read-history').onclick = () => { captureTranscript(); reader.show(transcript.text()); };
 function clearTranscript() {
-  cacheCleared = true; clearedScreen = terminalText(term); clearTimeout(cacheTimer); cacheTimer = undefined; transcript.restore([]); reader.hide();
+  cacheCleared = true; cancelBackfill(); clearedScreen = terminalText(term); clearTimeout(cacheTimer); cacheTimer = undefined; transcript.restore([]); reader.hide();
   void cache.clear(cacheKey).then(ok => toast(ok ? 'Saved terminal history cleared.' : 'Saved history could not be cleared.'));
 }
 $('clear-history').onclick = clearTranscript;
 reader.viewport.addEventListener('scroll', () => { cacheTimer ??= setTimeout(saveTranscript, 1000); }, { passive: true });
 void cache.read(cacheKey).then(saved => {
-  if (!saved || lastOutputAt || cacheCleared) return;
-  transcript.restore(saved.records); transcript.observe(saved.screen, saved.records.at(-1)?.kind === 'history', saved.updated); cachedUpdated = saved.updated; cachedStream = saved.stream; cachedScreen = saved.screen; cacheRestored = true;
+  if (!saved || cacheCleared || streamId && saved.stream !== streamId) return;
+  const current = transcript.records.map(record => ({ ...record }));
+  transcript.restore(saved.records);
+  if (lastOutputAt) {
+    for (const record of current) { if (record.kind === 'gap') transcript.gap(record.text, record.at); else transcript.observe(record.text, record.kind === 'history', record.at); }
+    saveTranscript(); return;
+  }
+  transcript.observe(saved.screen, saved.records.at(-1)?.kind === 'history', saved.updated); cachedUpdated = saved.updated; cachedStream = saved.stream; cachedScreen = saved.screen; cacheRestored = true;
   reader.show(transcript.text() || saved.screen, saved.position, saved.lines);
   if (transport.socket?.readyState !== WebSocket.OPEN) connection('Offline');
   notify('terminal-ready');
@@ -225,6 +233,22 @@ void cache.read(cacheKey).then(saved => {
 function flushTranscript() { captureTranscript(); saveTranscript(); }
 window.addEventListener('pagehide', flushTranscript);
 document.addEventListener('visibilitychange', () => { if (document.hidden) flushTranscript(); });
+function cancelBackfill() { clearTimeout(backfillTimer); backfillTimer = undefined; backfill?.abort(); backfill = undefined; }
+function scheduleBackfill() {
+  if (herdrTerminal || !backfillNeeded || backfill || backfillTimer || !synchronizedConnection || !tabVisible || document.hidden) return;
+  backfillTimer = setTimeout(() => {
+    backfillTimer = undefined;
+    if (!synchronizedConnection || !tabVisible || document.hidden) return;
+    const controller = backfill = new AbortController(), expected = streamId;
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    void api<{ streamId: string; seq: number; text: string }>('/api/terminal/history', undefined, controller.signal).then(result => {
+      if (controller.signal.aborted || expected !== streamId || result.streamId !== expected || cacheCleared) return;
+      captureTranscript(); transcript.backfill(result.text); saveTranscript(); backfillNeeded = false;
+    }).catch(() => {}).finally(() => { clearTimeout(timeout); if (backfill === controller) backfill = undefined; });
+  }, 1500);
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) cancelBackfill(); else scheduleBackfill(); });
+window.addEventListener('pagehide', cancelBackfill);
 function inputContext(): InputContext | undefined {
   const target = dictationTarget(state);
   if (!target || state.exited || capturedConnection) return;
@@ -258,6 +282,7 @@ function synchronizeInput() {
     else toast('Queued input belongs to a changed prompt and was not sent.');
   }
   if (!synchronizedConnection) { synchronizedConnection = true; disconnectedContext = undefined; dictation.connected(true); }
+  scheduleBackfill();
   if (cacheRestored && !reader.interacted) { reader.hide(); cacheRestored = false; }
 }
 function revealReplay() {
@@ -678,11 +703,12 @@ const handlers: Handlers = {
   },
   'hello': message => {
     replayTarget = message.lastSeq;
-    if (cachedStream && cachedStream !== message.streamId) { transcript.restore([]); cachedStream = cachedScreen = ''; }
+    const changedStream = !!(streamId && streamId !== message.streamId || cachedStream && cachedStream !== message.streamId);
+    if (changedStream) { transcript.restore([]); cachedStream = cachedScreen = ''; }
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
-    if (message.reset) { presentation.freeze(); queue.clear(); after = received = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
+    if (message.reset) { if (!changedStream) captureTranscript(); transcript.gap('The connection resumed from a screen snapshot; older output may be missing.'); backfillNeeded = true; presentation.freeze(); queue.clear(); after = received = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
     if (message.truncated) {
       term.write('\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n');
       toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.');
@@ -724,7 +750,7 @@ function socketMessage(event: MessageEvent) {
   (handlers[message.type] as ((message: ServerMessage) => void) | undefined)?.(message);
 }
 function socketClosed(event?: CloseEvent) {
-  flushTranscript();
+  cancelBackfill(); flushTranscript();
   discardHerdrFrames();
   if (directAttempt && !replayState) authorized = false;
   herdrDormant = herdrParked;
@@ -826,7 +852,7 @@ $('new-shell').onclick = async () => {
   try {
     inline.disconnect();
     transport.suspend();
-    await api('/api/new', {}); after = received = 0; streamId = ''; queue.clear(); unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; pendingCommand = undefined;
+    await api('/api/new', {}); transcript.restore([]); clearedScreen = terminalText(term); reader.hide(); cachedStream = cachedScreen = ''; void cache.clear(cacheKey); after = received = 0; streamId = ''; queue.clear(); unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; pendingCommand = undefined;
     $<HTMLDialogElement>('options-dialog').close(); await connect();
   } catch (error: any) { toast(error.message); void connect(); }
 };
@@ -869,7 +895,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { flushTranscript(); gestures.cancelGesture(); presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); flushTranscript(); gestures.cancelGesture(); presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);

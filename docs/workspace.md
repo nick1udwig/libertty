@@ -285,3 +285,8 @@ The cache expires after seven days and retains at most 16 terminals and 8 MiB in
 Storage failure or eviction leaves the live terminal usable.
 Clear saved history is available in the reader and terminal settings.
 Cached Herdr output opens through a read-only reader until live metadata verifies the pane.
+
+Native sessions retain 5,000 server scrollback rows, while the foreground reconnect snapshot stays limited to 1,000 rows.
+After synchronization, an authenticated background request retrieves up to 512 KiB of plain history from the same stream.
+The local archive survives snapshot resets and marks gaps that exceed server retention.
+Background history stops when the connection closes or the page hides, and it never delays input or moves an open reader.

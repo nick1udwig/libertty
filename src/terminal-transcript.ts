@@ -31,6 +31,13 @@ export class TerminalTranscript {
     this.records.push({ id: ++this.sequence, at, kind: continuous ? 'history' : 'excerpt', text });
     this.trim(); return true;
   }
+  backfill(text: string) {
+    const previous = this.records.at(-1);
+    if (previous?.kind === 'history' && text.includes(previous.text)) {
+      previous.text = text; this.trim(); return;
+    }
+    this.observe(text, true);
+  }
   gap(text: string, at = Date.now()) {
     if (!this.records.length || this.records.at(-1)?.kind === 'gap') return;
     this.records.push({ id: ++this.sequence, at, kind: 'gap', text }); this.trim();

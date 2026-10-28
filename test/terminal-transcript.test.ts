@@ -34,3 +34,14 @@ test('retained output is bounded and restoring it keeps record identities', () =
   assert.equal(restored.records.at(-1)!.id, last + 1);
   assert.equal(transcript.records.at(-1)!.id, last);
 });
+
+test('backfill extends a snapshot without discarding the archive before a recovery gap', () => {
+  const transcript = new TerminalTranscript();
+  transcript.observe('before outage', true, 1);
+  transcript.gap('Recovery gap', 2);
+  transcript.observe('newest output', true, 3);
+  transcript.backfill('missed output\nnewest output');
+  assert.equal(transcript.records.length, 3);
+  assert.equal(transcript.records[0].text, 'before outage');
+  assert.equal(transcript.records[2].text, 'missed output\nnewest output');
+});

@@ -663,6 +663,15 @@ impl Session {
     pub fn state(&self) -> ShellState {
         self.inner.lock().unwrap().state.clone()
     }
+    pub fn terminal_history(&self) -> Value {
+        let mut inner = self.inner.lock().unwrap();
+        let text = inner
+            .screen
+            .as_mut()
+            .map(screen::Screen::history)
+            .unwrap_or_default();
+        serde_json::json!({"streamId": self.stream_id, "seq": inner.replay.last_seq(), "text": text})
+    }
     pub fn filesystem(&self) -> crate::filesystem::FileSystem {
         crate::filesystem::FileSystem {
             remote: self.remote.clone(),

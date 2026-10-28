@@ -286,6 +286,12 @@ try {
     await page.locator('.terminal-presentation').waitFor({state:'hidden'});
   
     connectionPhase = 'snapshot replay';
+    await focusInput();
+    const archivePrompt = await page.evaluate(() => window.__testShellState.prompt);
+    await page.keyboard.type("printf 'archive-before-outage\\n'"); await page.keyboard.press('Enter');
+    await page.waitForFunction(prompt => window.__testShellState.ready && window.__testShellState.prompt > prompt, archivePrompt);
+    await page.locator('#read-history').click();
+    await page.locator('.terminal-reader').getByRole('button', { name: 'Jump to live', exact: true }).click();
     // Far more output than a quick replay arrives as one snapshot of the backend's terminal.
     await focusInput();
     const snapshotPrompt = await page.evaluate(() => window.__testShellState.prompt);
@@ -325,6 +331,17 @@ try {
     assert.equal(snapshotOutputs.length, 1, 'One snapshot replaces the raw replay');
     assert.match(snapshotOutputs[0].data, /42-snapshot-done/);
     assert.ok(snapshotOutputs[0].data.length < 200000, 'The snapshot is far smaller than the missed output');
+    assert.ok(!snapshotOutputs[0].data.includes('57000'), 'Foreground recovery keeps its small history window');
+    await until(() => page.evaluate(() => new Promise(resolve => {
+      const request = indexedDB.open('libertty-terminal-history');
+      request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.some(record => record.records.some(item => item.text.includes('57000')))); }; };
+    })), 'background history backfill');
+    await page.locator('#read-history').click();
+    await page.locator('.terminal-reader input').fill('archive-before-outage');
+    assert.match(await page.locator('.terminal-reader .reading-text').textContent(), /archive-before-outage/);
+    await page.locator('.terminal-reader input').fill('57000');
+    assert.match(await page.locator('.terminal-reader .reading-text').textContent(), /57000/);
+    await page.locator('.terminal-reader').getByRole('button', { name: 'Jump to live', exact: true }).click();
   
     connectionPhase = 'background cancellation';
     // A request stranded by backgrounding cannot block the next foreground attempt.

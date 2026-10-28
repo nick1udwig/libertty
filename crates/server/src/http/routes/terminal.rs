@@ -252,3 +252,11 @@ pub(super) async fn api_new(
     app.close_session(&owner, &sid).await;
     ok(json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state()}))
 }
+
+pub(super) async fn api_terminal_history(ctx: ShellContext) -> Result<Response<Body>, Failure> {
+    ok(
+        tokio::task::spawn_blocking(move || ctx.session.terminal_history())
+            .await
+            .map_err(|_| fail("Terminal history is unavailable."))?,
+    )
+}
