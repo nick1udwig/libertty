@@ -1,4 +1,4 @@
-# libertty
+# [libertty](https://libertty.sh)
 
 A webterm designed for modern mobile.
 
