@@ -561,16 +561,29 @@ try {
       const request = indexedDB.open('libertty-terminal-history');
       request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.some(record => record.key.includes('herdr') && record.records.length)); }; };
     })));
+    let previewTickets = 0;
+    const countPreviewTicket = request => { const url = new URL(request.url()); if (url.pathname.endsWith('/api/herdr/ticket') && url.searchParams.has('terminalId')) previewTickets++; };
+    page.on('request', countPreviewTicket);
     await context.setOffline(true); await page.reload();
-    const offlineReader = page.locator('.herdr-screen > .terminal-reader');
-    await offlineReader.waitFor({ state: 'visible' }).catch(async error => {
+    const preview = page.locator('.herdr-screen > iframe.herdr-terminal');
+    await preview.waitFor({ state: 'visible' }).catch(async error => {
       console.error('Offline cache state', await page.evaluate(() => new Promise(resolve => {
-        const request = indexedDB.open('libertty-terminal-history'); request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve({ keys: read.result.map(record => record.key), preferences: Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('libertty.herdr.'))), screen: document.querySelector('.herdr-screen')?.textContent }); }; };
+        const request = indexedDB.open('libertty-terminal-history'); request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve({ keys: read.result.map(record => record.key), preferences: Object.fromEntries(Object.entries(localStorage).filter(([key]) => key.startsWith('libertty.herdr.'))), frames: [...document.querySelectorAll('.herdr-screen iframe')].map(frame => frame.src) }); }; };
       })));
       throw error;
     });
-    assert.ok((await offlineReader.locator('.reading-text').textContent()).length > 20);
-    assert.equal(await page.locator('.herdr-terminal').count(), 0, 'Cached panes do not attach before live identity verification');
+    assert.match(await preview.getAttribute('src'), /herdrPreview=1/, 'Cached metadata mounts only an unauthorized preview');
+    const previewFrame = page.frameLocator('.herdr-screen > iframe.herdr-terminal');
+    assert.equal(await previewFrame.locator('.terminal-reader:visible').count(), 0, 'Retained output uses the terminal renderer');
+    assert.ok(await previewFrame.locator('#terminal canvas').evaluate(canvas => {
+      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data, background = pixels.slice(0, 3);
+      let painted = 0;
+      for (let i = 0; i < pixels.length; i += 4) if (Math.abs(pixels[i] - background[0]) + Math.abs(pixels[i + 1] - background[1]) + Math.abs(pixels[i + 2] - background[2]) > 60) painted++;
+      return painted > 100;
+    }), 'The preview paints retained output');
+    await delay(300);
+    assert.equal(previewTickets, 0, 'Cached panes do not attach before live identity verification');
+    page.off('request', countPreviewTicket);
     await context.setOffline(false); await page.reload(); await tab(0).waitFor();
     await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
     assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control'));

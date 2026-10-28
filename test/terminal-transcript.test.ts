@@ -45,3 +45,34 @@ test('backfill extends a snapshot without discarding the archive before a recove
   assert.equal(transcript.records[0].text, 'before outage');
   assert.equal(transcript.records[2].text, 'missed output\nnewest output');
 });
+
+test('recovery that continues an archived record removes its gap instead of repeating the history', () => {
+  const transcript = new TerminalTranscript();
+  transcript.observe('one\ntwo\nthree\nfour\nfive', true, 1);
+  transcript.gap('Recovery gap', 2);
+  transcript.observe('two\nthree\nfour\nfive\nsix', true, 3);
+  assert.deepEqual(transcript.records.map(record => record.kind), ['history']);
+  assert.equal(transcript.text(), 'one\ntwo\nthree\nfour\nfive\nsix');
+  transcript.observe('screen A', false, 4); transcript.gap('Recovery gap', 5); transcript.observe('screen A', false, 6);
+  assert.deepEqual(transcript.records.map(record => record.kind), ['history', 'excerpt']);
+  transcript.observe('$ ', true, 7); transcript.gap('Recovery gap', 8); transcript.observe('$ ls\nunrelated', true, 9);
+  assert.equal(transcript.records.at(-2)?.kind, 'gap', 'A short record cannot prove continuity across a gap');
+});
+
+test('plain server history extends a styled record without removing its styles', () => {
+  const transcript = new TerminalTranscript();
+  transcript.observe('\x1b[0;1mnewest\x1b[0m output\nprompt', true, 1);
+  transcript.backfill('older output\nnewest output\nprompt');
+  assert.equal(transcript.records.length, 1);
+  assert.equal(transcript.records[0].text, 'older output\n\x1b[0;1mnewest\x1b[0m output\nprompt');
+  transcript.observe('\x1b[0;32mone\x1b[0m\ntwo\nthree\nfour\nlater', true, 2);
+  transcript.backfill('zero\none\ntwo\nthree\nfour');
+  assert.equal(transcript.records.at(-1)!.text, 'zero\n\x1b[0;32mone\x1b[0m\ntwo\nthree\nfour\nlater', 'History that ends inside the record extends its start');
+  transcript.observe('\x1b[33mOlder output is unavailable.\x1b[0m\na\nb\nc\nd', true, 3);
+  transcript.backfill('missed\na\nb\nc\nd');
+  assert.equal(transcript.records.at(-1)!.text, 'missed\na\nb\nc\nd', 'Rows only the viewer wrote give way to the server history');
+  const styledRecords = transcript.records.length;
+  transcript.backfill('entirely different history');
+  assert.deepEqual(transcript.records.slice(-2).map(record => record.kind), ['gap', 'history'], 'Unrelated history is kept after a gap');
+  assert.equal(transcript.records.length, styledRecords + 2);
+});

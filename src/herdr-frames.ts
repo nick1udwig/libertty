@@ -3,7 +3,7 @@ import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
 import { terminalCanEvict } from './terminal-retention.ts';
 
-interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
+interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; verified:boolean; loaded?:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
 export interface FramesHost {
   url: string; session: string; source?: string;
   token(): string | undefined; authenticate(): Promise<void>;
@@ -42,9 +42,10 @@ export class HerdrFrames {
     if (!entry) return;
     const active = entry.frame === this.frame;
     if (event.data.type === 'terminal-loaded') {
+      entry.loaded = true;
       entry.frame.contentWindow?.postMessage({ type: 'shortcut-host' }, location.origin);
       entry.frame.contentWindow?.postMessage({ type:'herdr-present', presentation:entry.presentation },location.origin);
-      entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
+      if (entry.verified) entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
       entry.frame.contentWindow?.postMessage({ type:'tab-visibility', visible:this.host.visible() && active },location.origin);
     }
     const geometry = event.data.cols + 'x' + event.data.rows;
@@ -85,11 +86,17 @@ export class HerdrFrames {
   }
   post(message: object) { this.frame?.contentWindow?.postMessage(message, location.origin); }
   broadcast(message: object) { for (const entry of this.entries.values()) entry.frame.contentWindow?.postMessage(message, location.origin); }
-  /** Show the selected terminal, reusing its cached frame when its size still fits. */
-  mount(terminals: HerdrAgent[], selected: string, force = false) {
+  /** Show the selected terminal, reusing its cached frame when its size still fits.
+   * Unverified identities only preview retained output; live metadata authorizes the same frame. */
+  mount(terminals: HerdrAgent[], selected: string, force = false, verified = true) {
     if (this.displayed && !terminals.some(agent => agent.terminalId === this.displayed!.dataset.terminal && agent.paneId === this.displayed!.dataset.pane)) { this.displayed.remove(); this.displayed = undefined; }
     for (const [id, entry] of this.entries) {
       if (!terminals.some(agent => agent.terminalId === id && agent.paneId === entry.pane)) { entry.frame.remove(); this.entries.delete(id); if (this.frame === entry.frame) this.frame = undefined; if (this.displayed === entry.frame) this.displayed = undefined; }
+    }
+    if (verified) for (const entry of this.entries.values()) {
+      if (entry.verified) continue;
+      entry.verified = true;
+      if (entry.loaded) entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
     }
     if (!selected) { this.displayed?.remove(); for (const entry of this.entries.values()) entry.frame.remove(); this.entries.clear(); this.frame = this.displayed = undefined; this.rendered = false; this.setLoading(false); return; }
     const agent = terminals.find(agent => agent.terminalId === selected);
@@ -117,9 +124,9 @@ export class HerdrFrames {
       const frame = node('iframe','herdr-terminal'); frame.title = 'Herdr agent terminal'; frame.dataset.terminal = selected; frame.dataset.pane = agent.paneId; frame.style.visibility = 'hidden';
       frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write';
       const url = new URL('terminal.html',document.baseURI);
-      url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:selected,herdrPane:agent.paneId,herdrSession:this.host.session,...(this.host.source?{herdrSource:this.host.source}:{})}).toString();
+      url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:selected,herdrPane:agent.paneId,herdrSession:this.host.session,...(this.host.source?{herdrSource:this.host.source}:{}),...(verified?{}:{herdrPreview:'1'})}).toString();
       frame.src = url.href; this.frame = frame;
-      const entry = {frame,session,pane:agent.paneId,rendered:false}; this.entries.set(selected,entry); this.screen.append(frame); this.prepare(entry);
+      const entry = {frame,session,pane:agent.paneId,rendered:false,verified}; this.entries.set(selected,entry); this.screen.append(frame); this.prepare(entry);
     }
     while (this.entries.size > 2) { const candidate = [...this.entries].find(([,entry]) => entry.frame !== this.frame && entry.frame !== this.displayed && terminalCanEvict(entry.frame)); if (!candidate) break; const [id, entry] = candidate; entry.frame.remove(); this.entries.delete(id); }
   }

@@ -68,7 +68,8 @@ try {
   await installWireObserver(page.context());
   await page.addInitScript(() => {
     const paint = CanvasRenderingContext2D.prototype.fillText;
-    CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); return paint.call(this, text, ...args); };
+    window.__paintStyled = sessionStorage.getItem('test.paint-styles') ? [] : undefined;
+    CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); window.__paintStyled?.push([text, String(this.fillStyle)]); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'repair-result') window.__lastRepairResult = message; if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
@@ -461,21 +462,30 @@ try {
     await page.waitForFunction(() => { const r = document.querySelector('#alternatives-menu').getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth && r.bottom <= document.querySelector('.input-dock').getBoundingClientRect().top; });
     await page.screenshot({ path: path.join(root, '.test-artifacts/keyboard-viewport.png') });
     await page.keyboard.press('Control+c'); await ready(page);
-    await command(page, "printf 'offline-history-proof\\n'");
+    await command(page, "printf 'offline-history-proof \\033[31mred-proof\\033[0m\\n'");
     await page.evaluate(() => navigator.serviceWorker.ready);
     await until(() => page.evaluate(() => new Promise(resolve => {
       const request = indexedDB.open('libertty-terminal-history');
       request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(JSON.stringify(read.result).includes('offline-history-proof')); }; };
     })));
+    // Retained output repaints through the terminal renderer with the colors it had while live.
+    const paintedStyles = text => page.evaluate(text => {
+      const cells = window.__paintStyled || [], chars = [...text];
+      for (let i = cells.length - chars.length; i >= 0; i--) if (chars.every((char, j) => cells[i + j][0] === char)) return cells.slice(i, i + chars.length).map(([, style]) => style);
+    }, text);
+    await page.evaluate(() => sessionStorage.setItem('test.paint-styles', '1'));
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');
     await page.waitForSelector('#terminal canvas');
-    await page.locator('.terminal-reader').waitFor({ state: 'visible' });
-    assert.match(await page.locator('.terminal-reader .reading-text').textContent(), /offline-history-proof/);
-    assert.equal(await page.locator('.terminal-reader button, .terminal-reader input').count(), 0);
-    await page.evaluate(() => getSelection().selectAllChildren(document.querySelector('.terminal-reader .reading-text')));
-    assert.match(await page.evaluate(() => getSelection().toString()), /offline-history-proof/);
+    await until(async () => !!await paintedStyles('red-proof'), 'retained output painted by the terminal');
+    assert.equal(await page.locator('.terminal-reader:visible').count(), 0, 'No separate text reader replaces the terminal');
+    const cachedRed = await paintedStyles('red-proof'), cachedPlain = await paintedStyles('offline-history-proof');
+    assert.equal(new Set(cachedRed).size, 1); assert.notEqual(cachedRed[0], cachedPlain[0], 'Retained output keeps its colors');
     await page.waitForFunction(() => [...document.fonts].some(font => font.family === 'JetBrains Mono' && font.status === 'loaded'));
+    await page.evaluate(() => { window.__paintStyled = []; sessionStorage.removeItem('test.paint-styles'); });
     await context.setOffline(false); await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected', {}, { timeout: 15000 });
+    await until(async () => !!await paintedStyles('red-proof'), 'live output repainted');
+    assert.deepEqual(await paintedStyles('red-proof'), cachedRed, 'Live output and retained output use the same colors');
+    await page.evaluate(() => { window.__paintStyled = undefined; });
     await page.locator('#menu-button').click();
     page.once('dialog', dialog => dialog.accept());
     await page.locator('#new-shell').click();

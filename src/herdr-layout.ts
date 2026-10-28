@@ -18,6 +18,8 @@ export class HerdrLayout {
     this.pending = pending; this.matched = false; this.preserve = preserve; this.barrierReady = barrierReady;
     this.viewport.classList.toggle('awaiting-herdr-layout', cover);
   }
+  /** Retained output stays visible while the handshake waits for its first live frame. */
+  uncover() { this.viewport.classList.remove('awaiting-herdr-layout'); }
   /** A desktop layout needs no handshake and has no certified mobile picture. */
   desktop() {
     this.rendered = false; this.preserve = false;

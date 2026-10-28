@@ -271,7 +271,8 @@ The status banner shows when output last arrived.
 A full-screen application's unobserved history still needs the remote application.
 Geometry changes retain the separate layout handshake so stale frames do not replace a resized pane.
 
-Persisted output opens automatically during offline reloads with the terminal font and no extra controls.
+A reload paints persisted output through the terminal renderer with its colors, attributes, screen layout and cursor.
+The next live replay or Herdr frame replaces it in the same terminal.
 A normal scroll uses retained text when the connection is unavailable or a remote scroll receives no output within 200 ms.
 Scrolling back to the bottom returns to the live terminal after synchronization.
 Cached text keeps reading positions and selections stable during recovery and marks gaps with an ellipsis.
@@ -281,16 +282,21 @@ Normal scrollback can extend earlier records when their overlap matches.
 Full-screen redraws remain separate observed excerpts with possible gaps, because Herdr does not supply a stable application conversation log through this interface.
 Sampling occurs at most once per 1.5 seconds during output, plus remote scroll gestures and disconnects.
 
-IndexedDB retains recent output, the last text screen, and the reader position for offline reloads.
+IndexedDB retains recent styled rows, the screen layout, and the reading position for reloads.
+Each row starts from default attributes and stores true colors, so overlapping samples compare as text.
+A recovery that continues the record before a gap removes that gap instead of repeating the history.
 Records are scoped to the backend, session, Herdr source, terminal, and pane identity.
 A changed native stream starts a separate history.
 The cache expires after seven days and retains at most 16 terminals and 8 MiB in total.
 Storage failure or eviction leaves the live terminal usable.
 The terminal has no additional history toolbar or draft actions.
-Cached Herdr output opens through a read-only reader until live metadata verifies the pane.
+Cached Herdr metadata mounts the selected pane as an unauthorized preview that paints its persisted output.
+The preview requests no ticket, opens no socket and accepts no input until live metadata verifies its terminal and pane.
+Verification authorizes the same frame, and a changed pane replaces it.
 
 Native sessions retain 5,000 server scrollback rows, while the foreground reconnect snapshot stays limited to 1,000 rows.
 After synchronization, an authenticated background request retrieves up to 512 KiB of plain history from the same stream.
+Plain history only extends the styled archive where the two overlap.
 The local archive survives snapshot resets and marks gaps that exceed server retention.
 Background history stops when the connection closes or the page hides, and it never delays input or moves an open reader.
 

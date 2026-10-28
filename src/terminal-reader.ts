@@ -1,15 +1,4 @@
-import type { Terminal } from 'ghostty-web';
 import './terminal-reader.css';
-
-export function terminalText(term: Terminal) {
-  const buffer = term.buffer.active, lines: string[] = [];
-  for (let row = Math.max(0, buffer.length - 5000); row < buffer.length; row++) {
-    const line = buffer.getLine(row), text = line?.translateToString(true) || '';
-    if (line?.isWrapped && lines.length) lines[lines.length - 1] += text; else lines.push(text);
-  }
-  while (lines.at(-1) === '') lines.pop();
-  return lines.join('\n');
-}
 
 /** Retained text occupies the terminal surface without extra controls. */
 export class TerminalReader {

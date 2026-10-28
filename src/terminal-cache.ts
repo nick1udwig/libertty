@@ -1,7 +1,8 @@
+import type { TerminalPicture } from './terminal-snapshot.ts';
 import type { TranscriptRecord } from './terminal-transcript.ts';
 
 export interface CachedTerminal {
-  key: string; version: 1; updated: number; stream: string; records: TranscriptRecord[]; screen: string; position: number; lines: number;
+  key: string; version: 2; updated: number; stream: string; records: TranscriptRecord[]; picture: TerminalPicture; position: number;
 }
 const lifetime = 7 * 24 * 60 * 60 * 1000, maximumBytes = 8 * 1024 * 1024;
 const encoder = new TextEncoder();
@@ -12,10 +13,12 @@ export function terminalCacheKey(backend: string, session: string, terminal = ''
 export function cachedTerminal(value: unknown, now = Date.now()): CachedTerminal | undefined {
   if (!value || typeof value !== 'object') return;
   const v = value as CachedTerminal;
-  if (v.version !== 1 || typeof v.key !== 'string' || v.key.length > 4096 || typeof v.stream !== 'string' || v.stream.length > 1024
+  const picture = v.picture;
+  if (v.version !== 2 || typeof v.key !== 'string' || v.key.length > 4096 || typeof v.stream !== 'string' || v.stream.length > 1024
     || !Number.isFinite(v.updated) || now - v.updated > lifetime || v.updated > now + 60000
-    || !Number.isFinite(v.position) || v.position < 0 || !Number.isSafeInteger(v.lines) || v.lines < 500 || v.lines > 100000
-    || typeof v.screen !== 'string' || v.screen.length > 512 * 1024 || !Array.isArray(v.records) || v.records.length > 64) return;
+    || !Number.isSafeInteger(v.position) || v.position < 0 || !picture || typeof picture !== 'object' || typeof picture.cursor !== 'boolean'
+    || [picture.last, picture.x, picture.y].some(value => !Number.isSafeInteger(value) || Math.abs(value) > 1000)
+    || !Array.isArray(v.records) || v.records.length > 64) return;
   let length = 0, previous = 0;
   for (const record of v.records) {
     if (!record || !Number.isSafeInteger(record.id) || record.id <= previous || !Number.isFinite(record.at)
