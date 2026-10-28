@@ -78,9 +78,12 @@ try {
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await installWireObserver(context);
   await context.addInitScript(() => {
+    // A delayed redraw barrier keeps frames that precede it on screen long enough to observe.
+    window.__delayBarrier = sessionStorage.getItem('test.delay-barrier') === '1';
     window.__dropScreens = false; window.__frames = 0; window.__deltas = 0; window.__screens = 0; window.__historyDeltas = 0;
+    window.__visible = () => { const t = window.__terminal, buffer = t.buffer.active, top = buffer.length - t.rows - Math.floor(t.getViewportY()); return Array.from({ length: t.rows }, (_, row) => buffer.getLine(top + row)?.translateToString(true) ?? '').join('\n'); };
     window.WebSocket = class extends WebSocket {
-      constructor(...args) { super(...args); window.__socket = this; }
+      constructor(...args) { super(...args); window.__socket = this; window.__barrier = false; }
       send(data) {
         if (window.__holdAcks && window.__wireSent(data).type === 'ack') {
           window.__releaseFrames = () => super.send(data);
@@ -90,12 +93,15 @@ try {
       }
       set onmessage(handler) {
         window.__receive = message => handler.call(this, { data: JSON.stringify(message) });
-        super.onmessage = async event => {
+        let ordered = Promise.resolve();
+        const deliver = async event => {
           const message = await window.__wireMessage(event.data, this);
+          if (message.type === 'herdr-layout' && message.ready) { if (window.__delayBarrier) await new Promise(resolve => setTimeout(resolve, 400)); window.__barrier = true; }
           if (message.type === 'herdr-frame') { window.__frames++; if (!message.full) window.__deltas++; if (atob(message.bytes).includes('Host scrollback')) window.__nativeHistoryFrame = true; }
           if (message.type === 'screen') { if (message.delta) window.__historyDeltas++; window.__screens++; window.__lastScreen = message; if (window.__dropScreens) return; }
           handler.call(this, event);
         };
+        super.onmessage = event => { if (window.__delayBarrier) ordered = ordered.then(() => deliver(event)); else void deliver(event); };
       }
     };
   });
@@ -188,6 +194,23 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
   await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
   await page.waitForFunction(() => window.__terminal.getViewportY() === 0 && window.__terminal.buffer.active.length === window.__terminal.rows);
+  // A reload keeps retained output, unchanged, until a frame after Herdr's redraw barrier replaces it.
+  let releaseTicket; const ticketGate = new Promise(resolve => releaseTicket = resolve);
+  const holdTicket = async route => { await ticketGate; await route.continue(); };
+  await page.route('**/api/herdr/ticket**', holdTicket);
+  await page.evaluate(() => sessionStorage.setItem('test.delay-barrier', '1'));
+  await delay(2500); await page.reload();
+  await page.waitForFunction(() => window.__terminal && window.__visible().trim());
+  await page.evaluate(() => {
+    window.__samples = [];
+    const sample = () => { window.__samples.push([window.__barrier, window.__visible()]); if (document.querySelector('#terminal-viewport').getAttribute('aria-busy') !== 'false') requestAnimationFrame(sample); };
+    requestAnimationFrame(sample);
+  });
+  releaseTicket();
+  await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+  await page.unroute('**/api/herdr/ticket**', holdTicket);
+  const samples = await page.evaluate(() => { sessionStorage.removeItem('test.delay-barrier'); window.__delayBarrier = false; return window.__samples; });
+  assert.ok(samples.every(([barrier, text]) => barrier || text === samples[0][1]), 'Frames before the redraw barrier do not repaint retained output');
   const tapCell = async (column, row) => {
     const point = await page.evaluate(({ column, row }) => {
       const t = window.__terminal, r = document.querySelector('#terminal canvas').getBoundingClientRect();

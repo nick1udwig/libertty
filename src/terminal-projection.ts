@@ -193,7 +193,8 @@ export class TerminalProjection {
     this.cursor(point);
   }
   private writeCursor(control: string) {
-    if (control === this.cursorControl) return;
+    // Retained output keeps its own cursor until a complete paint replaces it.
+    if (this.stale || control === this.cursorControl) return;
     this.cursorControl = control;
     preserveScrollback(this.term, () => this.term.write(control));
   }

@@ -192,6 +192,8 @@ const cacheKey = terminalCacheKey(baseURL.href, herdrTerminal ? params.get('herd
 let cachedUpdated = 0, cachedStream = '', clearedScreen: string | undefined, streamStarted = false;
 // Retained output painted through the terminal itself until live output replaces it at the same distance from the bottom.
 let cachePainted = false, handoffPosition = 0, picture: TerminalPicture = { last: 0, x: 0, y: 0, cursor: false };
+// The reset that a complete replay writes over retained output, so the swap paints once.
+let handoff: string | undefined;
 let backfillNeeded = false, backfill: AbortController | undefined;
 let backfillTimer: ReturnType<typeof setTimeout> | undefined;
 let transcriptTimer: ReturnType<typeof setTimeout> | undefined, cacheTimer: ReturnType<typeof setTimeout> | undefined;
@@ -242,7 +244,8 @@ function livePainted(position: number) {
 }
 /** Hold the painted picture while the terminal changes, unless it already shows retained output. */
 function hold() { if (cachePainted) presentation.wait(); else presentation.freeze(); }
-function layout(options: Parameters<HerdrLayout['set']>[0]) { herdrLayout.set(cachePainted ? { ...options, cover: false } : options); }
+/** Retained output stays on screen, as a preserved picture, until a frame after Herdr's redraw barrier replaces it. */
+function layout(options: Parameters<HerdrLayout['set']>[0]) { herdrLayout.set(cachePainted ? { ...options, preserve: true, cover: false } : options); }
 function scheduleTranscript() { transcriptTimer ??= setTimeout(captureTranscript, transport.backgroundDelay); }
 term.onScroll(() => { if (cachePainted) cacheTimer ??= setTimeout(saveTranscript, 1000); });
 void cache.read(cacheKey).then(saved => {
@@ -315,7 +318,7 @@ function synchronizeInput() {
   scheduleBackfill();
 }
 function revealReplay() {
-  if (!herdrTerminal && replayState && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) {
+  if (!herdrTerminal && replayState && handoff === undefined && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) {
     if (handoffPosition) { term.scrollToLine(handoffPosition); handoffPosition = 0; }
     presentation.reveal(); synchronizeInput();
   }
@@ -332,14 +335,21 @@ function fullWidth() { return !!herdrTerminal && !mobileTerminal() && fullWidthL
 function drain() {
   frameQueued = false;
   if (!tabVisible || document.hidden || herdrParked) return;
+  // Retained output stays readable until the complete replay replaces it in a single paint.
+  if (handoff !== undefined && received < (replayTarget ?? 0)) return;
   let budget = 0, last = after;
   const chunks: string[] = [];
-  while (queue.length && budget < 65536) {
+  while (queue.length && (handoff !== undefined || budget < 65536)) {
     const item = queue.shift()!;
     if (item.seq <= last) continue;
     chunks.push(item.data); last = item.seq; budget += item.data.length;
   }
-  if (chunks.length) {
+  if (handoff !== undefined) {
+    gestures.clear(); term.scrollToBottom(); term.write(handoff + chunks.join(''));
+    handoff = undefined; cachePainted = false; after = last;
+    if (handoffPosition) { term.scrollToLine(handoffPosition); handoffPosition = 0; }
+    if (chunks.length) { lastOutputAt = Date.now(); scheduleTranscript(); }
+  } else if (chunks.length) {
     preserveScrollback(term, () => term.write(chunks.join(''))); after = last;
     lastOutputAt = Date.now(); scheduleTranscript(); echo.output();
   }
@@ -746,15 +756,22 @@ const handlers: Handlers = {
     streamId = message.streamId; streamStarted = true;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
-    if (message.reset) { if (!changedStream && !cachePainted) captureTranscript(); transcript.gap('The connection resumed from a screen snapshot; older output may be missing.'); backfillNeeded = true; handoffPosition = Math.floor(term.getViewportY()); presentation.freeze(!cachePainted); cachePainted = false; queue.clear(); after = received = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
+    if (message.reset) {
+      if (!changedStream && !cachePainted) captureTranscript();
+      transcript.gap('The connection resumed from a screen snapshot; older output may be missing.'); backfillNeeded = true;
+      handoffPosition = Math.floor(term.getViewportY()); queue.clear(); after = received = 0; inline.disconnect();
+      if (cachePainted) { handoff = '\x1bc\x1b[3J'; presentation.wait(); if (!frameQueued) scheduleDrain(); }
+      else { presentation.freeze(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
+    }
     if (message.truncated) {
-      term.write('\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n');
+      const notice = '\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n';
+      if (handoff === undefined) term.write(notice); else handoff += notice;
       toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.');
     }
   },
   'output': message => {
     // Output over retained rows is replayed after the next reset instead.
-    if (cachePainted) return;
+    if (cachePainted && handoff === undefined) return;
     socketSeq = Math.max(socketSeq, message.seq);
     if (message.seq > received) { queue.push(message); received = message.seq; }
     if (!frameQueued) scheduleDrain();
@@ -796,6 +813,8 @@ function socketClosed(event?: CloseEvent) {
   herdrDormant = herdrParked;
   disconnectedContext = inputContext() || disconnectedContext;
   dictation.connected(false); synchronizedConnection = false; streamStarted = false; handoffPosition = 0;
+  // An unfinished replay leaves retained output in place, so the next connection replays from the start.
+  if (handoff !== undefined) { handoff = undefined; queue.clear(); after = received = 0; }
   echo.reset();
   presentation.wait(); replayState = false;
   herdrReady = false;
@@ -846,7 +865,7 @@ transport.follow({ grace: backgroundGrace, hidden: () => {
 }, shown: () => {
   rendering.activity(); frameScheduler.activity();
   if (herdrTerminal && tabVisible && !herdrParked) send({ type: 'herdr-active', active: true });
-  sizeTerminal(); if (queue.length && !frameQueued) scheduleDrain(); revealReplay();
+  sizeTerminal(); if ((queue.length || handoff !== undefined) && !frameQueued) scheduleDrain(); revealReplay();
 },
   expired: () => {
     if (herdrTerminal) send({ type: 'resize', cols: term.cols, rows: term.rows, mobile: false });
@@ -935,7 +954,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); flushTranscript(); gestures.cancelGesture(); hold(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) layout({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); notifyCachedRendered(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); flushTranscript(); gestures.cancelGesture(); hold(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) layout({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length || handoff !== undefined) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); notifyCachedRendered(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else transport.foreground();

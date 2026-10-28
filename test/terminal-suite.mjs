@@ -69,11 +69,11 @@ try {
   await page.addInitScript(() => {
     const paint = CanvasRenderingContext2D.prototype.fillText;
     window.__paintStyled = sessionStorage.getItem('test.paint-styles') ? [] : undefined;
-    window.__handoff = { banner: false, progress: false };
+    window.__handoff = { banner: false, cover: false };
     new MutationObserver(() => {
       const banner = document.getElementById('reconnect-banner'), layer = document.querySelector('.terminal-presentation');
       if (banner && !banner.hidden) window.__handoff.banner = true;
-      if (layer && !layer.hidden && !layer.querySelector('.terminal-loading-bar')?.hidden) window.__handoff.progress = true;
+      if (layer && !layer.hidden) window.__handoff.cover = true;
     }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden'] });
     CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); window.__paintStyled?.push([text, String(this.fillStyle)]); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
@@ -493,7 +493,7 @@ try {
     releaseConnect(); await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected');
     await page.waitForFunction(() => document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
     await page.unroute('**/api/connect', holdConnect);
-    assert.deepEqual(await page.evaluate(() => window.__handoff), { banner: false, progress: false }, 'The live replay replaces retained output unnoticed');
+    assert.deepEqual(await page.evaluate(() => window.__handoff), { banner: false, cover: false }, 'The complete replay replaces retained output in one paint without a cover');
     assert.equal(await distance(), reading, 'Live output keeps the reading position');
     await track.press('End');
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');

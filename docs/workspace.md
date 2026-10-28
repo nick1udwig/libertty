@@ -273,7 +273,10 @@ Geometry changes retain the separate layout handshake so stale frames do not rep
 
 A reload paints persisted output through the terminal renderer with its colors, attributes, screen layout and cursor.
 The next live replay or Herdr frame replaces it in the same terminal at the same distance from the bottom.
-The replacement shows no reconnect banner or progress indicator, so a working connection swaps the two unnoticed.
+A shell replay over retained output is queued until it is complete, then written with its reset in one step, so no cover or intermediate screen paints.
+A Herdr pane keeps retained output as its preserved picture, so only a full frame after Herdr's redraw barrier replaces it.
+Retained output also keeps its own cursor until that replacement.
+The replacement shows no reconnect banner or progress indicator.
 Retained output appears at once, and the banner appears only while the browser is offline or a connection attempt fails.
 During use, retained output takes over a scroll only after the connection drops or stalls, when the live terminal has no more local rows to show.
 A remote scroll on a slow but working connection waits for the application instead.
