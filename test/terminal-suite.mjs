@@ -452,7 +452,8 @@ try {
     await dictate(page, 'ls dash all');
     await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'ls --all');
     await page.screenshot({ path: path.join(root, '.test-artifacts/mobile.png') });
-    assert.equal(await page.locator('#terminal').evaluate(el => el.getBoundingClientRect().top), 0);
+    assert.equal(await page.locator('.terminal-tools').evaluate(el => el.getBoundingClientRect().top), 0);
+    assert.equal(await page.locator('#terminal').evaluate(el => el.getBoundingClientRect().top), await page.locator('.terminal-tools').evaluate(el => el.getBoundingClientRect().bottom));
     assert.equal(await page.locator('#composer-panel, #compose-mode, #raw-mode').count(), 0);
     assert.ok(await page.locator('.input-dock').evaluate(el => el.clientHeight) <= 54);
     await page.setViewportSize({ width: 390, height: 460 });

@@ -270,3 +270,10 @@ A reconnect keeps the terminal renderer available for local scrolling and select
 The status banner shows when output last arrived, and Jump to live returns from scrollback.
 A full-screen application's own scrolling still needs the remote application.
 Geometry changes retain the separate layout handshake so stale frames do not replace a resized pane.
+
+History opens a separate Reading Mode text surface with local search, selection, copy, and pages of 500 lines.
+The reader stays fixed while the live terminal changes.
+The browser retains up to 64 observed records and 512 Ki UTF-16 code units of text.
+Normal scrollback can extend earlier records when their overlap matches.
+Full-screen redraws remain separate observed excerpts with possible gaps, because Herdr does not supply a stable application conversation log through this interface.
+Sampling occurs at most once per 1.5 seconds during output, plus explicit reads and disconnects.

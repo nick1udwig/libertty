@@ -13,11 +13,11 @@
   <button id="menu-button" class="icon-button floating-menu" aria-label="Session options"><svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg></button>
   <main class="workspace">
     <section class="terminal-pane" aria-label="Shell session">
+      <div class="terminal-tools" role="toolbar" aria-label="Terminal history"><button id="read-history" type="button">History</button><button id="jump-to-live" type="button" hidden>Jump to live</button></div>
       <div id="terminal-viewport"><div id="terminal" aria-label="Terminal output"></div></div>
       <button id="alternatives-toggle" class="alternatives-toggle" aria-label="Show alternatives" aria-expanded="false" aria-controls="alternatives-menu" hidden><span class="spinner" aria-hidden="true"></span><span class="chevron" aria-hidden="true">⌄</span></button>
       <div id="alternatives-menu" class="alternatives-menu" role="group" aria-label="Command alternatives" hidden><div id="alternative-items"></div></div>
       <span id="suggestion-status" class="sr-only" role="status"></span>
-      <button id="jump-to-live" class="terminal-history-action" type="button" hidden>Jump to live</button>
       <div id="reconnect-banner" hidden role="status">Reconnecting. Your shell is still running.</div>
     </section>
     <section class="input-dock" aria-label="Shell controls">

@@ -30,6 +30,7 @@ export class TerminalPresentation {
     const context = this.snapshot.getContext('2d')!;
     context.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--bg'); context.fillRect(0, 0, this.snapshot.width, this.snapshot.height);
     context.drawImage(canvas, (source.left - bounds.left) * scale, (source.top - bounds.top) * scale, source.width * scale, source.height * scale);
+    this.layer.style.top = bounds.top - this.viewport.parentElement!.getBoundingClientRect().top + 'px';
     this.layer.style.height = bounds.height + 'px';
     this.layer.hidden = false; this.held = true;
     this.viewport.setAttribute('aria-busy', 'true');

@@ -344,6 +344,14 @@ try {
     assert.equal(await track.getAttribute('aria-valuenow'), '0', 'Cached history scrolls without a connection');
     await page.locator('#jump-to-live').click();
     assert.equal(await track.getAttribute('aria-valuenow'), await track.getAttribute('aria-valuemax'));
+    await page.locator('#read-history').click();
+    const reader = page.locator('.terminal-reader');
+    await reader.getByRole('searchbox').fill('snapshot-done');
+    await page.waitForFunction(() => document.querySelector('.terminal-reader .reading-text').textContent.includes('snapshot-done'));
+    const cachedText = await reader.locator('.reading-text').textContent();
+    await page.evaluate(() => getSelection().selectAllChildren(document.querySelector('.terminal-reader .reading-text')));
+    assert.equal(await page.evaluate(() => getSelection().toString()), cachedText, 'Cached output is selectable while connection setup is stalled');
+    await reader.getByRole('button', { name: 'Jump to live', exact: true }).click();
     await background(); await page.evaluate(() => window.__expireBackground()); await foreground(); await connected(states);
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
     await page.waitForFunction(() => window.__sockets.filter(socket => socket.readyState === WebSocket.OPEN).length === 1);

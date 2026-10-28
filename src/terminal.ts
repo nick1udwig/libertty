@@ -20,6 +20,8 @@ import { terminalLinkAt } from './terminal-links.ts';
 import { TerminalFocus } from './terminal-focus.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
 import { TerminalEcho } from './predicted-echo.ts';
+import { TerminalTranscript } from './terminal-transcript.ts';
+import { TerminalReader, terminalText } from './terminal-reader.ts';
 import { TerminalHistory } from './terminal-history.ts';
 import { TerminalProjection } from './terminal-projection.ts';
 import { TerminalPresentation } from './terminal-presentation.ts';
@@ -184,6 +186,16 @@ let replayTarget: number | undefined, replayState = false;
 const jumpToLive = $('jump-to-live');
 term.onScroll(() => { jumpToLive.hidden = term.getViewportY() === 0; });
 jumpToLive.onclick = () => { term.scrollToBottom(); jumpToLive.hidden = true; };
+const transcript = new TerminalTranscript();
+const reader = new TerminalReader(terminalViewport.parentElement!, () => { reader.hide(); term.scrollToBottom(); }, copyTerminalText);
+let transcriptTimer: ReturnType<typeof setTimeout> | undefined;
+function captureTranscript() {
+  clearTimeout(transcriptTimer); transcriptTimer = undefined;
+  transcript.observe(terminalText(term), !term.wasmTerm?.isAlternateScreen() && (!herdrTerminal || state.ready));
+}
+function scheduleTranscript() { transcriptTimer ??= setTimeout(captureTranscript, 1500); }
+$('read-history').onclick = () => { captureTranscript(); reader.show(transcript.text()); };
+window.addEventListener('pagehide', () => { captureTranscript(); });
 function inputContext(): InputContext | undefined {
   const target = dictationTarget(state);
   if (!target || state.exited || capturedConnection) return;
@@ -244,7 +256,7 @@ function drain() {
   }
   if (chunks.length) {
     preserveScrollback(term, () => term.write(chunks.join(''))); after = last;
-    lastOutputAt = Date.now(); echo.output();
+    lastOutputAt = Date.now(); scheduleTranscript(); echo.output();
   }
   // Acknowledge only what this socket delivered, including duplicates of output painted earlier.
   const acknowledged = Math.min(after, socketSeq);
@@ -528,7 +540,7 @@ function scheduleHerdrRendered() {
 }
 function applyDeferredScreen() {
   if (deferredScreen === undefined || herdrLayout.pending || herdrParked || !tabVisible || document.hidden) return;
-  projection?.update(deferredScreen); deferredScreen = undefined;
+  projection?.update(deferredScreen); deferredScreen = undefined; scheduleTranscript();
 }
 function discardHerdrFrames() {
   frameScheduler.cancel();
@@ -547,7 +559,7 @@ function paintHerdrFrame(message: HerdrFrameMessage) {
     if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) return;
     if (herdrLayout.pending && !herdrLayout.accept(message.width === term.cols && message.height === term.rows, message.full)) return;
     if (projection?.frame(message) && !herdrLayout.pending) scheduleHerdrRendered();
-    lastOutputAt = Date.now();
+    lastOutputAt = Date.now(); scheduleTranscript();
     revealHerdrLayout();
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame();
   } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
@@ -681,6 +693,7 @@ function socketMessage(event: MessageEvent) {
   (handlers[message.type] as ((message: ServerMessage) => void) | undefined)?.(message);
 }
 function socketClosed(event?: CloseEvent) {
+  captureTranscript();
   discardHerdrFrames();
   if (directAttempt && !replayState) authorized = false;
   herdrDormant = herdrParked;
