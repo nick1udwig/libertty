@@ -299,4 +299,9 @@ A slow link or an aging frame queue reduces the frame window from two to one and
 Unsent redraws continue to merge into the latest screen, and input keeps its separate delivery path.
 Browser heartbeat timing and outbound queue pressure also defer local history sampling and background backfill.
 An offline event pauses connection attempts for ten seconds, then probes resume even without an online event.
-An online event resumes immediately, and hidden tabs retain their existing suspension rules.
+An online event or return to the foreground clears the offline delay and retry backoff.
+Returning to an open connection checks its heartbeat immediately instead of waiting for the idle interval.
+Only a socket with initial application state is healthy.
+Authorization has a 15-second budget, followed by eight seconds without progress for a WebSocket handshake or initial state.
+Measured slow links and repeated failures can extend that idle budget to 15 seconds, and the complete attempt is bounded to 45 seconds.
+Each successful connection phase or initial replay message renews the idle deadline.

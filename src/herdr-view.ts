@@ -238,7 +238,7 @@ export class HerdrView {
     const before = this.frames.frame; this.mountTerminal();
     if (visible && before === this.frames.frame) this.frames.represent();
     this.frames.broadcast({ type:'tab-visibility', visible });
-    if (visible && !this.connected) void this.connect();
+    if (visible) this.transport.foreground();
   }
   get ready() { return this.cached || this.frames.rendered || !!this.status.textContent || this.connected && !this.selected; }
   get navigationElement() { return this.strip; }

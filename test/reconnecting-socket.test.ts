@@ -74,7 +74,7 @@ test('a stalled WebSocket handshake is replaced and its late callbacks are ignor
   const f = fixture(t);
   await f.connection.connect();
   const stale = f.sockets[0];
-  t.mock.timers.tick(15000);
+  t.mock.timers.tick(8000);
   assert.equal(stale.readyState, 2);
   t.mock.timers.tick(1000); await flush();
   const current = f.sockets[1]; current.open(); current.message('state');
@@ -89,9 +89,11 @@ test('a stalled WebSocket handshake is replaced and its late callbacks are ignor
 test('an open socket without terminal state still times out and retains retry backoff', async t => {
   const f = fixture(t);
   await f.connection.connect(); f.sockets[0].open();
-  t.mock.timers.tick(15000);
+  t.mock.timers.tick(8000);
   t.mock.timers.tick(1000); await flush(); f.sockets[1].open();
-  t.mock.timers.tick(15000);
+  t.mock.timers.tick(11999);
+  assert.equal(f.errors.length, 1, 'Repeated attempts allow more time on an unmeasured slow link');
+  t.mock.timers.tick(1);
   t.mock.timers.tick(1499); await flush();
   assert.equal(f.sockets.length, 2);
   t.mock.timers.tick(1); await flush();
@@ -104,7 +106,7 @@ test('duplicate connect events do not create competing handshakes or remove the 
   const f = fixture(t);
   await f.connection.connect(); await f.connection.connect(); await f.connection.resume();
   assert.equal(f.sockets.length, 1);
-  t.mock.timers.tick(15000);
+  t.mock.timers.tick(8000);
   assert.equal(f.errors.length, 1);
   t.mock.timers.tick(1000); await flush();
   assert.equal(f.sockets.length, 2);
@@ -309,6 +311,7 @@ test('a followed page keeps its connection through the background grace and reco
   assert.equal(f.sockets.length, 2, 'Showing the page reconnects');
   windows.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false })); await flush();
   assert.equal(f.sockets.length, 2, 'An ordinary load does not restart the connection');
+  t.mock.timers.tick(1000);
   windows.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true })); await flush();
   assert.equal(f.sockets.length, 3, 'A page restored from the back-forward cache reconnects');
   windows.dispatchEvent(new Event('offline'));
@@ -332,4 +335,52 @@ test('optional work follows measured round trips and outbound queue pressure', a
   assert.equal(f.connection.backgroundDelay, 2400);
   Object.assign(socket, { bufferedAmount: 32768 });
   assert.equal(f.connection.backgroundDelay, 5000);
+});
+
+test('foreground probes a stale open socket immediately after browser timers were frozen', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state');
+  f.connection.foreground();
+  assert.deepEqual(socket.sent, [], 'A recent verified connection needs no extra probe');
+  socket.autoPong = false;
+  t.mock.timers.setTime(60000);
+  f.connection.foreground();
+  assert.deepEqual(socket.sent, ['{"type":"ping"}'], 'Foreground does not wait for the idle timer');
+  t.mock.timers.tick(2000); await flush();
+  assert.equal(f.sockets.length, 2, 'The dead socket is replaced within the reply deadline');
+});
+
+test('foreground replaces an open socket that never supplied initial state', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); f.sockets[0].open();
+  assert.equal(f.connection.healthy, false);
+  f.connection.foreground(); await flush();
+  assert.equal(f.sockets.length, 1, 'Duplicate visibility events preserve a fresh attempt');
+  t.mock.timers.tick(1000);
+  f.connection.foreground(); await flush();
+  assert.equal(f.sockets.length, 2);
+  f.sockets[0].message('state');
+  assert.equal(f.connection.healthy, false, 'Late state belongs to the abandoned attempt');
+  f.sockets[1].open(); f.sockets[1].message('state');
+  assert.equal(f.connection.healthy, true);
+});
+
+test('slow authorization and initial replay receive separate budgets with a total bound', async t => {
+  const f = fixture(t), pending = deferred<URL>();
+  f.behavior.prepare = () => pending.promise;
+  const attempt = f.connection.connect();
+  t.mock.timers.tick(14000); pending.resolve(f.url); await attempt;
+  t.mock.timers.tick(7000); f.sockets[0].open();
+  for (let i = 0; i < 3; i++) { t.mock.timers.tick(7000); f.sockets[0].message('replay output'); }
+  assert.equal(f.errors.length, 0, 'Progress is not killed by the old combined deadline');
+  t.mock.timers.tick(2999); assert.equal(f.errors.length, 0);
+  t.mock.timers.tick(1); assert.equal(f.errors.length, 1, 'Missing state cannot extend an attempt forever');
+});
+
+test('foreground recovery never reclaims a terminal owned by another tab', async t => {
+  const f = fixture(t);
+  f.behavior.close = event => event?.code !== 4001;
+  await f.connection.connect(); f.sockets[0].closed(4001);
+  f.connection.foreground(); await flush();
+  assert.equal(f.sockets.length, 1);
 });

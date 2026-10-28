@@ -908,12 +908,12 @@ if (embedded) {
     if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); cachedScroll.updated(); flushTranscript(); gestures.cancelGesture(); presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
-      else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);
+      else transport.foreground();
     } else if (event.data?.type === 'tab-visibility') {
       clearTimeout(tabTimer);
       // The workspace's selected tab counts as shown while another page covers it.
       tabSeen ||= tabVisible || event.data.active === true;
-      if (tabVisible) { tabExpired = false; void transport.resume(!transport.healthy); }
+      if (tabVisible) { tabExpired = false; transport.foreground(); }
       else if (!tabSeen) tabExpired = true;
       else tabTimer = setTimeout(() => { tabExpired = true; if (!dictation.active) { inline.suspend(); transport.suspend(); } }, inactiveGrace);
     }

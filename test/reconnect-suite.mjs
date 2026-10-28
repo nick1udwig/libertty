@@ -102,6 +102,13 @@ try {
     assert.equal(await page.evaluate(() => window.__blackhole.readyState), 3, 'the replacement releases its predecessor');
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
   }
+  async function foregroundHandoff() {
+    const states = await stateCount();
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    await background(); await foreground();
+    await connected(states, 4000);
+    await page.waitForFunction(() => document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+  }
   async function stalledTyping(link, text) {
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
     await focusInput();
@@ -164,6 +171,7 @@ try {
   let states, stalled;
   if (scenario === 'native') {
     await silentStall();
+    await foregroundHandoff();
   
     // Keys handed to a dead link reach the terminal once: a dead uplink resends them, and a dead downlink does not.
     for (const link of ['uplink', 'downlink']) {
@@ -381,6 +389,7 @@ try {
     }
     await queuedTyping('never-send-to-new-process', async () => { fixture.setProcessGroup(3); });
     await silentStall();
+    await foregroundHandoff();
     stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
     await online(); await stalled.entered;
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
