@@ -22,6 +22,33 @@ pub enum Call {
         catalog: Arc<crate::types::Catalog>,
         environment: Arc<crate::validation::Environment>,
     },
+    PrewarmTargets {
+        catalog: Arc<crate::types::Catalog>,
+        environment: Arc<crate::validation::Environment>,
+    },
+    WarmCommand {
+        command: String,
+        catalog: Arc<crate::types::Catalog>,
+        environment: Arc<crate::validation::Environment>,
+    },
+}
+
+#[derive(Debug)]
+pub enum Output {
+    Json(Value),
+    Candidates(Vec<crate::types::Candidate>),
+    Targets(Vec<String>),
+    Warmed,
+}
+impl Output {
+    pub fn into_json(self) -> Result<Value, String> {
+        match self {
+            Self::Json(value) => Ok(value),
+            Self::Candidates(value) => serde_json::to_value(value).map_err(|e| e.to_string()),
+            Self::Targets(value) => serde_json::to_value(value).map_err(|e| e.to_string()),
+            Self::Warmed => Ok(Value::Null),
+        }
+    }
 }
 
 type Slot = Rc<RefCell<Option<Result<FactValue, String>>>>;
@@ -170,7 +197,7 @@ mod completion_cache_tests {
 }
 struct Task {
     host: Rc<RequestHost>,
-    future: LocalBoxFuture<'static, Result<Value, String>>,
+    future: LocalBoxFuture<'static, Result<Output, String>>,
     waiting: BTreeMap<u32, Vec<Slot>>,
 }
 #[derive(Debug, Serialize, Deserialize)]
@@ -207,19 +234,31 @@ pub enum HostResult {
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "lowercase")]
-pub enum Step {
+pub enum Step<T = Value> {
     Pending {
         request: u32,
         callbacks: Vec<HostRequest>,
     },
     Complete {
         request: u32,
-        value: Value,
+        value: T,
     },
     Error {
         request: u32,
         error: String,
     },
+}
+impl Step<Output> {
+    fn into_json(self) -> Step {
+        match self {
+            Self::Pending { request, callbacks } => Step::Pending { request, callbacks },
+            Self::Error { request, error } => Step::Error { request, error },
+            Self::Complete { request, value } => match value.into_json() {
+                Ok(value) => Step::Complete { request, value },
+                Err(error) => Step::Error { request, error },
+            },
+        }
+    }
 }
 #[derive(Default)]
 pub struct Runtime {
@@ -250,7 +289,7 @@ pub fn drive<'a, F: Future<Output = Vec<Result<FactValue, String>>> + 'a>(
     call: Call,
     now: impl Fn() -> f64 + 'a,
     resolve: impl Fn(Vec<HostOperation>) -> F + 'a,
-) -> impl Future<Output = Result<Value, String>> + 'a {
+) -> impl Future<Output = Result<Output, String>> + 'a {
     struct Cancel(Rc<RefCell<Runtime>>, u32);
     impl Drop for Cancel {
         fn drop(&mut self) {
@@ -276,7 +315,7 @@ pub fn drive<'a, F: Future<Output = Vec<Result<FactValue, String>>> + 'a>(
                             }
                         }))
                         .await;
-                    step = request.0.borrow_mut().resume(id, replies, now());
+                    step = request.0.borrow_mut().resume_call(id, replies, now());
                 }
             }
         }
@@ -298,9 +337,9 @@ pub fn message(runtime: &mut Runtime, bytes: &[u8], resume: bool) -> Step {
 }
 impl Runtime {
     pub fn start(&mut self, id: u32, request: Request, now: f64) -> Step {
-        self.start_call(id, Call::Json(request), now)
+        self.start_call(id, Call::Json(request), now).into_json()
     }
-    pub fn start_call(&mut self, id: u32, call: Call, now: f64) -> Step {
+    pub fn start_call(&mut self, id: u32, call: Call, now: f64) -> Step<Output> {
         if id <= self.highest_request
             || self.tasks.contains_key(&id)
             || self.tasks.len() >= 32
@@ -317,7 +356,7 @@ impl Runtime {
         host.now.set(now);
         host.deadline.set(now + REPAIR_BUDGET_MS);
         host.completion.set(match &call {
-            Call::Suggest { .. } => true,
+            Call::Suggest { .. } | Call::PrewarmTargets { .. } | Call::WarmCommand { .. } => true,
             Call::Json(request) => request
                 .args
                 .get(if request.operation.starts_with("suggest") {
@@ -333,7 +372,28 @@ impl Runtime {
         let future = Box::pin(async move {
             match call {
                 Call::Json(request) => {
-                    crate::dispatch_with_discovery(&request, adapter.as_ref(), &discovery).await
+                    crate::dispatch_with_discovery(&request, adapter.as_ref(), &discovery)
+                        .await
+                        .map(Output::Json)
+                }
+                Call::PrewarmTargets {
+                    catalog,
+                    environment,
+                } => Ok(Output::Targets(discovery.prewarm_targets(
+                    &catalog,
+                    &environment,
+                    adapter.now_ms(),
+                ))),
+                Call::WarmCommand {
+                    command,
+                    catalog,
+                    environment,
+                } => {
+                    discovery
+                        .discover(&command, &catalog, &environment, adapter.as_ref())
+                        .await?;
+                    discovery.mark_warmed(&command, &catalog, &environment, adapter.now_ms());
+                    Ok(Output::Warmed)
                 }
                 Call::Suggest {
                     input,
@@ -350,7 +410,7 @@ impl Runtime {
                         &stage,
                     )
                     .await?;
-                    serde_json::to_value(candidates).map_err(|e| e.to_string())
+                    Ok(Output::Candidates(candidates))
                 }
             }
         });
@@ -365,6 +425,9 @@ impl Runtime {
         self.poll(id)
     }
     pub fn resume(&mut self, id: u32, replies: Vec<Reply>, now: f64) -> Step {
+        self.resume_call(id, replies, now).into_json()
+    }
+    fn resume_call(&mut self, id: u32, replies: Vec<Reply>, now: f64) -> Step<Output> {
         let Some(task) = self.tasks.get_mut(&id) else {
             return Step::Error {
                 request: id,
@@ -458,7 +521,7 @@ impl Runtime {
     pub fn active(&self) -> usize {
         self.tasks.len()
     }
-    fn poll(&mut self, id: u32) -> Step {
+    fn poll(&mut self, id: u32) -> Step<Output> {
         let task = self.tasks.get_mut(&id).expect("active task");
         match task
             .future

@@ -1,7 +1,7 @@
 use crate::{host::NativeHost, probes::ABORTED};
 use libertty_engine::{
     Request,
-    runtime::{self, Call, Runtime},
+    runtime::{self, Call, Output, Runtime},
     types::Candidate,
 };
 use serde_json::Value;
@@ -13,7 +13,7 @@ struct Job {
     call: Call,
     host: NativeHost,
     cancel: CancellationToken,
-    result: oneshot::Sender<Result<Value, String>>,
+    result: oneshot::Sender<Result<Output, String>>,
 }
 enum Message {
     Start(Box<Job>),
@@ -135,7 +135,9 @@ impl NativeEngine {
         host: &NativeHost,
         cancel: &CancellationToken,
     ) -> Result<Value, String> {
-        self.run(Call::Json(request), host, cancel).await
+        self.run(Call::Json(request), host, cancel)
+            .await?
+            .into_json()
     }
     pub async fn suggest(
         &self,
@@ -154,14 +156,59 @@ impl NativeEngine {
                 cancel,
             )
             .await?;
-        serde_json::from_value(value).map_err(|error| error.to_string())
+        match value {
+            Output::Candidates(candidates) => Ok(candidates),
+            _ => Err("Unexpected suggestion result.".into()),
+        }
+    }
+    pub async fn prewarm_targets(
+        &self,
+        host: &NativeHost,
+        cancel: &CancellationToken,
+    ) -> Result<Vec<String>, String> {
+        match self
+            .run(
+                Call::PrewarmTargets {
+                    catalog: Arc::new(host.catalog.clone()),
+                    environment: host.environment.clone(),
+                },
+                host,
+                cancel,
+            )
+            .await?
+        {
+            Output::Targets(targets) => Ok(targets),
+            _ => Err("Unexpected prewarm targets.".into()),
+        }
+    }
+    pub async fn warm_command(
+        &self,
+        command: &str,
+        host: &NativeHost,
+        cancel: &CancellationToken,
+    ) -> Result<(), String> {
+        match self
+            .run(
+                Call::WarmCommand {
+                    command: command.into(),
+                    catalog: Arc::new(host.catalog.clone()),
+                    environment: host.environment.clone(),
+                },
+                host,
+                cancel,
+            )
+            .await?
+        {
+            Output::Warmed => Ok(()),
+            _ => Err("Unexpected warm result.".into()),
+        }
     }
     async fn run(
         &self,
         call: Call,
         host: &NativeHost,
         cancel: &CancellationToken,
-    ) -> Result<Value, String> {
+    ) -> Result<Output, String> {
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }

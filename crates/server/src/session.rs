@@ -25,12 +25,14 @@ use crate::{
 use handoffs::{Handoffs, Kind as CaptureKind};
 use history_cache::History;
 use libertty_engine::{
-    Request, path,
+    path,
     types::{Candidate, Catalog},
 };
 use output::Replay;
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
@@ -1384,24 +1386,12 @@ impl Session {
             host.remote = session.remote.clone();
             let Ok(targets) = session
                 .engine
-                .invoke(
-                    Request {
-                        operation: "prewarmTargets".into(),
-                        args: vec![json!(catalog), json!(env)],
-                    },
-                    &host,
-                    &session.lifetime,
-                )
+                .prewarm_targets(&host, &session.lifetime)
                 .await
             else {
                 return;
             };
-            for target in targets
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(Value::as_str)
-            {
+            for target in targets {
                 if session.lifetime.is_cancelled()
                     || session
                         .remote
@@ -1413,33 +1403,11 @@ impl Session {
                 let cancel = session.lifetime.child_token();
                 let deadline = tokio::time::timeout(
                     Duration::from_secs(4),
-                    session.engine.invoke(
-                        Request {
-                            operation: "discover".into(),
-                            args: vec![json!(target), json!(catalog), json!(env)],
-                        },
-                        &host,
-                        &cancel,
-                    ),
+                    session.engine.warm_command(&target, &host, &cancel),
                 )
                 .await;
                 cancel.cancel();
                 if !matches!(deadline, Ok(Ok(_))) {
-                    break;
-                }
-                if session
-                    .engine
-                    .invoke(
-                        Request {
-                            operation: "markWarmed".into(),
-                            args: vec![json!(target), json!(catalog), json!(env)],
-                        },
-                        &host,
-                        &session.lifetime,
-                    )
-                    .await
-                    .is_err()
-                {
                     break;
                 }
                 tokio::select! {biased;_=session.lifetime.cancelled()=>break,_=tokio::time::sleep(Duration::from_millis(20))=>{}}
