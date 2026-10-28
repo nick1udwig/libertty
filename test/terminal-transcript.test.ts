@@ -16,7 +16,7 @@ test('full-screen redraws remain separate observed excerpts and missing history 
   transcript.observe('agent answer A', false, 1);
   transcript.observe('agent answer B', false, 2);
   assert.deepEqual(transcript.records.map(record => record.kind), ['excerpt', 'excerpt']);
-  assert.match(transcript.text(), /gaps may exist/);
+  assert.equal(transcript.text(), 'agent answer A\n[…]\nagent answer B');
   transcript.observe('shell output', true, 3);
   transcript.observe('unrelated output', true, 4);
   assert.equal(transcript.records.at(-2)?.kind, 'gap');

@@ -21,6 +21,7 @@ import { TerminalFocus } from './terminal-focus.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
 import { TerminalEcho } from './predicted-echo.ts';
 import { TerminalCache, terminalCacheKey } from './terminal-cache.ts';
+import { TerminalScrollFallback } from './terminal-scroll-fallback.ts';
 import { TerminalTranscript } from './terminal-transcript.ts';
 import { TerminalReader, terminalText } from './terminal-reader.ts';
 import { TerminalHistory } from './terminal-history.ts';
@@ -187,7 +188,18 @@ let replayTarget: number | undefined, replayState = false;
 const transcript = new TerminalTranscript();
 const cache = new TerminalCache();
 const cacheKey = terminalCacheKey(baseURL.href, herdrTerminal ? params.get('herdrSession') || '' : session, herdrTerminal || '', params.get('herdrSource') || '', params.get('herdrPane') || '');
-const reader = new TerminalReader(terminalViewport.parentElement!, () => { if (!synchronizedConnection) return; reader.hide(); term.scrollToBottom(); });
+const reader = new TerminalReader(terminalViewport.parentElement!, () => { if (!synchronizedConnection || !transport.healthy) return; gestures.cancelGesture(); cachedScroll.updated(); reader.hide(); term.scrollToBottom(); });
+function showCachedTerminal(position?: number) {
+  const canvas = term.element!.querySelector('canvas')!;
+  reader.element.style.setProperty('--cache-font-size', fontSizeInput.valueAsNumber * 4 / 3 + 'px');
+  reader.element.style.setProperty('--cache-line-height', canvas.getBoundingClientRect().height / term.rows + 'px');
+  reader.show(transcript.text() || cachedScreen, position);
+}
+const cachedScroll = new TerminalScrollFallback(lines => {
+  if (!tabVisible || document.hidden || gestures.text) return;
+  if (!reader.open) { captureTranscript(); showCachedTerminal(); reader.scroll(-term.getViewportY()); cacheRestored = true; }
+  reader.scroll(lines);
+});
 let cachedUpdated = 0, cachedStream = '', cachedScreen = '', clearedScreen: string | undefined, cacheRestored = false;
 let backfillNeeded = false, backfill: AbortController | undefined;
 let backfillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -207,6 +219,8 @@ function captureTranscript() {
   if (transcript.observe(text, !term.wasmTerm?.isAlternateScreen() && (!herdrTerminal || state.ready))) cacheTimer ??= setTimeout(saveTranscript, 2000);
 }
 function scheduleTranscript() { transcriptTimer ??= setTimeout(captureTranscript, transport.backgroundDelay); }
+reader.viewport.addEventListener('pointerdown', () => gestures.cancelGesture(), { passive: true });
+reader.viewport.addEventListener('wheel', () => gestures.cancelGesture(), { passive: true });
 reader.viewport.addEventListener('scroll', () => { cacheTimer ??= setTimeout(saveTranscript, 1000); }, { passive: true });
 void cache.read(cacheKey).then(saved => {
   if (!saved || streamId && saved.stream !== streamId) return;
@@ -217,7 +231,7 @@ void cache.read(cacheKey).then(saved => {
     saveTranscript(); return;
   }
   transcript.observe(saved.screen, saved.records.at(-1)?.kind === 'history', saved.updated); cachedUpdated = saved.updated; cachedStream = saved.stream; cachedScreen = saved.screen; cacheRestored = true;
-  reader.show(transcript.text() || saved.screen, saved.position, saved.lines);
+  showCachedTerminal(saved.position);
   if (transport.socket?.readyState !== WebSocket.OPEN) connection('Offline');
   notify('terminal-ready');
 });
@@ -303,7 +317,7 @@ function drain() {
   }
   if (chunks.length) {
     preserveScrollback(term, () => term.write(chunks.join(''))); after = last;
-    lastOutputAt = Date.now(); scheduleTranscript(); echo.output();
+    lastOutputAt = Date.now(); cachedScroll.updated(); scheduleTranscript(); echo.output();
   }
   // Acknowledge only what this socket delivered, including duplicates of output painted earlier.
   const acknowledged = Math.min(after, socketSeq);
@@ -492,10 +506,14 @@ const gestures = new TerminalGestures(term, {
   link: (col, row) => terminalLinkAt(term, col, row, projection?.clickable),
   pan: { enabled: () => fullWidth() && terminalViewport.scrollWidth > terminalViewport.clientWidth, move: pixels => { terminalViewport.scrollLeft += pixels; } },
   scroll: {
-    enabled: () => tabVisible && !document.hidden && !presentation.pending && !capturedConnection && !!replayState
-      && transport.socket?.readyState === WebSocket.OPEN && term.buffer.active.length <= term.rows
-      && (mobileTerminal() && herdrReady && !herdrParked && !herdrLayout.pending && state.terminalScroll === true || !herdrTerminal && !!term.wasmTerm?.isAlternateScreen()),
+    enabled: () => tabVisible && !document.hidden && !capturedConnection && (reader.open
+      || term.buffer.active.length <= term.rows && (mobileTerminal() && !herdrParked && state.terminalScroll === true || !herdrTerminal && !!term.wasmTerm?.isAlternateScreen())
+      || !transport.healthy && term.getViewportY() >= term.buffer.active.length - term.rows),
     move: (lines, x, y) => {
+      if (reader.open) { reader.scroll(lines); return; }
+      if (lines > 0 && term.buffer.active.length > term.rows) { term.scrollLines(lines); return; }
+      captureTranscript();
+      if (cachedScroll.move(lines, synchronizedConnection && transport.healthy && !presentation.pending && !herdrLayout.pending)) return;
       const bounds = term.element!.querySelector('canvas')!.getBoundingClientRect();
       const column = Math.max(0, Math.min(term.cols - 1, Math.floor((x - bounds.left) * term.cols / bounds.width)));
       const row = Math.max(0, Math.min(term.rows - 1, Math.floor((y - bounds.top) * term.rows / bounds.height)));
@@ -606,7 +624,7 @@ function paintHerdrFrame(message: HerdrFrameMessage) {
     if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) return;
     if (herdrLayout.pending && !herdrLayout.accept(message.width === term.cols && message.height === term.rows, message.full)) return;
     if (projection?.frame(message) && !herdrLayout.pending) scheduleHerdrRendered();
-    lastOutputAt = Date.now(); scheduleTranscript();
+    lastOutputAt = Date.now(); cachedScroll.updated(); scheduleTranscript();
     revealHerdrLayout();
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame();
   } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
@@ -615,7 +633,7 @@ type Handlers = { [K in ServerMessage['type']]: (message: Extract<ServerMessage,
 function screenMessage(message: Extract<ServerMessage, { type: 'screen' | 'screen-delta' }>) {
   const text = history.receive(message);
   if (text === undefined) return;
-  deferredScreen = text; lastOutputAt = Date.now();
+  deferredScreen = text; lastOutputAt = Date.now(); cachedScroll.updated();
   if (document.hidden || !tabVisible || herdrLayout.pending || herdrParked) return;
   applyDeferredScreen(); echo.output(); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered();
 }
@@ -696,11 +714,11 @@ const handlers: Handlers = {
   'hello': message => {
     replayTarget = message.lastSeq;
     const changedStream = !!(streamId && streamId !== message.streamId || cachedStream && cachedStream !== message.streamId);
-    if (changedStream) { transcript.restore([]); cachedStream = cachedScreen = ''; }
+    if (changedStream) { transcript.restore([]); cachedStream = cachedScreen = ''; reader.hide(); cacheRestored = false; }
     streamId = message.streamId;
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
-    if (message.reset) { if (!changedStream) captureTranscript(); transcript.gap('The connection resumed from a screen snapshot; older output may be missing.'); backfillNeeded = true; presentation.freeze(); queue.clear(); after = received = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
+    if (message.reset) { if (!changedStream) { captureTranscript(); if (!reader.open && term.getViewportY() > 0) { showCachedTerminal(); reader.scroll(-term.getViewportY()); cacheRestored = true; } } transcript.gap('The connection resumed from a screen snapshot; older output may be missing.'); backfillNeeded = true; presentation.freeze(); queue.clear(); after = received = 0; inline.disconnect(); term.clearSelection(); term.scrollToBottom(); term.write('\x1bc\x1b[3J'); }
     if (message.truncated) {
       term.write('\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n');
       toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.');
@@ -742,7 +760,7 @@ function socketMessage(event: MessageEvent) {
   (handlers[message.type] as ((message: ServerMessage) => void) | undefined)?.(message);
 }
 function socketClosed(event?: CloseEvent) {
-  cancelBackfill(); flushTranscript();
+  cancelBackfill(); cachedScroll.updated(); flushTranscript();
   discardHerdrFrames();
   if (directAttempt && !replayState) authorized = false;
   herdrDormant = herdrParked;
@@ -887,7 +905,7 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); flushTranscript(); gestures.cancelGesture(); presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); cachedScroll.updated(); flushTranscript(); gestures.cancelGesture(); presentation.freeze(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) herdrLayout.set({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else void transport.resume(transport.socket?.readyState !== WebSocket.OPEN);

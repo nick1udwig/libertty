@@ -53,9 +53,10 @@ try {
   await page.locator('#herdr-strip-saved-herdr .herdr-agent-tab').first().waitFor({ state: 'visible' });
   assert.ok(cachedTicket, 'Navigation metadata is displayed while the live ticket is pending');
   assert.equal(await page.locator('.herdr-screen iframe').count(), 0, 'Cached metadata cannot attach stale terminal identities');
-  assert.equal(await page.locator('#herdr-strip-saved-herdr').evaluate(element => element.inert), true);
+  assert.equal(await page.locator('#herdr-strip-saved-herdr').evaluate(element => element.inert), false, 'Normal navigation remains available for cached panes');
+  assert.equal(await page.locator('#herdr-strip-saved-herdr .herdr-agent-add').isDisabled(), true);
   releaseCache(); await page.unroute('**/api/herdr/ticket?**', holdCache);
-  await page.waitForFunction(() => !document.querySelector('#herdr-strip-saved-herdr').inert);
+  await page.waitForFunction(() => document.querySelector('#herdr-strip-saved-herdr').getAttribute('aria-busy') === 'false');
   await delay(500);
   const before = tickets;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });

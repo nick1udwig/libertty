@@ -408,6 +408,32 @@ try {
   assert.equal(await frame.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Workspace automatic copying must leave the keyboard closed');
   assert.equal(await page.locator('#notice:visible').count(), 0, 'Selection confirmation must appear only once beside the text');
   await checkLinks(frame);
+  // The same swipe falls back to retained output without opening a mode or pressing a control.
+  await frame.evaluate(() => {
+    getSelection()?.removeAllRanges();
+    window.__testTerminal.clearSelection();
+    window.__testTerminal.write('\x1b[?1049h\x1b[2J\x1b[HCACHED-APP-SCREEN');
+    window.dispatchEvent(new Event('offline'));
+    window.__sent = [];
+  });
+  await touch('touchStart', embeddedStart);
+  await touch('touchMove', { x: embeddedStart.x, y: embeddedStart.y + 100 });
+  await touch('touchEnd');
+  const retained = frame.locator('.terminal-reader');
+  await retained.waitFor({ state: 'visible' });
+  assert.equal(await retained.locator('button,input,select').count(), 0);
+  assert.match(await retained.textContent(), /EMBEDDED-.*alpha beta gamma/s);
+  const position = await retained.locator('.terminal-reader-content').evaluate(el => ({ top: el.scrollTop, bottom: el.scrollHeight - el.clientHeight }));
+  assert.ok(position.top < position.bottom, 'The original gesture scrolls cached output immediately');
+  assert.equal(await frame.evaluate(() => window.__sent.filter(m => m.type === 'terminal-scroll' || m.type === 'input').length), 0);
+  await frame.evaluate(() => window.dispatchEvent(new Event('online')));
+  await frame.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected');
+  await frame.waitForFunction(() => document.querySelector('#terminal-viewport').getAttribute('aria-busy') === 'false');
+  assert.equal(await retained.isVisible(), true, 'Recovery preserves the reading position');
+  const cachedBounds = await retained.boundingBox();
+  await page.mouse.move(cachedBounds.x + cachedBounds.width / 2, cachedBounds.y + cachedBounds.height / 2);
+  await page.mouse.wheel(0, 100000);
+  await retained.waitFor({ state: 'hidden' });
   assert.deepEqual(errors, []);
   await page.screenshot({ path: path.join(root, '.test-artifacts/terminal-gestures.png') });
   console.log('PASS: tapped plain/wrapped/labeled/scrollback links open safely in standalone/workspace terminals; automatic copy, selection, cancellation, scrolling, keyboard focus, preserved history, Backspace');

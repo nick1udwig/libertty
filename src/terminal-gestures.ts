@@ -156,6 +156,12 @@ export class TerminalGestures {
       if (this.press || (capabilities?.firesTouchEvents ?? performance.now() - this.lastTouch < 800)) { stop(event); return; }
       if (type === 'mousedown') { this.cancelMomentum(); this.clear(false); }
     }, { capture: true });
+    element.addEventListener('wheel', event => {
+      if (!host.scroll?.enabled() || event.ctrlKey || !event.deltaY) return;
+      stop(event); this.cancelMomentum();
+      const pixels = event.deltaMode === 1 ? event.deltaY * this.linePixels() : event.deltaMode === 2 ? event.deltaY * this.canvas.clientHeight : event.deltaY;
+      this.scroll(host, pixels / this.linePixels(), event.clientX, event.clientY);
+    }, { capture: true, passive: false });
     term.onSelectionChange(() => this.render());
     term.onScroll(() => { if (this.start && !this.selectionScroll && !isPreservingScrollback(term)) this.clear(); else this.render(); });
     term.onData(() => { this.cancelGesture(); this.clear(); });

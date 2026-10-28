@@ -268,15 +268,18 @@ BENCH_BEFORE=b2a0fb4 BENCH_BEFORE_WORKSPACE=1 BENCH_REPEATS=9 node test/workspac
 
 A reconnect keeps the terminal renderer available for local scrolling and selection.
 The status banner shows when output last arrived.
-A full-screen application's own scrolling still needs the remote application.
+A full-screen application's unobserved history still needs the remote application.
 Geometry changes retain the separate layout handshake so stale frames do not replace a resized pane.
 
-Persisted output opens automatically during offline reloads.
+Persisted output opens automatically during offline reloads with the terminal font and no extra controls.
+A normal scroll uses retained text when the connection is unavailable or a remote scroll receives no output within 200 ms.
+Scrolling back to the bottom returns to the live terminal after synchronization.
+Cached text keeps reading positions and selections stable during recovery and marks gaps with an ellipsis.
 The reader stays fixed while the live terminal changes.
 The browser retains up to 64 observed records and 512 Ki UTF-16 code units of text.
 Normal scrollback can extend earlier records when their overlap matches.
 Full-screen redraws remain separate observed excerpts with possible gaps, because Herdr does not supply a stable application conversation log through this interface.
-Sampling occurs at most once per 1.5 seconds during output, plus explicit reads and disconnects.
+Sampling occurs at most once per 1.5 seconds during output, plus remote scroll gestures and disconnects.
 
 IndexedDB retains recent output, the last text screen, and the reader position for offline reloads.
 Records are scoped to the backend, session, Herdr source, terminal, and pane identity.

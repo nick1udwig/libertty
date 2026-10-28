@@ -52,7 +52,7 @@ export class TerminalTranscript {
     if (this.records[0]) this.records[0].text = this.records[0].text.slice(-maximumText);
   }
   text() {
-    return this.records.map(record => record.kind === 'gap' ? `[${record.text}]` :
-      `[${record.kind === 'excerpt' ? 'Observed screen; gaps may exist' : 'Terminal history'} · ${new Date(record.at).toLocaleString()}]\n${record.text}`).join('\n\n');
+    return this.records.map((record, index) => record.kind === 'gap' ? '[…]' :
+      (record.kind === 'excerpt' && index && this.records[index - 1].kind !== 'gap' ? '[…]\n' : '') + record.text).join('\n');
   }
 }

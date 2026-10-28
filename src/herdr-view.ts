@@ -275,15 +275,16 @@ export class HerdrView {
     const key = terminalCacheKey(this.host.url, this.host.session, terminal.terminalId, this.host.source || '', terminal.paneId);
     if (key === this.offlineKey) return;
     this.offlineKey = key; this.offlineReader?.hide();
-    const generation = ++this.offlineGeneration, cache = new TerminalCache(), saved = await cache.read(key);
-    if (!saved || this.disposed || generation !== this.offlineGeneration || this.frames.rendered) return;
+    const generation = ++this.offlineGeneration, cache = new TerminalCache(), record = await cache.read(key);
+    if (!record || this.disposed || generation !== this.offlineGeneration || this.frames.rendered) return;
     this.offlineReader?.element.remove();
-    const transcript = new TerminalTranscript(); transcript.restore(saved.records);
+    const transcript = new TerminalTranscript(); transcript.restore(record.records);
     let positionTimer: ReturnType<typeof setTimeout> | undefined;
     const reader = this.offlineReader = new TerminalReader(this.screen, () => { if (this.frames.rendered) reader.hide(); });
-    reader.viewport.addEventListener('scroll', () => { clearTimeout(positionTimer); positionTimer = setTimeout(() => { void cache.save({ ...saved, ...reader.position }); }, 1000); }, { passive: true });
+    reader.viewport.addEventListener('scroll', () => { clearTimeout(positionTimer); positionTimer = setTimeout(() => { void cache.save({ ...record, ...reader.position }); }, 1000); }, { passive: true });
     this.unsubscribers.push(() => clearTimeout(positionTimer));
-    reader.show(transcript.text() || saved.screen, saved.position, saved.lines); this.host.ready?.();
+    reader.element.style.setProperty('--cache-font-size', (saved<number>('fontSizePt', 10.5) * 4 / 3) + 'px');
+    reader.show(transcript.text() || record.screen, record.position, record.lines); this.host.ready?.();
   }
   private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
   private connect() { return this.transport.connect(); }
@@ -426,7 +427,6 @@ export class HerdrView {
   }
   private render() {
     this.statuses = new Map(this.tracker.agents.map(agent => [agent.terminalId, this.tracker.status(agent)]));
-    this.strip.inert = !this.liveSnapshot;
     this.strip.setAttribute('aria-busy', String(!this.liveSnapshot));
     this.host.changed(this.tracker.attention);
     this.strip.setAttribute('aria-label', this.spaceMode ? 'Herdr spaces' : 'Herdr agents');
@@ -529,7 +529,7 @@ export class HerdrView {
       };
       parent.append(tab);
     }
-    const add = node('button', 'herdr-agent-add', '+'); add.type = 'button'; add.setAttribute('aria-label', 'Create space'); add.disabled = this.creatingSpace; add.onclick = () => void this.createSpace(); this.strip.append(add); this.strip.scrollLeft = scroll;
+    const add = node('button', 'herdr-agent-add', '+'); add.type = 'button'; add.setAttribute('aria-label', 'Create space'); add.disabled = !this.liveSnapshot || this.creatingSpace; add.onclick = () => void this.createSpace(); this.strip.append(add); this.strip.scrollLeft = scroll;
     if (this.tree) this.refreshTree();
   }
   private clearDrop() {
@@ -602,10 +602,11 @@ export class HerdrView {
     this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 5) + 'px';
   }
   private openMenu(anchor: HTMLElement, agent: StripItem) {
+    if (!this.liveSnapshot) return;
     this.menu.replaceChildren();
     this.menu.setAttribute('aria-label', agent.name + ' tab actions');
     const rename = node('button', '', 'Rename'); rename.role = 'menuitem'; rename.onclick = () => this.dialogs.rename(agent);
-    const close = node('button', '', 'Close tab'); close.role = 'menuitem'; close.disabled = this.closing.has(agent.terminalId); close.onclick = () => void this.closeTab(agent);
+    const close = node('button', '', 'Close tab'); close.role = 'menuitem'; close.disabled = !this.liveSnapshot || this.closing.has(agent.terminalId); close.onclick = () => void this.closeTab(agent);
     this.menu.append(rename, close); this.popup(anchor); rename.focus({ preventScroll: true });
   }
   private closeMenu() {
@@ -675,7 +676,7 @@ export class HerdrView {
     const actions = node('div', 'herdr-tree-actions');
     for (const [label, action, svg] of [['New worktree', 'new-worktree', icons.plus], ['Open worktree…', 'open-worktree', icons.open]] as const) {
       const button = node('button'); button.type = 'button'; button.innerHTML = svg; button.append(label);
-      button.disabled = !root; if (!root) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
+      button.disabled = !this.liveSnapshot || !root; if (!root) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
       button.onclick = () => { if (root) { const item = this.spaceItem(root); void this.dialogs.spaceAction(item, action, this.terminalFor(item)); } };
       actions.append(button);
     }
@@ -690,7 +691,7 @@ export class HerdrView {
     title.setAttribute('aria-label', 'Open ' + space.name + (current ? ', the current space' : '') + '. Hold to rename.');
     tabGestures(title, { select: () => { const terminal = this.terminalFor(item); if (terminal) this.selectTerminal(terminal); }, hold: () => this.renameInline(head, item) });
     const close = node('button', 'herdr-tree-close'); close.type = 'button'; close.innerHTML = icons.close;
-    close.setAttribute('aria-label', 'Close ' + space.name); close.disabled = this.closing.has(item.terminalId); close.onclick = () => this.dialogs.closeSpace(item);
+    close.setAttribute('aria-label', 'Close ' + space.name); close.disabled = !this.liveSnapshot || this.closing.has(item.terminalId); close.onclick = () => this.dialogs.closeSpace(item);
     head.append(title, close);
     const panes = node('div', 'herdr-tree-panes'); panes.role = 'group'; panes.setAttribute('aria-label', space.name + ' panes');
     for (const id of space.terminalIds) {
@@ -703,16 +704,16 @@ export class HerdrView {
       if (id === this.selected) focus.setAttribute('aria-current', 'true');
       tabGestures(focus, { select: () => this.selectTerminal(id), hold: () => this.renameInline(pill, terminal) });
       const remove = node('button', 'herdr-pane-close'); remove.type = 'button'; remove.innerHTML = icons.close;
-      remove.setAttribute('aria-label', 'Close ' + terminal.name); remove.disabled = this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
+      remove.setAttribute('aria-label', 'Close ' + terminal.name); remove.disabled = !this.liveSnapshot || this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
       pill.append(focus, remove); panes.append(pill);
     }
-    const split = node('button', 'herdr-pane-add', '+ split'); split.type = 'button'; split.setAttribute('aria-label', 'Split a pane in ' + space.name); split.onclick = () => void this.dialogs.spaceAction(item, 'split', this.terminalFor(item));
+    const split = node('button', 'herdr-pane-add', '+ split'); split.type = 'button'; split.disabled = !this.liveSnapshot; split.setAttribute('aria-label', 'Split a pane in ' + space.name); split.onclick = () => void this.dialogs.spaceAction(item, 'split', this.terminalFor(item));
     panes.append(split); box.append(head, panes);
     return box;
   }
   /** Holding a space or pane name edits it in place; the shared label also changes on the desktop. */
   private renameInline(target: HTMLElement, item: StripItem) {
-    if (this.renaming || !this.tree) return;
+    if (!this.liveSnapshot || this.renaming || !this.tree) return;
     this.renaming = true;
     const form = node('form', 'herdr-tree-rename ' + (item.space ? 'herdr-tree-head' : 'herdr-pane')), input = node('input'), save = node('button', 'herdr-tree-save');
     input.value = item.name; input.maxLength = 100; input.required = true; input.autocomplete = 'off'; input.spellcheck = false;
