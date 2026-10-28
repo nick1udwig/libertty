@@ -5,6 +5,7 @@ export class TerminalPresentation {
   private progress = document.createElement('div');
   private generation = 0;
   private held = false;
+  private waiting = false;
   private viewport: HTMLElement;
   private ready: () => void;
   constructor(viewport: HTMLElement, ready: () => void = () => {}, progress = true) {
@@ -17,9 +18,9 @@ export class TerminalPresentation {
     if (progress) this.layer.append(this.progress);
     viewport.parentElement!.append(this.layer);
   }
-  get pending() { return this.held; }
+  get pending() { return this.waiting; }
   freeze() {
-    ++this.generation;
+    ++this.generation; this.waiting = true;
     if (this.held) return;
     const canvas = this.viewport.querySelector<HTMLCanvasElement>('#terminal canvas');
     const bounds = this.viewport.getBoundingClientRect();
@@ -33,13 +34,19 @@ export class TerminalPresentation {
     this.layer.hidden = false; this.held = true;
     this.viewport.setAttribute('aria-busy', 'true');
   }
+  wait() {
+    ++this.generation; this.waiting = true;
+    this.layer.hidden = true; this.held = false;
+    this.snapshot.width = this.snapshot.height = 0;
+    this.viewport.setAttribute('aria-busy', 'true');
+  }
   reveal() {
-    if (!this.held) return;
+    if (!this.waiting) return;
     const generation = this.generation;
     // Terminal writes parse synchronously, but the renderer paints on a later frame.
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (generation !== this.generation || !this.held) return;
-      this.layer.hidden = true; this.held = false;
+      if (generation !== this.generation || !this.waiting) return;
+      this.layer.hidden = true; this.held = this.waiting = false;
       this.snapshot.width = this.snapshot.height = 0;
       this.viewport.setAttribute('aria-busy', 'false');
       this.ready();

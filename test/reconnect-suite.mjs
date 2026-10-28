@@ -330,14 +330,20 @@ try {
     // A request stranded by backgrounding cannot block the next foreground attempt.
     stalled = await stallNext('/ws'); states = await stateCount();
     await online(); await stalled.entered;
-    await page.locator('.terminal-loading-bar').waitFor({ state: 'visible' });
-    const retainedPixels = await page.locator('.terminal-presentation canvas').evaluate(canvas => {
+    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+    const retainedPixels = await page.locator('#terminal canvas').evaluate(canvas => {
       const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
       let painted = 0;
       for (let i = 0; i < pixels.length; i += 4) if (pixels[i] > 40 || pixels[i + 1] > 40 || pixels[i + 2] > 40) painted++;
       return painted;
     });
-    assert.ok(retainedPixels > 100, 'Retain painted text while authorization is pending');
+    assert.ok(retainedPixels > 100, 'Retain readable text while authorization is pending');
+    const track = page.locator('.terminal-scrollbar');
+    await track.press('Home');
+    await page.locator('#jump-to-live').waitFor({ state: 'visible' });
+    assert.equal(await track.getAttribute('aria-valuenow'), '0', 'Cached history scrolls without a connection');
+    await page.locator('#jump-to-live').click();
+    assert.equal(await track.getAttribute('aria-valuenow'), await track.getAttribute('aria-valuemax'));
     await background(); await page.evaluate(() => window.__expireBackground()); await foreground(); await connected(states);
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
     await page.waitForFunction(() => window.__sockets.filter(socket => socket.readyState === WebSocket.OPEN).length === 1);
@@ -370,8 +376,8 @@ try {
     await silentStall();
     stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
     await online(); await stalled.entered;
-    await page.locator('.terminal-loading-bar').waitFor({ state: 'visible' });
-    assert.ok(await page.locator('.terminal-presentation canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0), 'Keep the Herdr screen during ticket acquisition');
+    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+    assert.ok(await page.locator('#terminal canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0), 'Keep the Herdr screen during ticket acquisition');
     await background(); await page.evaluate(() => window.__expireBackground()); await foreground(); await connected(states);
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
     assert.equal(stalled.aborted(), true, 'backgrounding aborts Herdr ticket acquisition'); await stalled.done();

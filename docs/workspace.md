@@ -263,3 +263,10 @@ Reproduce after building:
 BENCH_BEFORE=b2a0fb4 BENCH_BEFORE_WORKSPACE=1 BENCH_REPEATS=9 node test/workspace-benchmark.mjs
 # Repeat with BENCH_REVERSE=1 and pool both sample sets.
 ```
+
+## Reading during connection loss
+
+A reconnect keeps the terminal renderer available for local scrolling and selection.
+The status banner shows when output last arrived, and Jump to live returns from scrollback.
+A full-screen application's own scrolling still needs the remote application.
+Geometry changes retain the separate layout handshake so stale frames do not replace a resized pane.

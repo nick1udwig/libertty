@@ -280,7 +280,7 @@ try {
     try {
       await page.waitForFunction(() => document.querySelector('#connection-label').textContent.startsWith('Connection stalled'), undefined, { timeout: 8000 });
       await wait(() => !!heldTicket, 'replacement ticket during the outage');
-      assert.equal(await page.locator('.terminal-presentation').isVisible(), true, 'An outage retains the previous terminal picture');
+      assert.equal(await page.locator('.terminal-presentation').isVisible(), false, 'An outage keeps the terminal readable without a frozen cover');
     } finally { release(); await page.unroute('**/api/herdr/ticket?**', hold); }
     await page.waitForFunction(tick => document.querySelector('#connection-label').textContent === 'Connected' && document.querySelector('.terminal-presentation').hidden
       && Number(window.__terminal.buffer.active.getLine(0).translateToString(true).match(/TICK:(\d+)/)?.[1]) > tick + 150, stalledTick, { timeout: 12000 });

@@ -69,6 +69,7 @@ let after = 0;
 // The replay cursor covers queued output too, so a replacement socket never resends what is already held.
 let received = 0, socketSeq = 0, ackedSeq = 0;
 let streamId = '';
+let lastOutputAt = 0;
 let capturedConnection: string | undefined;
 let pendingCommand: { id: string } | undefined;
 const edits = new Map<string, (accepted: boolean) => void>();
@@ -112,7 +113,8 @@ function toast(message: string) {
 }
 function connection(label: string, online = false) {
   $('connection-label').textContent = label;
-  $('reconnect-banner').textContent = label === 'Session ended' ? 'This terminal has ended; open its saved host to reconnect.' : label.startsWith('Connection stalled') ? label : 'Reconnecting to your terminal…';
+  const updated = lastOutputAt ? ` · last output ${new Date(lastOutputAt).toLocaleTimeString()}` : '';
+  $('reconnect-banner').textContent = label === 'Session ended' ? 'This terminal has ended; open its saved host to reconnect.' : label.startsWith('Connection stalled') ? label : 'Reconnecting' + updated;
   $('reconnect-banner').hidden = online || label === 'Connecting' || label === 'Locked';
   updateRun();
 }
@@ -179,6 +181,9 @@ const presentation = new TerminalPresentation(terminalViewport, () => {
   synchronizeInput();
 });
 let replayTarget: number | undefined, replayState = false;
+const jumpToLive = $('jump-to-live');
+term.onScroll(() => { jumpToLive.hidden = term.getViewportY() === 0; });
+jumpToLive.onclick = () => { term.scrollToBottom(); jumpToLive.hidden = true; };
 function inputContext(): InputContext | undefined {
   const target = dictationTarget(state);
   if (!target || state.exited || capturedConnection) return;
@@ -239,7 +244,7 @@ function drain() {
   }
   if (chunks.length) {
     preserveScrollback(term, () => term.write(chunks.join(''))); after = last;
-    echo.output();
+    lastOutputAt = Date.now(); echo.output();
   }
   // Acknowledge only what this socket delivered, including duplicates of output painted earlier.
   const acknowledged = Math.min(after, socketSeq);
@@ -460,13 +465,13 @@ const gestures = new TerminalGestures(term, {
 });
 
 async function socketURL(signal: AbortSignal) {
-  presentation.freeze();
+  if (lastOutputAt) presentation.wait(); else presentation.freeze();
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
   socketSeq = ackedSeq = 0;
   if (herdrTerminal) {
     sizeTerminal();
     const geometry = { cols: term.cols, rows: term.rows, mobile: mobileTerminal() && tabVisible && keepingGeometry() };
-    herdrLayout.rendered = false; herdrLayout.set({ pending: geometry.mobile, preserve: false, cover: geometry.mobile && !herdrParked });
+    herdrLayout.rendered = false; herdrLayout.set({ pending: geometry.mobile, preserve: !!lastOutputAt, cover: geometry.mobile && !herdrParked && !lastOutputAt });
     const result = await requestJSON<{ ticket: string }>(herdrEndpoint('api/herdr/ticket'), geometry, { token: () => accessToken, signal });
     socketURL.searchParams.set('ticket', result.ticket);
   } else if (baseURL.origin !== location.origin) socketURL.searchParams.set('ticket', (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket);
@@ -542,6 +547,7 @@ function paintHerdrFrame(message: HerdrFrameMessage) {
     if (document.hidden || !tabVisible || herdrParked || herdrLayout.holding) return;
     if (herdrLayout.pending && !herdrLayout.accept(message.width === term.cols && message.height === term.rows, message.full)) return;
     if (projection?.frame(message) && !herdrLayout.pending) scheduleHerdrRendered();
+    lastOutputAt = Date.now();
     revealHerdrLayout();
     if (fullWidth()) sizeTerminal(); refreshHerdrFrame();
   } finally { echo.output(); send({ type: 'ack', seq: message.seq }); }
@@ -550,7 +556,7 @@ type Handlers = { [K in ServerMessage['type']]: (message: Extract<ServerMessage,
 function screenMessage(message: Extract<ServerMessage, { type: 'screen' | 'screen-delta' }>) {
   const text = history.receive(message);
   if (text === undefined) return;
-  deferredScreen = text;
+  deferredScreen = text; lastOutputAt = Date.now();
   if (document.hidden || !tabVisible || herdrLayout.pending || herdrParked) return;
   applyDeferredScreen(); echo.output(); if (fullWidth()) sizeTerminal(); refreshHerdrFrame(); scheduleHerdrRendered();
 }
@@ -681,7 +687,7 @@ function socketClosed(event?: CloseEvent) {
   disconnectedContext = inputContext() || disconnectedContext;
   dictation.connected(false); synchronizedConnection = false;
   echo.reset();
-  presentation.freeze(); replayState = false;
+  presentation.wait(); replayState = false;
   herdrReady = false;
   if (event?.code === 4001 || state.exited) inline.disconnect(); else inline.suspend();
   for (const resolve of edits.values()) resolve(false); edits.clear();
