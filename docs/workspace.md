@@ -47,7 +47,8 @@ Embedded terminals send `terminal-notice` and `terminal-status` messages and do 
 The workspace shows only the selected tab's states, and sends action ids back with `notice-action`.
 A Herdr tab shows its own connection state and the state of its selected pane in the same orb.
 Selection copies and selection warnings also use the orb.
-Loading covers and dialog form errors stay beside their content.
+While a Herdr tab or pane loads behind a previous picture, the orb's ring turns instead of a pill covering the picture.
+A loading cover shows only over an empty screen, and dialog form errors stay beside their fields.
 
 Each frame connects directly to its chosen backend.
 Origin/source-checked messages supply access credentials; iframe URLs contain a backend URL and session ID, never tokens or passphrases.

@@ -11,6 +11,8 @@ export interface FramesHost {
   notice(message: string, kind?: NoticeKind, actions?: NoticeAction[]): void;
   /** The selected terminal's connection state. */
   state(state?: NoticeInput): void;
+  /** A loading label while a pane prepares behind the previous picture. */
+  loading(label?: string): void;
   reading(terminalId: string, request: ReadingOpen): void;
   visible(): boolean;
   /** A workspace handoff keeps the previous picture until it is released. */
@@ -75,8 +77,10 @@ export class HerdrFrames {
     if (event.data.type === 'terminal-locked') entry.locked = true;
     if (active && event.data.type === 'terminal-locked') void this.host.authenticate().then(() => entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin)).catch(error => this.host.notice(error.message));
   }
+  /** Cover an empty screen while loading; with a previous picture, the notice orb shows the progress instead. */
   setLoading(loading: boolean) {
-    this.loading.hidden = !loading; this.loading.classList.toggle('has-previous', !!this.displayed);
+    const behind = loading && !!this.displayed;
+    this.loading.hidden = !loading || behind; this.host.loading(behind ? this.loadingLabel.textContent! : undefined);
     this.screen.setAttribute('aria-busy', String(loading));
   }
   private prepare(entry: CachedTerminal) {

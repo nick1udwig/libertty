@@ -31,8 +31,8 @@ interface Host {
   api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
   notice(message: string, kind?: NoticeKind, actions?: NoticeAction[]): void;
-  /** Show a connection state for this view (`herdr`) or its selected pane (`terminal`). */
-  state?(key: 'herdr' | 'terminal', state?: NoticeInput): void;
+  /** Show a connection state for this view (`herdr`), or the connection (`terminal`) or loading (`loading`) state of its selected pane. */
+  state?(key: 'herdr' | 'terminal' | 'loading', state?: NoticeInput): void;
   reading(terminalId: string, request: ReadingOpen): void;
   reconnect?(): Promise<void>;
   ready?(): void;
@@ -133,7 +133,7 @@ export class HerdrView {
     const viewed = () => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     this.frames = new HerdrFrames(this.screen, {
       url: host.url, session: host.session, source: host.source,
-      token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), state: state => host.state?.('terminal', state), reading: (terminalId, request) => host.reading(terminalId, request),
+      token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), state: state => host.state?.('terminal', state), loading: label => host.state?.('loading', label ? { message: label, kind: 'progress' } : undefined), reading: (terminalId, request) => host.reading(terminalId, request),
       visible: () => this.visible, held: () => this.handoffHeld, agentName: terminalId => this.terminals.find(agent => agent.terminalId === terminalId)?.name,
       painted: () => { viewed(); this.host.ready?.(); },
       ended: () => void this.refreshSnapshot().catch(error => { if (error.status !== 404) this.connectionError(error); }),

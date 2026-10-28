@@ -326,12 +326,18 @@ export function createWorkspaceNavigation(options: Options) {
   }
   menuEvents(tabMenu, () => tabMenuAnchor, closeTabMenu);
   function updateTerminalLoading() {
-    $('terminal-loading').hidden =
-      page !== 'terminal' || (!herdrLoading && terminalLoading?.id !== workspace.active);
+    const loading =
+      page === 'terminal' && (herdrLoading || terminalLoading?.id === workspace.active);
+    // A previous tab stays visible while Herdr prepares, so the orb shows the progress instead of a cover.
+    const behind = herdrLoading && !!presentedTab;
+    $('terminal-loading').hidden = !loading || behind;
     $('terminal-loading-label').textContent = herdrLoading
       ? 'Loading Herdr…'
       : 'Opening SSH terminal…';
-    $('terminal-loading').classList.toggle('has-previous', herdrLoading && !!presentedTab);
+    notices.set(
+      'tab-loading',
+      loading && behind ? { message: 'Loading Herdr…', kind: 'progress' } : undefined,
+    );
   }
   function updateViewVisibility() {
     const visible = page === 'terminal' && !document.hidden,

@@ -67,8 +67,6 @@ dialog .primary[type=submit]{width:100%;margin-top:8px}dialog .actions .primary{
 #terminal-loading{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:var(--glass-strong);color:var(--text-2);font-size:14px;text-align:center;padding:24px}
 .terminal-loading-spinner{width:32px;height:32px;border:2.5px solid var(--line-strong);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
 @media(prefers-reduced-motion:reduce){.terminal-loading-spinner{animation-duration:2s}}
-#terminal-loading.has-previous{inset:60px 12px auto auto;flex-direction:row;gap:10px;max-width:calc(100% - 24px);padding:10px 14px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--overlay);box-shadow:var(--shadow-pop);pointer-events:none}
-#terminal-loading.has-previous .terminal-loading-spinner{width:16px;height:16px;border-width:2px;flex:none}
 
 .plugin-entry{border:1px solid var(--line);background:var(--surface);border-radius:var(--r-lg);padding:14px;margin:12px 0}.plugin-entry strong{display:block}.plugin-entry .actions{flex-wrap:wrap}.plugin-entry .toggle{margin:10px 0!important}.plugin-entry p{overflow-wrap:anywhere}
 #workspace-shortcuts{flex:none;background:var(--surface);padding:4px 8px}
