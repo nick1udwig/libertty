@@ -313,8 +313,7 @@ try {
     await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: false }); window.dispatchEvent(new Event('offline')); });
     await page.waitForTimeout(100);
     await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, value: true }); window.dispatchEvent(new Event('online')); });
-    await page.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Connected');
-    await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
+    await waitForShell(page);
     assert.equal(voice.currentId, beforePermission, 'Reconnect waits for microphone startup before admitting a recording');
     await page.evaluate(() => { window.__holdPermission = false; window.__releasePermission(); });
     await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
