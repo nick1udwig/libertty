@@ -11,6 +11,7 @@ export const noticeLifetimes: Partial<Record<NoticeKind, number>> = { done: 3000
 const resumeAtLeast = 1500;
 const historyLimit = 20;
 const severity: Record<NoticeKind, number> = { progress: 0, done: 1, info: 2, warning: 3, error: 4 };
+const signature = (notice: Notice) => [notice.key, notice.kind, notice.message, notice.source].join('\n');
 
 export function remoteNotice(data: unknown, fallback: NoticeKind): RemoteNotice | undefined {
   const value = data as Partial<RemoteNotice> | null;
@@ -33,6 +34,8 @@ export class NoticeModel {
   history: Notice[] = [];
   presented?: Notice;
   private nextId = 1;
+  /** States the person put away, so one that returns unchanged, such as after a tab switch, stays folded. */
+  private folded = new Set<string>();
   private timers = new Map<number, { handle?: ReturnType<typeof setTimeout>; deadline: number; remaining: number }>();
   private changed: () => void;
   private now: () => number;
@@ -60,8 +63,8 @@ export class NoticeModel {
     return notice;
   }
 
-  /** Set or clear a keyed state; a presented state follows its updates, and `present` raises a new or more severe one. */
-  set(key: string, input?: NoticeInput, present = false) {
+  /** Set or clear a keyed state; a presented state follows its updates, and a new or changed error or warning unfurls unless the person put it away. */
+  set(key: string, input?: NoticeInput) {
     const previous = this.states.get(key);
     if (!input) {
       if (!previous) return;
@@ -80,7 +83,7 @@ export class NoticeModel {
     if (previous?.kind === kind) { notice.id = previous.id; notice.at = previous.at; }
     this.states.set(key, notice);
     if (this.presented === previous && previous) this.presented = notice;
-    else if (present && (!previous || severity[kind] > severity[previous.kind])) this.presented = notice;
+    else if (severity[kind] >= severity.warning && !this.folded.has(signature(notice))) this.presented = notice;
     this.changed();
   }
 
@@ -96,6 +99,7 @@ export class NoticeModel {
   /** Put the presented notice away without dismissing it. */
   fold(notice = this.presented) {
     if (!notice || this.presented !== notice) return;
+    if (notice.key !== undefined) this.folded.add(signature(notice));
     this.presented = undefined;
     this.changed();
   }

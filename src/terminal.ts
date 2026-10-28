@@ -127,14 +127,15 @@ function toast(message: string, kind: NoticeKind = 'error', actions: Partial<Rec
 function connection(label: string, online = false) {
   $('connection-label').textContent = label;
   const updated = lastOutputAt || cachedUpdated ? ` · last output ${new Date(lastOutputAt || cachedUpdated).toLocaleTimeString()}` : '';
-  const status = online || ['Connecting', 'Locked', 'Other tab'].includes(label) ? undefined
+  // The workspace reports an ended embedded terminal itself, so only a standalone terminal shows that state.
+  const status = online || ['Connecting', 'Locked', 'Other tab'].includes(label) || embedded && label === 'Session ended' ? undefined
     : label === 'Session ended' ? { message: 'This terminal has ended. Open its saved host to reconnect.', kind: 'error' as const, actions: {} }
     : { message: label.startsWith('Connection stalled') ? label : 'Reconnecting' + updated, kind: 'progress' as const, actions: { reconnect: 'Retry now' } };
   const serialized = JSON.stringify(status ?? null);
   if (serialized !== connectionStatus) {
     connectionStatus = serialized;
     if (embedded) notify('terminal-status', { status: status && { ...status, actions: Object.entries(status.actions).map(([id, label]) => ({ id, label })) } });
-    else notices!.set('connection', status && noticeInput(status.message, status.kind, status.actions), status?.kind === 'error');
+    else notices!.set('connection', status && noticeInput(status.message, status.kind, status.actions));
   }
   updateRun();
 }

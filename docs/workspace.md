@@ -44,7 +44,10 @@ Local storage keeps the parked position.
 The orb shows only while a notice or state is current, so it does not cover the terminal at other times.
 A stalled connection shows the clock time of its last contact, so its state does not change every second.
 States last while they are true, so the user can hide them from the bubble but cannot dismiss them.
+An error or warning state unfurls when it appears or changes, in a standalone terminal and in the workspace alike.
+A state that the user puts away stays folded when it returns unchanged, such as after a tab switch.
 Embedded terminals send `terminal-notice` and `terminal-status` messages and do not draw notices.
+An embedded terminal sends no state when it ends, because the workspace reports ended terminals itself.
 The workspace shows only the selected tab's states, and sends action ids back with `notice-action`.
 A Herdr tab shows its own connection state and the state of its selected pane in the same orb.
 Selection copies and selection warnings also use the orb.

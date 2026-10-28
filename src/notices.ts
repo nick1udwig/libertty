@@ -81,8 +81,8 @@ export class NoticeCenter {
   }
 
   notify(input: NoticeInput) { this.model.notify(input); }
-  /** Show a condition until it clears; `present` unfurls it when it first appears or worsens. */
-  set(key: string, input?: NoticeInput, present = false) { this.model.set(key, input, present); }
+  /** Show a condition until it clears; an error or warning unfurls when it appears or changes. */
+  set(key: string, input?: NoticeInput) { this.model.set(key, input); }
 
   toggle(open = !this.open) {
     if (open === this.open) return;
