@@ -290,3 +290,10 @@ Native sessions retain 5,000 server scrollback rows, while the foreground reconn
 After synchronization, an authenticated background request retrieves up to 512 KiB of plain history from the same stream.
 The local archive survives snapshot resets and marks gaps that exceed server retention.
 Background history stops when the connection closes or the page hides, and it never delays input or moves an open reader.
+
+Herdr frame acknowledgments measure round-trip delay and delivered bytes per second.
+A slow link or an aging frame queue reduces the frame window from two to one and slows optional history delivery to one update per one to three seconds.
+Unsent redraws continue to merge into the latest screen, and input keeps its separate delivery path.
+Browser heartbeat timing and outbound queue pressure also defer local history sampling and background backfill.
+An offline event pauses connection attempts for ten seconds, then probes resume even without an online event.
+An online event resumes immediately, and hidden tabs retain their existing suspension rules.

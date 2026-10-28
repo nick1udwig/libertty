@@ -313,8 +313,23 @@ test('a followed page keeps its connection through the background grace and reco
   assert.equal(f.sockets.length, 3, 'A page restored from the back-forward cache reconnects');
   windows.dispatchEvent(new Event('offline'));
   assert.equal(f.connection.socket, undefined);
+  f.connection.activity(); await flush();
+  t.mock.timers.tick(9999); await flush();
+  assert.equal(f.sockets.length, 3, 'Offline input waits through the short network handoff');
+  t.mock.timers.tick(1); await flush();
+  assert.equal(f.sockets.length, 4, 'An offline hint cannot suppress connection probes forever');
   windows.dispatchEvent(new Event('online')); await flush();
-  assert.equal(f.sockets.length, 4);
+  assert.equal(f.sockets.length, 5);
   stop(); windows.dispatchEvent(new Event('offline'));
-  assert.equal(f.connection.socket, f.sockets[3], 'A stopped follower ignores later events');
+  assert.equal(f.connection.socket, f.sockets[4], 'A stopped follower ignores later events');
+});
+
+test('optional work follows measured round trips and outbound queue pressure', async t => {
+  const f = fixture(t);
+  await f.connection.connect(); const socket = f.sockets[0]; socket.open(); socket.message('state'); socket.autoPong = false;
+  assert.equal(f.connection.backgroundDelay, 1500);
+  f.connection.activity(); t.mock.timers.tick(2000); t.mock.timers.tick(600); socket.message('{"type":"pong"}');
+  assert.equal(f.connection.backgroundDelay, 2400);
+  Object.assign(socket, { bufferedAmount: 32768 });
+  assert.equal(f.connection.backgroundDelay, 5000);
 });

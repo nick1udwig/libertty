@@ -61,7 +61,7 @@ function notify(type: string, data: object = {}) { if (embedded) parent.postMess
 if (embedded) document.documentElement.classList.add('embedded-terminal');
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const transport = new ReconnectingSocket({
-  available: () => (keepingGeometry() || dictation.active) && (herdrTerminal ? tabVisible && !(herdrParked && herdrDormant) : tabVisible || !tabExpired || dictation.active) && navigator.onLine,
+  available: () => (keepingGeometry() || dictation.active) && (herdrTerminal ? tabVisible && !(herdrParked && herdrDormant) : tabVisible || !tabExpired || dictation.active),
   protocols: wireProtocols,
   checkpoint: () => sentInput.pending,
   stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
@@ -209,7 +209,7 @@ function captureTranscript() {
   if (text === clearedScreen) return;
   if (transcript.observe(text, !term.wasmTerm?.isAlternateScreen() && (!herdrTerminal || state.ready))) cacheTimer ??= setTimeout(saveTranscript, 2000);
 }
-function scheduleTranscript() { transcriptTimer ??= setTimeout(captureTranscript, 1500); }
+function scheduleTranscript() { transcriptTimer ??= setTimeout(captureTranscript, transport.backgroundDelay); }
 $('read-history').onclick = () => { captureTranscript(); reader.show(transcript.text()); };
 function clearTranscript() {
   cacheCleared = true; cancelBackfill(); clearedScreen = terminalText(term); clearTimeout(cacheTimer); cacheTimer = undefined; transcript.restore([]); reader.hide();
@@ -239,13 +239,14 @@ function scheduleBackfill() {
   backfillTimer = setTimeout(() => {
     backfillTimer = undefined;
     if (!synchronizedConnection || !tabVisible || document.hidden) return;
+    if (transport.backgroundDelay > 1500 && Date.now() - lastOutputAt < 1000) { scheduleBackfill(); return; }
     const controller = backfill = new AbortController(), expected = streamId;
     const timeout = setTimeout(() => controller.abort(), 15000);
     void api<{ streamId: string; seq: number; text: string }>('/api/terminal/history', undefined, controller.signal).then(result => {
       if (controller.signal.aborted || expected !== streamId || result.streamId !== expected || cacheCleared) return;
       captureTranscript(); transcript.backfill(result.text); saveTranscript(); backfillNeeded = false;
     }).catch(() => {}).finally(() => { clearTimeout(timeout); if (backfill === controller) backfill = undefined; });
-  }, 1500);
+  }, transport.backgroundDelay);
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) cancelBackfill(); else scheduleBackfill(); });
 window.addEventListener('pagehide', cancelBackfill);

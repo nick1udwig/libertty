@@ -198,7 +198,7 @@ export class HerdrView {
     window.addEventListener('resize', reposition); visualViewport?.addEventListener('resize', reposition);
     this.unsubscribers.push(() => window.removeEventListener('resize', reposition), () => visualViewport?.removeEventListener('resize', reposition));
     this.transport = new ReconnectingSocket({
-      available: () => !this.disposed && !this.recovering && (!document.hidden || !this.transport.backgroundExpired) && navigator.onLine,
+      available: () => !this.disposed && !this.recovering && (!document.hidden || !this.transport.backgroundExpired),
       protocols: wireProtocols,
       prepare: async signal => {
         const { ticket } = await this.host.api<{ ticket: string }>('api/herdr/ticket', {}, signal);

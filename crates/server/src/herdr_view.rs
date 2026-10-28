@@ -359,6 +359,13 @@ impl View {
                         }
                     }
                 }
+                let delay = match weak.upgrade() {
+                    Some(view) => view.frames.lock().unwrap().background_delay(),
+                    None => break,
+                };
+                if !delay.is_zero() {
+                    tokio::select! { biased; _=lifetime.cancelled()=>break, changed=active.changed()=>{ if changed.is_err(){break;} continue; }, _=tokio::time::sleep(delay)=>{} }
+                }
                 tokio::select! { biased; _=lifetime.cancelled()=>break, changed=active.changed()=>if changed.is_err(){break;}, changed=async { match &mut history {Some(history)=>history.receive.changed().await, None=>std::future::pending().await} }=>if changed.is_err(){break;} }
             }
         });
