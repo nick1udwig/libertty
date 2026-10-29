@@ -281,6 +281,48 @@ try {
   assert.equal(await tree.count(), 1); assert.equal(await tab(beta).evaluate(el => el.classList.contains('herdr-tree-anchor')), false);
   assert.equal(await selected(), chip(beta), 'Moving the tree keeps the selection');
   await page.keyboard.press('Escape');
+  const treeSwipeTabs = await page.addStyleTag({ content: '.herdr-agent-strip .herdr-agent-tab { min-width: 260px; }' });
+  const strip = page.locator('.herdr-agent-strip:visible');
+  const stripState = () => strip.evaluate(strip => ({ scroll: strip.scrollLeft, order: [...strip.querySelectorAll('.herdr-agent-tab')].map(tab => tab.dataset.terminal), selected: strip.querySelector('[aria-selected=true]')?.dataset.terminal }));
+  try {
+    for (const pointer of ['touch', 'mouse']) {
+      await hold(beta); await strip.evaluate(strip => { strip.scrollLeft = 0; });
+      const initial = await stripState(), area = await box(strip), y = area.y + area.height / 2;
+      const swipe = async (from, to) => {
+        if (pointer === 'touch') {
+          await touch('touchStart', from, y);
+          for (const fraction of [.25, .5, .75, 1]) { await touch('touchMove', from + (to - from) * fraction, y); await delay(35); }
+          await touch('touchEnd');
+        } else {
+          await page.mouse.move(from, y); await page.mouse.down(); await page.mouse.move(to, y, { steps: 8 }); await page.mouse.up();
+        }
+        await delay(200);
+      };
+      await swipe(area.x + area.width - 50, area.x + 60);
+      const forward = await stripState();
+      assert.ok(forward.scroll > initial.scroll + 100, pointer + ' scrolls to later tabs while the tree is open: ' + JSON.stringify({ initial, forward, target: await page.evaluate(() => window.__touchSource) }));
+      assert.equal(await tree.count(), 1, 'Scrolling keeps the tree open');
+      assert.equal(await tab(beta).evaluate(el => el.classList.contains('herdr-tree-anchor')), true, 'Scrolling keeps the same tree');
+      await swipe(area.x + 60, area.x + area.width - 50);
+      const reverse = await stripState();
+      assert.ok(reverse.scroll < forward.scroll - 100, pointer + ' scrolls back while the tree is open');
+      for (const state of [forward, reverse]) {
+        assert.deepEqual(state.order, initial.order, 'Scrolling preserves tab order');
+        assert.equal(state.selected, initial.selected, 'Scrolling does not select a tab');
+      }
+      assert.equal(await tree.count(), 1, 'Reverse scrolling keeps the tree open');
+      assert.equal(await page.locator('.herdr-agent-tab.dragging, .herdr-drop-indicator:visible').count(), 0, 'Scrolling does not reorder tabs');
+      await strip.evaluate(strip => { strip.scrollLeft = strip.scrollWidth; });
+      await wait(async () => await bridge.count() === 0, 'the bridge hides when its chip scrolls out of view');
+      await bounds(beta);
+      await wait(async () => {
+        const anchor = await box(tab(beta)), connector = await bridge.boundingBox();
+        return connector && Math.abs(connector.x - anchor.x) < 1 && Math.abs(connector.width - anchor.width) < 1;
+      }, 'the bridge follows its chip back into view');
+    }
+  } finally {
+    await page.keyboard.press('Escape'); await treeSwipeTabs.evaluate(style => style.remove()); await strip.evaluate(strip => { strip.scrollLeft = 0; });
+  }
   await hold(beta); await page.keyboard.press('Escape');
   assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Escape also removes the dismissal layer');
   const swipeTree = async distance => {

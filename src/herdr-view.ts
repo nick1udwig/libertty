@@ -145,22 +145,23 @@ export class HerdrView {
     backdrop.onpointerdown = event => { event.stopPropagation(); dismissMenu = true; };
     backdrop.onpointercancel = () => { dismissMenu = false; };
     // The release that opens a hold menu can click the newly visible backdrop.
-    backdrop.onclick = event => {
+    backdrop.onclick = () => {
       if (!dismissMenu) return;
       dismissMenu = false;
-      // While a tree is open, tapping another chip moves the tree to that chip instead of only dismissing it.
-      const chip = this.tree && document.elementsFromPoint(event.clientX, event.clientY).find(element => element.matches('.herdr-agent-tab') && this.strip.contains(element)) as HTMLElement | undefined;
-      const repo = chip && chip.dataset.terminal !== this.tree!.repo && this.entries().find(item => item.terminalId === chip.dataset.terminal)?.repo;
-      if (chip && repo) this.openTree(chip, repo); else this.closeMenu();
+      this.closeMenu();
     };
     this.element.append(this.screen, this.menu, backdrop);
+    this.strip.addEventListener('click', event => {
+      if (!this.tree || (event.target as HTMLElement).closest('.herdr-agent-tab')) return;
+      event.preventDefault(); event.stopPropagation(); this.closeMenu();
+    }, true);
     const messages = (event: MessageEvent) => this.frames.message(event);
     document.addEventListener('visibilitychange', viewed); window.addEventListener('focus', viewed); window.addEventListener('message', messages);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', viewed), () => window.removeEventListener('focus', viewed), () => window.removeEventListener('message', messages));
     const presence = () => this.updatePresence();
     document.addEventListener('visibilitychange', presence); window.addEventListener('focus', presence); window.addEventListener('blur', presence);
     this.unsubscribers.push(() => document.removeEventListener('visibilitychange', presence), () => window.removeEventListener('focus', presence), () => window.removeEventListener('blur', presence));
-    const outside = (event: PointerEvent) => { if (!this.menu.contains(event.target as Node) && !(event.target as HTMLElement).closest('.herdr-agent-tab')) this.closeMenu(); };
+    const outside = (event: PointerEvent) => { if (!this.menu.contains(event.target as Node) && !(this.tree && this.strip.contains(event.target as Node)) && !(event.target as HTMLElement).closest('.herdr-agent-tab')) this.closeMenu(); };
     document.addEventListener('pointerdown', outside); this.unsubscribers.push(() => document.removeEventListener('pointerdown', outside));
     const escape = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !this.menu.hidden) { event.preventDefault(); this.closeMenu(); this.strip.querySelector<HTMLButtonElement>('[aria-selected=true]')?.focus(); }
@@ -192,6 +193,7 @@ export class HerdrView {
     // A swipe that returns to its start must not also press the control it began on.
     this.menu.addEventListener('click', event => { if (swiped) { event.preventDefault(); event.stopPropagation(); swiped = false; } }, true);
     const reposition = () => { if (this.tree) this.refreshTree(); };
+    this.strip.addEventListener('scroll', reposition);
     window.addEventListener('resize', reposition); visualViewport?.addEventListener('resize', reposition);
     this.unsubscribers.push(() => window.removeEventListener('resize', reposition), () => visualViewport?.removeEventListener('resize', reposition));
     this.transport = new ReconnectingSocket({
@@ -368,6 +370,12 @@ export class HerdrView {
   }
   private select(id: string) {
     const item = this.entries().find(item => item.terminalId === id);
+    if (this.tree) {
+      // Tapping another chip moves the open tree without selecting a terminal.
+      const anchor = this.strip.querySelector<HTMLElement>('[data-terminal="' + CSS.escape(id) + '"]');
+      if (item?.repo && id !== this.tree.repo && anchor) this.openTree(anchor, item.repo); else this.closeMenu();
+      return;
+    }
     const panes = (space: HerdrSpace) => this.tracker.agents.filter(agent => space.terminalIds.includes(agent.terminalId))
       .map(agent => ({ terminalId: agent.terminalId, status: this.tracker.status(agent), sequence: agent.sequence, completion: this.tracker.completion(agent.terminalId) }));
     // Tapping the selected chip opens its tree, as does tapping another repository when the tree setting is chosen.
@@ -601,6 +609,7 @@ export class HerdrView {
     this.menu.hidden = true; this.tree = undefined; this.renaming = false;
     this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.touchAction = this.menu.style.width = '';
     this.treeBridge.hidden = true; this.screen.classList.remove('herdr-screen-dim');
+    this.strip.classList.remove('herdr-tree-open');
     for (const anchor of this.strip.querySelectorAll('.herdr-tree-anchor')) anchor.classList.remove('herdr-tree-anchor');
   }
   /** A repository's spaces, panes and worktree actions open as a tree attached to its chip. */
@@ -608,6 +617,7 @@ export class HerdrView {
     if (this.dialogs.active) return;
     this.closeMenu(); anchor.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     this.tree = { repo: repo.id, signature: '' };
+    this.strip.classList.add('herdr-tree-open');
     this.menu.role = 'dialog'; this.menu.setAttribute('aria-label', repo.name + ' spaces'); this.menu.classList.add('herdr-tree');
     this.menu.hidden = false; this.screen.classList.add('herdr-screen-dim');
     this.refreshTree(true);
@@ -631,7 +641,8 @@ export class HerdrView {
     // Phones get a full-width tree; wider screens keep it beside its chip.
     const parent = this.element.getBoundingClientRect(), rect = anchor.getBoundingClientRect(), width = parent.width > 560 ? 420 : parent.width - 16;
     const preferredLeft = Math.max(8, Math.min(rect.left - parent.left, parent.width - width - 8));
-    const bridgeLeft = Math.max(parent.left, rect.left), bridgeRight = Math.min(parent.right, rect.right);
+    const strip = this.strip.getBoundingClientRect();
+    const bridgeLeft = Math.max(parent.left, strip.left, Math.min(strip.right, rect.left)), bridgeRight = Math.min(parent.right, strip.right, Math.max(strip.left, rect.right));
     const left = Math.min(preferredLeft, bridgeLeft - parent.left), right = Math.max(preferredLeft + width, bridgeRight - parent.left);
     this.menu.style.width = right - left + 'px';
     this.menu.style.left = left + 'px';
@@ -643,7 +654,7 @@ export class HerdrView {
     this.menu.style.setProperty('--herdr-tree-left-gap', Math.max(0, bridgeLeft - menu.left) + 'px');
     this.menu.style.setProperty('--herdr-tree-right-gap', Math.max(0, menu.right - bridgeRight) + 'px');
     Object.assign(this.treeBridge.style, { left: bridgeLeft + 'px', width: bridgeRight - bridgeLeft + 'px', top: menu.bottom - 1 + 'px', height: Math.max(0, rect.top - menu.bottom + 3) + 'px' });
-    this.treeBridge.hidden = false;
+    this.treeBridge.hidden = bridgeRight <= bridgeLeft;
   }
   private buildTree(repo: SpaceRepo) {
     const grabber = node('div', 'herdr-tree-grabber'); grabber.setAttribute('aria-hidden', 'true');
