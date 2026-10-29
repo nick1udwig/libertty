@@ -64,7 +64,7 @@ try {
   const preview = page.locator('.herdr-screen iframe');
   await preview.waitFor({ state: 'attached' });
   assert.match(await preview.getAttribute('src'), /herdrPreview=1/, 'Cached metadata mounts only an unauthorized preview');
-  await page.frameLocator('.herdr-screen iframe').locator('#terminal canvas').waitFor({ state: 'attached' });
+  await page.frameLocator('.herdr-screen iframe').locator('#terminal .gespenst__background').waitFor({ state: 'attached' });
   const previewTickets = terminalTickets; await delay(500);
   assert.equal(terminalTickets, previewTickets, 'Cached metadata cannot attach stale terminal identities');
   const previewElement = await preview.elementHandle();

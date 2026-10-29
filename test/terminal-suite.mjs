@@ -75,7 +75,7 @@ try {
       if (orb && !orb.hidden && orb.dataset.states.split(' ').includes('connection')) window.__handoff.banner = true;
       if (layer && !layer.hidden) window.__handoff.cover = true;
     }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-states'] });
-    CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); window.__paintStyled?.push([text, String(this.fillStyle)]); return paint.call(this, text, ...args); };
+    CanvasRenderingContext2D.prototype.fillText = function(text, ...args) { if (window.__paint) window.__paint.push(text); window.__paintStyled?.push(...Array.from(text, char => [char, String(this.fillStyle)])); return paint.call(this, text, ...args); };
     const Original = window.WebSocket;
     window.WebSocket = class extends Original {
       constructor(...args) { super(...args); this.addEventListener('message', async event => { const message = await window.__wireMessage(event.data, this); if (message.type === 'repair-result') window.__lastRepairResult = message; if (message.type === 'hello') window.__engineMode = message.engine; if (message.type === 'state') window.__shellState = message.state; if (message.type === 'output') window.__terminalOutput = (window.__terminalOutput || '') + message.data; }); }
@@ -126,7 +126,7 @@ try {
     await page.clock.runFor(800); await page.evaluate(() => window.__paint = []); await page.clock.runFor(800);
     assert.equal(await page.evaluate(() => window.__paint.length), 0, 'An unfocused stationary prompt stops painting');
     await command(page, "printf 'idle-history-%s\\n' {1..100}");
-    await page.locator('#terminal canvas').hover(); await page.mouse.wheel(0, -1000);
+    await page.locator('#terminal .gespenst__background').hover(); await page.mouse.wheel(0, -1000);
     await page.locator('#terminal textarea').evaluate(el => el.blur());
     await page.clock.runFor(2000); await page.evaluate(() => window.__paint = []); await page.clock.runFor(800);
     assert.equal(await page.evaluate(() => window.__paint.length), 0, 'Stationary scrollback stops painting');
@@ -244,7 +244,7 @@ try {
     assert.equal(await page.locator('#alternatives-toggle').isVisible(), true);
     await page.locator('#alternatives-toggle').click();
     assert.equal(await page.locator('#alternatives-menu').isVisible(), true);
-    await page.locator('#terminal canvas').click({ position: { x: 10, y: 300 } });
+    await page.locator('#terminal .gespenst__background').click({ position: { x: 10, y: 300 } });
     assert.equal(await page.locator('#alternatives-menu').isVisible(), false);
     assert.equal(await page.locator('#alternatives-toggle').isVisible(), true);
     await page.locator('#alternatives-toggle').click();
@@ -497,7 +497,7 @@ try {
     assert.equal(await distance(), reading, 'Live output keeps the reading position');
     await track.press('End');
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');
-    await page.waitForSelector('#terminal canvas');
+    await page.waitForSelector('#terminal .gespenst__background');
     await until(async () => !!await paintedStyles('red-proof'), 'retained output painted by the terminal');
     const cachedRed = await paintedStyles('red-proof'), cachedPlain = await paintedStyles('offline-history-proof');
     assert.equal(new Set(cachedRed).size, 1); assert.notEqual(cachedRed[0], cachedPlain[0], 'Retained output keeps its colors');

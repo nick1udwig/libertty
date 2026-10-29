@@ -70,7 +70,7 @@ try {
   await context.route('**/api/dictation**', route => route.fulfill({ json: { installed: true, available: true } }));
   await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
-    const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
+    const body = original.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__testTerminal=new $1({fontSize:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
   });
 

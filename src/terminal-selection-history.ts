@@ -1,4 +1,4 @@
-import type { Terminal } from 'ghostty-web';
+import type { Terminal } from './terminal-adapter.ts';
 
 interface Cell { chars: string; width: number }
 interface Line { cells: Cell[]; wrapped: boolean; key: string }

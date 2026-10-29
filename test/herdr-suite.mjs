@@ -77,7 +77,7 @@ try {
   page.on('request', request => { if (/herdr-view|api\/herdr/.test(request.url())) network.push('request ' + request.url()); });
   await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
-    const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:').replace(/([\w$]+)=([\w$]+)\?new ([\w$]+)\(([\w$]+),([\w$]+)\):void 0/, '$1=$2?(window.__testProjection=new $3($4,$5)):void 0');
+    const body = original.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__testTerminal=new $1({fontSize:').replace(/([\w$]+)=([\w$]+)\?new ([\w$]+)\(([\w$]+),([\w$]+\.ghostty)\):void 0/, '$1=$2?(window.__testProjection=new $3($4,$5)):void 0');
     assert.notEqual(body, original); assert.ok(body.includes('window.__testProjection')); await route.fulfill({ response, body });
   });
   await installWireObserver(context);
@@ -333,7 +333,7 @@ try {
     assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.resize' && a.params.cols === nativeSize.cols), 'Mobile screen changes resize the real terminal');
     await desktop.close(); await page.bringToFront(); await page.setViewportSize({ width: 390, height: 844 });
     await terminal.waitForFunction(cols => window.__testTerminal.cols === cols && !document.querySelector('#terminal-viewport').classList.contains('awaiting-herdr-layout') && getComputedStyle(frameElement).visibility !== 'hidden', mobileSize.cols);
-    const canvas = await terminal.locator('#terminal canvas').boundingBox(), x = canvas.x + canvas.width / 2, y = canvas.y + canvas.height / 2;
+    const canvas = await terminal.locator('#terminal .gespenst__background').boundingBox(), x = canvas.x + canvas.width / 2, y = canvas.y + canvas.height / 2;
     await touch('touchStart', x, y); await delay(30); await touch('touchMove', x, y + 75); await touch('touchEnd'); await delay(100);
     assert.ok(await terminal.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Herdr uses normal touch scrolling');
     assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Scrolling leaves the keyboard closed');
@@ -347,7 +347,7 @@ try {
     const historyOffset = await terminal.evaluate(() => window.__testTerminal.getViewportY()); await delay(200);
     assert.ok(Math.abs(await terminal.evaluate(() => window.__testTerminal.getViewportY()) - historyOffset) < 1e-6, 'Live cursor frames preserve the scrolled viewport');
     const historyWord = await terminal.evaluate(() => {
-      const term = window.__testTerminal, rect = document.querySelector('#terminal canvas').getBoundingClientRect();
+      const term = window.__testTerminal, rect = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
       const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
       for (let row = Math.floor(term.rows / 3); row < term.rows - 2; row++) {
         const col = term.buffer.active.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1;
@@ -365,7 +365,7 @@ try {
     clearInterval(liveOutput); await terminal.evaluate(() => clearInterval(window.__cursorFrames));
     await delay(800); await terminal.evaluate(() => window.__testTerminal.scrollToBottom()); await delay(80);
     const wordPoint = await terminal.evaluate(() => {
-      const term = window.__testTerminal, rect = document.querySelector('#terminal canvas').getBoundingClientRect();
+      const term = window.__testTerminal, rect = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
       const top = term.buffer.active.length - term.rows;
       for (let row = 0; row < term.rows; row++) {
         const col = term.buffer.active.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1;
@@ -386,7 +386,7 @@ try {
     });
     for (const [label, url] of [['https://', plainURL], ['Open help', helpURL]]) {
       const point = await terminal.evaluate(label => {
-        const term = window.__testTerminal, rect = document.querySelector('#terminal canvas').getBoundingClientRect();
+        const term = window.__testTerminal, rect = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
         const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
         for (let row = 0; row < term.rows; row++) {
           const col = term.buffer.active.getLine(top + row)?.translateToString(true).indexOf(label) ?? -1;
@@ -394,7 +394,7 @@ try {
         }
         throw new Error('No terminal link: ' + label);
       }, label);
-      const bounds = await terminal.locator('#terminal canvas').boundingBox(), opened = page.waitForEvent('popup');
+      const bounds = await terminal.locator('#terminal .gespenst__background').boundingBox(), opened = page.waitForEvent('popup');
       await touch('touchStart', bounds.x + point.x, bounds.y + point.y); await touch('touchEnd');
       const popup = await opened; await popup.waitForLoadState(); assert.equal(popup.url(), url); await popup.close(); await page.bringToFront();
       assert.equal(await terminal.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Link taps leave terminal input closed');
@@ -424,11 +424,11 @@ try {
     await terminal.locator('#terminal-viewport').evaluate(el => el.scrollLeft = 0); await terminal.evaluate(() => window.__testTerminal.scrollToBottom());
     await page.evaluate(() => navigator.clipboard.writeText('copy sentinel'));
     const wideWord = await terminal.evaluate(() => {
-      const term = window.__testTerminal, rect = document.querySelector('#terminal canvas').getBoundingClientRect(), top = term.buffer.active.length - term.rows;
+      const term = window.__testTerminal, rect = document.querySelector('#terminal .gespenst__background').getBoundingClientRect(), top = term.buffer.active.length - term.rows;
       for (let row = 0; row < term.rows; row++) { const col = term.buffer.active.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1; if (col >= 0) return { x: (col + 2) * rect.width / term.cols, y: (row + .5) * rect.height / term.rows }; }
       throw new Error('No full-width word for selection');
     });
-    const wideCanvas = await terminal.locator('#terminal canvas').boundingBox();
+    const wideCanvas = await terminal.locator('#terminal .gespenst__background').boundingBox();
     await touch('touchStart', wideCanvas.x + wideWord.x, wideCanvas.y + wideWord.y); await delay(450); await touch('touchEnd');
     await page.locator('#notice-bubble').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'alpha', 'Full-width mode retains hold-to-copy');
@@ -574,10 +574,10 @@ try {
     });
     assert.match(await preview.getAttribute('src'), /herdrPreview=1/, 'Cached metadata mounts only an unauthorized preview');
     const previewFrame = page.frameLocator('.herdr-screen > iframe.herdr-terminal');
-    assert.ok(await previewFrame.locator('#terminal canvas').evaluate(canvas => {
-      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data, background = pixels.slice(0, 3);
+    assert.ok(await previewFrame.locator('#terminal .gespenst__text').evaluate(canvas => {
+      const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
       let painted = 0;
-      for (let i = 0; i < pixels.length; i += 4) if (Math.abs(pixels[i] - background[0]) + Math.abs(pixels[i + 1] - background[1]) + Math.abs(pixels[i + 2] - background[2]) > 60) painted++;
+      for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] > 0) painted++;
       return painted > 100;
     }), 'The preview paints retained output');
     await delay(300);

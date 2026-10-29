@@ -40,7 +40,7 @@ try {
   const frame = await (await page.locator('#terminal-stack iframe').elementHandle()).contentFrame();
   await frame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected');
   await frame.waitForFunction(() => document.querySelector('#shell-status')?.textContent === 'At prompt');
-  await frame.locator('#terminal canvas').click();
+  await frame.locator('#terminal .gespenst__background').click();
   assert.equal(await frame.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Clicking the terminal must enable input');
   await page.keyboard.type('printf dev-paired > checked.txt'); await page.keyboard.press('Enter');
   for (let i = 0; await readFile(directory + '/checked.txt', 'utf8').catch(() => '') !== 'dev-paired'; i++) {

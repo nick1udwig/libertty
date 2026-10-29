@@ -41,7 +41,7 @@ try {
     }, { accessToken, theme });
     await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
       const response = await route.fetch(), original = await response.text();
-      const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
+      const body = original.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__terminal=new $1({fontSize:');
       assert.notEqual(body, original); await route.fulfill({ response, body });
     });
     let session = 'selection-herdr';
@@ -60,7 +60,7 @@ try {
     await frame.waitForFunction(() => window.__terminal.buffer.active.length > 100);
     assert.equal(await frame.evaluate(() => document.documentElement.dataset.theme || 'forest'), theme);
     const word = await frame.evaluate(() => {
-      const t = window.__terminal, b = t.buffer.active, rect = document.querySelector('#terminal canvas').getBoundingClientRect(), top = b.length - t.rows;
+      const t = window.__terminal, b = t.buffer.active, rect = document.querySelector('#terminal .gespenst__background').getBoundingClientRect(), top = b.length - t.rows;
       for (let row = Math.floor(t.rows / 3); row < t.rows - 2; row++) {
         const col = b.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1;
         if (col >= 0) return { x: rect.x + col * rect.width / t.cols, y: rect.y + row * rect.height / t.rows, width: 5 * rect.width / t.cols, height: rect.height / t.rows };

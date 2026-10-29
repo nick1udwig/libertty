@@ -1,4 +1,5 @@
-import type { GhosttyCell, Terminal } from 'ghostty-web';
+import type { GhosttyCell } from './terminal-core.ts';
+import type { Terminal } from './terminal-adapter.ts';
 
 /** The screen rows of the last content line and the cursor, so a repaint keeps the same layout. */
 export interface TerminalPicture { last: number; x: number; y: number; cursor: boolean }

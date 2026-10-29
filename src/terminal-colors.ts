@@ -1,6 +1,4 @@
-import type { ITheme } from 'ghostty-web';
-
-type ColorRenderer = { rgbToCSS(r: number, g: number, b: number): string };
+import type { ITheme, Terminal } from './terminal-adapter.ts';
 
 const linear = (c: number) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
 const encoded = (c: number) => Math.round(255 * (c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055));
@@ -45,16 +43,15 @@ const cellColors = ['foreground', 'background', 'black', 'red', 'green', 'yellow
 
 // Agents in Herdr panes, and programs whose background query goes unanswered, paint for a dark terminal.
 // Light themes keep their own palette and flip the lightness of every other color, so dark input boxes, diffs and code blocks render light.
-export function adaptDarkAppColors(renderer: ColorRenderer | undefined, theme: ITheme) {
-  if (typeof renderer?.rgbToCSS !== 'function') return;
+export function adaptDarkAppColors(term: Pick<Terminal, 'setColorTransform'>, theme: ITheme) {
   // Only colors a cell can carry count as the theme's own, so an app's white text still flips even though Paper's cursor accent is white.
   const own = new Set(cellColors.map(name => theme[name]).filter((value): value is string => !!value).map(hex));
-  const plain = renderer.rgbToCSS.bind(renderer), flipped = new Map<number, string>();
-  renderer.rgbToCSS = (r, g, b) => {
+  const flipped = new Map<number, [number, number, number]>();
+  term.setColorTransform((r, g, b) => {
     const key = r << 16 | g << 8 | b;
-    if (own.has(key)) return plain(r, g, b);
-    let css = flipped.get(key);
-    if (css === undefined) { css = plain(...flipLightness(r, g, b, theme)); flipped.set(key, css); }
-    return css;
-  };
+    if (own.has(key)) return [r, g, b];
+    let color = flipped.get(key);
+    if (color === undefined) { color = flipLightness(r, g, b, theme); flipped.set(key, color); }
+    return color;
+  });
 }

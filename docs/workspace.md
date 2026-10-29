@@ -348,3 +348,15 @@ Only a socket with initial application state is healthy.
 Authorization has a 15-second budget, followed by eight seconds without progress for a WebSocket handshake or initial state.
 Measured slow links and repeated failures can extend that idle budget to 15 seconds, and the complete attempt is bounded to 45 seconds.
 Each successful connection phase or initial replay message renews the idle deadline.
+
+## Terminal engine
+
+The browser uses `@gespenst/core` 0.2.0 with its unchanged Ghostty WASM and callback bridge.
+The browser terminal and its headless projection terminals share one WASM runtime per view.
+`terminal-adapter.ts`, `terminal-core.ts`, and `terminal-buffer.ts` preserve the synchronous APIs that Libertty uses.
+The adapter uses Canvas 2D on the main thread because predicted echo, link detection, snapshots, and projection reads need synchronous terminal state.
+Worker and GPU modes are not enabled by this migration.
+The version-scoped adapter accesses Gespenst's local backend to share state, schedule paints, suppress its blink interval, and leave resize ownership with Libertty.
+Review these private integration points when upgrading Gespenst.
+Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
+Reconnect and resize covers combine the background and text canvases.
