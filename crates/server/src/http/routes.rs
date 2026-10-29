@@ -16,7 +16,7 @@ mod ssh_routes;
 #[path = "routes/terminal.rs"]
 mod terminal_routes;
 
-fn ok(value: Value) -> Result<Response<Body>, Failure> {
+fn ok(value: impl serde::Serialize) -> Result<Response<Body>, Failure> {
     Ok(json_response(StatusCode::OK, value))
 }
 fn parse_query(uri: &Uri) -> Result<HashMap<String, String>, Failure> {

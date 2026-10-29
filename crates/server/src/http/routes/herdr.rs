@@ -137,7 +137,7 @@ pub(super) async fn api_herdr_notifications(
 
 pub(super) async fn api_herdr_snapshot(ctx: HerdrContext) -> Result<Response<Body>, Failure> {
     let target = ctx.target;
-    return ok(json!(target.snapshot().await.map_err(fail)?));
+    return ok(target.snapshot().await.map_err(fail)?);
 }
 
 pub(super) async fn api_herdr_images_upload(
