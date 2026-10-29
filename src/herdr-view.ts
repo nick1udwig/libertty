@@ -52,7 +52,6 @@ export class HerdrView {
   private menu = node('div', 'herdr-tab-menu');
   private dropIndicator = node('div', 'herdr-drop-indicator');
   private dropLabel = node('span', 'herdr-drop-label');
-  private treeBridge = node('div', 'herdr-tree-bridge');
   private tracker = new HerdrState();
   private preferences: Preferences;
   private transport!: ReconnectingSocket;
@@ -128,10 +127,9 @@ export class HerdrView {
     this.tabsToggle.type = 'button'; this.tabsToggle.setAttribute('aria-controls', 'terminal-tabs-drawer');
     this.tabsToggle.innerHTML = icon('<path d="m6 15 6-6 6 6"/>', 18, 2);
     this.tabsToggle.onclick = () => this.host.toggleTerminalTabs?.(); this.setTerminalTabsExpanded(false);
-    this.menu.role = 'menu'; this.menu.hidden = true; this.treeBridge.hidden = true; this.treeBridge.setAttribute('aria-hidden', 'true');
-    this.treeBridge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg"><path class="herdr-tree-bridge-fill"/><path class="herdr-tree-bridge-outline"/></svg>';
+    this.menu.role = 'menu'; this.menu.hidden = true;
     this.dropIndicator.hidden = true; this.dropIndicator.setAttribute('aria-hidden', 'true');
-    this.dropIndicator.append(this.dropLabel); document.body.append(this.dropIndicator, this.treeBridge);
+    this.dropIndicator.append(this.dropLabel); document.body.append(this.dropIndicator);
     const viewed = () => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     this.frames = new HerdrFrames(this.screen, {
       url: host.url, session: host.session, source: host.source,
@@ -181,7 +179,7 @@ export class HerdrView {
       if (!sheet || event.pointerId !== sheet.id) return;
       const distance = event.clientY - sheet.y;
       if (!sheet.dragging && (distance < 10 || this.menu.scrollTop > 0)) return;
-      sheet.dragging = true; this.treeBridge.hidden = true; this.menu.style.transform = 'translateY(' + Math.max(0, distance) + 'px)';
+      sheet.dragging = true; this.strip.classList.add('herdr-tree-adrift'); this.menu.style.transform = 'translateY(' + Math.max(0, distance) + 'px)';
     });
     const release = (event: PointerEvent) => {
       if (!sheet || event.pointerId !== sheet.id) return;
@@ -194,7 +192,7 @@ export class HerdrView {
     // A swipe that returns to its start must not also press the control it began on.
     this.menu.addEventListener('click', event => { if (swiped) { event.preventDefault(); event.stopPropagation(); swiped = false; } }, true);
     const reposition = () => { if (this.tree) this.refreshTree(); };
-    this.strip.addEventListener('scroll', reposition);
+    this.strip.addEventListener('scroll', () => { if (this.tree) this.alignTreeJoint(); }, { passive: true });
     window.addEventListener('resize', reposition); visualViewport?.addEventListener('resize', reposition);
     this.unsubscribers.push(() => window.removeEventListener('resize', reposition), () => visualViewport?.removeEventListener('resize', reposition));
     this.transport = new ReconnectingSocket({
@@ -609,8 +607,8 @@ export class HerdrView {
   private closeMenu() {
     this.menu.hidden = true; this.tree = undefined; this.renaming = false;
     this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.touchAction = this.menu.style.width = '';
-    this.treeBridge.hidden = true; this.screen.classList.remove('herdr-screen-dim');
-    this.strip.classList.remove('herdr-tree-open');
+    this.screen.classList.remove('herdr-screen-dim');
+    this.strip.classList.remove('herdr-tree-open', 'herdr-tree-adrift');
     for (const anchor of this.strip.querySelectorAll('.herdr-tree-anchor')) anchor.classList.remove('herdr-tree-anchor');
   }
   /** A repository's spaces, panes and worktree actions open as a tree attached to its chip. */
@@ -639,31 +637,30 @@ export class HerdrView {
     }
     for (const other of this.strip.querySelectorAll('.herdr-tree-anchor')) if (other !== anchor) other.classList.remove('herdr-tree-anchor');
     anchor.classList.add('herdr-tree-anchor');
-    // Phones get a full-width tree; wider screens keep it beside its chip.
-    const parent = this.element.getBoundingClientRect(), rect = anchor.getBoundingClientRect(), width = parent.width > 560 ? 420 : parent.width - 16;
-    const preferredLeft = Math.max(8, Math.min(rect.left - parent.left, parent.width - width - 8));
-    const strip = this.strip.getBoundingClientRect();
-    const bridgeLeft = Math.max(parent.left, strip.left, Math.min(strip.right, rect.left)), bridgeRight = Math.min(parent.right, strip.right, Math.max(strip.left, rect.right));
-    const joined = bridgeRight > bridgeLeft;
-    const left = joined ? Math.min(preferredLeft, bridgeLeft - parent.left) : preferredLeft, right = joined ? Math.max(preferredLeft + width, bridgeRight - parent.left) : preferredLeft + width;
-    this.menu.style.width = right - left + 'px';
-    this.menu.style.left = left + 'px';
-    this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 10) + 'px';
+    // The tree rests on the strip and stays put while the strip scrolls, so phones get a full-width tree and wider screens keep it beside its chip.
+    const parent = this.element.getBoundingClientRect(), strip = this.strip.getBoundingClientRect(), rect = anchor.getBoundingClientRect(), wide = parent.width > 560;
+    const width = wide ? Math.min(strip.width, Math.max(420, rect.width + 48)) : strip.width;
+    let left = wide ? Math.max(strip.left + 8, Math.min(rect.left - 24, strip.right - width - 8)) : strip.left;
+    // A chip near the strip's edge pulls the tree flush with that edge so the chip's joint stays under the tree.
+    if (rect.left - 8 < left) left = strip.left; else if (rect.right + 8 > left + width) left = strip.right - width;
+    this.menu.style.width = width + 'px';
+    this.menu.style.left = left - parent.left + 'px';
+    this.menu.style.top = Math.max(8, strip.top - parent.top - this.menu.offsetHeight) + 'px';
     // Without overflow the whole tree can be swiped away; otherwise only its grab bar can.
     this.menu.style.touchAction = this.menu.scrollHeight > this.menu.clientHeight ? '' : 'none';
-    // The bridge joins the tree to its chip so it reads as that chip's own panel.
-    const menu = this.menu.getBoundingClientRect();
-    const leftGap = Math.max(0, bridgeLeft - menu.left), rightGap = Math.max(0, menu.right - bridgeRight);
-    const leftShoulder = Math.min(8, leftGap), rightShoulder = Math.min(8, rightGap);
-    const bridgeWidth = Math.max(0, bridgeRight - bridgeLeft), bridgeHeight = Math.max(0, rect.top - menu.bottom + 3);
-    this.menu.style.setProperty('--herdr-tree-left-gap', joined ? leftGap - leftShoulder + 'px' : 'var(--r-lg)');
-    this.menu.style.setProperty('--herdr-tree-right-gap', joined ? rightGap - rightShoulder + 'px' : 'var(--r-lg)');
-    Object.assign(this.treeBridge.style, { left: bridgeLeft + 'px', width: bridgeWidth + 'px', top: menu.bottom - 1 + 'px', height: bridgeHeight + 'px' });
-    const leftCurve = `M ${-leftShoulder} .5 Q .5 .5 .5 ${leftShoulder + .5} V ${bridgeHeight}`;
-    const rightCurve = `M ${bridgeWidth + rightShoulder} .5 Q ${bridgeWidth - .5} .5 ${bridgeWidth - .5} ${rightShoulder + .5} V ${bridgeHeight}`;
-    this.treeBridge.querySelector('.herdr-tree-bridge-fill')!.setAttribute('d', `${leftCurve} H ${bridgeWidth - .5} V ${rightShoulder + .5} Q ${bridgeWidth - .5} .5 ${bridgeWidth + rightShoulder} .5 V 0 H ${-leftShoulder} Z`);
-    this.treeBridge.querySelector('.herdr-tree-bridge-outline')!.setAttribute('d', (rect.left >= strip.left ? leftCurve : '') + (rect.right <= strip.right ? rightCurve : ''));
-    this.treeBridge.hidden = !joined;
+    // The joint belongs to the chip inside the strip, so native scrolling moves it with the chip in the same frame.
+    this.strip.style.setProperty('--herdr-tree-line-left', left - strip.left + 'px');
+    this.strip.style.setProperty('--herdr-tree-line-width', width + 'px');
+    anchor.style.setProperty('--herdr-tree-reach', anchor.offsetTop + anchor.clientTop + 'px');
+    this.alignTreeJoint();
+  }
+  /** A chip outside a narrower tree, or under a tree being swiped away, drops its joint. */
+  private alignTreeJoint() {
+    const anchor = this.strip.querySelector('.herdr-tree-anchor');
+    if (!anchor) return;
+    const strip = this.strip.getBoundingClientRect(), menu = this.menu.getBoundingClientRect(), rect = anchor.getBoundingClientRect();
+    const joined = !this.menu.style.transform && Math.max(strip.left, rect.left - 8) >= menu.left - .5 && Math.min(strip.right, rect.right + 8) <= menu.right + .5;
+    this.strip.classList.toggle('herdr-tree-adrift', !joined);
   }
   private buildTree(repo: SpaceRepo) {
     const grabber = node('div', 'herdr-tree-grabber'); grabber.setAttribute('aria-hidden', 'true');
@@ -786,7 +783,7 @@ export class HerdrView {
   dispose() {
     if (this.disposed) return; this.disposed = true;
     this.writePreferences(); this.writeCache(); this.dialogs.active?.close();
-    this.dropIndicator.remove(); this.treeBridge.remove();
+    this.dropIndicator.remove();
     clearTimeout(this.recoveryRetry); this.transport.suspend(); this.frames.dispose(); this.strip.remove(); this.element.remove();
     for (const unsubscribe of this.unsubscribers) unsubscribe();
   }
