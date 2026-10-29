@@ -53,6 +53,7 @@ A Herdr tab shows its own connection state and the state of its selected pane in
 Selection copies and selection warnings also use the orb.
 While a Herdr tab or pane loads behind a previous picture, the orb's ring turns instead of a pill covering the picture.
 A loading cover shows only over an empty screen, and dialog form errors stay beside their fields.
+The orb draws once after a burst of changes, such as a tab switch, so it reads layout once.
 
 Each frame connects directly to its chosen backend.
 Origin/source-checked messages supply access credentials; iframe URLs contain a backend URL and session ID, never tokens or passphrases.

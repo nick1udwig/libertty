@@ -29,7 +29,7 @@ const time = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digi
 /** One orb owns every notice: new ones unfurl beside it, and tapping it lists current and earlier notices. */
 export class NoticeCenter {
   readonly orb = node('button', 'notice-orb');
-  private model = new NoticeModel(() => this.render());
+  private model = new NoticeModel(() => this.schedule());
   private ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   private center = node('span', 'notice-orb-mark');
   private badge = node('span', 'notice-badge');
@@ -41,6 +41,7 @@ export class NoticeCenter {
   private drag?: { pointer: number; x: number; y: number; moved: boolean };
   private swipe?: { pointer: number; x: number; y: number; dx: number; moved: boolean };
   private dragged = false;
+  private queued = false;
 
   constructor(root: HTMLElement = document.body) {
     this.orb.type = 'button'; this.orb.id = 'notice-orb'; this.orb.hidden = true;
@@ -88,6 +89,13 @@ export class NoticeCenter {
     if (open === this.open) return;
     this.open = open;
     if (this.model.presented) this.model.fold(); else this.render();
+  }
+
+  /** Draw once after a burst of changes, such as a tab switch, so layout is read once. */
+  private schedule() {
+    if (this.queued) return;
+    this.queued = true;
+    queueMicrotask(() => { this.queued = false; this.render(); });
   }
 
   private render() {
