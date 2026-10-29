@@ -55,7 +55,8 @@ pub type InputHub = Hub<InputState>;
 type Update<T> = Option<Result<T, Arc<str>>>;
 struct Resource<T> {
     send: watch::Sender<Update<T>>,
-    users: Mutex<usize>,
+    users: Mutex<Vec<(Arc<()>, Duration)>>,
+    demand: Notify,
     cancel: CancellationToken,
     refresh: Arc<Notify>,
     activity: Notify,
@@ -84,14 +85,41 @@ pub struct Subscription<T> {
     /// Forces the next read to deliver its value even when it is unchanged.
     pub refresh: Arc<Notify>,
     resource: Arc<Resource<T>>,
+    user: Arc<()>,
+}
+impl<T> Resource<T> {
+    fn interval(&self, minimum: Duration) -> Duration {
+        self.users
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, delay)| *delay)
+            .min()
+            .unwrap_or_default()
+            .max(minimum)
+    }
+}
+impl<T> Subscription<T> {
+    pub fn set_interval(&self, interval: Duration) {
+        let mut users = self.resource.users.lock().unwrap();
+        let (_, delay) = users
+            .iter_mut()
+            .find(|(user, _)| Arc::ptr_eq(user, &self.user))
+            .unwrap();
+        if *delay != interval {
+            *delay = interval;
+            self.resource.demand.notify_one();
+        }
+    }
 }
 impl<T> Drop for Subscription<T> {
     fn drop(&mut self) {
         let mut users = self.resource.users.lock().unwrap();
-        *users -= 1;
-        if *users == 0 {
+        users.retain(|(user, _)| !Arc::ptr_eq(user, &self.user));
+        if users.is_empty() {
             self.resource.cancel.cancel();
         }
+        self.resource.demand.notify_one();
     }
 }
 impl<P: Poll> Hub<P> {
@@ -109,23 +137,27 @@ impl<P: Poll> Hub<P> {
         pane: String,
     ) -> Result<Subscription<P::Value>, String> {
         let key = target.key(&pane)?;
+        let user = Arc::new(());
         let mut resources = self.resources.lock().unwrap();
         resources.retain(|_, resource| !resource.cancel.is_cancelled());
         if let Some(resource) = resources.get(&key) {
             let mut users = resource.users.lock().unwrap();
             if !resource.cancel.is_cancelled() {
-                *users += 1;
+                users.push((user.clone(), Duration::ZERO));
+                resource.demand.notify_one();
                 return Ok(Subscription {
                     receive: resource.send.subscribe(),
                     refresh: resource.refresh.clone(),
                     resource: resource.clone(),
+                    user,
                 });
             }
         }
         let (send, receive) = watch::channel(None);
         let resource = Arc::new(Resource {
             send,
-            users: Mutex::new(1),
+            users: Mutex::new(vec![(user.clone(), Duration::ZERO)]),
+            demand: Notify::new(),
             cancel: CancellationToken::new(),
             refresh: Arc::new(Notify::new()),
             activity: Notify::new(),
@@ -137,6 +169,7 @@ impl<P: Poll> Hub<P> {
             receive,
             refresh: resource.refresh.clone(),
             resource,
+            user,
         })
     }
 }
@@ -168,11 +201,20 @@ async fn run<P: Poll>(target: Target, pane: String, resource: Arc<Resource<P::Va
         let idle = if resource.streaming.load(Ordering::Acquire) {
             P::IDLE
         } else {
-            P::INTERVAL
+            resource.interval(P::INTERVAL)
         };
-        tokio::select! { biased; _=resource.cancel.cancelled()=>break, _=resource.refresh.notified()=>{force=true;}, _=resource.activity.notified()=>{}, _=tokio::time::sleep(idle)=>{} }
-        // A burst of frames still yields at most one read per interval.
-        tokio::select! { biased; _=resource.cancel.cancelled()=>break, _=resource.refresh.notified()=>{force=true;}, _=tokio::time::sleep_until(started + P::INTERVAL)=>{} }
+        tokio::select! { biased; _=resource.cancel.cancelled()=>break, _=resource.refresh.notified()=>{force=true;}, _=resource.activity.notified()=>{}, _=resource.demand.notified()=>{}, _=tokio::time::sleep(idle)=>{} }
+        // The fastest viewer sets the rate, and explicit refresh bypasses it.
+        while !force {
+            let deadline = started + resource.interval(P::INTERVAL);
+            tokio::select! {
+                biased;
+                _=resource.cancel.cancelled()=>return,
+                _=resource.refresh.notified()=>{force=true;},
+                _=resource.demand.notified()=>{},
+                _=tokio::time::sleep_until(deadline)=>break,
+            }
+        }
     }
 }
 /// The shared pane polls a Herdr viewer follows.
@@ -185,5 +227,52 @@ impl Polls {
     pub fn activity(&self, target: &Target, pane: &str, streaming: bool) {
         self.history.activity(target, pane, streaming);
         self.inputs.activity(target, pane, streaming);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn fastest_viewer_controls_polling_and_last_drop_cancels() {
+        let (send, receive) = watch::channel(None::<Result<(), Arc<str>>>);
+        let fast = Arc::new(());
+        let slow = Arc::new(());
+        let resource = Arc::new(Resource {
+            send,
+            users: Mutex::new(vec![
+                (fast.clone(), Duration::ZERO),
+                (slow.clone(), Duration::ZERO),
+            ]),
+            demand: Notify::new(),
+            cancel: CancellationToken::new(),
+            refresh: Arc::new(Notify::new()),
+            activity: Notify::new(),
+            streaming: AtomicBool::new(false),
+        });
+        let fast = Subscription {
+            receive: receive.clone(),
+            refresh: resource.refresh.clone(),
+            resource: resource.clone(),
+            user: fast,
+        };
+        let slow = Subscription {
+            receive,
+            refresh: resource.refresh.clone(),
+            resource: resource.clone(),
+            user: slow,
+        };
+        let minimum = Duration::from_millis(150);
+        slow.set_interval(Duration::from_secs(3));
+        assert_eq!(resource.interval(minimum), minimum);
+        fast.set_interval(Duration::from_secs(1));
+        assert_eq!(resource.interval(minimum), Duration::from_secs(1));
+        drop(fast);
+        assert_eq!(resource.interval(minimum), Duration::from_secs(3));
+        assert!(!resource.cancel.is_cancelled());
+        slow.set_interval(Duration::ZERO);
+        assert_eq!(resource.interval(minimum), minimum);
+        drop(slow);
+        assert!(resource.cancel.is_cancelled());
     }
 }
