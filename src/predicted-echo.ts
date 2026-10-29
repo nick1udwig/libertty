@@ -63,7 +63,7 @@ export class TerminalEcho {
       const buffer = term.buffer.active, row = Math.max(0, buffer.length - term.rows) + buffer.cursorY;
       const line = buffer.getLine(row);
       return { cols: term.cols, x: buffer.cursorX, row, cells: Array.from({ length: term.cols }, (_, x) => line?.getCell(x)?.getChars() || ' '),
-        visible: buffer.type === 'normal' && term.getViewportY() === 0 };
+        visible: buffer.type === 'normal' && term.getViewportY() === 0 && term.wasmTerm?.semantics.allowsPrediction !== false };
     };
     this.model = new EchoPrediction(screen, prediction => {
       clearTimeout(this.expiry);

@@ -375,3 +375,11 @@ A native snapshot is saved only when one transcript record matches the current s
 Restoration requires the exact WASM checksum and grid size, and corrupt or incompatible snapshots fall back to text.
 Multiple transcript records keep their text presentation so a native screen cannot hide older retained excerpts.
 Native snapshot bytes count toward the existing 8 MiB cache budget.
+
+Native OSC 133 callbacks expose the current shell phase, reported command, and optional exit status through `term.wasmTerm.semantics.state`.
+The last completed command remains available through `semantics.lastCommand` when completion and the next prompt arrive in one output chunk.
+The adapter uses two shared typed WASM callback trampolines per runtime and does not parse the output stream again.
+Command output and completion suppress predicted echo until the next prompt or input event.
+These markers only constrain prediction and never authorize input or replace server readiness.
+Terminals without shell markers keep the existing prediction rules.
+A full reset or native snapshot restoration clears advisory shell state, and restoration reattaches the callbacks to the new native handle.

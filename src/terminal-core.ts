@@ -1,3 +1,4 @@
+import { TerminalSemantics } from './terminal-semantics.ts';
 import { terminalMemoryUsage } from './terminal-memory.ts';
 import {
   createCoreRuntime,
@@ -29,6 +30,7 @@ export class Ghostty {
 export class GhosttyTerminal {
   readonly core: CoreTerminal;
   onWrite?: () => void;
+  readonly semantics: TerminalSemantics;
   private revision = -1;
   private bufferRows = new Map<number, TerminalBufferRow>();
   private colors?: RenderColors;
@@ -40,6 +42,7 @@ export class GhosttyTerminal {
 
   constructor(core: CoreTerminal, onWrite?: () => void, collectResponses = false) {
     this.core = core;
+    this.semantics = new TerminalSemantics(core);
     this.onWrite = onWrite;
     if (collectResponses) this.input = core.on('input', event => { if (event.source === 'reply') this.replies.push(event.data.slice()); });
     this.render = core.on('render', frame => {
@@ -50,7 +53,7 @@ export class GhosttyTerminal {
   get cols() { return this.core.geometry.cols; }
   get rows() { return this.core.geometry.rows; }
   write(data: string | Uint8Array) { this.core.write(data); this.onWrite?.(); }
-  restore(snapshot: Uint8Array) { this.core.restore(snapshot); this.onWrite?.(); }
+  restore(snapshot: Uint8Array) { this.core.restore(snapshot); this.semantics.attach(); this.onWrite?.(); }
   resize(cols: number, rows: number) { this.core.resize(cols, rows); this.onWrite?.(); }
   update() {
     const state = this.core.bufferState();
@@ -114,6 +117,7 @@ export class GhosttyTerminal {
   free() {
     if (this.disposed) return;
     this.disposed = true;
+    this.semantics.dispose();
     this.input?.dispose();
     this.render.dispose();
     this.replies = [];
