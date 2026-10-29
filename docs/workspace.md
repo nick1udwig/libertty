@@ -358,6 +358,8 @@ The adapter uses Canvas 2D on the main thread because predicted echo, link detec
 Worker and GPU modes are not enabled by this migration.
 The version-scoped adapter accesses Gespenst's local backend to share state, schedule paints, suppress its blink interval, and leave resize ownership with Libertty.
 Review these private integration points when upgrading Gespenst.
+Snapshots and projections read native cells without a legacy cell conversion.
+Styled transcripts retain underline variants and colors, overlines, explicit backgrounds, and OSC 8 links.
 Snapshot caches follow the core state revision so writes and cursor changes are visible before the next paint.
 Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
 Reconnect and resize covers combine the background and text canvases.

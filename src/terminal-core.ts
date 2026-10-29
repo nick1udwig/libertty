@@ -12,20 +12,6 @@ import {
   type TerminalTheme,
 } from '@gespenst/core/headless';
 
-export interface GhosttyCell {
-  codepoint: number;
-  fg_r: number;
-  fg_g: number;
-  fg_b: number;
-  bg_r: number;
-  bg_g: number;
-  bg_b: number;
-  flags: number;
-  width: number;
-  grapheme_len: number;
-  hyperlink_id: number;
-}
-
 export class Ghostty {
   readonly core: CoreRuntime;
   private defaults: CoreTerminalOptions;
@@ -43,7 +29,6 @@ export class GhosttyTerminal {
   onWrite?: () => void;
   private revision = -1;
   private bufferRows = new Map<number, TerminalBufferRow>();
-  private cells = new Map<number, GhosttyCell[]>();
   private colors?: RenderColors;
   private theme?: Readonly<TerminalTheme>;
   private replies: Uint8Array[] = [];
@@ -58,7 +43,6 @@ export class GhosttyTerminal {
     this.render = core.on('render', frame => {
       this.colors = frame.colors;
       this.theme = core.theme;
-      this.cells.clear();
     });
   }
   get cols() { return this.core.geometry.cols; }
@@ -70,7 +54,6 @@ export class GhosttyTerminal {
     if (state.revision !== this.revision) {
       this.revision = state.revision;
       this.bufferRows.clear();
-      this.cells.clear();
     }
     return state;
   }
@@ -95,7 +78,6 @@ export class GhosttyTerminal {
     if (!this.colors || this.theme !== this.core.theme) {
       this.theme = this.core.theme;
       this.colors = resolveTerminalTheme(this.theme);
-      this.cells.clear();
     }
     return this.colors;
   }
@@ -103,47 +85,22 @@ export class GhosttyTerminal {
     const state = this.update();
     if (!Number.isInteger(index) || index < 0 || index >= state.totalRows) return;
     if (!this.bufferRows.has(index)) {
-      if (this.bufferRows.size + 64 > 128) { this.bufferRows.clear(); this.cells.clear(); }
+      if (this.bufferRows.size + 64 > 128) { this.bufferRows.clear(); }
       const start = Math.floor(index / 64) * 64;
       for (const row of this.core.readBuffer({ start, end: Math.min(start + 64, state.totalRows) }).rows) this.bufferRows.set(row.index, row);
     }
     return this.bufferRows.get(index);
   }
-  private bufferLine(index: number) {
-    const row = this.getBufferRow(index);
-    if (!row) return undefined;
-    let cells = this.cells.get(index);
-    if (!cells) {
-      const foreground = this.getColors().foreground;
-      cells = row.cells.map(cell => this.cell(cell, foreground));
-      this.cells.set(index, cells);
-    }
-    return cells;
-  }
-  private cell(cell: RenderCell, foreground: RenderColors['foreground']): GhosttyCell {
-    const fg = cell.foreground ?? foreground, bg = cell.background;
-    const style = cell.style, length = Array.from(cell.text).length;
-    return {
-      codepoint: cell.text.codePointAt(0) ?? 0,
-      fg_r: fg.r, fg_g: fg.g, fg_b: fg.b,
-      bg_r: bg?.r ?? 0, bg_g: bg?.g ?? 0, bg_b: bg?.b ?? 0,
-      flags: +style.bold | +style.italic << 1 | +(style.underline !== 0) << 2 | +style.strikethrough << 3
-        | +style.inverse << 4 | +style.invisible << 5 | +style.blink << 6 | +style.faint << 7,
-      width: cell.width === 'wide' ? 2 : cell.width === 'narrow' ? 1 : 0,
-      grapheme_len: length > 1 ? length : 0,
-      hyperlink_id: cell.hyperlink ? 1 : 0,
-    };
-  }
   getLine(row: number) {
-    return Number.isInteger(row) && row >= 0 && row < this.rows ? this.bufferLine(this.getScrollbackLength() + row) : undefined;
+    return Number.isInteger(row) && row >= 0 && row < this.rows ? this.getBufferRow(this.getScrollbackLength() + row)?.cells : undefined;
   }
   getScrollbackLine(row: number) {
-    return Number.isInteger(row) && row >= 0 && row < this.getScrollbackLength() ? this.bufferLine(row) : undefined;
+    return Number.isInteger(row) && row >= 0 && row < this.getScrollbackLength() ? this.getBufferRow(row)?.cells : undefined;
   }
   /** Projection and snapshots always read the active screen, independent of viewport scrolling. */
   getViewport() {
-    const history = this.getScrollbackLength(), cells: GhosttyCell[] = [];
-    for (let row = 0; row < this.rows; row++) cells.push(...this.bufferLine(history + row)!);
+    const history = this.getScrollbackLength(), cells: RenderCell[] = [];
+    for (let row = 0; row < this.rows; row++) cells.push(...this.getBufferRow(history + row)!.cells);
     return cells;
   }
   getGraphemeString(row: number, col: number) { return this.getBufferRow(this.getScrollbackLength() + row)?.cells[col]?.text ?? ''; }
@@ -158,7 +115,6 @@ export class GhosttyTerminal {
     this.render.dispose();
     this.replies = [];
     this.bufferRows.clear();
-    this.cells.clear();
     this.core.dispose();
   }
 }

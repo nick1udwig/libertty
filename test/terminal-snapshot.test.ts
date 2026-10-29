@@ -3,27 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Terminal } from '../src/terminal-adapter.ts';
 import { Ghostty } from '../src/terminal-core.ts';
-import { terminalSnapshot, invalidateSnapshot } from '../src/terminal-snapshot.ts';
-
-test('snapshots reuse unchanged rows and refresh content, geometry and colors', () => {
-  let reads = 0;
-  const cell = { codepoint: 65, width: 1, flags: 1, fg_r: 255, fg_g: 255, fg_b: 255, bg_r: 0, bg_g: 0, bg_b: 0, grapheme_len: 0 };
-  const foreground = { r: 255, g: 255, b: 255 };
-  const native = { getRevision: () => 0, cols: 2, rows: 1, getColors: () => ({ foreground }), getScrollbackLength: () => 0, getCursor: () => ({ x: 0, y: 0, visible: true }), getViewport: () => { reads++; return [cell, cell]; } };
-  const term = { wasmTerm: native, buffer: { active: { type: 'normal' } } } as unknown as Terminal;
-  const first = terminalSnapshot(term);
-  assert.equal(first.text, '\x1b[0;1mAA\x1b[0m');
-  assert.equal(terminalSnapshot(term), first);
-  assert.equal(reads, 1);
-  cell.codepoint = 66; invalidateSnapshot(term);
-  assert.match(terminalSnapshot(term).text, /BB/);
-  native.cols = 1;
-  assert.match(terminalSnapshot(term).text, /mB\x1b/);
-  foreground.r = 0;
-  assert.match(terminalSnapshot(term).text, /38;2;255;255;255/);
-  assert.equal(reads, 4);
-});
-
+import { terminalSnapshot, plainText } from '../src/terminal-snapshot.ts';
 
 test('snapshots follow Gespenst revisions before rendering, including direct core writes and cursor changes', async () => {
   const ghostty = await Ghostty.load({
@@ -46,4 +26,32 @@ test('snapshots follow Gespenst revisions before rendering, including direct cor
     assert.match(terminalSnapshot(term).text, /next/);
     assert.equal(term.wasmTerm.core.render().dirty, 'full');
   } finally { term.wasmTerm.free(); ghostty.dispose(); }
+});
+
+test('styled snapshots preserve native cell attributes, colors, links and graphemes', async () => {
+  const ghostty = await Ghostty.load({
+    wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
+    callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+  });
+  const term = new Terminal({ cols: 30, rows: 3 });
+  term.wasmTerm = ghostty.createTerminal(30, 3);
+  const restored = ghostty.createTerminal(30, 3);
+  try {
+    term.write('e\u0301界😀\x1b[4:3;58:2::12:34:56;53;48;2;0;0;0mU \x1b[0m'
+      + '\x1b]8;;https://example.com/path\x1b\\\x1b[38;5;2mLINK\x1b]8;;\x1b\\\x1b[0m'
+      + '\r\n\x1b[4:2mD\x1b[4:4mT\x1b[4:5mH\x1b[0m\x1b[48;2;0;0;0m  \x1b[0m');
+    const snapshot = terminalSnapshot(term);
+    restored.write(snapshot.text.replaceAll('\n', '\r\n'));
+    const cells = (terminal: typeof restored, row: number) => terminal.getLine(row)!.map(cell => ({
+      text: cell.text, width: cell.width, style: cell.style, foreground: cell.foregroundSource,
+      background: cell.backgroundSource, underline: cell.underlineSource, link: cell.hyperlinkUri,
+    }));
+    assert.deepEqual(cells(restored, 0), cells(term.wasmTerm, 0));
+    assert.deepEqual(cells(restored, 1), cells(term.wasmTerm, 1));
+    assert.equal(plainText(snapshot.text), 'e\u0301界😀U LINK\nDTH  ');
+    assert.equal(term.wasmTerm.core.render().dirty, 'full');
+    assert.equal(terminalSnapshot(term), snapshot);
+    term.resize(25, 3);
+    assert.notEqual(terminalSnapshot(term), snapshot);
+  } finally { restored.free(); term.wasmTerm.free(); ghostty.dispose(); }
 });
