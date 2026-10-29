@@ -1,7 +1,7 @@
 import './notices.css';
 import { node } from './dom.ts';
 import { closeIcon } from './icons.ts';
-import { NoticeModel, type Notice, type NoticeInput, type NoticeKind } from './notice-model.ts';
+import { NoticeModel, urgent, type Notice, type NoticeInput, type NoticeKind } from './notice-model.ts';
 
 type Edge = 'corner' | 'left' | 'right';
 interface Placement { edge: Edge; y: number }
@@ -110,7 +110,7 @@ export class NoticeCenter {
       this.shown = presented; this.resetSwipe();
       // The bubble is its own live region, so its role is set before its new content shows.
       if (presented) {
-        this.bubble.role = ['error', 'warning'].includes(presented.kind) ? 'alert' : 'status';
+        this.bubble.role = urgent(presented.kind) ? 'alert' : 'status';
         this.bubble.classList.toggle('notice-passive', passive(presented));
         this.bubble.replaceChildren(this.item(presented, true));
       }

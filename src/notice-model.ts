@@ -1,5 +1,6 @@
-export type NoticeKind = 'progress' | 'error' | 'warning' | 'info' | 'done';
-export const noticeKinds: readonly NoticeKind[] = ['progress', 'error', 'warning', 'info', 'done'];
+/** Notice kinds from the least to the most severe. */
+export const noticeKinds = ['progress', 'done', 'info', 'warning', 'error'] as const;
+export type NoticeKind = typeof noticeKinds[number];
 export interface NoticeAction { label: string; run(): void }
 export interface NoticeInput { message: string; kind?: NoticeKind; source?: string; actions?: NoticeAction[] }
 export interface Notice { id: number; kind: NoticeKind; message: string; source?: string; actions: NoticeAction[]; at: number; key?: string }
@@ -10,7 +11,9 @@ export interface RemoteNotice { message: string; kind: NoticeKind; actions: { id
 export const noticeLifetimes: Partial<Record<NoticeKind, number>> = { done: 3000, info: 6000, progress: 6000 };
 const resumeAtLeast = 1500;
 const historyLimit = 20;
-const severity: Record<NoticeKind, number> = { progress: 0, done: 1, info: 2, warning: 3, error: 4 };
+const severity = (kind: NoticeKind) => noticeKinds.indexOf(kind);
+/** Errors and warnings interrupt the person and wait for them. */
+export const urgent = (kind: NoticeKind) => severity(kind) >= severity('warning');
 const signature = (notice: Notice) => [notice.key, notice.kind, notice.message, notice.source].join('\n');
 
 export function remoteNotice(data: unknown, fallback: NoticeKind): RemoteNotice | undefined {
@@ -46,7 +49,7 @@ export class NoticeModel {
   get progress() { return [...this.states.values()].some(notice => notice.kind === 'progress'); }
   /** Notices the person has not dismissed, excluding progress that resolves itself. */
   get unread() { return this.events.length + [...this.states.values()].filter(notice => notice.kind !== 'progress').length; }
-  get strongest() { return [...this.states.values(), ...this.events].filter(notice => notice.kind !== 'progress').sort((a, b) => severity[b.kind] - severity[a.kind] || b.at - a.at)[0]; }
+  get strongest() { return [...this.states.values(), ...this.events].filter(notice => notice.kind !== 'progress').sort((a, b) => severity(b.kind) - severity(a.kind) || b.at - a.at)[0]; }
   /** States first, then notices, newest first. */
   get current() { return [...this.states.values(), ...this.events]; }
 
@@ -83,7 +86,7 @@ export class NoticeModel {
     if (previous?.kind === kind) { notice.id = previous.id; notice.at = previous.at; }
     this.states.set(key, notice);
     if (this.presented === previous && previous) this.presented = notice;
-    else if (severity[kind] >= severity.warning && !this.folded.has(signature(notice))) this.presented = notice;
+    else if (urgent(kind) && !this.folded.has(signature(notice))) this.presented = notice;
     this.changed();
   }
 
