@@ -16,9 +16,11 @@ function loadPlacement(): Placement {
   return { edge: 'corner', y: 0 };
 }
 
-function mark(kind: NoticeKind) {
+/** The orb's own label names its mark, so only marks beside text are labelled. */
+function mark(kind: NoticeKind, labelled = true) {
   const element = node('span', 'notice-mark');
-  element.dataset.kind = kind; element.role = 'img'; element.ariaLabel = kindNames[kind];
+  element.dataset.kind = kind;
+  if (labelled) { element.role = 'img'; element.ariaLabel = kindNames[kind]; }
   return element;
 }
 
@@ -99,15 +101,14 @@ export class NoticeCenter {
   }
 
   private render() {
-    const model = this.model, strongest = model.strongest, edge = this.placement.edge;
+    const model = this.model, { strongest, progress, unread } = model, edge = this.placement.edge;
     this.orb.hidden = !model.active && !this.open;
     this.orb.dataset.edge = edge;
     this.orb.dataset.states = [...model.states.keys()].join(' ');
-    this.orb.classList.toggle('progress', model.progress);
+    this.orb.classList.toggle('progress', progress);
     this.orb.setAttribute('aria-expanded', String(this.open));
-    this.center.replaceChildren(...(strongest ? [mark(strongest.kind)] : model.progress && edge !== 'corner' ? [mark('progress')] : []));
-    this.center.firstElementChild?.removeAttribute('role');
-    this.badge.textContent = String(model.unread); this.badge.hidden = model.unread < 2;
+    this.center.replaceChildren(...(strongest ? [mark(strongest.kind, false)] : progress && edge !== 'corner' ? [mark('progress', false)] : []));
+    this.badge.textContent = String(unread); this.badge.hidden = unread < 2;
     const states = [...model.states.values()].map(notice => notice.message);
     this.orb.ariaLabel = ['Notices', ...states, model.events.length ? model.events.length + ' unread' : ''].filter(Boolean).join('. ');
 

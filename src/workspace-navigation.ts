@@ -122,8 +122,6 @@ export function createWorkspaceNavigation(options: Options) {
     $('workspace-navigation').hidden = !terminal;
     $('terminal-stack').hidden = !terminal;
     $('library').hidden = terminal;
-    // The library header keeps its corner buttons clear of the notice orb.
-    document.documentElement.style.setProperty('--notice-orb-offset', terminal ? '0px' : '56px');
     updateViewVisibility();
     if (terminal) {
       renderTabs();
