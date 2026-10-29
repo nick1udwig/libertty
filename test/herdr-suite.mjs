@@ -529,8 +529,11 @@ try {
     fixture.update(2, 'working');
     await until(async () => JSON.stringify(await lanes()) === JSON.stringify(['blocked:term_0', 'working:term_2', 'idle:term_1']), 'working lane');
     await tab(0).click(); await page.waitForFunction(() => document.querySelector('.herdr-agent-tab[data-terminal=term_0]').getAttribute('aria-selected') === 'true'); terminal = await agentFrame();
+    const pinnedTab = await tab(0).elementHandle();
     fixture.update(0, 'working');
     await until(async () => await tab(0).getAttribute('data-status') === 'working', 'answered request');
+    assert.equal(await pinnedTab.evaluate(element => element.isConnected), true, 'A status change keeps the existing pinned tab');
+    assert.match(await tab(0).getAttribute('aria-label'), /working/, 'Status labels update without replacing the tab');
     assert.deepEqual(await lanes(), ['blocked:term_0', 'working:term_2', 'idle:term_1'], 'The open tab keeps its lane');
     assert.equal(await tab(0).locator('.herdr-status-dot').isVisible(), true, 'A pinned tab shows its changed status');
     await tab(1).click(); await page.waitForFunction(() => document.querySelector('.herdr-agent-tab[data-terminal=term_1]').getAttribute('aria-selected') === 'true'); terminal = await agentFrame();
