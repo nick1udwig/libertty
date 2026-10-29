@@ -34,7 +34,7 @@ import { InlineSuggestions } from './inline-suggestions.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { defaults, keySequence, validateShortcuts, type Shortcut } from './shortcuts.ts';
 import { readingPhrases, readingRequest, readingPipeline, type ReadingOpen } from './reading-request.ts';
-import type { NoticeInput, NoticeKind } from './notice-model.ts';
+import { remoteActions, type NoticeKind, type RemoteNotice } from './notice-model.ts';
 import { NoticeCenter } from './notices.ts';
 const params = new URLSearchParams(location.search);
 const embedded = params.get('embedded') === '1' && parent !== window;
@@ -114,28 +114,26 @@ const frameScheduler = new OutputScheduler(drainHerdrFrames, () => tabVisible &&
 function scheduleDrain() { if (!tabVisible || document.hidden || herdrParked) return; frameQueued = true; outputFrame = requestAnimationFrame(drain); }
 // An embedded terminal sends notices to the workspace, which returns these action ids.
 const noticeActions = { redraw: () => rawInput('\x0c'), reconnect: () => transport.activity() };
-type NoticeActionId = keyof typeof noticeActions;
+type NoticeAction = { id: keyof typeof noticeActions; label: string };
+const runNoticeAction = (id: string) => { if (Object.hasOwn(noticeActions, id)) noticeActions[id as NoticeAction['id']](); };
 const notices = embedded ? undefined : new NoticeCenter();
+const localNotice = (notice: RemoteNotice) => ({ ...notice, actions: remoteActions(notice, runNoticeAction) });
 let connectionStatus = 'null';
-function noticeInput(message: string, kind: NoticeKind, actions: Partial<Record<NoticeActionId, string>>): NoticeInput {
-  return { message, kind, actions: Object.entries(actions).map(([id, label]) => ({ label, run: noticeActions[id as NoticeActionId] })) };
-}
-function toast(message: string, kind: NoticeKind = 'error', actions: Partial<Record<NoticeActionId, string>> = {}) {
-  if (embedded) notify('terminal-notice', { message, kind, actions: Object.entries(actions).map(([id, label]) => ({ id, label })) });
-  else notices!.notify(noticeInput(message, kind, actions));
+function toast(message: string, kind: NoticeKind = 'error', actions: NoticeAction[] = []) {
+  const notice = { message, kind, actions };
+  if (embedded) notify('terminal-notice', notice); else notices!.notify(localNotice(notice));
 }
 function connection(label: string, online = false) {
   $('connection-label').textContent = label;
   const updated = lastOutputAt || cachedUpdated ? ` · last output ${new Date(lastOutputAt || cachedUpdated).toLocaleTimeString()}` : '';
   // The workspace reports an ended embedded terminal itself, so only a standalone terminal shows that state.
-  const status = online || ['Connecting', 'Locked', 'Other tab'].includes(label) || embedded && label === 'Session ended' ? undefined
-    : label === 'Session ended' ? { message: 'This terminal has ended. Open its saved host to reconnect.', kind: 'error' as const, actions: {} }
-    : { message: label.startsWith('Connection stalled') ? label : 'Reconnecting' + updated, kind: 'progress' as const, actions: { reconnect: 'Retry now' } };
+  const status: RemoteNotice | undefined = online || ['Connecting', 'Locked', 'Other tab'].includes(label) || embedded && label === 'Session ended' ? undefined
+    : label === 'Session ended' ? { message: 'This terminal has ended. Open its saved host to reconnect.', kind: 'error', actions: [] }
+    : { message: label.startsWith('Connection stalled') ? label : 'Reconnecting' + updated, kind: 'progress', actions: [{ id: 'reconnect', label: 'Retry now' }] };
   const serialized = JSON.stringify(status ?? null);
   if (serialized !== connectionStatus) {
     connectionStatus = serialized;
-    if (embedded) notify('terminal-status', { status: status && { ...status, actions: Object.entries(status.actions).map(([id, label]) => ({ id, label })) } });
-    else notices!.set('connection', status && noticeInput(status.message, status.kind, status.actions));
+    if (embedded) notify('terminal-status', { status }); else notices!.set('connection', status && localNotice(status));
   }
   updateRun();
 }
@@ -808,7 +806,7 @@ const handlers: Handlers = {
     if (message.truncated) {
       const notice = '\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n';
       if (handoff === undefined) term.write(notice); else handoff += notice;
-      toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.', 'info', { redraw: 'Redraw' });
+      toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.', 'info', [{ id: 'redraw', label: 'Redraw' }]);
     }
   },
   'output': message => {
@@ -985,7 +983,7 @@ if (embedded) {
     }
     if (event.data?.type === 'authorize') { herdrPreview = false; accessToken = event.data.accessToken; void transport.connect(undefined, true); }
     if (event.data?.type === 'recovery-failed') connection('Session ended');
-    if (event.data?.type === 'notice-action' && Object.hasOwn(noticeActions, event.data.id)) noticeActions[event.data.id as NoticeActionId]();
+    if (event.data?.type === 'notice-action') runNoticeAction(event.data.id);
     if (event.data?.type === 'herdr-park' && herdrTerminal) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;
