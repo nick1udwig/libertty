@@ -2,7 +2,7 @@ import { DictationAudio } from './dictation-audio.ts';
 import { sameInputContext, type InputContext } from './unsent-input.ts';
 import type { ClientMessage, ShellState } from './protocol.ts';
 import { dictationTarget } from './protocol.ts';
-import type { NoticeKind } from './notice-model.ts';
+import type { Notify } from './notice-model.ts';
 import './dictation.css';
 import { DictationView } from './dictation-view.ts';
 import { DictationWakeLock, dictationWakeEnvironment } from './dictation-wake-lock.ts';
@@ -13,7 +13,7 @@ interface Host {
   audio(data: ArrayBuffer): boolean;
   state(): ShellState;
   prepare(): void;
-  notice(message: string, kind?: NoticeKind): void;
+  notice: Notify;
   focus(): void;
   waiting?(active: boolean): void;
   key: string;

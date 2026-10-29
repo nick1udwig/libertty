@@ -4,7 +4,7 @@ import {
   type HostProfile,
   type TerminalTab,
 } from './connections.ts';
-import type { NoticeAction, NoticeKind } from './notice-model.ts';
+import type { Notify } from './notice-model.ts';
 import { saved, validSession } from './persistence.ts';
 
 export interface WorkspaceState {
@@ -34,7 +34,7 @@ export interface WorkspaceServices {
   backendFor: (id: string) => BackendProfile;
   tokenFor: (backend: BackendProfile) => string | undefined;
   store: () => void;
-  notice: (message: string, kind?: NoticeKind, actions?: NoticeAction[]) => void;
+  notice: Notify;
 }
 export function loadWorkspace(primary: BackendProfile): WorkspaceState {
   let backends: BackendProfile[] = saved<BackendProfile[]>('backends', []).filter((b) => {

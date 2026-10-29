@@ -2,13 +2,13 @@ import { $, input, select, dialog } from './dom.ts';
 import type { BackendProfile, KeyInfo } from './connections.ts';
 import type { BrowserKeyInfo } from './browser-key.ts';
 import type { BrowserVault } from './browser-vault.ts';
-import type { NoticeKind } from './notice-model.ts';
+import type { Notify } from './notice-model.ts';
 interface VaultServices {
   browserVault: BrowserVault; primary: BackendProfile;
   backends(): BackendProfile[]; backendFor(id: string): BackendProfile;
   authenticate(backend: BackendProfile): Promise<void>;
   api<T>(backend: BackendProfile, name: string, data?: unknown): Promise<T>;
-  notice(message: string, kind?: NoticeKind): void; renderCards(): Promise<void>; clearRoutes(): void;
+  notice: Notify; renderCards(): Promise<void>; clearRoutes(): void;
 }
 export function vaultUI(services: VaultServices) {
   const { browserVault, primary, backendFor, authenticate, api, notice, renderCards } = services;

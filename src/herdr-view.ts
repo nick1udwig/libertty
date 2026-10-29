@@ -12,7 +12,7 @@ import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
 import { dropSpace, repoSpace, repoTap, spaceLayout, spaceRepos, spaceTerminal, type RepoTap, type SpaceDrop, type SpaceRepo } from './herdr-spaces.ts';
 import { herdrLane, herdrLaneNames, statusLanes, type HerdrLane } from './herdr-lanes.ts';
-import type { NoticeAction, NoticeInput, NoticeKind } from './notice-model.ts';
+import type { NoticeInput, NoticeKind, Notify } from './notice-model.ts';
 import './herdr.css';
 
 const herdrIcon = (body: string, size = 15) => icon(body, size, 2);
@@ -30,7 +30,7 @@ interface Host {
   token(): string | undefined; authenticate(): Promise<void>;
   api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
-  notice(message: string, kind?: NoticeKind, actions?: NoticeAction[]): void;
+  notice: Notify;
   /** Show a connection state for this view (`herdr`), or the connection (`terminal`) or loading (`loading`) state of its selected pane. */
   state?(key: 'herdr' | 'terminal' | 'loading', state?: NoticeInput): void;
   reading(terminalId: string, request: ReadingOpen): void;

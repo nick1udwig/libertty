@@ -34,7 +34,7 @@ import { InlineSuggestions } from './inline-suggestions.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { defaults, keySequence, validateShortcuts, type Shortcut } from './shortcuts.ts';
 import { readingPhrases, readingRequest, readingPipeline, type ReadingOpen } from './reading-request.ts';
-import { remoteActions, type NoticeKind, type RemoteNotice } from './notice-model.ts';
+import { remoteActions, type NoticeKind, type Notify, type RemoteNotice } from './notice-model.ts';
 import { NoticeCenter } from './notices.ts';
 const params = new URLSearchParams(location.search);
 const embedded = params.get('embedded') === '1' && parent !== window;
@@ -114,15 +114,17 @@ const frameScheduler = new OutputScheduler(drainHerdrFrames, () => tabVisible &&
 function scheduleDrain() { if (!tabVisible || document.hidden || herdrParked) return; frameQueued = true; outputFrame = requestAnimationFrame(drain); }
 // An embedded terminal sends notices to the workspace, which returns these action ids.
 const noticeActions = { redraw: () => rawInput('\x0c'), reconnect: () => transport.activity() };
-type NoticeAction = { id: keyof typeof noticeActions; label: string };
-const runNoticeAction = (id: string) => { if (Object.hasOwn(noticeActions, id)) noticeActions[id as NoticeAction['id']](); };
+type TerminalAction = { id: keyof typeof noticeActions; label: string };
+const runTerminalAction = (id: string) => { if (Object.hasOwn(noticeActions, id)) noticeActions[id as TerminalAction['id']](); };
 const notices = embedded ? undefined : new NoticeCenter();
-const localNotice = (notice: RemoteNotice) => ({ ...notice, actions: remoteActions(notice, runNoticeAction) });
+const localNotice = (notice: RemoteNotice) => ({ ...notice, actions: remoteActions(notice, runTerminalAction) });
 let connectionStatus = 'null';
-function toast(message: string, kind: NoticeKind = 'error', actions: NoticeAction[] = []) {
+function toast(message: string, kind: NoticeKind = 'error', actions: TerminalAction[] = []) {
   const notice = { message, kind, actions };
   if (embedded) notify('terminal-notice', notice); else notices!.notify(localNotice(notice));
 }
+/** Terminal parts without frame actions show plain notices. */
+const plainToast: Notify = (message, kind) => toast(message, kind);
 function connection(label: string, online = false) {
   $('connection-label').textContent = label;
   const updated = lastOutputAt || cachedUpdated ? ` · last output ${new Date(lastOutputAt || cachedUpdated).toLocaleTimeString()}` : '';
@@ -498,7 +500,7 @@ const inline = new InlineSuggestions(term, { state: () => state, replace: replac
   raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, context: inputContext, key: baseURL.href,
   audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data)); return true; },
-  prepare: () => inline.prepareExternalPaste(), waiting: active => { dictationWaiting = active; inline.dictationPending(active); updateRun(); }, notice: toast, focus: () => term.focus() });
+  prepare: () => inline.prepareExternalPaste(), waiting: active => { dictationWaiting = active; inline.dictationPending(active); updateRun(); }, notice: plainToast, focus: () => term.focus() });
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
   const workspace = new URL('.', document.baseURI);
@@ -574,7 +576,7 @@ function copyTerminalText(text: string) {
   window.focus(); return navigator.clipboard.writeText(text);
 }
 const gestures = new TerminalGestures(term, {
-  focus, notice: toast,
+  focus, notice: plainToast,
   link: (col, row) => terminalLinkAt(term, col, row, projection?.clickable),
   pan: { enabled: () => fullWidth() && terminalViewport.scrollWidth > terminalViewport.clientWidth, move: pixels => { terminalViewport.scrollLeft += pixels; } },
   scroll: {
@@ -983,7 +985,7 @@ if (embedded) {
     }
     if (event.data?.type === 'authorize') { herdrPreview = false; accessToken = event.data.accessToken; void transport.connect(undefined, true); }
     if (event.data?.type === 'recovery-failed') connection('Session ended');
-    if (event.data?.type === 'notice-action') runNoticeAction(event.data.id);
+    if (event.data?.type === 'notice-action') runTerminalAction(event.data.id);
     if (event.data?.type === 'herdr-park' && herdrTerminal) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;

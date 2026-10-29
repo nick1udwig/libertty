@@ -3,6 +3,8 @@ export const noticeKinds = ['progress', 'done', 'info', 'warning', 'error'] as c
 export type NoticeKind = typeof noticeKinds[number];
 export interface NoticeAction { label: string; run(): void }
 export interface NoticeInput { message: string; kind?: NoticeKind; source?: string; actions?: NoticeAction[] }
+/** Show a notice, which is an error unless another kind is given. */
+export type Notify = (message: string, kind?: NoticeKind, actions?: NoticeAction[]) => void;
 export interface Notice { id: number; kind: NoticeKind; message: string; source?: string; actions: NoticeAction[]; at: number; key?: string }
 /** A notice posted by a terminal frame, whose actions the frame runs when the workspace returns their ids. */
 export interface RemoteNotice { message: string; kind: NoticeKind; actions: { id: string; label: string }[] }

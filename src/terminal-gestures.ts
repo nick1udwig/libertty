@@ -5,12 +5,12 @@ import { terminalLinkAt } from './terminal-links.ts';
 import { isPreservingScrollback } from './terminal-viewport.ts';
 import { terminalContact } from './terminal-contact.ts';
 import { TerminalSelectionHistory } from './terminal-selection-history.ts';
-import type { NoticeKind } from './notice-model.ts';
+import type { Notify } from './notice-model.ts';
 
 interface Point { row: number; col: number }
 interface Host {
   tap(x: number, y: number): void; copy(text: string): Promise<void>; focus: TerminalFocus;
-  notice(message: string, kind: NoticeKind): void;
+  notice: Notify;
   link?(col: number, row: number): string | undefined;
   pan?: { enabled(): boolean; move(pixels: number): void };
   scroll?: { enabled(): boolean; move(lines: number, x: number, y: number): void };

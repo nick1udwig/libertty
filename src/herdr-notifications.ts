@@ -1,4 +1,4 @@
-import type { NoticeKind } from './notice-model.ts';
+import type { Notify } from './notice-model.ts';
 interface Backend { id: string; name: string }
 type API = <T>(id: string, name: string, data?: unknown) => Promise<T>;
 const installed = () => matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone === true;
@@ -71,7 +71,7 @@ export class HerdrNotifications {
     try { if (device) await this.api(id, 'api/notifications/unwatch', { device, tabId }).catch((error: any) => { if (error.status !== 400) throw error; }); }
     catch (error) { this.closedViews.delete(tabId); throw error; }
   }
-  render(element: HTMLElement, backends: Backend[], notice: (message: string, kind?: NoticeKind) => void) {
+  render(element: HTMLElement, backends: Backend[], notice: Notify) {
     element.replaceChildren();
     const hint = document.createElement('p'); hint.className = 'hint';
     hint.textContent = !this.supported ? 'Background notifications need HTTPS and a browser with Web Push.'

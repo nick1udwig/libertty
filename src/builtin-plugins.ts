@@ -3,7 +3,7 @@ import { folderIcon, terminalIcon, herdrIcon } from './icons.ts';
 import { fileBrowser } from './file-browser.ts';
 import { fileClient } from './file-client.ts';
 import { herdrSession } from './herdr-protocol.ts';
-import type { NoticeAction, NoticeInput, NoticeKind } from './notice-model.ts';
+import type { NoticeInput, Notify } from './notice-model.ts';
 import type { HerdrView } from './herdr-view.ts';
 import { BUILTIN_VERSION, type TabPlugin } from './plugins.ts';
 import { readingPlugin, type ReadingServices } from './reading-plugin.ts';
@@ -18,7 +18,7 @@ export interface BuiltinServices extends ReadingServices {
   openReadingCapture(tab: TerminalTab, capture: string, name: string, exitCode?: number): void;
   reconnectHerdr(tab: TerminalTab): Promise<void>;
   store(): void;
-  notice(message: string, kind?: NoticeKind, actions?: NoticeAction[]): void;
+  notice: Notify;
   tabState(tab: TerminalTab, key: string, state?: NoticeInput): void;
   terminalURL(backend: BackendProfile, session: string): string;
   frame(tab: TerminalTab, frame?: HTMLIFrameElement): void;

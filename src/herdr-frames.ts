@@ -2,13 +2,13 @@ import { node } from './dom.ts';
 import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
 import { terminalCanEvict } from './terminal-retention.ts';
-import { frameNotice, type NoticeAction, type NoticeInput, type NoticeKind } from './notice-model.ts';
+import { frameNotice, type NoticeInput, type Notify } from './notice-model.ts';
 
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; verified:boolean; loaded?:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number; state?:NoticeInput }
 export interface FramesHost {
   url: string; session: string; source?: string;
   token(): string | undefined; authenticate(): Promise<void>;
-  notice(message: string, kind?: NoticeKind, actions?: NoticeAction[]): void;
+  notice: Notify;
   /** The selected terminal's connection state. */
   state(state?: NoticeInput): void;
   /** A loading label while a pane prepares behind the previous picture. */
