@@ -170,25 +170,39 @@ export class HerdrView {
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const items = [...this.menu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement); items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus(); }
     };
     // Swiping the space tree down dismisses it, like the sheet its grab bar suggests.
-    let sheet: { id: number; y: number; dragging: boolean } | undefined, swiped = false;
+    let sheet: { id: number; y: number; dragging: boolean; scrolling?: boolean } | undefined, swiped = false;
     this.menu.addEventListener('pointerdown', event => {
       swiped = false;
       if (this.tree && !this.renaming && !(event.target as HTMLElement).closest('input')) sheet = { id: event.pointerId, y: event.clientY, dragging: false };
     });
-    this.menu.addEventListener('pointermove', event => {
-      if (!sheet || event.pointerId !== sheet.id) return;
-      const distance = event.clientY - sheet.y;
-      if (!sheet.dragging && (distance < 10 || this.menu.scrollTop > 0)) return;
-      sheet.dragging = true; this.strip.classList.add('herdr-tree-adrift'); this.menu.style.transform = 'translateY(' + Math.max(0, distance) + 'px)';
-    });
-    const release = (event: PointerEvent) => {
-      if (!sheet || event.pointerId !== sheet.id) return;
-      const dismissed = sheet.dragging && event.type === 'pointerup' && event.clientY - sheet.y > 56;
+    const pull = (y: number) => {
+      if (!sheet) return;
+      if (!sheet.dragging) {
+        // A scrolled list restarts the pull, so the tree only follows the finger beyond the list's top.
+        if (this.menu.scrollTop > 0 || y < sheet.y) { sheet.y = y; return; }
+        if (y - sheet.y < 10) return;
+        sheet.dragging = true;
+      }
+      // The tree slides behind the strip, clipped at its top edge so the joint stays and nothing shows below the strip.
+      const distance = Math.min(this.menu.offsetHeight, Math.max(0, y - sheet.y));
+      this.menu.style.transform = 'translateY(' + distance + 'px)'; this.menu.style.clipPath = 'inset(-48px -48px ' + distance + 'px)';
+    };
+    const release = (y: number, completed: boolean) => {
+      if (!sheet) return;
+      const dismissed = sheet.dragging && completed && y - sheet.y > 56;
       swiped = sheet.dragging; sheet = undefined;
       if (dismissed) this.closeMenu();
-      else if (swiped) { this.menu.style.transform = ''; this.refreshTree(); }
+      else if (swiped) { this.menu.style.transform = this.menu.style.clipPath = ''; this.refreshTree(); }
     };
-    this.menu.addEventListener('pointerup', release); this.menu.addEventListener('pointercancel', release);
+    this.menu.addEventListener('pointermove', event => { if (sheet?.id === event.pointerId) pull(event.clientY); });
+    this.menu.addEventListener('pointerup', event => { if (sheet?.id === event.pointerId) release(event.clientY, true); });
+    // Native scrolling takes over a touch on an overflowing tree, so its touch events carry the swipe once the list reaches its top.
+    this.menu.addEventListener('pointercancel', event => {
+      if (sheet?.id !== event.pointerId) return;
+      if (event.pointerType === 'touch' && !sheet.dragging) sheet.scrolling = true; else release(event.clientY, false);
+    });
+    this.menu.addEventListener('touchmove', event => { if (sheet?.scrolling && event.touches.length === 1) pull(event.touches[0].clientY); }, { passive: true });
+    for (const type of ['touchend', 'touchcancel'] as const) this.menu.addEventListener(type, event => { if (sheet?.scrolling) release(event.changedTouches[0]?.clientY ?? 0, type === 'touchend'); });
     // A swipe that returns to its start must not also press the control it began on.
     this.menu.addEventListener('click', event => { if (swiped) { event.preventDefault(); event.stopPropagation(); swiped = false; } }, true);
     const reposition = () => { if (this.tree) this.refreshTree(); };
@@ -607,7 +621,7 @@ export class HerdrView {
   }
   private closeMenu() {
     this.menu.hidden = true; this.tree = undefined; this.renaming = false;
-    this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.touchAction = this.menu.style.width = '';
+    this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.clipPath = this.menu.style.touchAction = this.menu.style.width = '';
     this.screen.classList.remove('herdr-screen-dim');
     this.strip.classList.remove('herdr-tree-open', 'herdr-tree-adrift');
     for (const anchor of this.strip.querySelectorAll('.herdr-tree-anchor')) anchor.classList.remove('herdr-tree-anchor');
@@ -647,7 +661,7 @@ export class HerdrView {
     this.menu.style.width = width + 'px';
     this.menu.style.left = left - parent.left + 'px';
     this.menu.style.top = Math.max(8, strip.top - parent.top - this.menu.offsetHeight) + 'px';
-    // Without overflow the whole tree can be swiped away; otherwise only its grab bar can.
+    // Without overflow the whole tree follows a swipe; otherwise the list scrolls natively and hands the swipe over at its top.
     this.menu.style.touchAction = this.menu.scrollHeight > this.menu.clientHeight ? '' : 'none';
     // The joint belongs to the chip inside the strip, so native scrolling moves it with the chip in the same frame.
     this.strip.style.setProperty('--herdr-tree-line-left', left - strip.left + 'px');
@@ -655,12 +669,12 @@ export class HerdrView {
     anchor.style.setProperty('--herdr-tree-reach', anchor.offsetTop + anchor.clientTop + 'px');
     this.alignTreeJoint();
   }
-  /** A chip outside a narrower tree, or under a tree being swiped away, drops its joint. */
+  /** A chip outside a narrower tree drops its joint. */
   private alignTreeJoint() {
     const anchor = this.strip.querySelector('.herdr-tree-anchor');
     if (!anchor) return;
     const strip = this.strip.getBoundingClientRect(), menu = this.menu.getBoundingClientRect(), rect = anchor.getBoundingClientRect();
-    const joined = !this.menu.style.transform && Math.max(strip.left, rect.left - 8) >= menu.left - .5 && Math.min(strip.right, rect.right + 8) <= menu.right + .5;
+    const joined = Math.max(strip.left, rect.left - 8) >= menu.left - .5 && Math.min(strip.right, rect.right + 8) <= menu.right + .5;
     this.strip.classList.toggle('herdr-tree-adrift', !joined);
   }
   private buildTree(repo: SpaceRepo) {
