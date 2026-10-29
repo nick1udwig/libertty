@@ -72,6 +72,7 @@
 .herdr-tree-adrift .herdr-tree-anchor::before{content:none}
 .herdr-tab-menu.herdr-tree{max-width:100%;max-height:70%;box-sizing:border-box;border-color:var(--accent-line);border-bottom:0;border-radius:var(--r-lg) var(--r-lg) 0 0;clip-path:inset(-48px -48px 0);padding:0 8px 8px}
 .herdr-screen-dim::after{content:"";position:absolute;inset:0;z-index:5;background:var(--scrim);pointer-events:none}
+.herdr-tree>*{opacity:calc(1 - 2 * var(--herdr-tree-fold,0))}
 .herdr-tree-grabber{display:grid;place-items:center;height:20px;touch-action:none}
 .herdr-tree-grabber::before{content:"";width:40px;height:5px;border-radius:3px;background:var(--faint)}
 .herdr-tree button{display:flex;align-items:center;gap:7px;width:auto;min-height:0;padding:0;border-radius:var(--r-sm);text-align:left;font:13px var(--font-mono);color:var(--text-2)}

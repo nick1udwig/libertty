@@ -73,6 +73,8 @@ export class HerdrView {
   private repos: SpaceRepo[] = [];
   private tree?: { repo: string; signature: string };
   private renaming = false;
+  private fold = 0;
+  private foldFrame = 0;
   private handoffHeld = false;
   private navigationResize = 0;
   private held = false;
@@ -169,24 +171,26 @@ export class HerdrView {
     this.menu.onkeydown = event => {
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const items = [...this.menu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement); items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus(); }
     };
-    // Swiping the space tree down dismisses it, like the sheet its grab bar suggests.
+    // Swiping the space tree down folds it into its chip, like the sheet its grab bar suggests.
     let sheet: { id: number; y: number; dragging: boolean } | undefined, swiped = false;
     this.menu.addEventListener('pointerdown', event => {
       swiped = false;
-      if (this.tree && !this.renaming && !(event.target as HTMLElement).closest('input')) sheet = { id: event.pointerId, y: event.clientY, dragging: false };
+      if (!this.tree || this.renaming || (event.target as HTMLElement).closest('input')) return;
+      // A touch during the fold's animation catches the tree where it is.
+      cancelAnimationFrame(this.foldFrame); this.foldFrame = 0;
+      sheet = { id: event.pointerId, y: event.clientY - this.fold * this.menu.offsetHeight, dragging: this.fold > 0 };
     });
     this.menu.addEventListener('pointermove', event => {
       if (!sheet || event.pointerId !== sheet.id) return;
       const distance = event.clientY - sheet.y;
       if (!sheet.dragging && (distance < 10 || this.menu.scrollTop > 0)) return;
-      sheet.dragging = true; this.strip.classList.add('herdr-tree-adrift'); this.menu.style.transform = 'translateY(' + Math.max(0, distance) + 'px)';
+      sheet.dragging = true; this.foldTree(Math.min(1, Math.max(0, distance) / this.menu.offsetHeight));
     });
     const release = (event: PointerEvent) => {
       if (!sheet || event.pointerId !== sheet.id) return;
       const dismissed = sheet.dragging && event.type === 'pointerup' && event.clientY - sheet.y > 56;
       swiped = sheet.dragging; sheet = undefined;
-      if (dismissed) this.closeMenu();
-      else if (swiped) { this.menu.style.transform = ''; this.refreshTree(); }
+      if (swiped) this.settleFold(dismissed ? 1 : 0);
     };
     this.menu.addEventListener('pointerup', release); this.menu.addEventListener('pointercancel', release);
     // A swipe that returns to its start must not also press the control it began on.
@@ -607,7 +611,8 @@ export class HerdrView {
   }
   private closeMenu() {
     this.menu.hidden = true; this.tree = undefined; this.renaming = false;
-    this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.touchAction = this.menu.style.width = '';
+    cancelAnimationFrame(this.foldFrame); this.foldFrame = this.fold = 0; this.menu.style.removeProperty('--herdr-tree-fold');
+    this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.transformOrigin = this.menu.style.touchAction = this.menu.style.width = '';
     this.screen.classList.remove('herdr-screen-dim');
     this.strip.classList.remove('herdr-tree-open', 'herdr-tree-adrift');
     for (const anchor of this.strip.querySelectorAll('.herdr-tree-anchor')) anchor.classList.remove('herdr-tree-anchor');
@@ -653,14 +658,42 @@ export class HerdrView {
     this.strip.style.setProperty('--herdr-tree-line-left', left - strip.left + 'px');
     this.strip.style.setProperty('--herdr-tree-line-width', width + 'px');
     anchor.style.setProperty('--herdr-tree-reach', anchor.offsetTop + anchor.clientTop + 'px');
+    if (this.fold) this.foldTree(this.fold);
     this.alignTreeJoint();
   }
-  /** A chip outside a narrower tree, or under a tree being swiped away, drops its joint. */
+  /** A folding tree keeps its base on the strip and narrows toward its chip, so it never slides under the strip. */
+  private foldTree(progress: number) {
+    const anchor = this.strip.querySelector('.herdr-tree-anchor');
+    if (!anchor) return;
+    this.fold = progress;
+    const parent = this.element.getBoundingClientRect(), strip = this.strip.getBoundingClientRect(), rect = anchor.getBoundingClientRect();
+    const left = parent.left + parseFloat(this.menu.style.left), width = this.menu.offsetWidth;
+    const from = Math.max(strip.left, rect.left - 8), ratio = (Math.min(strip.right, rect.right + 8) - from) / width;
+    const narrows = ratio > 0 && ratio < 1, scale = narrows ? 1 - progress * (1 - ratio) : 1, origin = narrows ? (from - left) / (1 - ratio) : width / 2;
+    this.menu.style.transformOrigin = origin + 'px 100%';
+    this.menu.style.transform = 'scale(' + scale + ',' + (1 - progress) + ')';
+    this.menu.style.setProperty('--herdr-tree-fold', String(progress));
+    this.strip.style.setProperty('--herdr-tree-line-left', left + origin * (1 - scale) - strip.left + 'px');
+    this.strip.style.setProperty('--herdr-tree-line-width', width * scale + 'px');
+  }
+  /** A released tree finishes folding into its chip or springs back open. */
+  private settleFold(target: 0 | 1) {
+    const start = this.fold, began = performance.now(), duration = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 180;
+    const step = (now: number) => {
+      const elapsed = duration ? Math.min(1, (now - began) / duration) : 1;
+      this.foldFrame = 0; this.foldTree(start + (target - start) * (1 - (1 - elapsed) ** 3));
+      if (elapsed < 1) this.foldFrame = requestAnimationFrame(step);
+      else if (target) this.closeMenu();
+      else { this.fold = 0; this.menu.style.transform = this.menu.style.transformOrigin = ''; this.menu.style.removeProperty('--herdr-tree-fold'); this.refreshTree(); }
+    };
+    this.foldFrame = requestAnimationFrame(step);
+  }
+  /** A chip outside a narrower tree drops its joint. */
   private alignTreeJoint() {
     const anchor = this.strip.querySelector('.herdr-tree-anchor');
     if (!anchor) return;
     const strip = this.strip.getBoundingClientRect(), menu = this.menu.getBoundingClientRect(), rect = anchor.getBoundingClientRect();
-    const joined = !this.menu.style.transform && Math.max(strip.left, rect.left - 8) >= menu.left - .5 && Math.min(strip.right, rect.right + 8) <= menu.right + .5;
+    const joined = Math.max(strip.left, rect.left - 8) >= menu.left - .5 && Math.min(strip.right, rect.right + 8) <= menu.right + .5;
     this.strip.classList.toggle('herdr-tree-adrift', !joined);
   }
   private buildTree(repo: SpaceRepo) {
