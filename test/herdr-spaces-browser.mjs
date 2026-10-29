@@ -230,16 +230,24 @@ try {
   await drag(alpha, created, .1); await wait(async () => (await page.locator('.herdr-space-stack').count()) === 0, 'edge drop extracts a space from its stack');
   await tab(beta).click();
   await wait(async () => await tab(beta).getAttribute('aria-selected') === 'true', 'selected Beta space');
-  const tree = page.locator('.herdr-tree:visible'), bridge = page.locator('.herdr-tree-bridge:visible');
+  const tree = page.locator('.herdr-tree:visible');
+  // The joint is the open chip's own pseudo-element inside the strip, so it scrolls natively with the chip.
+  const joint = () => page.evaluate(() => {
+    const anchor = document.querySelector('.herdr-tree-anchor'), strip = anchor?.closest('.herdr-agent-strip'), shape = anchor && getComputedStyle(anchor, '::before');
+    if (!anchor || strip.classList.contains('herdr-tree-adrift') || shape.content === 'none') return null;
+    const chip = anchor.getBoundingClientRect(), area = strip.getBoundingClientRect(), panel = document.querySelector('.herdr-tree').getBoundingClientRect();
+    return { x: chip.x, width: chip.width, top: chip.top + anchor.clientTop - parseFloat(shape.height), stripTop: area.top, panel: { left: panel.left, right: panel.right, bottom: panel.bottom } };
+  });
   // Snapshots re-render the strip and tree, so a measurement can briefly find a replaced element.
   const box = async locator => { let rect; await wait(async () => !!(rect = await locator.boundingBox()), 'element bounds'); return rect; };
   const press = async (locator, duration = 500) => { const rect = await box(locator); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2); await delay(duration); await touch('touchEnd'); };
   const rect = await bounds(beta); await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2);
   assert.equal(await page.evaluate(() => window.__touchSource), chip(beta)); await delay(500); await touch('touchEnd');
   await tree.waitFor();
-  const treeBounds = await box(tree), chipBounds = await box(tab(beta)), bridgeBounds = await box(bridge);
+  const treeBounds = await box(tree), chipBounds = await box(tab(beta)), connection = await joint();
   assert.ok(treeBounds.y + treeBounds.height < chipBounds.y, 'The space tree opens upward above its chip');
-  assert.ok(Math.abs(bridgeBounds.x - chipBounds.x) < 1 && Math.abs(bridgeBounds.width - chipBounds.width) < 1 && bridgeBounds.y <= treeBounds.y + treeBounds.height && bridgeBounds.y + bridgeBounds.height >= chipBounds.y, 'The bridge joins the tree to its chip');
+  assert.ok(connection && Math.abs(connection.x - chipBounds.x) < 1 && Math.abs(connection.width - chipBounds.width) < 1, 'The joint rises from its chip');
+  assert.ok(Math.abs(connection.top - connection.stripTop) < 1 && Math.abs(connection.panel.bottom - connection.stripTop) < 1, 'The tree rests on the strip where the joint meets it');
   assert.equal(await tab(beta).evaluate(el => el.classList.contains('herdr-tree-anchor')), true);
   await page.screenshot({ path: root + '.test-artifacts/herdr-space-tree-beta.png' });
   // Holding a name renames it in place, and the tree stays open afterwards.
@@ -265,7 +273,7 @@ try {
     await touch('touchStart', x, y); await touch('touchEnd');
     assert.equal(await page.locator('.herdr-tab-menu:visible').count(), 0, 'Tapping outside closes the space tree');
     assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Dismissal restores access to the screen');
-    assert.equal(await bridge.count(), 0, 'Dismissal removes the bridge');
+    assert.equal(await joint(), null, 'Dismissal removes the joint');
   };
   const terminalBounds = await page.locator('.herdr-terminal:visible').boundingBox();
   await dismissMenu(terminalBounds.x + terminalBounds.width / 2, terminalBounds.y + 20);
@@ -281,6 +289,47 @@ try {
   assert.equal(await tree.count(), 1); assert.equal(await tab(beta).evaluate(el => el.classList.contains('herdr-tree-anchor')), false);
   assert.equal(await selected(), chip(beta), 'Moving the tree keeps the selection');
   await page.keyboard.press('Escape');
+  const treeSwipeTabs = await page.addStyleTag({ content: '.herdr-agent-strip .herdr-agent-tab { min-width: 260px; }' });
+  const strip = page.locator('.herdr-agent-strip:visible');
+  const stripState = () => strip.evaluate(strip => ({ scroll: strip.scrollLeft, order: [...strip.querySelectorAll('.herdr-agent-tab')].map(tab => tab.dataset.terminal), selected: strip.querySelector('[aria-selected=true]')?.dataset.terminal }));
+  try {
+    for (const pointer of ['touch', 'mouse']) {
+      await hold(beta); await strip.evaluate(strip => { strip.scrollLeft = 0; });
+      const initial = await stripState(), area = await box(strip), y = area.y + area.height / 2, panel = await box(tree);
+      const swipe = async (from, to) => {
+        if (pointer === 'touch') {
+          await touch('touchStart', from, y);
+          for (const fraction of [.25, .5, .75, 1]) { await touch('touchMove', from + (to - from) * fraction, y); await delay(35); }
+          await touch('touchEnd');
+        } else {
+          await page.mouse.move(from, y); await page.mouse.down(); await page.mouse.move(to, y, { steps: 8 }); await page.mouse.up();
+        }
+        await delay(200);
+      };
+      await swipe(area.x + area.width - 50, area.x + 60);
+      const forward = await stripState();
+      assert.ok(forward.scroll > initial.scroll + 100, pointer + ' scrolls to later tabs while the tree is open: ' + JSON.stringify({ initial, forward, target: await page.evaluate(() => window.__touchSource) }));
+      assert.equal(await tree.count(), 1, 'Scrolling keeps the tree open');
+      assert.equal(await tab(beta).evaluate(el => el.classList.contains('herdr-tree-anchor')), true, 'Scrolling keeps the same tree');
+      await swipe(area.x + 60, area.x + area.width - 50);
+      const reverse = await stripState();
+      assert.ok(reverse.scroll < forward.scroll - 100, pointer + ' scrolls back while the tree is open');
+      for (const state of [forward, reverse]) {
+        assert.deepEqual(state.order, initial.order, 'Scrolling preserves tab order');
+        assert.equal(state.selected, initial.selected, 'Scrolling does not select a tab');
+      }
+      assert.equal(await tree.count(), 1, 'Reverse scrolling keeps the tree open');
+      assert.equal(await page.locator('.herdr-agent-tab.dragging, .herdr-drop-indicator:visible').count(), 0, 'Scrolling does not reorder tabs');
+      assert.deepEqual(await box(tree), panel, 'The tree stays still while the strip scrolls beneath it');
+      await strip.evaluate(strip => { strip.scrollLeft = strip.scrollWidth; });
+      await bounds(beta);
+      const anchor = await box(tab(beta)), connection = await joint();
+      assert.ok(connection && Math.abs(connection.x - anchor.x) < 1 && Math.abs(connection.width - anchor.width) < 1, 'The joint follows its chip back into view');
+      assert.deepEqual(await box(tree), panel, 'The tree stays still after its chip scrolls away and back');
+    }
+  } finally {
+    await page.keyboard.press('Escape'); await treeSwipeTabs.evaluate(style => style.remove()); await strip.evaluate(strip => { strip.scrollLeft = 0; });
+  }
   await hold(beta); await page.keyboard.press('Escape');
   assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Escape also removes the dismissal layer');
   const swipeTree = async distance => {
@@ -523,15 +572,24 @@ try {
       }, edge);
       await hold(id);
       const connection = await page.evaluate(() => {
-        const tree = document.querySelector('.herdr-tree'), bridge = document.querySelector('.herdr-tree-bridge'), anchor = document.querySelector('.herdr-tree-anchor');
-        const panel = tree.getBoundingClientRect(), connector = bridge.getBoundingClientRect(), chip = anchor.getBoundingClientRect(), style = getComputedStyle(tree);
-        return { left: panel.left, right: panel.right, bridgeLeft: connector.left, bridgeRight: connector.right, chipLeft: chip.left, chipRight: chip.right, leftRadius: parseFloat(style.borderBottomLeftRadius), rightRadius: parseFloat(style.borderBottomRightRadius) };
+        const tree = document.querySelector('.herdr-tree'), anchor = document.querySelector('.herdr-tree-anchor'), strip = anchor.closest('.herdr-agent-strip');
+        const panel = tree.getBoundingClientRect(), chip = anchor.getBoundingClientRect(), area = strip.getBoundingClientRect();
+        return { left: panel.left, right: panel.right, jointLeft: Math.max(area.left, chip.left - 8), jointRight: Math.min(area.right, chip.right + 8), chipLeft: chip.left, chipRight: chip.right, adrift: strip.classList.contains('herdr-tree-adrift') };
       });
       assert.ok(Math.abs(connection[edge === 'left' ? 'chipLeft' : 'chipRight'] - (edge === 'left' ? 0 : width)) < 1, 'The chip reaches the ' + edge + ' screen edge at width ' + width);
       assert.ok(connection.left >= 0 && connection.right <= width, 'The tree stays within the viewport');
-      assert.ok(connection.left <= connection.bridgeLeft && connection.right >= connection.bridgeRight, 'The tree contains the connector at the ' + edge + ' screen edge');
-      assert.ok(connection.leftRadius <= connection.bridgeLeft - connection.left && connection.rightRadius <= connection.right - connection.bridgeRight, 'The tree corners stop before the connector at the ' + edge + ' screen edge');
+      assert.ok(!connection.adrift && connection.left <= connection.jointLeft + .5 && connection.right >= connection.jointRight - .5, 'The tree contains the joint and its shoulders at the ' + edge + ' screen edge');
       await page.screenshot({ path: root + '.test-artifacts/herdr-space-tree-' + width + '-' + edge + '.png' });
+      if (width > 560 && edge === 'left') {
+        const drift = shift => tab(id).evaluate(async (tab, shift) => {
+          const strip = tab.closest('.herdr-agent-strip'); strip.scrollLeft -= shift;
+          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          return { left: tab.getBoundingClientRect().left, adrift: strip.classList.contains('herdr-tree-adrift') };
+        }, shift);
+        const away = await drift(300);
+        assert.ok(Math.abs(away.left - 300) < 1 && away.adrift, 'A chip that scrolls out from under a narrower tree drops its joint');
+        assert.equal((await drift(-300)).adrift, false, 'The joint returns when the chip scrolls back under the tree');
+      }
       await page.keyboard.press('Escape');
     }
   }

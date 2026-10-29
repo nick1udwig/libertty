@@ -4,6 +4,8 @@
 :root:is([data-theme="1776"],[data-theme=flag]) :is(.herdr-view,.herdr-agent-strip){--herdr-idle:var(--text)}
 .herdr-agent-strip{position:relative;z-index:1;display:flex;gap:6px;align-items:center;flex:none;overflow-x:auto;scrollbar-width:none;padding:6px 8px;background:var(--surface);border-top:1px solid var(--line);min-height:46px;touch-action:pan-x;user-select:none}
 .herdr-agent-strip::-webkit-scrollbar{display:none}
+/* An open tree rests on the strip, whose top line turns into the tree's base line within the tree's span. */
+.herdr-agent-strip.herdr-tree-open{z-index:12;border-top-width:0;padding-top:7px;background:linear-gradient(var(--accent-line),var(--accent-line)) var(--herdr-tree-line-left,0) 0/var(--herdr-tree-line-width,100%) 1px no-repeat,linear-gradient(var(--line),var(--line)) 0 0/100% 1px no-repeat,var(--surface)}
 .herdr-agent-tab{display:flex;align-items:center;gap:8px;flex:0 0 auto;white-space:nowrap;border:1px solid transparent;border-radius:var(--r-md);background:none;color:var(--muted);min-height:34px;padding:6px 11px;font:12px var(--font-mono);touch-action:pan-x;user-select:none}
 .herdr-agent-tab:hover{background:var(--raised);color:var(--text-2)}
 .herdr-agent-tab[aria-selected=true]{background:var(--raised);border-color:var(--line-strong);color:var(--text)}
@@ -62,10 +64,13 @@
 .herdr-repo-name{font:10px var(--font-ui);color:var(--muted)}
 .herdr-space-label .herdr-agent-name{max-width:150px;overflow:hidden;text-overflow:ellipsis}
 .herdr-repo-count{font:11px var(--font-ui);color:var(--text-2)}
-/* The open chip loses its top edge and joins the tree through the bridge, so both read as one panel. */
-.herdr-agent-tab.herdr-tree-anchor{background:var(--overlay);border-color:var(--accent-line);border-top-color:transparent;border-radius:0 0 var(--r-md) var(--r-md);color:var(--text)}
-.herdr-tree-bridge{position:fixed;z-index:16;pointer-events:none;box-sizing:border-box;background:var(--overlay);border:1px solid var(--accent-line);border-block:0}
-.herdr-tab-menu.herdr-tree{max-width:100%;max-height:70%;box-sizing:border-box;border-color:var(--accent-line);border-bottom-left-radius:min(var(--r-lg),var(--herdr-tree-left-gap));border-bottom-right-radius:min(var(--r-lg),var(--herdr-tree-right-gap));padding:0 8px 8px}
+/* The open chip loses its top edge and rises through the strip's padding into the tree with rounded shoulders, so both read as one panel. */
+/* The joint lives inside the scrolling strip, so it moves with the chip in the same frame. */
+.herdr-agent-tab.herdr-tree-anchor{position:relative;background:var(--overlay);border-color:var(--accent-line);border-top-color:transparent;border-radius:0 0 var(--r-md) var(--r-md);color:var(--text)}
+.herdr-tree-anchor::before{content:"";position:absolute;left:-9px;right:-9px;bottom:100%;height:var(--herdr-tree-reach,0);pointer-events:none;background:radial-gradient(circle at .5px 8.5px,transparent 7.5px,var(--accent-line) 7.5px 8.5px,var(--overlay) 8.5px) 0 0/9px 9px no-repeat,radial-gradient(circle at 8.5px 8.5px,transparent 7.5px,var(--accent-line) 7.5px 8.5px,var(--overlay) 8.5px) 100% 0/9px 9px no-repeat,linear-gradient(90deg,var(--accent-line) 1px,var(--overlay) 1px calc(100% - 1px),var(--accent-line) 0) 50% 0/calc(100% - 16px) 100% no-repeat}
+.herdr-tree-adrift .herdr-tree-anchor{border-top-color:var(--accent-line);border-radius:var(--r-md)}
+.herdr-tree-adrift .herdr-tree-anchor::before{content:none}
+.herdr-tab-menu.herdr-tree{max-width:100%;max-height:70%;box-sizing:border-box;border-color:var(--accent-line);border-bottom:0;border-radius:var(--r-lg) var(--r-lg) 0 0;clip-path:inset(-48px -48px 0);padding:0 8px 8px}
 .herdr-screen-dim::after{content:"";position:absolute;inset:0;z-index:5;background:var(--scrim);pointer-events:none}
 .herdr-tree-grabber{display:grid;place-items:center;height:20px;touch-action:none}
 .herdr-tree-grabber::before{content:"";width:40px;height:5px;border-radius:3px;background:var(--faint)}
