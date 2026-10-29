@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TerminalPresentation } from '../src/terminal-presentation.ts';
+import { TerminalPresentation, TerminalResizeCover } from '../src/terminal-presentation.ts';
 
 test('uncovered reconnects wait for paint and ignore obsolete reveals', () => {
   const nodes: { hidden?: boolean; append(): void; setAttribute(): void }[] = [];
@@ -23,4 +23,28 @@ test('uncovered reconnects wait for paint and ignore obsolete reveals', () => {
   callbacks.shift()!(0); callbacks.shift()!(0);
   assert.equal(ready, 1);
   assert.equal(presentation.pending, false);
+});
+
+
+test('reconnect and resize covers retain both visible Gespenst canvas layers', () => {
+  const previous = globalThis.document;
+  const bounds = { left: 4, top: 10, bottom: 210, width: 300, height: 200 };
+  const background = { width: 600, height: 400, getBoundingClientRect: () => bounds };
+  const text = { ...background };
+  const hidden = { ...background, getBoundingClientRect: () => ({ ...bounds, width: 0 }) };
+  try {
+    for (const resize of [false, true]) {
+      const drawn: unknown[][] = [];
+      globalThis.document = { createElement: () => ({
+        style: {}, append() {}, setAttribute() {}, getContext: () => ({ drawImage: (...args: unknown[]) => drawn.push(args) }),
+      }) } as unknown as Document;
+      const viewport = {
+        parentElement: { append() {}, getBoundingClientRect: () => bounds }, setAttribute() {},
+        getBoundingClientRect: () => bounds, querySelectorAll: () => [background, hidden, text],
+      } as unknown as HTMLElement;
+      if (resize) new TerminalResizeCover(viewport).hold(200);
+      else new TerminalPresentation(viewport).freeze();
+      assert.deepEqual(drawn, [[background, 0, 0], [text, 0, 0]], 'Copy each visible layer in paint order without scaling');
+    }
+  } finally { globalThis.document = previous; }
 });

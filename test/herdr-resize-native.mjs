@@ -49,7 +49,7 @@ try {
   await installBackgroundGrace(context);
   await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), source = await response.text();
-    const body = source.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:');
+    const body = source.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__terminal=new $1({fontSize:');
     assert.notEqual(body, source); await route.fulfill({ response, body });
   });
   await installWireObserver(context);
@@ -100,7 +100,7 @@ try {
   await phone.locator('#terminal-viewport.awaiting-herdr-layout').waitFor({state:'detached'});
   const input = phone.locator('#terminal textarea');
   await input.evaluate(element => { window.__inputBlurs=0; element.addEventListener('blur',()=>window.__inputBlurs++); });
-  const canvas = await phone.locator('#terminal canvas').boundingBox();
+  const canvas = await phone.locator('#terminal .gespenst__background').boundingBox();
   await phone.touchscreen.tap(canvas.x+canvas.width*.5,canvas.y+canvas.height*.3);
   assert.equal(await input.evaluate(element => element===document.activeElement && !element.readOnly),true,'A real Herdr pane accepts tapped input');
   await phone.setViewportSize({width:390,height:460});

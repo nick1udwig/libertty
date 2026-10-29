@@ -12,15 +12,16 @@ License: GNU Affero General Public License v3.0, as distributed upstream.
 Full license: HERDR-SOUNDS-LICENSE.txt (included alongside this notice).
 These assets retain their upstream license.
 
-ghostty-web
-===========
-Version: 0.4.0-next.20.g1858a59
-Source: https://github.com/coder/ghostty-web/tree/1858a59
-License: https://github.com/coder/ghostty-web/blob/1858a59/LICENSE
+Gespenst (@gespenst/core)
+=========================
+Version: 0.2.0
+Files: browser terminal, headless core, ghostty-callbacks.wasm
+Source: https://github.com/tobilg/gespenst
+License: https://github.com/tobilg/gespenst/blob/main/LICENSE
 
 MIT License
 
-Copyright (c) 2025 Coder
+Copyright (c) 2026 TobiLG <github@tobilg.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -42,10 +43,10 @@ SOFTWARE.
 
 Ghostty / libghostty
 ===================
-Embedded in ghostty-web's ghostty-vt.wasm, with ghostty-web's WASM API patch.
-Revision: 5714ed07a1012573261b7b7e3ed2add9c1504496
-Source: https://github.com/ghostty-org/ghostty/tree/5714ed07a1012573261b7b7e3ed2add9c1504496
-License: https://github.com/ghostty-org/ghostty/blob/5714ed07a1012573261b7b7e3ed2add9c1504496/LICENSE
+Official ghostty-vt.wasm, distributed unchanged by @gespenst/core.
+Revision: 919dca5c848d43a489a4cb2e1feade016f0fa2db
+Source: https://github.com/ghostty-org/ghostty/tree/919dca5c848d43a489a4cb2e1feade016f0fa2db
+License: https://github.com/ghostty-org/ghostty/blob/919dca5c848d43a489a4cb2e1feade016f0fa2db/LICENSE
 
 MIT License
 

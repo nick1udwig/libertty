@@ -1,4 +1,5 @@
-import type { Ghostty, GhosttyTerminal, Terminal } from 'ghostty-web';
+import type { Ghostty, GhosttyTerminal } from './terminal-core.ts';
+import type { Terminal } from './terminal-adapter.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
 
 const tokens = (text: string) => text.match(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][\s\S]*?(?:\x07|\x1b\\)|.)|[^\x1b]/gu) || [];
@@ -135,7 +136,7 @@ export class TerminalProjection {
   }
   /** Paint the certified native baseline before exposing a previously hidden canvas. */
   paintBaseline() {
-    if (this.native && this.live && this.canRenderLive()) this.term.renderer?.render(this.native, true, 0, this.term);
+    if (this.native && this.live && this.canRenderLive()) this.term.renderCore(this.native);
   }
   private canRenderLive() {
     return this.mobile && this.complete && this.native?.cols === this.term.cols && this.native.rows === this.term.rows

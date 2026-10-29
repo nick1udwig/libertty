@@ -4,17 +4,6 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Plugin } from 'vite';
 
-export function externalWasm(): Plugin {
-  return {
-    name: 'libertty-external-wasm', enforce: 'pre',
-    transform(code, id) {
-      if (!id.split('?')[0].replaceAll('\\', '/').endsWith('/ghostty-web/dist/ghostty-web.js')) return;
-      const payload = /"data:application\/wasm;base64,[A-Za-z0-9+/=]+"/g;
-      if ([...code.matchAll(payload)].length !== 1) throw new Error('Review Ghostty WASM packaging before updating ghostty-web.');
-      return { code: "import liberttyWasmUrl from 'ghostty-web/ghostty-vt.wasm?url';\n" + code.replace(payload, 'liberttyWasmUrl'), map: null };
-    },
-  };
-}
 export function compressedAssets(): Plugin {
   return {
     name: 'libertty-compressed-assets',

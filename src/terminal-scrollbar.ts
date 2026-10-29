@@ -1,4 +1,4 @@
-import type { Terminal } from 'ghostty-web';
+import type { Terminal } from './terminal-adapter.ts';
 import { terminalContact } from './terminal-contact.ts';
 
 /** A screen-edge scrollbar that shares the terminal's scrollback and focus policy. */
@@ -13,14 +13,6 @@ export class TerminalScrollbar {
 
   constructor(term: Terminal, begin: () => void) {
     const element = term.element!;
-    // ghostty-web's fixed canvas scrollbar paints over the final columns and
-    // owns a separate mouse-only hit test. Disable both in the pinned adapter.
-    const renderer = term.renderer!;
-    (renderer as unknown as { renderScrollbar: () => void }).renderScrollbar = () => {};
-    const native = term as unknown as { handleMouseDown: EventListener; showScrollbar(): void };
-    native.showScrollbar = () => {};
-    element.removeEventListener('mousedown', native.handleMouseDown, true);
-
     this.track.className = 'terminal-scrollbar'; this.track.tabIndex = 0;
     this.track.setAttribute('role', 'scrollbar');
     this.track.setAttribute('aria-label', 'Terminal history');
@@ -76,10 +68,7 @@ export class TerminalScrollbar {
       else if (event.key === 'End') term.scrollToBottom();
       else term.scrollLines(amount!);
     });
-    // This pinned Ghostty build exposes onRender but does not emit it. Refresh
-    // with the actual paint so new output and alternate buffers update the bar.
-    const paint = renderer.render.bind(renderer);
-    renderer.render = (...args) => { paint(...args); render(); };
+    term.onRender(render);
     term.onScroll(render); term.onResize(render);
     const resize = new ResizeObserver(render); resize.observe(element);
     const container = element.parentElement; container?.addEventListener('scroll', render);

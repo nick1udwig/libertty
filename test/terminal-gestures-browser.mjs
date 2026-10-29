@@ -27,7 +27,7 @@ try {
   await context.route('https://example.com/**', route => route.fulfill({ contentType: 'text/html', body: '<title>Opened terminal link</title>' }));
   await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
-    const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
+    const body = original.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__testTerminal=new $1({fontSize:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
   });
   await installWireObserver(context);
@@ -78,7 +78,7 @@ try {
     const before = await snapshot();
     async function pointFor(needle, wrapped = false, offset = 0) {
       const point = await scope.evaluate(({ needle, wrapped, offset }) => {
-        const term = window.__testTerminal, bounds = document.querySelector('#terminal canvas').getBoundingClientRect();
+        const term = window.__testTerminal, bounds = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
         const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
         for (let row = 0; row < term.rows; row++) {
           const line = term.buffer.active.getLine(top + row), col = line?.translateToString(true).indexOf(needle) ?? -1;
@@ -87,7 +87,7 @@ try {
         }
         throw new Error('Missing visible link: ' + needle);
       }, { needle, wrapped, offset });
-      const bounds = await scope.locator('#terminal canvas').boundingBox();
+      const bounds = await scope.locator('#terminal .gespenst__background').boundingBox();
       return { x: bounds.x + point.x, y: bounds.y + point.y };
     }
     for (const [needle, url, wrapped, offset] of [
@@ -180,7 +180,7 @@ try {
     await track.waitFor({ state: 'visible' });
   }
   await checkScrollbar(page);
-  const canvas = await page.locator('#terminal canvas').boundingBox();
+  const canvas = await page.locator('#terminal .gespenst__background').boundingBox();
   const start = { x: canvas.x + canvas.width * .6, y: canvas.y + canvas.height * .35 };
   const focusCalls = await page.evaluate(() => window.__inputFocusCalls);
   await touch('touchStart', start); await delay(25);
@@ -189,7 +189,7 @@ try {
   assert.equal(await focused(), false);
   await delay(20); await touch('touchMove', { x: start.x, y: start.y + 90 }); await touch('touchEnd');
   // Dispatch a fast swipe in one task so CDP round-trip delays cannot turn it into a hold.
-  await page.locator('#terminal canvas').evaluate((el, point) => {
+  await page.locator('#terminal .gespenst__background').evaluate((el, point) => {
     const options = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, pointerId: 98, clientX: point.x, clientY: point.y };
     el.dispatchEvent(new PointerEvent('pointerdown', options));
     el.dispatchEvent(new PointerEvent('pointermove', { ...options, clientY: point.y + 60 }));
@@ -199,21 +199,21 @@ try {
   await delay(120);
   assert.ok(await page.evaluate(() => window.__testTerminal.getViewportY()) > released, 'A swipe should coast after release');
   assert.equal(await focused(), false, 'Scrolling must leave the keyboard closed');
-  await page.locator('#terminal canvas').evaluate(el => {
+  await page.locator('#terminal .gespenst__background').evaluate(el => {
     const options = { bubbles: true, cancelable: true, sourceCapabilities: new InputDeviceCapabilities({ firesTouchEvents: true }) };
     for (const type of ['mousedown', 'mouseup', 'click']) el.dispatchEvent(new MouseEvent(type, options));
   });
   assert.equal(await focused(), false, 'Compatibility mouse events after a swipe must not reopen input');
-  // A library callback can focus input independently of the release event.
+  assert.equal(await page.evaluate(() => window.__inputFocusCalls), focusCalls, 'A swipe must not invoke native input focus at all');
+  // Browser default actions can focus the readonly input independently of adapter hooks.
   await page.locator('#terminal').evaluate(el => {
     el.focus();
     setTimeout(() => el.querySelector('textarea').focus(), 0);
   });
   await delay(25);
   assert.equal(await focused(), false, 'Delayed automatic focus after release must stay blocked');
-  assert.equal(await page.evaluate(() => window.__inputFocusCalls), focusCalls, 'A swipe must not invoke native input focus at all');
   // Some browsers coalesce movement: the release alone must disqualify a tap.
-  await page.locator('#terminal canvas').evaluate((el, point) => {
+  await page.locator('#terminal .gespenst__background').evaluate((el, point) => {
     const options = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, pointerId: 99, clientX: point.x, clientY: point.y };
     el.dispatchEvent(new PointerEvent('pointerdown', options));
     el.dispatchEvent(new PointerEvent('pointerup', { ...options, clientY: point.y + 20 }));
@@ -224,7 +224,7 @@ try {
   await touch('touchStart', start); await touch('touchCancel');
   await page.evaluate(() => window.__testTerminal.scrollToLine(40));
   const rowPoint = await page.evaluate(() => {
-    const term = window.__testTerminal, bounds = document.querySelector('#terminal canvas').getBoundingClientRect();
+    const term = window.__testTerminal, bounds = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
     const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
     for (let row = Math.floor(term.rows / 3); row < term.rows - 2; row++) {
       if (term.buffer.active.getLine(top + row)?.translateToString(true).startsWith('ROW-'))
@@ -243,7 +243,7 @@ try {
   await touch('touchStart', from); await delay(400);
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'before selection', 'Holding must not copy before release');
   assert.equal(await page.locator('#notice-bubble:visible').count(), 0);
-  await page.locator('#terminal canvas').evaluate((el, point) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: point.x, clientY: point.y })), from);
+  await page.locator('#terminal .gespenst__background').evaluate((el, point) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: point.x, clientY: point.y })), from);
   assert.equal(await focused(), false, 'The native long-press menu must not focus terminal input');
   await touch('touchEnd');
   assert.equal(await focused(), false);
@@ -287,7 +287,7 @@ try {
   await delay(850);
   const mouseCopies = await page.evaluate(() => window.__clipboardWrites.length);
   await page.mouse.move(from.x, from.y); await page.mouse.down();
-  await page.mouse.move(from.x + 4 * rowPoint.cell, from.y); await page.mouse.up();
+  await page.mouse.move(from.x + 5 * rowPoint.cell, from.y); await page.mouse.up();
   await copied(page, 'alpha');
   assert.equal(await page.evaluate(() => window.__clipboardWrites.length), mouseCopies + 1);
   await page.locator('#terminal textarea').evaluate(el => el.blur());
@@ -295,7 +295,7 @@ try {
   // Select the lower row first so its handles do not cover the next test word.
   for (const [prefix, text] of [['SINGLE ', 'x'], ['UNICODE ', '界😀']]) {
     const point = await page.evaluate(prefix => {
-      const term = window.__testTerminal, bounds = document.querySelector('#terminal canvas').getBoundingClientRect();
+      const term = window.__testTerminal, bounds = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
       const top = term.buffer.active.length - term.rows;
       for (let row = 0; row < term.rows; row++) if (term.buffer.active.getLine(top + row)?.translateToString(true).startsWith(prefix))
         return { x: bounds.left + (prefix.length + .5) * bounds.width / term.cols, y: bounds.top + (row + .5) * bounds.height / term.rows };
@@ -316,14 +316,14 @@ try {
   // Simulate an Android keyboard opening and closing with a real PTY resize/redraw.
   await page.evaluate(() => window.__testTerminal.focus());
   await page.setViewportSize({ width: 390, height: 460 });
-  await page.waitForFunction(() => document.querySelector('#terminal canvas').getBoundingClientRect().height < 450);
+  await page.waitForFunction(() => document.querySelector('#terminal .gespenst__background').getBoundingClientRect().height < 450);
   await delay(150);
-  const smallCanvas = await page.locator('#terminal canvas').boundingBox();
+  const smallCanvas = await page.locator('#terminal .gespenst__background').boundingBox();
   const withKeyboard = { x: smallCanvas.x + smallCanvas.width * .6, y: smallCanvas.y + smallCanvas.height * .3 };
   const focusedCalls = await page.evaluate(() => window.__inputFocusCalls);
   await touch('touchStart', withKeyboard); await touch('touchMove', { x: withKeyboard.x, y: withKeyboard.y + 60 }); await touch('touchEnd');
   assert.equal(await focused(), true, 'Scrolling must also leave an already open keyboard alone');
-  await page.locator('#terminal textarea').evaluate(el => el.focus());
+  await page.evaluate(() => window.__testTerminal.requestAutomaticFocus());
   assert.equal(await page.evaluate(() => window.__inputFocusCalls), focusedCalls, 'A still-focused input must not be refocused on release after Android hides its keyboard');
   await touch('touchStart', withKeyboard); await touch('touchCancel');
   const view = await page.evaluate(() => {
@@ -372,7 +372,7 @@ try {
   await delay(150);
   await frame.locator('#terminal textarea').evaluate(el => el.blur());
   await checkScrollbar(frame);
-  const embeddedCanvas = await frame.locator('#terminal canvas').boundingBox();
+  const embeddedCanvas = await frame.locator('#terminal .gespenst__background').boundingBox();
   const embeddedStart = { x: embeddedCanvas.x + embeddedCanvas.width * .6, y: embeddedCanvas.y + embeddedCanvas.height * .3 };
   await touch('touchStart', embeddedStart); await touch('touchMove', { x: embeddedStart.x, y: embeddedStart.y + 60 }); await touch('touchEnd');
   await delay(100);
@@ -380,7 +380,7 @@ try {
   await touch('touchStart', embeddedStart); await touch('touchCancel');
   await frame.evaluate(() => window.__testTerminal.focus());
   await page.setViewportSize({ width: 390, height: 460 });
-  await frame.waitForFunction(() => document.querySelector('#terminal canvas').getBoundingClientRect().height < 410);
+  await frame.waitForFunction(() => document.querySelector('#terminal .gespenst__background').getBoundingClientRect().height < 410);
   await delay(150);
   await frame.evaluate(() => window.__testTerminal.scrollLines(-15));
   const embeddedView = await frame.evaluate(() => {
@@ -403,7 +403,7 @@ try {
     for (let row = 2; row < term.rows - 2; row++) if (term.buffer.active.getLine(top + row)?.translateToString(true).startsWith('EMBEDDED-')) return row;
     throw new Error('Missing embedded selection row');
   });
-  const embeddedBounds = await frame.locator('#terminal canvas').boundingBox();
+  const embeddedBounds = await frame.locator('#terminal .gespenst__background').boundingBox();
   const dimensions = await frame.evaluate(() => ({ rows: window.__testTerminal.rows, cols: window.__testTerminal.cols }));
   await touch('touchStart', { x: embeddedBounds.x + 13.5 * embeddedBounds.width / dimensions.cols, y: embeddedBounds.y + (visibleRow + .5) * embeddedBounds.height / dimensions.rows });
   await delay(400); await touch('touchEnd');

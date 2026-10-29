@@ -1,4 +1,4 @@
-import type { Terminal } from 'ghostty-web';
+import type { Terminal } from './terminal-adapter.ts';
 import type { TerminalFocus } from './terminal-focus.ts';
 import { TerminalScrollbar } from './terminal-scrollbar.ts';
 import { terminalLinkAt } from './terminal-links.ts';
@@ -46,17 +46,16 @@ export class TerminalGestures {
     this.term = term; this.host = host;
     const element = term.element!;
     this.canvas = element.querySelector('canvas')!;
+    // Keep mobile touch adjustment on cells instead of nearby selection handles.
+    this.canvas.addEventListener('click', event => event.preventDefault());
     const geometry = new ResizeObserver(() => { this.scrollLinePixels = undefined; });
     geometry.observe(this.canvas);
     window.addEventListener('pagehide', event => { if (!event.persisted) geometry.disconnect(); });
-    const surface = (target: EventTarget | null) => target === element || target === this.canvas || target === term.textarea;
+    const surface = (target: EventTarget | null) => target === element || target === this.canvas.parentElement || target === term.textarea || target instanceof HTMLCanvasElement && element.contains(target);
     const stop = (event: Event) => { if (event.cancelable) event.preventDefault(); event.stopImmediatePropagation(); };
     this.highlights.className = 'terminal-selection';
     element.append(this.highlights);
-    // The pinned Ghostty adapter already copies native mouse selections and
-    // double-clicks. Use one clipboard hook for their confirmation as well.
-    const native = term as unknown as { selectionManager: { copyToClipboard(text: string): void } };
-    native.selectionManager.copyToClipboard = text => void this.copy(host, text);
+    term.setCopyHandler(text => void this.copy(host, text));
     this.handles.forEach((handle, index) => {
       handle.className = 'selection-handle'; handle.hidden = true;
       handle.setAttribute('aria-label', index ? 'Selection end' : 'Selection start');
@@ -102,7 +101,7 @@ export class TerminalGestures {
       accepts: surface,
       down: ({ x, y, at, pointerType }) => {
         if (pointerType === 'mouse') {
-          if (performance.now() - this.lastTouch >= 800) host.focus.allowMouse();
+          if (performance.now() - this.lastTouch >= 800) { host.focus.allowMouse(); this.cancelMomentum(); this.clear(false); }
           return false;
         }
         host.focus.suppress(); this.cancelCopy(); this.lastTouch = performance.now();
@@ -143,17 +142,15 @@ export class TerminalGestures {
       if (surface(e.target) && e.pointerType === 'mouse' && performance.now() - this.lastTouch < 800) stop(e);
     }, { capture: true });
     element.addEventListener('contextmenu', e => {
-      // Ghostty's native menu focuses and repositions its textarea even when the
-      // event was prevented. Stop it before it reaches the canvas on long press.
+      // Stop native context menus during long presses and text selection.
       if (surface(e.target) && (this.press || this.start || performance.now() - this.lastTouch < 800)) stop(e);
     }, { capture: true });
     for (const type of ['mousedown', 'mouseup', 'mousemove', 'click']) element.addEventListener(type, event => {
       if (!surface(event.target)) return;
       const capabilities = (event as MouseEvent & { sourceCapabilities?: { firesTouchEvents: boolean } }).sourceCapabilities;
       // Android may dispatch compatibility mouse events after the touch ends.
-      // They must not reach Ghostty's independent mouse focus/selection handlers.
+      // They must not reach native mouse focus and selection handlers.
       if (this.press || (capabilities?.firesTouchEvents ?? performance.now() - this.lastTouch < 800)) { stop(event); return; }
-      if (type === 'mousedown') { this.cancelMomentum(); this.clear(false); }
     }, { capture: true });
     element.addEventListener('wheel', event => {
       if (!host.scroll?.enabled() || event.ctrlKey || !event.deltaY) return;

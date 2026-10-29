@@ -174,7 +174,7 @@ export class Herdr {
     const theme = add('t-1776', 'w-1776', 'claude', 'claude', 'blocked', [
       user('Make a new theme for the newly rebranded libertty called 1776. A patriotic American theme, practical to use, without sacrificing red, white and blue. Propose three mock designs.'),
       '', `${dot()} Theme lives in src/theme.ts + src/tokens.css; I'm drafting three palettes, checking their contrast, and building a visual mock page.`,
-      '', tool('Bash', 'cat src/theme.ts && cat src/tokens.css'), `  ⎿  import type { ITheme } from 'ghostty-web';`, dim('     … +71 lines (ctrl+o to expand)'),
+      '', tool('Bash', 'cat src/theme.ts && cat src/tokens.css'), `  ⎿  import type { ITheme } from './terminal-adapter.ts';`, dim('     … +71 lines (ctrl+o to expand)'),
       '', `${dot()} I've put three mock designs for the 1776 theme on one page:`, '  A · Old Glory: deep navy, star-white text, red accent.', '  B · Declaration: iron-gall ink on parchment.', '  C · Star-Spangled: the flag laid out as an interface.',
       '', user('i really like A & C. can we do a theme like C but light & light'),
       '', `${dot()} Added D · Star-Spangled Light: a white canvas, pale blue bars, Old Glory Blue text and Old Glory Red buttons.`,

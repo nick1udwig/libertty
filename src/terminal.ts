@@ -4,7 +4,8 @@ import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.
 import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
 import { imagePicker, uploadImage } from './image-upload.ts';
-import { Ghostty, Terminal, FitAddon } from 'ghostty-web';
+import { Terminal, FitAddon } from './terminal-adapter.ts';
+import '@gespenst/core/style.css';
 import type { ClientMessage, ServerMessage, ShellState, RepairResult } from './protocol.ts';
 import './style.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
@@ -180,20 +181,20 @@ try {
 } catch { /* Use the default when storage is unavailable or stale. */ }
 if (!fontSizeInput.checkValidity()) fontSizeInput.value = fontSizeInput.defaultValue;
 const fontFamily = getComputedStyle(document.documentElement).fontFamily;
-// Load the font before Ghostty measures cells, in parallel with its WASM.
-const [ghostty] = await Promise.all([Ghostty.load(), document.fonts.load(`14px ${fontFamily}`).catch(() => {})]);
-const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 / 3, fontFamily,
+// Load the font before Gespenst measures cells.
+await document.fonts.load(`14px ${fontFamily}`).catch(() => {});
+const term = new Terminal({ fontSize: fontSizeInput.valueAsNumber * 4 / 3, fontFamily,
   scrollback: 5000, cursorBlink: true, smoothScrollDuration: 0,
   theme: terminalThemes[terminalTheme] });
 const rendering = new TerminalRendering(term);
-term.open($('terminal'));
+await term.open($('terminal'));
 rendering.attach();
-if (terminalTheme === 'paper' || terminalTheme === 'flag') adaptDarkAppColors(term.renderer as unknown as Parameters<typeof adaptDarkAppColors>[0], terminalThemes[terminalTheme]);
+if (terminalTheme === 'paper' || terminalTheme === 'flag') adaptDarkAppColors(term, terminalThemes[terminalTheme]);
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
 const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
 let deferredScreen: string | undefined;
-const projection = herdrTerminal ? new TerminalProjection(term, ghostty) : undefined;
+const projection = herdrTerminal ? new TerminalProjection(term, term.ghostty!) : undefined;
 const terminalViewport = $('terminal-viewport');
 const herdrLayout = new HerdrLayout(terminalViewport);
 const echo = new TerminalEcho(term, $('terminal'));
@@ -436,9 +437,9 @@ function sizeTerminal() {
     refreshHerdrFrame();
   } catch { /* hidden during layout */ }
 }
-fontSizeInput.oninput = () => {
+fontSizeInput.oninput = async () => {
   if (!fontSizeInput.checkValidity() || fontSizeInput.valueAsNumber * 4 / 3 === term.options.fontSize) return;
-  term.options.fontSize = fontSizeInput.valueAsNumber * 4 / 3;
+  await term.setFontSize(fontSizeInput.valueAsNumber * 4 / 3);
   sizeTerminal();
   persist('fontSizePt', fontSizeInput.valueAsNumber);
 };

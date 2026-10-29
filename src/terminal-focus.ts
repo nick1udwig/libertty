@@ -1,4 +1,4 @@
-import type { Terminal } from 'ghostty-web';
+import type { Terminal } from './terminal-adapter.ts';
 
 /** Only intentional input actions may reopen the software keyboard after a gesture. */
 export class TerminalFocus {
@@ -12,24 +12,21 @@ export class TerminalFocus {
   constructor(term: Terminal) {
     this.input = term.textarea!;
     this.nativeFocus = this.input.focus.bind(this.input);
-    // Ghostty focuses this node directly from several independent event handlers.
-    // Guard those calls, rather than relying on every browser's event ordering.
-    this.input.focus = options => {
+    const automaticFocus = () => {
       if (!this.automatic) return;
-      this.enable(); this.nativeFocus({ ...options, preventScroll: true });
+      this.enable(); this.nativeFocus({ preventScroll: true });
     };
-    term.focus = () => this.focus();
-    term.blur = () => { this.input.blur(); term.element?.blur(); };
+    term.setAutomaticFocusHandler(automaticFocus);
+    term.setFocusHandler(() => this.focus());
     term.element!.removeAttribute('contenteditable');
     term.element!.tabIndex = -1;
-    // Native mouse selection also focuses the outer element. Keep input in the
-    // textarea, using the same guard when a touch gesture has blocked refocus.
-    term.element!.addEventListener('focus', () => { if (!this.input.readOnly) this.input.focus({ preventScroll: true }); });
+    // Keep native mouse focus in the textarea when a gesture permits it.
+    term.element!.addEventListener('focus', () => { if (!this.input.readOnly) automaticFocus(); });
     this.input.addEventListener('blur', event => { if (event.relatedTarget !== term.element) this.lock(); });
     this.input.addEventListener('focus', event => {
-      // Browser default actions bypass JavaScript focus() overrides. A readonly
-      // input cannot summon the IME; also relinquish accidental native focus.
-      if (this.input.readOnly && !this.automatic) { this.input.blur(); event.stopImmediatePropagation(); }
+      // A readonly input cannot summon the IME; also relinquish accidental native focus.
+      if (!this.automatic && this.input.readOnly) { this.input.blur(); event.stopImmediatePropagation(); }
+      else if (this.automatic) this.enable();
     }, { capture: true });
     term.blur();
     this.lock();

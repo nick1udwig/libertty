@@ -19,15 +19,12 @@ test('Paper turns dark app panels light and light app text dark', () => {
 });
 
 test('Paper leaves its own palette alone and caches flipped colors', () => {
-  const calls: number[][] = [];
-  const renderer = { rgbToCSS(r: number, g: number, b: number) { calls.push([r, g, b]); return `rgb(${r}, ${g}, ${b})`; } };
-  adaptDarkAppColors(renderer, paper);
-  assert.equal(renderer.rgbToCSS(0xa3, 0x16, 0x1c), 'rgb(163, 22, 28)', 'ANSI red is already tuned for Paper');
-  assert.equal(renderer.rgbToCSS(0xfb, 0xfa, 0xf6), 'rgb(251, 250, 246)');
-  assert.equal(renderer.rgbToCSS(0xff, 0xff, 0xff), 'rgb(20, 20, 20)', 'App white text flips although the cursor accent is white');
-  const flipped = renderer.rgbToCSS(0x1e, 0x1e, 0x1e);
-  assert.notEqual(flipped, 'rgb(30, 30, 30)');
-  const before = calls.length;
-  assert.equal(renderer.rgbToCSS(0x1e, 0x1e, 0x1e), flipped); assert.equal(calls.length, before, 'Repeated colors come from the cache');
-  adaptDarkAppColors(undefined, paper);
+  let transform!: (r: number, g: number, b: number) => [number, number, number];
+  adaptDarkAppColors({ setColorTransform(value) { transform = value; } }, paper);
+  assert.deepEqual(transform(0xa3, 0x16, 0x1c), [163, 22, 28], 'ANSI red is already tuned for Paper');
+  assert.deepEqual(transform(0xfb, 0xfa, 0xf6), [251, 250, 246]);
+  assert.deepEqual(transform(0xff, 0xff, 0xff), [20, 20, 20], 'App white text flips although the cursor accent is white');
+  const flipped = transform(0x1e, 0x1e, 0x1e);
+  assert.notDeepEqual(flipped, [30, 30, 30]);
+  assert.equal(transform(0x1e, 0x1e, 0x1e), flipped, 'Repeated colors come from the cache');
 });

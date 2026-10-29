@@ -1,4 +1,5 @@
-import type { GhosttyCell, Terminal } from 'ghostty-web';
+import type { GhosttyCell } from './terminal-core.ts';
+import type { Terminal } from './terminal-adapter.ts';
 
 /** The screen rows of the last content line and the cursor, so a repaint keeps the same layout. */
 export interface TerminalPicture { last: number; x: number; y: number; cursor: boolean }
@@ -33,15 +34,15 @@ function row(cells: ArrayLike<GhosttyCell>, offset: number, columns: number, gra
 }
 
 type Snapshot = { text: string; picture: TerminalPicture };
-const snapshots = new WeakMap<object, { limit: number; columns: number; rows: number; foreground: number; value: Snapshot }>();
+const snapshots = new WeakMap<object, { revision: number; limit: number; columns: number; rows: number; foreground: number; value: Snapshot }>();
 export function invalidateSnapshot(term: Terminal) { if (term.wasmTerm) snapshots.delete(term.wasmTerm); }
 
 /** Styled rows that repaint through the same renderer; each row starts from default attributes. */
 export function terminalSnapshot(term: Terminal, limit = 5000) {
   const terminal = term.wasmTerm!, columns = terminal.cols, rows = terminal.rows;
   const colors = terminal.getColors().foreground, foreground = colors.r << 16 | colors.g << 8 | colors.b;
-  const cached = snapshots.get(terminal);
-  if (cached && cached.limit === limit && cached.columns === columns && cached.rows === rows && cached.foreground === foreground) return cached.value;
+  const revision = terminal.getRevision(), cached = snapshots.get(terminal);
+  if (cached && cached.revision === revision && cached.limit === limit && cached.columns === columns && cached.rows === rows && cached.foreground === foreground) return cached.value;
   const history = term.buffer.active.type === 'normal' ? terminal.getScrollbackLength() : 0, lines: string[] = [];
   for (let offset = Math.max(0, history + rows - limit); offset < history; offset++) {
     const cells = terminal.getScrollbackLine(offset);
@@ -57,7 +58,7 @@ export function terminalSnapshot(term: Terminal, limit = 5000) {
   while (lines.at(-1) === '') lines.pop();
   const picture: TerminalPicture = { last, x: cursor.x, y: cursor.y, cursor: !!cursor.visible };
   const value = { text: lines.join('\n'), picture };
-  snapshots.set(terminal, { limit, columns, rows, foreground, value });
+  snapshots.set(terminal, { revision, limit, columns, rows, foreground, value });
   return value;
 }
 
