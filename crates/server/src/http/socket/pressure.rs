@@ -69,6 +69,19 @@ mod tests {
     use super::*;
     use crate::protocol::ServerMessage;
     #[test]
+    fn acknowledgement_during_flush_is_not_reintroduced_when_send_finishes() {
+        let mut pressure = Pressure::default();
+        let now = Instant::now();
+        pressure.sent(Some(1), now, now);
+        pressure.acknowledge(1, now + Duration::from_millis(5));
+        pressure.sent(None, now, now + Duration::from_millis(10));
+        assert!(pressure.outstanding.is_empty());
+        assert_eq!(
+            pressure.mode(wire::Mode::GzipFast, false, now + SLOW_ACK),
+            wire::Mode::GzipFast
+        );
+    }
+    #[test]
     fn queue_pressure_compresses_bulk_without_changing_negotiated_compatibility() {
         let mut pressure = Pressure::default();
         let now = Instant::now();
