@@ -38,6 +38,67 @@ fn executable(file: &std::path::Path, content: &str) {
 }
 
 #[tokio::test]
+async fn engine_workers_are_bounded_and_learned_metadata_stays_private() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    executable(
+        &root.path().join("orbit"),
+        "#!/bin/sh\nprintf '  --private VALUE  Private\\n'\n",
+    );
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(cwd, &["orbit"]),
+        BTreeMap::from([("HOME".into(), cwd.into()), ("PATH".into(), cwd.into())]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engines: Vec<_> = (0..40).map(|_| NativeEngine::new().unwrap()).collect();
+    let cancel = CancellationToken::new();
+    engines[0]
+        .warm_command("orbit", &host, &cancel)
+        .await
+        .unwrap();
+    for engine in &engines[1..] {
+        let metadata = engine
+            .invoke(
+                request("cachedMetadata", json!([host.catalog, host.environment])),
+                &host,
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert!(metadata["flags"]["orbit"].is_null(), "{metadata}");
+        engine.reset().unwrap();
+    }
+    let first = engines[0].clone();
+    drop(engines);
+    let metadata = first
+        .invoke(
+            request("cachedMetadata", json!([host.catalog, host.environment])),
+            &host,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(metadata["flags"]["orbit"][0]["name"], "--private");
+    #[cfg(target_os = "linux")]
+    {
+        let workers = std::fs::read_dir("/proc/self/task")
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                std::fs::read_to_string(entry.path().join("comm"))
+                    .is_ok_and(|name| name.starts_with("libertty-engine"))
+            })
+            .count();
+        assert!(
+            (1..=4).contains(&workers),
+            "{workers} engine threads for 40 engines"
+        );
+    }
+}
+
+#[tokio::test]
 async fn typed_native_calls_match_json_and_warm_the_same_discovery() {
     let root = tempfile::tempdir().unwrap();
     let cwd = root.path().to_str().unwrap();

@@ -42,6 +42,8 @@ Backend microphone dictation repairs its transcript locally and publishes altern
 Herdr additionally checks ownership, foreground shell identity and the last dictated span before replacement.
 
 Each engine owns its learned metadata, while request-owned host futures isolate cancellation and fact memoization.
+A shared pool uses at most four OS threads, with a separate cooperative runtime state and bounded request queue for each engine.
+Dropping an engine closes its queue and cancels its outstanding work without stopping other engines.
 Prompt-time metadata prewarming remains shared by local and SSH sessions.
 Herdr retains an engine and help provider per terminal context and invalidates them when the shell or environment changes.
 Herdr shares command discovery within each terminal context for two seconds after a successful scan.

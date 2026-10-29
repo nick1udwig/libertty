@@ -5,7 +5,15 @@ use libertty_engine::{
     types::Candidate,
 };
 use serde_json::Value;
-use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Instant,
+};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
@@ -29,99 +37,118 @@ impl Drop for Pending {
         self.0.cancel();
     }
 }
-enum Executor {
-    Shared(tokio::runtime::Handle),
-    Owned(tokio::runtime::Runtime),
+struct Workers {
+    senders: Vec<mpsc::Sender<mpsc::Receiver<Message>>>,
+    next: AtomicUsize,
+}
+impl Workers {
+    fn new() -> Result<Self, String> {
+        let count = std::thread::available_parallelism()
+            .map_or(1, usize::from)
+            .min(4);
+        let mut senders = Vec::with_capacity(count);
+        for index in 0..count {
+            let executor = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())?;
+            let (sender, mut receivers) = mpsc::channel(128);
+            std::thread::Builder::new()
+                .name(format!("libertty-engine-{index}"))
+                .spawn(move || {
+                    libertty_engine::initialize();
+                    let local = tokio::task::LocalSet::new();
+                    executor.block_on(local.run_until(async move {
+                        while let Some(receiver) = receivers.recv().await {
+                            tokio::task::spawn_local(run_engine(receiver));
+                        }
+                    }));
+                })
+                .map_err(|error| error.to_string())?;
+            senders.push(sender);
+        }
+        Ok(Self {
+            senders,
+            next: AtomicUsize::new(0),
+        })
+    }
+    fn register(&self, receiver: mpsc::Receiver<Message>) -> Result<(), String> {
+        let index = self.next.fetch_add(1, Ordering::Relaxed) % self.senders.len();
+        self.senders[index]
+            .try_send(receiver)
+            .map_err(|_| "Engine worker queue is full or closed.".into())
+    }
+}
+async fn run_engine(mut receiver: mpsc::Receiver<Message>) {
+    let runtime = Rc::new(RefCell::new(Runtime::default()));
+    let mut next = 0u32;
+    let clock = Instant::now();
+    let mut generation = CancellationToken::new();
+    while let Some(message) = receiver.recv().await {
+        match message {
+            Message::Reset => {
+                generation.cancel();
+                generation = CancellationToken::new();
+                runtime.borrow_mut().reset();
+            }
+            Message::Start(job) => {
+                let Job {
+                    call,
+                    host,
+                    cancel,
+                    result,
+                } = *job;
+                let Some(id) = next.checked_add(1) else {
+                    let _ = result.send(Err("Engine request IDs exhausted.".into()));
+                    continue;
+                };
+                next = id;
+                if cancel.is_cancelled() {
+                    let _ = result.send(Err(ABORTED.into()));
+                    continue;
+                }
+                // Assign and start IDs in receiver order, before tasks can yield.
+                let deadline = tokio::time::Instant::now()
+                    + std::time::Duration::from_millis(
+                        libertty_engine::runtime::REPAIR_BUDGET_MS as u64,
+                    );
+                let (host, facts) = (Rc::new(host), cancel.clone());
+                let work = runtime::drive(
+                    runtime.clone(),
+                    id,
+                    call,
+                    move || clock.elapsed().as_secs_f64() * 1000.0,
+                    move |operations| {
+                        let (host, cancel) = (host.clone(), facts.clone());
+                        async move {
+                            host.engine_operations_until(&operations, &cancel, Some(deadline))
+                                .await
+                        }
+                    },
+                );
+                let reset = generation.clone();
+                tokio::task::spawn_local(async move {
+                    let value = tokio::select! { biased;
+                        _ = cancel.cancelled() => Err(ABORTED.into()),
+                        _ = reset.cancelled() => Err(ABORTED.into()),
+                        value = work => value,
+                    };
+                    let _ = result.send(value);
+                });
+            }
+        }
+    }
+    generation.cancel();
 }
 impl NativeEngine {
     pub fn new() -> Result<Self, String> {
-        let (sender, mut receiver) = mpsc::channel::<Message>(128);
-        let executor = match tokio::runtime::Handle::try_current() {
-            Ok(handle) => Executor::Shared(handle),
-            Err(_) => Executor::Owned(
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| e.to_string())?,
-            ),
-        };
-        std::thread::Builder::new()
-            .name("libertty-engine".into())
-            .spawn(move || {
-                libertty_engine::initialize();
-                let runtime = Rc::new(RefCell::new(Runtime::default()));
-                let local = tokio::task::LocalSet::new();
-                let work = local.run_until(async move {
-                    let mut next = 0u32;
-                    let clock = Instant::now();
-                    let mut generation = CancellationToken::new();
-                    while let Some(message) = receiver.recv().await {
-                        match message {
-                            Message::Reset => {
-                                generation.cancel();
-                                generation = CancellationToken::new();
-                                runtime.borrow_mut().reset();
-                            }
-                            Message::Start(job) => {
-                                let Job {
-                                    call,
-                                    host,
-                                    cancel,
-                                    result,
-                                } = *job;
-                                let Some(id) = next.checked_add(1) else {
-                                    let _ =
-                                        result.send(Err("Engine request IDs exhausted.".into()));
-                                    continue;
-                                };
-                                next = id;
-                                if cancel.is_cancelled() {
-                                    let _ = result.send(Err(ABORTED.into()));
-                                    continue;
-                                }
-                                // Assign and start IDs in receiver order, before tasks can yield.
-                                let deadline = tokio::time::Instant::now()
-                                    + std::time::Duration::from_millis(
-                                        libertty_engine::runtime::REPAIR_BUDGET_MS as u64,
-                                    );
-                                let (host, facts) = (Rc::new(host), cancel.clone());
-                                let work = runtime::drive(
-                                    runtime.clone(),
-                                    id,
-                                    call,
-                                    move || clock.elapsed().as_secs_f64() * 1000.0,
-                                    move |operations| {
-                                        let (host, cancel) = (host.clone(), facts.clone());
-                                        async move {
-                                            host.engine_operations_until(
-                                                &operations,
-                                                &cancel,
-                                                Some(deadline),
-                                            )
-                                            .await
-                                        }
-                                    },
-                                );
-                                let reset = generation.clone();
-                                tokio::task::spawn_local(async move {
-                                    let value = tokio::select! { biased;
-                                        _ = cancel.cancelled() => Err(ABORTED.into()),
-                                        _ = reset.cancelled() => Err(ABORTED.into()),
-                                        value = work => value,
-                                    };
-                                    let _ = result.send(value);
-                                });
-                            }
-                        }
-                    }
-                    generation.cancel();
-                });
-                match executor {
-                    Executor::Shared(handle) => handle.block_on(work),
-                    Executor::Owned(runtime) => runtime.block_on(work),
-                }
-            })
-            .map_err(|e| e.to_string())?;
+        static WORKERS: OnceLock<Result<Workers, String>> = OnceLock::new();
+        let workers = WORKERS
+            .get_or_init(Workers::new)
+            .as_ref()
+            .map_err(Clone::clone)?;
+        let (sender, receiver) = mpsc::channel(128);
+        workers.register(receiver)?;
         Ok(Self { sender })
     }
     pub fn reset(&self) -> Result<(), String> {
