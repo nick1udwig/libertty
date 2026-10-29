@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Terminal } from '../src/terminal-adapter.ts';
+import { Terminal, FitAddon } from '../src/terminal-adapter.ts';
 
 function scheduledTerminal() {
   const terminal = new Terminal({});
@@ -162,5 +162,32 @@ test('modified mouse clicks open safe links at the scrolled cell and preserve co
   } finally {
     if (original) Object.defineProperty(globalThis, 'window', original);
     else Reflect.deleteProperty(globalThis, 'window');
+  }
+});
+
+test('fitting uses the retained renderer scale across device pixel ratio changes', () => {
+  const terminal = new Terminal({});
+  const view = { geometry: { cellWidthPx: 16, cellHeightPx: 32 }, layout: { metrics: { devicePixelRatio: 2 } } };
+  Reflect.set(terminal, 'view', view);
+  terminal.element = { clientWidth: 815, clientHeight: 384 } as HTMLElement;
+  const ratio = Object.getOwnPropertyDescriptor(globalThis, 'devicePixelRatio');
+  const computedStyle = Object.getOwnPropertyDescriptor(globalThis, 'getComputedStyle');
+  Object.defineProperty(globalThis, 'getComputedStyle', { configurable: true, value: () => ({ paddingLeft: '0', paddingRight: '0', paddingTop: '0', paddingBottom: '0' }) });
+  const fit = new FitAddon();
+  fit.activate(terminal);
+  try {
+    for (const value of [1, 1.25, 2, 3]) {
+      Object.defineProperty(globalThis, 'devicePixelRatio', { configurable: true, value });
+      assert.deepEqual(terminal.renderer.getMetrics(), { width: 8, height: 16 });
+      assert.deepEqual(fit.proposeDimensions(), { cols: 100, rows: 24 });
+    }
+    view.layout.metrics.devicePixelRatio = 3;
+    view.geometry = { cellWidthPx: 24, cellHeightPx: 48 };
+    assert.deepEqual(fit.proposeDimensions(), { cols: 100, rows: 24 });
+  } finally {
+    for (const [key, descriptor] of [['devicePixelRatio', ratio], ['getComputedStyle', computedStyle]] as const) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
   }
 });

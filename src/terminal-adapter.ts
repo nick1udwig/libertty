@@ -57,7 +57,9 @@ export class Terminal {
   private lastCursor = '';
   private lastScroll = 0;
   readonly renderer = { getMetrics: () => {
-    const geometry = this.view?.geometry, ratio = globalThis.devicePixelRatio || 1;
+    const geometry = this.view?.geometry;
+    const layout = (this.view as unknown as { layout?: { metrics: { devicePixelRatio: number } } })?.layout;
+    const ratio = layout?.metrics.devicePixelRatio ?? 1;
     return { width: (geometry?.cellWidthPx ?? 8) / ratio, height: (geometry?.cellHeightPx ?? 16) / ratio };
   } };
   constructor(options: TerminalOptions) {
