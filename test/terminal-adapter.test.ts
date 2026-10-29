@@ -107,3 +107,23 @@ test('a retained baseline paints its own core even when browser focus needs a fu
   assert.equal(painted, frame);
   assert.equal(Reflect.get(terminal, 'fullFrame'), true);
 });
+
+test('programmatic selection scrolling emits once and still reports native changes', () => {
+  const terminal = new Terminal({});
+  let offset = 0;
+  Reflect.set(terminal, 'wasmTerm', {
+    getScrollbackLength: () => 100,
+    getViewportY: () => offset,
+    setViewportY: (value: number) => { offset = value; },
+  });
+  const notifications: number[] = [];
+  terminal.onScroll(value => notifications.push(value));
+  terminal.scrollToLine(5.5);
+  Reflect.get(terminal, 'notifyScroll').call(terminal);
+  terminal.scrollToLine(6);
+  terminal.scrollToLine(7);
+  Reflect.get(terminal, 'notifyScroll').call(terminal);
+  offset = 3;
+  Reflect.get(terminal, 'notifyScroll').call(terminal);
+  assert.deepEqual(notifications, [5.5, 6, 7, 3]);
+});

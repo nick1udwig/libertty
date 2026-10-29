@@ -54,6 +54,7 @@ export class Terminal {
   private copyHandler?: (text: string) => void;
   private listeners = new Map<string, Set<(value: any) => void>>();
   private lastCursor = '';
+  private lastScroll = 0;
   readonly renderer = { getMetrics: () => {
     const geometry = this.view?.geometry, ratio = globalThis.devicePixelRatio || 1;
     return { width: (geometry?.cellWidthPx ?? 8) / ratio, height: (geometry?.cellHeightPx ?? 16) / ratio };
@@ -107,7 +108,7 @@ export class Terminal {
     view.on('input', event => this.emit('data', new TextDecoder().decode(event.data)));
     view.on('resize', () => this.emit('resize', { cols: this.cols, rows: this.rows }));
     view.on('selectionChange', () => this.emit('selection'));
-    view.on('scroll', () => this.emit('scroll', this.getViewportY()));
+    view.on('scroll', () => this.notifyScroll());
     view.on('viewportChange', () => {
       const cursor = this.wasmTerm!.getCursor(), key = `${cursor.x},${cursor.y}`;
       if (key !== this.lastCursor) { this.lastCursor = key; this.emit('cursor'); }
@@ -176,8 +177,14 @@ export class Terminal {
     this.viewportFraction = target - Math.floor(target);
     this.wasmTerm?.setViewportY(Math.floor(target));
     this.viewportBase = this.wasmTerm?.getViewportY() ?? 0;
-    this.emit('scroll', this.getViewportY());
+    this.notifyScroll();
     if (this.backend) void this.backend.pipeline.scheduleRender();
+  }
+  private notifyScroll() {
+    const offset = this.getViewportY();
+    if (offset === this.lastScroll) return;
+    this.lastScroll = offset;
+    this.emit('scroll', offset);
   }
   async setFontSize(size: number) {
     this.options.fontSize = size;
