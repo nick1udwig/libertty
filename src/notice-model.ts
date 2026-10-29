@@ -27,6 +27,14 @@ export function remoteActions(notice: RemoteNotice, run: (id: string) => void): 
   return notice.actions.map(action => ({ label: action.label, run: () => run(action.id) }));
 }
 
+/** Read a frame's `terminal-notice` or `terminal-status` message, whose actions send their ids back to the frame. */
+export function frameNotice(data: any, frame: Window | null): { status: boolean; input?: NoticeInput } | undefined {
+  const status = data?.type === 'terminal-status';
+  if (!status && data?.type !== 'terminal-notice') return;
+  const remote = remoteNotice(status ? data.status : data, status ? 'progress' : 'error');
+  return { status, input: remote && { ...remote, actions: remoteActions(remote, id => frame?.postMessage({ type: 'notice-action', id }, location.origin)) } };
+}
+
 /** Hold current notices, keyed states and a short history, and choose the notice the bubble presents. */
 export class NoticeModel {
   /** Current notices, newest first. */

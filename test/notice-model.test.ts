@@ -1,6 +1,6 @@
 import { mock, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NoticeModel, remoteActions, remoteNotice } from '../src/notice-model.ts';
+import { NoticeModel, frameNotice, remoteActions, remoteNotice } from '../src/notice-model.ts';
 
 function model() {
   let now = 0, changes = 0;
@@ -94,4 +94,19 @@ test('frame notices are validated and their actions reply with ids', () => {
   const replies: string[] = [];
   for (const action of remoteActions(remote, id => replies.push(id))) action.run();
   assert.deepEqual(replies, ['redraw', 'a']);
+});
+
+test('frame messages become notices or states whose actions post their ids back to the frame', t => {
+  Object.defineProperty(globalThis, 'location', { value: { origin: 'https://libertty.test' }, configurable: true });
+  t.after(() => { delete (globalThis as { location?: unknown }).location; });
+  const posted: unknown[] = [];
+  const frame = { postMessage: (message: unknown, origin: string) => posted.push([message, origin]) } as unknown as Window;
+  assert.equal(frameNotice({ type: 'reading-open' }, frame), undefined);
+  const notice = frameNotice({ type: 'terminal-notice', message: 'Copied', actions: [{ id: 'redraw', label: 'Redraw' }] }, frame)!;
+  assert.equal(notice.status, false); assert.equal(notice.input?.kind, 'error');
+  notice.input!.actions![0].run();
+  assert.deepEqual(posted, [[{ type: 'notice-action', id: 'redraw' }, 'https://libertty.test']]);
+  const status = frameNotice({ type: 'terminal-status', status: { message: 'Reconnecting' } }, frame)!;
+  assert.equal(status.status, true); assert.equal(status.input?.kind, 'progress');
+  assert.deepEqual(frameNotice({ type: 'terminal-status' }, frame), { status: true, input: undefined }, 'A missing status clears the state');
 });

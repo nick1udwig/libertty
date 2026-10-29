@@ -2,7 +2,7 @@ import { node } from './dom.ts';
 import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
 import { terminalCanEvict } from './terminal-retention.ts';
-import { remoteActions, remoteNotice, type NoticeAction, type NoticeInput, type NoticeKind } from './notice-model.ts';
+import { frameNotice, type NoticeAction, type NoticeInput, type NoticeKind } from './notice-model.ts';
 
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; verified:boolean; loaded?:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number; state?:NoticeInput }
 export interface FramesHost {
@@ -47,7 +47,6 @@ export class HerdrFrames {
     const entry = [...this.entries.values()].find(entry => event.source === entry.frame.contentWindow && event.data?.session === entry.session);
     if (!entry) return;
     const active = entry.frame === this.frame;
-    const reply = (id: string) => entry.frame.contentWindow?.postMessage({ type: 'notice-action', id }, location.origin);
     if (event.data.type === 'terminal-loaded') {
       entry.loaded = true; entry.state = undefined; if (active) this.host.state();
       entry.frame.contentWindow?.postMessage({ type: 'shortcut-host' }, location.origin);
@@ -65,13 +64,9 @@ export class HerdrFrames {
       this.rendered = true; this.setLoading(false); this.host.painted();
     }
     if (event.data.type === 'herdr-resize-ready') this.resizing.get(entry.frame)?.();
-    const remote = event.data.type === 'terminal-notice' ? remoteNotice(event.data, 'error') : undefined;
-    if (active && remote) this.host.notice(remote.message, remote.kind, remoteActions(remote, reply));
-    if (event.data.type === 'terminal-status') {
-      const status = remoteNotice(event.data.status, 'progress');
-      entry.state = status && { ...status, actions: remoteActions(status, reply) };
-      if (active) this.host.state(entry.state);
-    }
+    const remote = frameNotice(event.data, entry.frame.contentWindow);
+    if (remote?.status) { entry.state = remote.input; if (active) this.host.state(entry.state); }
+    else if (active && remote?.input) this.host.notice(remote.input.message, remote.input.kind, remote.input.actions);
     if (event.data.type === 'reading-open' && readingOpen(event.data)) this.host.reading(entry.frame.dataset.terminal!, event.data);
     if (event.data.type === 'terminal-ended') this.host.ended();
     if (event.data.type === 'terminal-locked') entry.locked = true;

@@ -6,8 +6,7 @@ import type { HerdrView } from './herdr-view.ts';
 import { imagePicker } from './image-upload.ts';
 import { menuEvents } from './menu.ts';
 import {
-  remoteActions,
-  remoteNotice,
+  frameNotice,
   type NoticeAction,
   type NoticeInput,
   type NoticeKind,
@@ -838,17 +837,9 @@ export function createWorkspaceNavigation(options: Options) {
       showTerminalLoading(tab.id);
       void capturedHerdr(backend, tab, event.data.id);
     }
-    const reply = (id: string) =>
-      frame.contentWindow?.postMessage({ type: 'notice-action', id }, location.origin);
-    if (event.data?.type === 'terminal-notice') {
-      const remote = remoteNotice(event.data, 'error');
-      if (remote)
-        notices.notify({ ...remote, source: tab.name, actions: remoteActions(remote, reply) });
-    }
-    if (event.data?.type === 'terminal-status') {
-      const remote = remoteNotice(event.data.status, 'progress');
-      tabState(tab, 'terminal', remote && { ...remote, actions: remoteActions(remote, reply) });
-    }
+    const remote = frameNotice(event.data, frame.contentWindow);
+    if (remote?.status) tabState(tab, 'terminal', remote.input);
+    else if (remote?.input) notices.notify({ ...remote.input, source: tab.name });
     if (
       event.data?.type === 'reading-open' &&
       typeof event.data.path === 'string' &&
