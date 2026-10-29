@@ -10,10 +10,8 @@ export interface FramesHost {
   token(): string | undefined; authenticate(): Promise<void>;
   notice: Notify;
   fail: Fail;
-  /** The selected terminal's connection state. */
-  state(state?: NoticeInput): void;
-  /** A loading label while a pane prepares behind the previous picture. */
-  loading(label?: string): void;
+  /** Show the selected pane's connection state, or its loading state while it prepares behind the previous picture. */
+  state(key: 'terminal' | 'loading', state?: NoticeInput): void;
   reading(terminalId: string, request: ReadingOpen): void;
   visible(): boolean;
   /** A workspace handoff keeps the previous picture until it is released. */
@@ -25,7 +23,10 @@ export interface FramesHost {
 }
 /** Keep the selected terminal and one previous pane on phones or during a handoff. */
 export class HerdrFrames {
-  frame?: HTMLIFrameElement;
+  private selected?: HTMLIFrameElement;
+  get frame() { return this.selected; }
+  /** Selecting a frame shows its connection state. */
+  set frame(frame) { this.selected = frame; this.host.state('terminal', [...this.entries.values()].find(entry => entry.frame === frame)?.state); }
   displayed?: HTMLIFrameElement;
   /** The selected terminal has painted since it was chosen. */
   rendered = false;
@@ -49,7 +50,7 @@ export class HerdrFrames {
     if (!entry) return;
     const active = entry.frame === this.frame;
     if (event.data.type === 'terminal-loaded') {
-      entry.loaded = true; entry.state = undefined; if (active) this.host.state();
+      entry.loaded = true; entry.state = undefined; if (active) this.host.state('terminal');
       entry.frame.contentWindow?.postMessage({ type: 'shortcut-host' }, location.origin);
       entry.frame.contentWindow?.postMessage({ type:'herdr-present', presentation:entry.presentation },location.origin);
       if (entry.verified) entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
@@ -66,7 +67,7 @@ export class HerdrFrames {
     }
     if (event.data.type === 'herdr-resize-ready') this.resizing.get(entry.frame)?.();
     const remote = frameNotice(event.data, entry.frame.contentWindow);
-    if (remote?.status) { entry.state = remote.input; if (active) this.host.state(entry.state); }
+    if (remote?.status) { entry.state = remote.input; if (active) this.host.state('terminal', entry.state); }
     else if (active && remote?.input) this.host.notice(remote.input.message, remote.input.kind, remote.input.actions);
     if (event.data.type === 'reading-open' && readingOpen(event.data)) this.host.reading(entry.frame.dataset.terminal!, event.data);
     if (event.data.type === 'terminal-ended') this.host.ended();
@@ -76,7 +77,7 @@ export class HerdrFrames {
   /** Cover an empty screen while loading; with a previous picture, the notice orb shows the progress instead. */
   setLoading(loading: boolean) {
     const behind = loading && !!this.displayed;
-    this.loading.hidden = !loading || behind; this.host.loading(behind ? this.loadingLabel.textContent! : undefined);
+    this.loading.hidden = !loading || behind; this.host.state('loading', behind ? { message: this.loadingLabel.textContent!, kind: 'progress' } : undefined);
     this.screen.setAttribute('aria-busy', String(loading));
   }
   private prepare(entry: CachedTerminal) {
@@ -119,8 +120,7 @@ export class HerdrFrames {
       entry.verified = true;
       if (entry.loaded) entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
     }
-    if (!selected) { this.displayed?.remove(); for (const entry of this.entries.values()) entry.frame.remove(); this.entries.clear(); this.frame = this.displayed = undefined; this.rendered = false; this.setLoading(false); this.presentState(); return; }
-    this.presentState();
+    if (!selected) { this.displayed?.remove(); for (const entry of this.entries.values()) entry.frame.remove(); this.entries.clear(); this.frame = this.displayed = undefined; this.rendered = false; this.setLoading(false); return; }
     const agent = terminals.find(agent => agent.terminalId === selected);
     if (!agent || !force && this.frame?.dataset.terminal === selected && this.frame.dataset.pane === agent.paneId || !this.host.visible() || this.disposed) return;
     if (this.frame) this.park(this.frame, this.frame === this.displayed);
@@ -150,10 +150,8 @@ export class HerdrFrames {
       frame.src = url.href; this.frame = frame;
       const entry = {frame,session,pane:agent.paneId,rendered:false,verified}; this.entries.set(selected,entry); this.screen.append(frame); this.prepare(entry);
     }
-    this.presentState();
     while (this.entries.size > 2) { const candidate = [...this.entries].find(([,entry]) => entry.frame !== this.frame && entry.frame !== this.displayed && terminalCanEvict(entry.frame)); if (!candidate) break; const [id, entry] = candidate; entry.frame.remove(); this.entries.delete(id); }
   }
-  private presentState() { this.host.state([...this.entries.values()].find(entry => entry.frame === this.frame)?.state); }
   /** Park every frame except the selected one when the view hides. */
   hide() {
     if (this.displayed && ![...this.entries.values()].some(entry => entry.frame === this.displayed)) { this.displayed.remove(); this.displayed = undefined; }

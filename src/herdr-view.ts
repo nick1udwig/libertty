@@ -33,7 +33,7 @@ interface Host {
   notice: Notify;
   fail: Fail;
   /** Show a connection state for this view (`herdr`), or the connection (`terminal`) or loading (`loading`) state of its selected pane. */
-  state?(key: 'herdr' | 'terminal' | 'loading', state?: NoticeInput): void;
+  state(key: 'herdr' | 'terminal' | 'loading', state?: NoticeInput): void;
   reading(terminalId: string, request: ReadingOpen): void;
   reconnect?(): Promise<void>;
   ready?(): void;
@@ -134,7 +134,7 @@ export class HerdrView {
     const viewed = () => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     this.frames = new HerdrFrames(this.screen, {
       url: host.url, session: host.session, source: host.source,
-      token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), fail: error => host.fail(error), state: state => host.state?.('terminal', state), loading: label => host.state?.('loading', label ? { message: label, kind: 'progress' } : undefined), reading: (terminalId, request) => host.reading(terminalId, request),
+      token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), fail: error => host.fail(error), state: (key, state) => host.state(key, state), reading: (terminalId, request) => host.reading(terminalId, request),
       visible: () => this.visible, held: () => this.handoffHeld, agentName: terminalId => this.terminals.find(agent => agent.terminalId === terminalId)?.name,
       painted: () => { viewed(); this.host.ready?.(); },
       ended: () => void this.refreshSnapshot().catch(error => { if (error.status !== 404) this.connectionError(error); }),
@@ -272,7 +272,7 @@ export class HerdrView {
   private status(message = '', kind: NoticeKind = 'progress') {
     if (message === this.statusText) return;
     this.statusText = message;
-    this.host.state?.('herdr', message ? { message, kind } : undefined);
+    this.host.state('herdr', message ? { message, kind } : undefined);
   }
   private connectionError(error: unknown) {
     if (this.disposed) return;
