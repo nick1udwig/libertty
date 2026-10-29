@@ -127,3 +127,40 @@ test('programmatic selection scrolling emits once and still reports native chang
   Reflect.get(terminal, 'notifyScroll').call(terminal);
   assert.deepEqual(notifications, [5.5, 6, 7, 3]);
 });
+
+test('modified mouse clicks open safe links at the scrolled cell and preserve copying', () => {
+  const terminal = new Terminal({ cols: 40, rows: 4 });
+  const opened: unknown[][] = [], copied: string[] = [];
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'window');
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { open: (...args: unknown[]) => opened.push(args) } });
+  let selection = '', uri = 'https://example.com/linked';
+  Reflect.set(terminal, 'view', { element: { getBoundingClientRect: () => ({ left: 10, top: 20 }) } });
+  Reflect.set(terminal, 'buffer', { active: { viewportY: 8, getLine: (row: number) => {
+    assert.equal(row, 9);
+    return { length: 40, getCell: () => ({ getHyperlinkId: () => 1 }) };
+  } } });
+  Reflect.set(terminal, 'wasmTerm', {
+    cols: 40, rows: 4, core: { getSelection: () => selection },
+    getScrollbackLength: () => 10, getScrollbackHyperlinkUri: () => uri,
+  });
+  terminal.setCopyHandler(text => copied.push(text));
+  const click = (overrides = {}) => Reflect.get(terminal, 'handlePointerUp').call(terminal, {
+    pointerType: 'mouse', button: 0, ctrlKey: true, clientX: 18, clientY: 36, ...overrides,
+  });
+  try {
+    click();
+    click({ ctrlKey: false, metaKey: true });
+    click({ ctrlKey: false });
+    click({ pointerType: 'touch' });
+    click({ button: 2 });
+    uri = 'javascript:alert(1)';
+    click();
+    selection = 'copy me';
+    click();
+    assert.deepEqual(opened, Array(2).fill(['https://example.com/linked', '_blank', 'noopener,noreferrer']));
+    assert.deepEqual(copied, ['copy me']);
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'window', original);
+    else Reflect.deleteProperty(globalThis, 'window');
+  }
+});

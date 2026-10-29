@@ -2,6 +2,7 @@ import { createTerminal, type GespenstTerminal } from '@gespenst/core';
 import type { CoreRuntime, CoreTerminal, RenderColor, RenderFrame, RenderRow, TerminalTheme, ViewportSnapshot } from '@gespenst/core/headless';
 import { GhosttyTerminal, Ghostty } from './terminal-core.ts';
 import { createTerminalBuffer } from './terminal-buffer.ts';
+import { terminalLinkAt } from './terminal-links.ts';
 
 export type ITheme = { [K in Exclude<keyof TerminalTheme, 'appearance' | 'palette' | 'extendedAnsi'>]?: string };
 interface TerminalOptions {
@@ -114,13 +115,20 @@ export class Terminal {
       if (key !== this.lastCursor) { this.lastCursor = key; this.emit('cursor'); }
       this.emit('render');
     });
-    view.element.addEventListener('pointerup', event => {
-      if (event.pointerType === 'mouse') {
-        const text = this.getSelection();
-        if (text) this.copyHandler?.(text);
-      }
-    });
+    view.element.addEventListener('pointerup', event => this.handlePointerUp(event));
     this.requestRender();
+  }
+  private handlePointerUp(event: PointerEvent) {
+    if (event.pointerType !== 'mouse') return;
+    const text = this.getSelection();
+    if (text) { this.copyHandler?.(text); return; }
+    if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return;
+    const bounds = this.view!.element.getBoundingClientRect(), metrics = this.renderer.getMetrics();
+    const col = Math.floor((event.clientX - bounds.left) / metrics.width);
+    const row = Math.floor((event.clientY - bounds.top) / metrics.height);
+    if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return;
+    const link = terminalLinkAt(this, col, this.buffer.active.viewportY + row);
+    if (link) window.open(link, '_blank', 'noopener,noreferrer');
   }
   private transformFrame(frame: Frame): Frame {
     const cursor = { ...frame.cursor, blinking: false, visible: frame.cursor.visible && this.cursorVisible };
