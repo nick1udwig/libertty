@@ -1,3 +1,4 @@
+import { terminalMemoryUsage } from './terminal-memory.ts';
 import {
   createCoreRuntime,
   resolveTerminalTheme,
@@ -20,6 +21,7 @@ export class Ghostty {
   createTerminal(cols: number, rows: number, options: CoreTerminalOptions & { scrollbackLimit?: number } = {}) {
     return new GhosttyTerminal(this.core.createTerminal({ ...this.defaults, ...options, cols, rows, scrollbackLines: options.scrollbackLimit ?? options.scrollbackLines ?? this.defaults.scrollbackLines }), undefined, true);
   }
+  memoryUsage() { return terminalMemoryUsage(this.core); }
   dispose() { this.core.dispose(); }
 }
 

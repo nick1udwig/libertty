@@ -363,3 +363,9 @@ Styled transcripts retain underline variants and colors, overlines, explicit bac
 Snapshot caches follow the core state revision so writes and cursor changes are visible before the next paint.
 Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
 Reconnect and resize covers combine the background and text canvases.
+
+`term.ghostty.memoryUsage()` reads per-terminal retained page and image bytes on demand, including projection terminals.
+The report counts the shared WASM memory capacity once and does not add retained bytes to that capacity.
+The figures exclude browser canvases, GPU allocations, and small native bookkeeping structures.
+`npm run bench:terminal-memory` measures empty, filled, and freed headless terminals and writes `.test-artifacts/terminal-memory.json`.
+Freeing terminal pages permits reuse but does not shrink WASM linear memory.

@@ -37,6 +37,7 @@
     "test:reading": "node test/reading-browser.mjs",
     "test:files": "node test/files-browser.mjs",
     "bench:architecture": "node test/architecture-benchmark.ts",
+    "bench:terminal-memory": "node --expose-gc test/terminal-memory-benchmark.mjs",
     "bench:workspace": "node test/workspace-benchmark.mjs",
     "test:workspace": "node test/workspace-browser.mjs",
     "test:herdr": "node test/herdr-browser.mjs",
