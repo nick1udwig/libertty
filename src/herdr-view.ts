@@ -240,6 +240,7 @@ export class HerdrView {
   }
   get ready() { return this.cached || this.frames.rendered || !!this.statusText || this.connected && !this.selected; }
   get navigationElement() { return this.strip; }
+  get treeOpen() { return !!this.tree; }
   setTerminalTabsExpanded(expanded: boolean) {
     this.tabsToggle.setAttribute('aria-expanded', String(expanded));
     this.tabsToggle.setAttribute('aria-label', expanded ? 'Hide terminal tabs' : 'Show terminal tabs');
