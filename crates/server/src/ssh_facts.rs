@@ -20,10 +20,7 @@ use libertty_engine::{
 };
 use russh_sftp::{client::RawSftpSession, protocol::StatusCode};
 use serde_json::json;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 struct DirectoryGuard {
@@ -412,40 +409,22 @@ impl SSHHost {
             &version,
         ))
         .unwrap();
-        let task = {
-            let mut cache = self.help_cache.lock().await;
-            if let Some((_, _, task)) = cache
-                .iter()
-                .find(|(k, until, t)| k == &key && *until > Instant::now() && !t.aborted())
-            {
-                task.clone()
-            } else {
-                cache.retain(|(k, _, _)| k != &key);
-                if cache.len() >= 200 {
-                    cache.pop_front();
-                }
-                let host = Arc::downgrade(self);
-                let command = command.to_owned();
-                let route = route.to_vec();
-                let catalog = catalog.clone();
-                let env = env.clone();
-                let task = SharedTask::new(move |cancel| {
-                    Box::pin(async move {
-                        let host = host.upgrade().ok_or("SSH connection closed.")?;
-                        tokio::select! { biased; _=host.lifetime.cancelled()=>Err(ABORTED.into()),result=host.probe_help(&command,&route,&catalog,&env,&cancel)=>result.map(|mut help| { help.version = Some(version); help }) }
-                    })
-                });
-                cache.push_back((
-                    key.clone(),
-                    Instant::now() + Duration::from_secs(600),
-                    task.clone(),
-                ));
-                task
-            }
-        };
+        let task = self.help_cache.lock().await.get_or_insert_with(&key, || {
+            let host = Arc::downgrade(self);
+            let command = command.to_owned();
+            let route = route.to_vec();
+            let catalog = catalog.clone();
+            let env = env.clone();
+            SharedTask::new(move |cancel| {
+                Box::pin(async move {
+                    let host = host.upgrade().ok_or("SSH connection closed.")?;
+                    tokio::select! { biased; _=host.lifetime.cancelled()=>Err(ABORTED.into()),result=host.probe_help(&command,&route,&catalog,&env,&cancel)=>result.map(|mut help| { help.version = Some(version); help }) }
+                })
+            })
+        });
         let result = task.wait(cancel).await;
         if result.is_err() {
-            self.help_cache.lock().await.retain(|(k, _, _)| k != &key);
+            self.help_cache.lock().await.remove(&key);
         }
         result
     }
