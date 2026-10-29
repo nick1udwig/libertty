@@ -330,6 +330,12 @@ try {
   } finally {
     await page.keyboard.press('Escape'); await treeSwipeTabs.evaluate(style => style.remove()); await strip.evaluate(strip => { strip.scrollLeft = 0; });
   }
+  await hold(beta);
+  const drawerBeforeTreeSwipe = await drawerHeight();
+  await swipeNavigation(tab(beta), 0, -70); await delay(250);
+  assert.equal(await drawerHeight(), drawerBeforeTreeSwipe, 'Upward strip swipes do not reveal terminal tabs while the tree is open');
+  assert.equal(await tree.count(), 1, 'Upward strip swipes keep the tree open');
+  await page.keyboard.press('Escape');
   await hold(beta); await page.keyboard.press('Escape');
   assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Escape also removes the dismissal layer');
   const swipeTree = async distance => {

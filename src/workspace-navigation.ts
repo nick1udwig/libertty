@@ -944,7 +944,11 @@ export function createWorkspaceNavigation(options: Options) {
   }
   const cancelDrawerSwipe = tabStripSwipes(
     $('workspace-navigation'),
-    () => page === 'terminal' && herdrViews.get(workspace.active),
+    () => {
+      const view = page === 'terminal' && herdrViews.get(workspace.active);
+      // An open worktree tree owns vertical gestures on the strip.
+      return view && !view.treeOpen && view;
+    },
     { move: moveTerminalTabs, end: endTerminalTabs },
   );
   function attention(tab: TerminalTab, count: number) {
