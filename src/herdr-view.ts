@@ -129,6 +129,7 @@ export class HerdrView {
     this.tabsToggle.innerHTML = icon('<path d="m6 15 6-6 6 6"/>', 18, 2);
     this.tabsToggle.onclick = () => this.host.toggleTerminalTabs?.(); this.setTerminalTabsExpanded(false);
     this.menu.role = 'menu'; this.menu.hidden = true; this.treeBridge.hidden = true; this.treeBridge.setAttribute('aria-hidden', 'true');
+    this.treeBridge.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg"><path class="herdr-tree-bridge-fill"/><path class="herdr-tree-bridge-outline"/></svg>';
     this.dropIndicator.hidden = true; this.dropIndicator.setAttribute('aria-hidden', 'true');
     this.dropIndicator.append(this.dropLabel); document.body.append(this.dropIndicator, this.treeBridge);
     const viewed = () => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
@@ -643,18 +644,26 @@ export class HerdrView {
     const preferredLeft = Math.max(8, Math.min(rect.left - parent.left, parent.width - width - 8));
     const strip = this.strip.getBoundingClientRect();
     const bridgeLeft = Math.max(parent.left, strip.left, Math.min(strip.right, rect.left)), bridgeRight = Math.min(parent.right, strip.right, Math.max(strip.left, rect.right));
-    const left = Math.min(preferredLeft, bridgeLeft - parent.left), right = Math.max(preferredLeft + width, bridgeRight - parent.left);
+    const joined = bridgeRight > bridgeLeft;
+    const left = joined ? Math.min(preferredLeft, bridgeLeft - parent.left) : preferredLeft, right = joined ? Math.max(preferredLeft + width, bridgeRight - parent.left) : preferredLeft + width;
     this.menu.style.width = right - left + 'px';
     this.menu.style.left = left + 'px';
-    this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 6) + 'px';
+    this.menu.style.top = Math.max(8, rect.top - parent.top - this.menu.offsetHeight - 10) + 'px';
     // Without overflow the whole tree can be swiped away; otherwise only its grab bar can.
     this.menu.style.touchAction = this.menu.scrollHeight > this.menu.clientHeight ? '' : 'none';
     // The bridge joins the tree to its chip so it reads as that chip's own panel.
     const menu = this.menu.getBoundingClientRect();
-    this.menu.style.setProperty('--herdr-tree-left-gap', Math.max(0, bridgeLeft - menu.left) + 'px');
-    this.menu.style.setProperty('--herdr-tree-right-gap', Math.max(0, menu.right - bridgeRight) + 'px');
-    Object.assign(this.treeBridge.style, { left: bridgeLeft + 'px', width: bridgeRight - bridgeLeft + 'px', top: menu.bottom - 1 + 'px', height: Math.max(0, rect.top - menu.bottom + 3) + 'px' });
-    this.treeBridge.hidden = bridgeRight <= bridgeLeft;
+    const leftGap = Math.max(0, bridgeLeft - menu.left), rightGap = Math.max(0, menu.right - bridgeRight);
+    const leftShoulder = Math.min(8, leftGap), rightShoulder = Math.min(8, rightGap);
+    const bridgeWidth = Math.max(0, bridgeRight - bridgeLeft), bridgeHeight = Math.max(0, rect.top - menu.bottom + 3);
+    this.menu.style.setProperty('--herdr-tree-left-gap', joined ? leftGap - leftShoulder + 'px' : 'var(--r-lg)');
+    this.menu.style.setProperty('--herdr-tree-right-gap', joined ? rightGap - rightShoulder + 'px' : 'var(--r-lg)');
+    Object.assign(this.treeBridge.style, { left: bridgeLeft + 'px', width: bridgeWidth + 'px', top: menu.bottom - 1 + 'px', height: bridgeHeight + 'px' });
+    const leftCurve = `M ${-leftShoulder} .5 Q .5 .5 .5 ${leftShoulder + .5} V ${bridgeHeight}`;
+    const rightCurve = `M ${bridgeWidth + rightShoulder} .5 Q ${bridgeWidth - .5} .5 ${bridgeWidth - .5} ${rightShoulder + .5} V ${bridgeHeight}`;
+    this.treeBridge.querySelector('.herdr-tree-bridge-fill')!.setAttribute('d', `${leftCurve} H ${bridgeWidth - .5} V ${rightShoulder + .5} Q ${bridgeWidth - .5} .5 ${bridgeWidth + rightShoulder} .5 V 0 H ${-leftShoulder} Z`);
+    this.treeBridge.querySelector('.herdr-tree-bridge-outline')!.setAttribute('d', (rect.left >= strip.left ? leftCurve : '') + (rect.right <= strip.right ? rightCurve : ''));
+    this.treeBridge.hidden = !joined;
   }
   private buildTree(repo: SpaceRepo) {
     const grabber = node('div', 'herdr-tree-grabber'); grabber.setAttribute('aria-hidden', 'true');

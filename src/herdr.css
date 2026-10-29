@@ -65,7 +65,10 @@
 .herdr-repo-count{font:11px var(--font-ui);color:var(--text-2)}
 /* The open chip loses its top edge and joins the tree through the bridge, so both read as one panel. */
 .herdr-agent-tab.herdr-tree-anchor{background:var(--overlay);border-color:var(--accent-line);border-top-color:transparent;border-radius:0 0 var(--r-md) var(--r-md);color:var(--text)}
-.herdr-tree-bridge{position:fixed;z-index:16;pointer-events:none;box-sizing:border-box;background:var(--overlay);border:1px solid var(--accent-line);border-block:0}
+.herdr-tree-bridge{position:fixed;z-index:16;pointer-events:none}
+.herdr-tree-bridge svg{display:block;width:100%;height:100%;overflow:visible}
+.herdr-tree-bridge-fill{fill:var(--overlay)}
+.herdr-tree-bridge-outline{fill:none;stroke:var(--accent-line);stroke-width:1}
 .herdr-tab-menu.herdr-tree{max-width:100%;max-height:70%;box-sizing:border-box;border-color:var(--accent-line);border-bottom-left-radius:min(var(--r-lg),var(--herdr-tree-left-gap));border-bottom-right-radius:min(var(--r-lg),var(--herdr-tree-right-gap));padding:0 8px 8px}
 .herdr-screen-dim::after{content:"";position:absolute;inset:0;z-index:5;background:var(--scrim);pointer-events:none}
 .herdr-tree-grabber{display:grid;place-items:center;height:20px;touch-action:none}
