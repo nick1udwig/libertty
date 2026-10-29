@@ -6,6 +6,7 @@ import type { HerdrView } from './herdr-view.ts';
 import { imagePicker } from './image-upload.ts';
 import { menuEvents } from './menu.ts';
 import {
+  failure,
   frameNotice,
   type NoticeAction,
   type NoticeInput,
@@ -42,8 +43,6 @@ interface Options
   capturedHerdr: (backend: BackendProfile, parent: TerminalTab, id: string) => Promise<void>;
   cancelReconnect: (id: string) => void;
 }
-/** A cancelled login is the user's own choice, so it informs instead of waiting as an error. */
-export const loginCancelled = 'Backend login cancelled.';
 export function createWorkspaceNavigation(options: Options) {
   const {
     workspace,
@@ -96,8 +95,9 @@ export function createWorkspaceNavigation(options: Options) {
   const tabStates = new Map<string, Map<string, NoticeInput>>();
   let presentedStates = new Set<string>();
   function notice(message: string, kind: NoticeKind = 'error', actions: NoticeAction[] = []) {
-    notices.notify({ message, kind: message === loginCancelled ? 'info' : kind, actions });
+    notices.notify({ message, kind, actions });
   }
+  const fail = failure(notice);
   /** Keep each tab's connection state, and show only the selected terminal's. */
   function tabState(tab: TerminalTab, key: string, state?: NoticeInput) {
     const states = tabStates.get(tab.id) ?? new Map<string, NoticeInput>();
@@ -221,10 +221,7 @@ export function createWorkspaceNavigation(options: Options) {
       return control;
     };
     for (const plugin of plugins.actions(host))
-      item(
-        plugin.connectLabel,
-        () => void plugin.connect(host).catch((error) => notice(error.message)),
-      );
+      item(plugin.connectLabel, () => void plugin.connect(host).catch(fail));
     const open = hostTabs(host);
     if (open.length) {
       hostMenu.append(document.createElement('hr'));
@@ -274,7 +271,7 @@ export function createWorkspaceNavigation(options: Options) {
     rename.role = 'menuitem';
     const close = button('Close tab', () => {
       closeTabMenu();
-      void closeTab(tab).catch((error) => notice(error.message));
+      void closeTab(tab).catch(fail);
     });
     close.role = 'menuitem';
     tabMenu.append(rename, close);
@@ -342,8 +339,7 @@ export function createWorkspaceNavigation(options: Options) {
     const visible = page === 'terminal' && !document.hidden,
       target = pluginViews.get(workspace.active),
       tab = workspace.tabs.find((tab) => tab.id === workspace.active);
-    if (page === 'terminal' && tab && !target)
-      void mount(tab).catch((error) => notice(error.message));
+    if (page === 'terminal' && tab && !target) void mount(tab).catch(fail);
     target?.setHeld?.(false);
     target?.setVisible(
       tab && ['terminal', 'herdr'].includes(tabPluginId(tab)) ? page === 'terminal' : visible,
@@ -499,11 +495,7 @@ export function createWorkspaceNavigation(options: Options) {
       const name = document.createElement('span');
       name.className = 'tab-name';
       name.textContent = tabLabel(tab);
-      const close = button(
-        '',
-        () => void closeTab(tab).catch((error) => notice(error.message)),
-        'tab-close',
-      );
+      const close = button('', () => void closeTab(tab).catch(fail), 'tab-close');
       close.innerHTML = closeIcon;
       close.setAttribute('aria-label', 'Close ' + tab.name);
       close.addEventListener('click', (event) => event.stopPropagation());
@@ -823,7 +815,7 @@ export function createWorkspaceNavigation(options: Options) {
       const current = tokenFor(backend);
       // A delayed rejection may refer to credentials replaced by another frame.
       if (current && current !== event.data.accessToken) authorizeTerminals(backend, current);
-      else void authenticate(backend, true).catch((error) => notice(error.message));
+      else void authenticate(backend, true).catch(fail);
     }
     if (
       event.data?.type === 'ssh-command' &&
@@ -974,6 +966,7 @@ export function createWorkspaceNavigation(options: Options) {
     unmount,
     mount,
     notice,
+    fail,
     tabState,
     hideTerminalLoading,
     showTerminalLoading,

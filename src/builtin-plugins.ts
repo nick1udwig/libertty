@@ -3,7 +3,7 @@ import { folderIcon, terminalIcon, herdrIcon } from './icons.ts';
 import { fileBrowser } from './file-browser.ts';
 import { fileClient } from './file-client.ts';
 import { herdrSession } from './herdr-protocol.ts';
-import type { NoticeInput, Notify } from './notice-model.ts';
+import type { Fail, NoticeInput, Notify } from './notice-model.ts';
 import type { HerdrView } from './herdr-view.ts';
 import { BUILTIN_VERSION, type TabPlugin } from './plugins.ts';
 import { readingPlugin, type ReadingServices } from './reading-plugin.ts';
@@ -19,6 +19,7 @@ export interface BuiltinServices extends ReadingServices {
   reconnectHerdr(tab: TerminalTab): Promise<void>;
   store(): void;
   notice: Notify;
+  fail: Fail;
   tabState(tab: TerminalTab, key: string, state?: NoticeInput): void;
   terminalURL(backend: BackendProfile, session: string): string;
   frame(tab: TerminalTab, frame?: HTMLIFrameElement): void;
@@ -79,9 +80,9 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
             try { return await s.api<T>(backend, name + (name.includes('?') ? '&' : '?') + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }
             catch (error: any) { if (!signal?.aborted && error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
           },
-          changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice, state: (key, state) => s.tabState(tab, key, state) });
+          changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice, fail: s.fail, state: (key, state) => s.tabState(tab, key, state) });
         view.element.id = 'herdr-' + tab.id; view.navigationElement.id = 'herdr-strip-' + tab.id; s.herdr(tab, view);
-        void s.watch(tab).then(() => view.updatePresence()).catch(error => s.notice(error.message));
+        void s.watch(tab).then(() => view.updatePresence()).catch(s.fail);
         return { element: view.element, setVisible: visible => view.setVisible(visible), setHeld: held => view.setHeld(held), applySettings: () => view.applySettings(), copySelection: () => view.copySelection(),
           dispose() { view.dispose(); s.herdr(tab); } };
       },

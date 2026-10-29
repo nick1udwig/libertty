@@ -21,7 +21,7 @@ import { type PluginPackage } from './plugin-package.ts';
 import { BUILTIN_VERSION, PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
 import { createWorkspaceConnections } from './workspace-connections.ts';
 import { createWorkspaceLibrary } from './workspace-library.ts';
-import { createWorkspaceNavigation, loginCancelled } from './workspace-navigation.ts';
+import { createWorkspaceNavigation } from './workspace-navigation.ts';
 import { createWorkspaceSettings } from './workspace-settings.ts';
 import { loadWorkspace, saveWorkspace, type WorkspaceServices } from './workspace-storage.ts';
 import './workspace.css';
@@ -52,6 +52,7 @@ const services: WorkspaceServices = {
   tokenFor,
   store,
   notice: (...args) => navigation.notice(...args),
+  fail: (error) => navigation.fail(error),
 };
 const navigation = createWorkspaceNavigation({
   ...services,
@@ -74,6 +75,7 @@ const {
   unmount,
   mount,
   notice,
+  fail,
   hideTerminalLoading,
   showTerminalLoading,
   activate,
@@ -119,7 +121,7 @@ const herdrNotifications = new HerdrNotifications(
       if (tab)
         void herdrNotifications
           .watch(tab.backendId, tab.id, herdrSession(tab.herdrSession), tab.herdrSource)
-          .catch((error) => notice(error.message));
+          .catch(fail);
     }
   },
 );
@@ -153,6 +155,7 @@ for (const plugin of builtinPlugins({
   reconnectHerdr,
   store,
   notice,
+  fail,
   tabState: navigation.tabState,
   terminalURL,
   openReading,
@@ -300,7 +303,7 @@ function authenticate(backend: BackendProfile, force = false): Promise<void> {
           const modal = dialog('backend-login');
           const close = () => {
             modal.removeEventListener('close', close);
-            reject(new Error(loginCancelled));
+            reject(Object.assign(new Error('Backend login cancelled.'), { cancelled: true }));
           };
           modal.addEventListener('close', close);
           $<HTMLFormElement>('backend-login-form').onsubmit = async (event) => {
@@ -350,12 +353,12 @@ async function boot() {
       renderTabs();
       // Hidden Herdr views retain notification metadata without mounting terminal panes.
       const active = workspace.tabs.find((tab) => tab.id === workspace.active)!;
-      await mount(active).catch((error) => notice(error.message));
+      await mount(active).catch(fail);
       void idle().then(() =>
         Promise.all(
           workspace.tabs
             .filter((tab) => tab !== active && tabPluginId(tab) === 'herdr')
-            .map((tab) => mount(tab).catch((error) => notice(error.message))),
+            .map((tab) => mount(tab).catch(fail)),
         ),
       );
     }
@@ -399,9 +402,7 @@ async function openHerdrNotification(tabId: unknown, terminalId: unknown) {
 }
 navigator.serviceWorker?.addEventListener('message', (event) => {
   if (event.data?.type === 'herdr-notification')
-    void openHerdrNotification(event.data.tabId, event.data.terminalId).catch((error) =>
-      notice(error.message),
-    );
+    void openHerdrNotification(event.data.tabId, event.data.terminalId).catch(fail);
 });
 async function pendingSource(backendUrl: string, session: string) {
   const url = backendURL(backendUrl);

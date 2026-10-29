@@ -5,6 +5,11 @@ export interface NoticeAction { label: string; run(): void }
 export interface NoticeInput { message: string; kind?: NoticeKind; source?: string; actions?: NoticeAction[] }
 /** Show a notice, which is an error unless another kind is given. */
 export type Notify = (message: string, kind?: NoticeKind, actions?: NoticeAction[]) => void;
+/** A failure that the person may have caused by cancelling, such as by closing a login dialog. */
+export interface Failure { message: string; cancelled?: boolean }
+export type Fail = (error: Failure) => void;
+/** Show failures as errors, or as info when the person cancelled, because their own choice needs no warning. */
+export const failure = (notify: Notify): Fail => error => notify(error.message, error.cancelled ? 'info' : 'error');
 export interface Notice { id: number; kind: NoticeKind; message: string; source?: string; actions: NoticeAction[]; at: number; key?: string }
 /** A notice posted by a terminal frame, whose actions the frame runs when the workspace returns their ids. */
 export interface RemoteNotice { message: string; kind: NoticeKind; actions: { id: string; label: string }[] }

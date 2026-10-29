@@ -33,6 +33,7 @@ Default font size is 10 pt (13⅓ CSS px).
 `notices.ts` draws one orb that shows every error, warning, confirmation and connection state.
 `notice-model.ts` keeps the current notices, the keyed states and a history of the last 20 notices.
 Errors and warnings stay until the user dismisses them.
+A failure that the user caused by cancelling, such as by closing a login dialog, shows as info instead of an error.
 Info notices leave after 6 seconds, and done notices leave after 3 seconds.
 A done or info notice without actions lets touches through to the terminal, so it never blocks it.
 A press or keyboard focus on any other bubble stops its timer.

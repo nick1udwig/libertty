@@ -2,13 +2,14 @@ import { node } from './dom.ts';
 import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
 import { terminalCanEvict } from './terminal-retention.ts';
-import { frameNotice, type NoticeInput, type Notify } from './notice-model.ts';
+import { frameNotice, type Fail, type NoticeInput, type Notify } from './notice-model.ts';
 
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; verified:boolean; loaded?:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number; state?:NoticeInput }
 export interface FramesHost {
   url: string; session: string; source?: string;
   token(): string | undefined; authenticate(): Promise<void>;
   notice: Notify;
+  fail: Fail;
   /** The selected terminal's connection state. */
   state(state?: NoticeInput): void;
   /** A loading label while a pane prepares behind the previous picture. */
@@ -70,7 +71,7 @@ export class HerdrFrames {
     if (event.data.type === 'reading-open' && readingOpen(event.data)) this.host.reading(entry.frame.dataset.terminal!, event.data);
     if (event.data.type === 'terminal-ended') this.host.ended();
     if (event.data.type === 'terminal-locked') entry.locked = true;
-    if (active && event.data.type === 'terminal-locked') void this.host.authenticate().then(() => entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin)).catch(error => this.host.notice(error.message));
+    if (active && event.data.type === 'terminal-locked') void this.host.authenticate().then(() => entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin)).catch(this.host.fail);
   }
   /** Cover an empty screen while loading; with a previous picture, the notice orb shows the progress instead. */
   setLoading(loading: boolean) {
@@ -137,7 +138,7 @@ export class HerdrFrames {
       this.frame = cached.frame;
       const bounds = cached.frame.getBoundingClientRect(), preserve = cached.rendered && cached.width === bounds.width && cached.height === bounds.height;
       this.prepare(cached);
-      if (cached.locked) { cached.locked = false; void this.host.authenticate().then(() => cached.frame.contentWindow?.postMessage({type:'authorize',accessToken:this.host.token()},location.origin)).catch(error => this.host.notice(error.message)); }
+      if (cached.locked) { cached.locked = false; void this.host.authenticate().then(() => cached.frame.contentWindow?.postMessage({type:'authorize',accessToken:this.host.token()},location.origin)).catch(this.host.fail); }
       cached.frame.contentWindow?.postMessage({type:'herdr-park',parked:false,preserve},location.origin);
       cached.frame.contentWindow?.postMessage({type:'tab-visibility',visible:this.host.visible()},location.origin);
     } else {

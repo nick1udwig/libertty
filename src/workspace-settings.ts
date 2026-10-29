@@ -21,7 +21,7 @@ export function currentShortcuts() {
     return structuredClone(defaults);
   }
 }
-interface Options extends Pick<WorkspaceServices, 'backendFor' | 'notice'> {
+interface Options extends Pick<WorkspaceServices, 'backendFor' | 'notice' | 'fail'> {
   workspace: WorkspaceState;
   registerExternal: (pkg: PluginPackage) => void;
   plugins: PluginRegistry;
@@ -39,6 +39,7 @@ export function createWorkspaceSettings(options: Options) {
     registerExternal,
     plugins,
     notice,
+    fail,
     pluginViews,
     herdrNotifications,
     tabLabel,
@@ -154,7 +155,7 @@ export function createWorkspaceSettings(options: Options) {
           refreshPluginTabs(id);
         } catch (error: any) {
           enabled.checked = !enabled.checked;
-          notice(error.message);
+          fail(error);
         }
       };
       label.append(enabled, document.createTextNode('Enabled'));
@@ -166,7 +167,7 @@ export function createWorkspaceSettings(options: Options) {
             plugins.remove(id);
             refreshPluginTabs(id);
           } catch (error: any) {
-            notice(error.message);
+            fail(error);
           }
         },
         'secondary',

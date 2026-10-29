@@ -16,7 +16,7 @@ import type { WorkspacePage, WorkspaceServices, WorkspaceState } from './workspa
 interface Options
   extends Pick<
     WorkspaceServices,
-    'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store' | 'notice'
+    'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store' | 'notice' | 'fail'
   > {
   workspace: WorkspaceState;
   unmount: (tab: TerminalTab) => void;
@@ -46,6 +46,7 @@ export function createWorkspaceConnections(options: Options) {
     mount,
     store,
     notice,
+    fail,
     hideTerminalLoading,
     showTerminalLoading,
     activate,
@@ -112,7 +113,7 @@ export function createWorkspaceConnections(options: Options) {
       await openHost(host);
       await api(backend, 'api/herdr/captured', { id, action: 'ack' }, parent.session);
     } catch (error: any) {
-      notice(error.message);
+      fail(error);
       await api(backend, 'api/herdr/captured', { id, action: 'cancel' }, parent.session).catch(
         () => {},
       );
@@ -258,7 +259,7 @@ export function createWorkspaceConnections(options: Options) {
       .catch((error) => {
         captureRequests.delete(key);
         hideTerminalLoading(parent.id);
-        notice(error.message);
+        fail(error);
       });
     captureQueue = work;
     return work;
@@ -315,7 +316,7 @@ export function createWorkspaceConnections(options: Options) {
       }
       dialog('plugin-connect-dialog').close();
       pendingConnection = undefined;
-      void openHost(host, true, request).catch((error) => notice(error.message));
+      void openHost(host, true, request).catch(fail);
     } catch (error: any) {
       $('plugin-connect-error').textContent = error.message;
     }
@@ -742,7 +743,7 @@ export function createWorkspaceConnections(options: Options) {
             `Verify the fingerprint for ${ssh.host}:${ssh.port} through ${route.backend.name}:\n\n${error.fingerprint}\n\nTrust this host and connect?`,
           )
         )
-          throw new Error('Host verification cancelled.');
+          throw Object.assign(new Error('Host verification cancelled.'), { cancelled: true });
         ssh.trust = error.fingerprint;
         result = await create();
       }

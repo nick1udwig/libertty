@@ -24,7 +24,10 @@ import { herdrSession } from './herdr-protocol.ts';
 import { vaultUI } from './vault-ui.ts';
 import type { WorkspacePage, WorkspaceServices, WorkspaceState } from './workspace-storage.ts';
 interface Options
-  extends Pick<WorkspaceServices, 'api' | 'authenticate' | 'backendFor' | 'store' | 'notice'> {
+  extends Pick<
+    WorkspaceServices,
+    'api' | 'authenticate' | 'backendFor' | 'store' | 'notice' | 'fail'
+  > {
   workspace: WorkspaceState;
   closeHostMenu: (focus?: boolean) => void;
   show: (view: WorkspacePage) => void;
@@ -51,6 +54,7 @@ export function createWorkspaceLibrary(options: Options) {
     backendFor,
     openHost,
     notice,
+    fail,
     hostTabs,
     openHostMenu,
     hostMenu,
@@ -160,7 +164,7 @@ export function createWorkspaceLibrary(options: Options) {
             ? `${host.username}@${host.hostname} · ${host.route === 'fixed' ? backendFor(host.backendId).name : 'Automatic route'}`
             : backendFor(host.backendId).url,
           hostIcon,
-          () => void openHost(host).catch((error) => notice(error.message)),
+          () => void openHost(host).catch(fail),
           undefined,
           host.kind.toUpperCase(),
         );
@@ -189,7 +193,7 @@ export function createWorkspaceLibrary(options: Options) {
           () =>
             void authenticate(backend)
               .then(() => notice('Connected to ' + backend.name, 'done'))
-              .catch((error) => notice(error.message)),
+              .catch(fail),
           backend.id === 'primary'
             ? undefined
             : () => {
@@ -213,7 +217,7 @@ export function createWorkspaceLibrary(options: Options) {
                       store();
                       void renderCards();
                     })
-                    .catch((error) => notice(error.message));
+                    .catch(fail);
               },
           'HTTP',
         );
@@ -271,12 +275,12 @@ export function createWorkspaceLibrary(options: Options) {
                       port: item.port,
                     })
                       .then(() => renderCards())
-                      .catch((error) => notice(error.message));
+                      .catch(fail);
                 },
               );
         }
       } catch (error: any) {
-        if (generation === rendering) notice(error.message);
+        if (generation === rendering) fail(error);
       }
     }
     if (!$('cards').children.length) {
@@ -405,6 +409,7 @@ export function createWorkspaceLibrary(options: Options) {
     authenticate,
     api,
     notice,
+    fail,
     renderCards,
     clearRoutes: () => routes.clear(),
   });

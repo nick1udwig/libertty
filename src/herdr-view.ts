@@ -12,7 +12,7 @@ import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
 import { dropSpace, repoSpace, repoTap, spaceLayout, spaceRepos, spaceTerminal, type RepoTap, type SpaceDrop, type SpaceRepo } from './herdr-spaces.ts';
 import { herdrLane, herdrLaneNames, statusLanes, type HerdrLane } from './herdr-lanes.ts';
-import type { NoticeInput, NoticeKind, Notify } from './notice-model.ts';
+import type { Fail, NoticeInput, NoticeKind, Notify } from './notice-model.ts';
 import './herdr.css';
 
 const herdrIcon = (body: string, size = 15) => icon(body, size, 2);
@@ -31,6 +31,7 @@ interface Host {
   api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
   notice: Notify;
+  fail: Fail;
   /** Show a connection state for this view (`herdr`), or the connection (`terminal`) or loading (`loading`) state of its selected pane. */
   state?(key: 'herdr' | 'terminal' | 'loading', state?: NoticeInput): void;
   reading(terminalId: string, request: ReadingOpen): void;
@@ -133,7 +134,7 @@ export class HerdrView {
     const viewed = () => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     this.frames = new HerdrFrames(this.screen, {
       url: host.url, session: host.session, source: host.source,
-      token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), state: state => host.state?.('terminal', state), loading: label => host.state?.('loading', label ? { message: label, kind: 'progress' } : undefined), reading: (terminalId, request) => host.reading(terminalId, request),
+      token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), fail: error => host.fail(error), state: state => host.state?.('terminal', state), loading: label => host.state?.('loading', label ? { message: label, kind: 'progress' } : undefined), reading: (terminalId, request) => host.reading(terminalId, request),
       visible: () => this.visible, held: () => this.handoffHeld, agentName: terminalId => this.terminals.find(agent => agent.terminalId === terminalId)?.name,
       painted: () => { viewed(); this.host.ready?.(); },
       ended: () => void this.refreshSnapshot().catch(error => { if (error.status !== 404) this.connectionError(error); }),
@@ -562,7 +563,7 @@ export class HerdrView {
       this.preferences.spaceGroups = layout.groups;
       if (drop === 'group') this.preferences.collapsedGroups = this.preferences.collapsedGroups!.filter(id => !layout.groups.find(group => group.includes(source))?.includes(id));
       await this.refreshSnapshot();
-    } catch (error: any) { if (!this.disposed) this.host.notice(error.message); }
+    } catch (error: any) { if (!this.disposed) this.host.fail(error); }
     finally { this.movingSpace = false; }
   }
   private async createSpace() {
@@ -578,7 +579,7 @@ export class HerdrView {
       this.selected = result.terminalId || snapshot.spaces?.find(space => space.id === result.workspaceId)?.selectedTerminalId || '';
       this.receive({ type: 'snapshot', snapshot });
       this.strip.querySelector<HTMLElement>('[data-terminal="' + CSS.escape(this.repoOf(result.workspaceId)?.id || 'space:' + result.workspaceId) + '"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    } catch (error: any) { if (!this.disposed) this.host.notice(error.message); }
+    } catch (error: any) { if (!this.disposed) this.host.fail(error); }
     finally { this.creatingSpace = false; if (!this.disposed) this.render(); }
   }
   private popup(anchor: HTMLElement) {
@@ -716,7 +717,7 @@ export class HerdrView {
         this.renaming = false; await this.refreshSnapshot(); finish();
       } catch (error: any) {
         if (this.disposed || !form.isConnected) return;
-        this.renaming = true; save.disabled = input.disabled = false; this.host.notice(error.message); input.focus();
+        this.renaming = true; save.disabled = input.disabled = false; this.host.fail(error); input.focus();
       }
     };
     form.append(input, save); target.replaceWith(form); input.focus(); input.select();
@@ -729,7 +730,7 @@ export class HerdrView {
         ? { action: 'close-space', workspaceId: item.space.id }
         : { action: 'close', terminalId: item.terminalId });
       await this.refreshSnapshot();
-    } catch (error: any) { if (!this.disposed) this.host.notice(error.message); }
+    } catch (error: any) { if (!this.disposed) this.host.fail(error); }
     finally { this.closing.delete(item.terminalId); }
   }
   private async refreshSnapshot(created?: Created) {
