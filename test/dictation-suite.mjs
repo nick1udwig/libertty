@@ -213,7 +213,10 @@ try {
     const micPosition = await mic.boundingBox();
     let idleStatusReads = 0;
     const statusRead = request => { if (new URL(request.url()).pathname.endsWith('/api/dictation')) idleStatusReads++; };
-    page.on('request', statusRead); await page.clock.runFor(16000); page.off('request', statusRead);
+    // Advance in steps that let heartbeat replies arrive, because one large jump passes the reply deadline and reconnects.
+    page.on('request', statusRead);
+    for (let second = 0; second < 16; second++) { await page.clock.runFor(1000); await page.waitForTimeout(20); }
+    page.off('request', statusRead);
     assert.equal(idleStatusReads, 0, 'An idle terminal does not poll dictation availability');
     assert.equal(await mic.evaluate(el => getComputedStyle(el).borderRadius), '14px');
     assert.equal(await mic.locator('.dictation-microphone-icon').isVisible(), true);
