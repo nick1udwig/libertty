@@ -338,13 +338,20 @@ try {
   await page.keyboard.press('Escape');
   await hold(beta); await page.keyboard.press('Escape');
   assert.equal(await page.locator('.herdr-menu-backdrop:visible').count(), 0, 'Escape also removes the dismissal layer');
-  const swipeTree = async distance => {
+  const swipeTree = async (distance, during) => {
     const grab = await box(tree.locator('.herdr-tree-grabber')), x = grab.x + grab.width / 2, y = grab.y + grab.height / 2;
     await touch('touchStart', x, y);
     for (const fraction of [.25, .5, 1]) await touch('touchMove', x, y + distance * fraction);
+    await during?.();
     await touch('touchEnd');
   };
-  await hold(beta); await swipeTree(30);
+  await hold(beta);
+  await swipeTree(40, async () => {
+    await delay(100);
+    const connection = await joint(), clipped = await tree.evaluate(menu => parseFloat(getComputedStyle(menu).clipPath.split(' ')[2]));
+    assert.ok(connection, 'A tree being swiped away keeps its joint');
+    assert.ok(Math.abs(connection.panel.bottom - clipped - connection.stripTop) < 1 && connection.panel.bottom > connection.stripTop + 20, 'A tree being swiped away slides behind the strip instead of showing below it');
+  });
   assert.equal(await tree.count(), 1, 'A short swipe returns the tree');
   await swipeTree(120); await wait(async () => await tree.count() === 0, 'swiping down dismisses the tree');
   assert.equal(await selected(), chip(beta), 'Swiping the tree away keeps the selection');

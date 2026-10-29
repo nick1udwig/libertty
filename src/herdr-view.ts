@@ -183,14 +183,16 @@ export class HerdrView {
         if (y - sheet.y < 10) return;
         sheet.dragging = true;
       }
-      this.strip.classList.add('herdr-tree-adrift'); this.menu.style.transform = 'translateY(' + Math.max(0, y - sheet.y) + 'px)';
+      // The tree slides behind the strip, clipped at its top edge so the joint stays and nothing shows below the strip.
+      const distance = Math.min(this.menu.offsetHeight, Math.max(0, y - sheet.y));
+      this.menu.style.transform = 'translateY(' + distance + 'px)'; this.menu.style.clipPath = 'inset(-48px -48px ' + distance + 'px)';
     };
     const release = (y: number, completed: boolean) => {
       if (!sheet) return;
       const dismissed = sheet.dragging && completed && y - sheet.y > 56;
       swiped = sheet.dragging; sheet = undefined;
       if (dismissed) this.closeMenu();
-      else if (swiped) { this.menu.style.transform = ''; this.refreshTree(); }
+      else if (swiped) { this.menu.style.transform = this.menu.style.clipPath = ''; this.refreshTree(); }
     };
     this.menu.addEventListener('pointermove', event => { if (sheet?.id === event.pointerId) pull(event.clientY); });
     this.menu.addEventListener('pointerup', event => { if (sheet?.id === event.pointerId) release(event.clientY, true); });
@@ -619,7 +621,7 @@ export class HerdrView {
   }
   private closeMenu() {
     this.menu.hidden = true; this.tree = undefined; this.renaming = false;
-    this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.touchAction = this.menu.style.width = '';
+    this.menu.classList.remove('herdr-tree'); this.menu.style.transform = this.menu.style.clipPath = this.menu.style.touchAction = this.menu.style.width = '';
     this.screen.classList.remove('herdr-screen-dim');
     this.strip.classList.remove('herdr-tree-open', 'herdr-tree-adrift');
     for (const anchor of this.strip.querySelectorAll('.herdr-tree-anchor')) anchor.classList.remove('herdr-tree-anchor');
@@ -667,12 +669,12 @@ export class HerdrView {
     anchor.style.setProperty('--herdr-tree-reach', anchor.offsetTop + anchor.clientTop + 'px');
     this.alignTreeJoint();
   }
-  /** A chip outside a narrower tree, or under a tree being swiped away, drops its joint. */
+  /** A chip outside a narrower tree drops its joint. */
   private alignTreeJoint() {
     const anchor = this.strip.querySelector('.herdr-tree-anchor');
     if (!anchor) return;
     const strip = this.strip.getBoundingClientRect(), menu = this.menu.getBoundingClientRect(), rect = anchor.getBoundingClientRect();
-    const joined = !this.menu.style.transform && Math.max(strip.left, rect.left - 8) >= menu.left - .5 && Math.min(strip.right, rect.right + 8) <= menu.right + .5;
+    const joined = Math.max(strip.left, rect.left - 8) >= menu.left - .5 && Math.min(strip.right, rect.right + 8) <= menu.right + .5;
     this.strip.classList.toggle('herdr-tree-adrift', !joined);
   }
   private buildTree(repo: SpaceRepo) {
