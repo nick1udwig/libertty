@@ -118,7 +118,7 @@ try {
   console.log('PASS: real Herdr desktop PTY ' + original.cols + '×' + original.rows + ' adapts to mobile ' + mobile.cols + '×' + mobile.rows + ', redraws its native border/cursor, shares multiple mobile viewers, updates for the keyboard, and restores on background/disconnect.');
 } catch (error) {
   console.error('Resize fixture geometry:', await geometry());
-  if (browser) for (const context of browser.contexts()) for (const page of context.pages()) console.error('Browser resize state:', await page.evaluate(() => ({ cols: window.__terminal?.cols, rows: window.__terminal?.rows, coarse: matchMedia('(pointer: coarse)').matches, notice: document.querySelector('#toast')?.textContent, resizes: window.__resizes?.slice(-5), frames: window.__frames?.slice(-5), connection: document.querySelector('#connection-label')?.textContent } )).catch(() => ({})));
+  if (browser) for (const context of browser.contexts()) for (const page of context.pages()) console.error('Browser resize state:', await page.evaluate(() => ({ cols: window.__terminal?.cols, rows: window.__terminal?.rows, coarse: matchMedia('(pointer: coarse)').matches, notice: document.querySelector('#notice-bubble')?.textContent, resizes: window.__resizes?.slice(-5), frames: window.__frames?.slice(-5), connection: document.querySelector('#connection-label')?.textContent } )).catch(() => ({})));
   throw error;
 } finally {
   await browser?.close();

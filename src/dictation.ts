@@ -2,6 +2,7 @@ import { DictationAudio } from './dictation-audio.ts';
 import { sameInputContext, type InputContext } from './unsent-input.ts';
 import type { ClientMessage, ShellState } from './protocol.ts';
 import { dictationTarget } from './protocol.ts';
+import type { Notify } from './notice-model.ts';
 import './dictation.css';
 import { DictationView } from './dictation-view.ts';
 import { DictationWakeLock, dictationWakeEnvironment } from './dictation-wake-lock.ts';
@@ -12,7 +13,7 @@ interface Host {
   audio(data: ArrayBuffer): boolean;
   state(): ShellState;
   prepare(): void;
-  notice(message: string): void;
+  notice: Notify;
   focus(): void;
   waiting?(active: boolean): void;
   key: string;
@@ -67,7 +68,7 @@ export class DictationControl {
   private captureTimer?: ReturnType<typeof setInterval>;
   constructor(host: Host) {
     this.host = host;
-    this.wakeLock = new DictationWakeLock(dictationWakeEnvironment(), message => host.notice(message));
+    this.wakeLock = new DictationWakeLock(dictationWakeEnvironment(), message => host.notice(message, 'warning'));
     window.addEventListener('pagehide', () => { this.cancel(); this.wakeLock.stop(); clearTimeout(this.pollTimer); });
     this.cancelButton.onclick = () => this.cancel();
     this.dialog.id = 'dictation-install';
@@ -82,7 +83,7 @@ export class DictationControl {
         const state = this.host.state();
         await this.host.api('/api/dictation/install', { prompt: state.prompt, revision: state.inputRevision });
         this.installPrompt = state.prompt;
-        dismiss(); this.host.focus(); this.host.notice('Install command pasted. Review it, then press Enter to run it.');
+        dismiss(); this.host.focus(); this.host.notice('Install command pasted. Review it, then press Enter to run it.', 'info');
       } catch (error) { this.host.notice((error as Error).message); } finally { button.disabled = false; }
     };
     document.body.append(this.dialog);
@@ -133,7 +134,7 @@ export class DictationControl {
       if (context && this.inputContext && sameInputContext(this.inputContext, context)) this.inputContext = context;
       this.needsResume = true; this.daemonReady = false;
       clearTimeout(this.readyTimer); clearTimeout(this.uploadTimer);
-      if (changed) this.host.notice('Recording is retained while the terminal reconnects.');
+      if (changed) this.host.notice('Recording is retained while the terminal reconnects.', 'info');
     }
     this.online = online;
     if (!online) { if (!this.active) this.available = false; this.dialog.close(); }
@@ -166,7 +167,7 @@ export class DictationControl {
     clearTimeout(this.audioTimer); this.render();
   }
   private retry() {
-    if (!this.online || !dictationTarget(this.host.state())) { this.host.notice('Wait for the terminal to reconnect before retrying the retained recording.'); return; }
+    if (!this.online || !dictationTarget(this.host.state())) { this.host.notice('Wait for the terminal to reconnect before retrying the retained recording.', 'warning'); return; }
     this.id = crypto.randomUUID(); this.inputContext = this.host.context(); this.retryAfterFlush = false;
     this.phase = 'finishing'; this.host.prepare(); this.host.waiting?.(true); this.sendStart(); this.render();
   }
@@ -215,7 +216,7 @@ export class DictationControl {
   private render() { this.view.update(this.phase, (this.active || this.available && this.online) && this.visible, this.capturePaused); }
   private async start() {
     void this.poll(true);
-    if (!this.online || !this.available || !dictationTarget(this.host.state())) { this.host.notice('Wait for terminal input before dictating.'); return; }
+    if (!this.online || !this.available || !dictationTarget(this.host.state())) { this.host.notice('Wait for terminal input before dictating.', 'warning'); return; }
     const generation = ++this.generation; this.id = crypto.randomUUID(); this.inputContext = this.host.context(); this.retryAfterFlush = false; this.phase = 'starting'; this.finishPending = false; this.render();
     this.wakeLock.start();
     this.audioTimer = setTimeout(() => this.captureFailed('Microphone audio did not start. Check microphone permission and try again.'), 15000);
@@ -357,8 +358,8 @@ export class DictationControl {
     if (!paused) this.captureRecoveryAttempted = false;
     if (paused === this.capturePaused) return;
     this.capturePaused = paused;
-    if (paused) { this.captureInterrupted = true; this.host.notice('Microphone audio paused. Unlock or return to this tab to resume; speech during the pause may be missing.'); }
-    else if (this.captureInterrupted) this.host.notice('Microphone audio resumed. Speech during the pause may be missing.');
+    if (paused) { this.captureInterrupted = true; this.host.notice('Microphone audio paused. Unlock or return to this tab to resume; speech during the pause may be missing.', 'warning'); }
+    else if (this.captureInterrupted) this.host.notice('Microphone audio resumed. Speech during the pause may be missing.', 'info');
     this.render();
   }
   cancel(notify = true) {

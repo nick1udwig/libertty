@@ -5,10 +5,12 @@ import { terminalLinkAt } from './terminal-links.ts';
 import { isPreservingScrollback } from './terminal-viewport.ts';
 import { terminalContact } from './terminal-contact.ts';
 import { TerminalSelectionHistory } from './terminal-selection-history.ts';
+import type { Notify } from './notice-model.ts';
 
 interface Point { row: number; col: number }
 interface Host {
   tap(x: number, y: number): void; copy(text: string): Promise<void>; focus: TerminalFocus;
+  notice: Notify;
   link?(col: number, row: number): string | undefined;
   pan?: { enabled(): boolean; move(pixels: number): void };
   scroll?: { enabled(): boolean; move(lines: number, x: number, y: number): void };
@@ -18,8 +20,6 @@ interface Host {
 export class TerminalGestures {
   private canvas: HTMLCanvasElement;
   private highlights = document.createElement('div');
-  private notice = document.createElement('div');
-  private noticeTimer?: ReturnType<typeof setTimeout>;
   private copyGeneration = 0;
   private handles = [document.createElement('button'), document.createElement('button')];
   private start?: Point;
@@ -41,8 +41,9 @@ export class TerminalGestures {
   private scrollFraction = 0;
   private scrollLinePixels?: number;
   private term: Terminal;
+  private host: Host;
   constructor(term: Terminal, host: Host) {
-    this.term = term;
+    this.term = term; this.host = host;
     const element = term.element!;
     this.canvas = element.querySelector('canvas')!;
     const geometry = new ResizeObserver(() => { this.scrollLinePixels = undefined; });
@@ -51,9 +52,7 @@ export class TerminalGestures {
     const surface = (target: EventTarget | null) => target === element || target === this.canvas || target === term.textarea;
     const stop = (event: Event) => { if (event.cancelable) event.preventDefault(); event.stopImmediatePropagation(); };
     this.highlights.className = 'terminal-selection';
-    this.notice.className = 'selection-notice'; this.notice.hidden = true;
-    this.notice.setAttribute('role', 'status'); this.notice.setAttribute('aria-live', 'polite');
-    element.append(this.highlights, this.notice);
+    element.append(this.highlights);
     // The pinned Ghostty adapter already copies native mouse selections and
     // double-clicks. Use one clipboard hook for their confirmation as well.
     const native = term as unknown as { selectionManager: { copyToClipboard(text: string): void } };
@@ -64,7 +63,7 @@ export class TerminalGestures {
       element.append(handle);
       terminalContact(handle, {
         down: () => {
-          host.focus.suppress(); this.dismissNotice(); this.cancelMomentum(); this.stopSelectionScroll();
+          host.focus.suppress(); this.cancelCopy(); this.cancelMomentum(); this.stopSelectionScroll();
           this.lastTouch = performance.now(); this.dragHandle = index; return true;
         },
         move: ({ x, y }) => {
@@ -106,7 +105,7 @@ export class TerminalGestures {
           if (performance.now() - this.lastTouch >= 800) host.focus.allowMouse();
           return false;
         }
-        host.focus.suppress(); this.dismissNotice(); this.lastTouch = performance.now();
+        host.focus.suppress(); this.cancelCopy(); this.lastTouch = performance.now();
         this.cancelMomentum(); this.clear(); this.scrollFraction = 0; this.scrollLinePixels = undefined; clearTimeout(this.hold);
         this.press = { x, y, lastX: x, lastY: y, started: at, at, velocity: 0, mode: 'pending' };
         this.hold = setTimeout(() => {
@@ -225,53 +224,44 @@ export class TerminalGestures {
   clear(native = true) {
     this.stopSelectionScroll(); this.selectionHistory = undefined; this.selectionBlocked = false; this.selectionWarning = '';
     this.start = this.end = undefined;
-    this.dismissNotice();
+    this.cancelCopy();
     this.highlights.replaceChildren(); this.handles.forEach(handle => handle.hidden = true);
     if (native) this.term.clearSelection();
   }
-  private dismissNotice() {
-    this.copyGeneration++; clearTimeout(this.noticeTimer); this.notice.hidden = true;
-  }
+  /** A new gesture drops the confirmation of a copy that has not finished. */
+  private cancelCopy() { this.copyGeneration++; }
   private async copy(host: Host, text = this.text) {
     if (!text) return;
     const generation = ++this.copyGeneration;
-    let message: string;
+    let message: string, failed = false;
     try {
       await host.copy(text);
       const count = Array.from(text).length;
       message = `Copied ${count.toLocaleString()} ${count === 1 ? 'character' : 'characters'} to clipboard`;
-    } catch { message = 'Clipboard is unavailable. Text remains selected.'; }
+    } catch { message = 'Clipboard is unavailable. Text remains selected.'; failed = true; }
     if (generation !== this.copyGeneration) return;
-    this.notice.textContent = this.selectionWarning ? `${message}\n${this.selectionWarning}` : message; this.notice.hidden = false; this.render();
-    clearTimeout(this.noticeTimer); if (!this.selectionWarning) this.noticeTimer = setTimeout(() => { this.notice.hidden = true; }, 2200);
+    const warning = this.selectionWarning;
+    host.notice(warning ? `${message}\n${warning}` : message, failed ? 'error' : warning ? 'warning' : 'done');
   }
   private render() {
     const range = this.range();
-    if (!range && this.notice.hidden) return;
+    if (!range) return;
     this.highlights.replaceChildren();
     const bounds = this.canvas.getBoundingClientRect(), container = this.term.element!.getBoundingClientRect();
     const viewport = this.term.element!.parentElement?.id === 'terminal-viewport' ? this.term.element!.parentElement.getBoundingClientRect() : container;
     const width = bounds.width / this.term.cols, height = bounds.height / this.term.rows, top = this.topRow();
-    this.handles.forEach(handle => handle.hidden = !range);
-    if (range) {
-      for (let row = Math.max(top + (this.selectionHistory?.first ?? 0), range.start.row); row <= Math.min(top + (this.selectionHistory?.last ?? this.term.rows - 1), range.end.row); row++) {
-        const first = row === range.start.row ? range.start.col : 0, last = row === range.end.row ? range.end.col : this.term.cols - 1;
-        const highlight = document.createElement('span');
-        Object.assign(highlight.style, { left: `${bounds.left - container.left + first * width}px`, top: `${bounds.top - container.top + (row - top) * height}px`, width: `${(last - first + 1) * width}px`, height: `${height}px` });
-        this.highlights.append(highlight);
-      }
-      [this.start!, this.end!].forEach((point, i) => {
-        const handle = this.handles[i];
-        handle.hidden = this.dragHandle !== i && (point.row < top + (this.selectionHistory?.first ?? 0) || point.row > top + (this.selectionHistory?.last ?? this.term.rows - 1));
-        handle.style.left = `${Math.max(viewport.left - container.left, Math.min(viewport.right - container.left - 32, bounds.left - container.left + (point.col + (i ? 1 : 0)) * width - 16))}px`;
-        handle.style.top = `${Math.max(0, Math.min(container.height - 32, bounds.top - container.top + (point.row - top + 1) * height - 4))}px`;
-      });
+    for (let row = Math.max(top + (this.selectionHistory?.first ?? 0), range.start.row); row <= Math.min(top + (this.selectionHistory?.last ?? this.term.rows - 1), range.end.row); row++) {
+      const first = row === range.start.row ? range.start.col : 0, last = row === range.end.row ? range.end.col : this.term.cols - 1;
+      const highlight = document.createElement('span');
+      Object.assign(highlight.style, { left: `${bounds.left - container.left + first * width}px`, top: `${bounds.top - container.top + (row - top) * height}px`, width: `${(last - first + 1) * width}px`, height: `${height}px` });
+      this.highlights.append(highlight);
     }
-    if (!this.notice.hidden) {
-      this.notice.style.left = `${viewport.left - container.left + 8}px`; this.notice.style.right = 'auto'; this.notice.style.maxWidth = `${Math.max(0, viewport.width - 16)}px`;
-      const row = range ? range.start.row - top : 0;
-      this.notice.style.top = `${Math.max(4, Math.min(container.height - 40, bounds.top - container.top + row * height - 36))}px`;
-    }
+    [this.start!, this.end!].forEach((point, i) => {
+      const handle = this.handles[i];
+      handle.hidden = this.dragHandle !== i && (point.row < top + (this.selectionHistory?.first ?? 0) || point.row > top + (this.selectionHistory?.last ?? this.term.rows - 1));
+      handle.style.left = `${Math.max(viewport.left - container.left, Math.min(viewport.right - container.left - 32, bounds.left - container.left + (point.col + (i ? 1 : 0)) * width - 16))}px`;
+      handle.style.top = `${Math.max(0, Math.min(container.height - 32, bounds.top - container.top + (point.row - top + 1) * height - 4))}px`;
+    });
   }
   cancelGesture() {
     clearTimeout(this.hold); this.press = undefined; this.dragHandle = undefined;
@@ -312,8 +302,7 @@ export class TerminalGestures {
   }
   private blockSelectionScroll(message: string) {
     this.selectionBlocked = true; this.stopSelectionScroll();
-    this.selectionWarning = message;
-    this.notice.textContent = message; this.notice.hidden = false; this.render();
+    this.host.notice(message, 'warning');
   }
   private autoScrollSelection(host: Host, at: number) {
     this.selectionFrame = 0;

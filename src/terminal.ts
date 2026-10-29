@@ -13,7 +13,7 @@ import { dictationTarget } from './protocol.ts';
 import { SentInput, UnsentInput, type InputContext } from './unsent-input.ts';
 import { applyTheme, terminalThemes, watchSystemTheme } from './theme.ts';
 import { adaptDarkAppColors } from './terminal-colors.ts';
-import { ReconnectingSocket } from './reconnecting-socket.ts';
+import { ReconnectingSocket, stalledLabel } from './reconnecting-socket.ts';
 import { HerdrLayout } from './herdr-layout.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { terminalLinkAt } from './terminal-links.ts';
@@ -34,6 +34,8 @@ import { InlineSuggestions } from './inline-suggestions.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { defaults, keySequence, validateShortcuts, type Shortcut } from './shortcuts.ts';
 import { readingPhrases, readingRequest, readingPipeline, type ReadingOpen } from './reading-request.ts';
+import { remoteActions, type NoticeKind, type Notify, type RemoteNotice } from './notice-model.ts';
+import { NoticeCenter } from './notices.ts';
 const params = new URLSearchParams(location.search);
 const embedded = params.get('embedded') === '1' && parent !== window;
 const baseURL = new URL(params.get('backend') || document.baseURI);
@@ -66,7 +68,7 @@ const transport = new ReconnectingSocket({
   available: () => !herdrPreview && (keepingGeometry() || dictation.active) && (herdrTerminal ? tabVisible && !(herdrParked && herdrDormant) : tabVisible || !tabExpired || dictation.active),
   protocols: wireProtocols,
   checkpoint: () => sentInput.pending,
-  stalled: seconds => connection(`Connection stalled · last contact ${seconds}s ago`),
+  stalled: lastContact => connection(stalledLabel(lastContact)),
   prepare: prepareConnection, open: socketOpened, message: socketMessage, close: socketClosed, error: connectionError,
 });
 let state: ShellState = { cwd: '', inputRevision: 0, promptRevision: 0, ready: false, prompt: 0, exited: false };
@@ -95,14 +97,13 @@ try {
 } catch { /* Use defaults when storage is unavailable or stale. */ }
 function persist(key: string, value: unknown) {
   try { localStorage.setItem('libertty.' + key, JSON.stringify(value)); } catch { toast('Browser storage is unavailable. ' +
-    'Settings will last for this page only.'); }
+    'Settings will last for this page only.', 'warning'); }
 }
 const transfersSeen = new Set<string>();
 let ctrl = false;
 let shortcutState = '';
 let uploadingImage = false;
 let dictationWaiting = false;
-let toastTimer: ReturnType<typeof setTimeout>;
 const queue = new Queue<Extract<ServerMessage, { type: 'output' }>>();
 let frameQueued = false;
 let tabVisible = true, outputFrame = 0;
@@ -111,16 +112,31 @@ let tabSeen = !embedded, tabExpired = false, tabTimer: ReturnType<typeof setTime
 const pendingFrames = new Queue<{ socket: WebSocket | undefined; frame: HerdrFrameMessage }>();
 const frameScheduler = new OutputScheduler(drainHerdrFrames, () => tabVisible && !document.hidden && !herdrParked, true);
 function scheduleDrain() { if (!tabVisible || document.hidden || herdrParked) return; frameQueued = true; outputFrame = requestAnimationFrame(drain); }
-function toast(message: string) {
-  if (embedded) { notify('terminal-notice', { message }); return; }
-  $('toast').textContent = message; $('toast').hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 5500);
+// An embedded terminal sends notices to the workspace, which returns these action ids.
+const noticeActions = { redraw: () => rawInput('\x0c'), reconnect: () => transport.activity() };
+type TerminalAction = { id: keyof typeof noticeActions; label: string };
+const runTerminalAction = (id: string) => { if (Object.hasOwn(noticeActions, id)) noticeActions[id as TerminalAction['id']](); };
+const notices = embedded ? undefined : new NoticeCenter();
+const localNotice = (notice: RemoteNotice) => ({ ...notice, actions: remoteActions(notice, runTerminalAction) });
+let connectionStatus = 'null';
+function toast(message: string, kind: NoticeKind = 'error', actions: TerminalAction[] = []) {
+  const notice = { message, kind, actions };
+  if (embedded) notify('terminal-notice', notice); else notices!.notify(localNotice(notice));
 }
+/** Terminal parts without frame actions show plain notices. */
+const plainToast: Notify = (message, kind) => toast(message, kind);
 function connection(label: string, online = false) {
   $('connection-label').textContent = label;
   const updated = lastOutputAt || cachedUpdated ? ` · last output ${new Date(lastOutputAt || cachedUpdated).toLocaleTimeString()}` : '';
-  $('reconnect-banner').textContent = label === 'Session ended' ? 'This terminal has ended; open its saved host to reconnect.' : label.startsWith('Connection stalled') ? label : 'Reconnecting' + updated;
-  $('reconnect-banner').hidden = online || label === 'Connecting' || label === 'Locked';
+  // The workspace reports an ended embedded terminal itself, so only a standalone terminal shows that state.
+  const status: RemoteNotice | undefined = online || ['Connecting', 'Locked', 'Other tab'].includes(label) || embedded && label === 'Session ended' ? undefined
+    : label === 'Session ended' ? { message: 'This terminal has ended. Open its saved host to reconnect.', kind: 'error', actions: [] }
+    : { message: label.startsWith('Connection stalled') ? label : 'Reconnecting' + updated, kind: 'progress', actions: [{ id: 'reconnect', label: 'Retry now' }] };
+  const serialized = JSON.stringify(status ?? null);
+  if (serialized !== connectionStatus) {
+    connectionStatus = serialized;
+    if (embedded) notify('terminal-status', { status }); else notices!.set('connection', status && localNotice(status));
+  }
   updateRun();
 }
 function updateRun() {
@@ -321,7 +337,7 @@ function synchronizeInput() {
     if (!context) return;
     const pending = unsentInput.take(context);
     if (pending) for (const data of pending) rawInput(data);
-    else toast('Queued input belongs to a changed prompt and was not sent.');
+    else toast('Queued input belongs to a changed prompt and was not sent.', 'warning');
   }
   if (!synchronizedConnection) { synchronizedConnection = true; disconnectedContext = undefined; dictation.connected(true); }
   scheduleBackfill();
@@ -435,7 +451,7 @@ window.visualViewport?.addEventListener('resize', viewport); window.addEventList
 function rawInput(data: string) {
   terminalActivity();
   if (['\x1b[I', '\x1b[O'].includes(data)) { if (!presentation.pending) send({ type: 'input', data }); return; }
-  if (capturedConnection) { toast('Finish opening the connection first.'); return; }
+  if (capturedConnection) { toast('Finish opening the connection first.', 'warning'); return; }
   if (ctrl) { if (/^[a-zA-Z]$/.test(data)) data = String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64); setCtrl(false); }
   if (presentation.pending || herdrTerminal && (!herdrReady || herdrLayout.pending) || transport.socket?.readyState !== WebSocket.OPEN || !replayState) {
     const context = unsentInput.context || disconnectedContext || inputContext();
@@ -484,7 +500,7 @@ const inline = new InlineSuggestions(term, { state: () => state, replace: replac
   raw: rawInput, execute });
 const dictation = new DictationControl({ api, send, state: () => state, context: inputContext, key: baseURL.href,
   audio: data => { if (!transport.socket || transport.socket.readyState !== WebSocket.OPEN || transport.socket.bufferedAmount > 256 * 1024) return false; transport.socket.send(encodeAudio(data)); return true; },
-  prepare: () => inline.prepareExternalPaste(), waiting: active => { dictationWaiting = active; inline.dictationPending(active); updateRun(); }, notice: toast, focus: () => term.focus() });
+  prepare: () => inline.prepareExternalPaste(), waiting: active => { dictationWaiting = active; inline.dictationPending(active); updateRun(); }, notice: plainToast, focus: () => term.focus() });
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
   const workspace = new URL('.', document.baseURI);
@@ -500,20 +516,20 @@ $('terminal-enter').addEventListener('pointerdown', event => event.preventDefaul
 $('terminal-enter').onclick = sendReturn;
 const images = imagePicker(files => void attachImages(files)); document.body.append(images);
 async function attachImages(files: File[]) {
-  if (!canUploadImage()) { toast('Connect to the terminal before attaching an image.'); return; }
+  if (!canUploadImage()) { toast('Connect to the terminal before attaching an image.', 'warning'); return; }
   const socket = transport.socket!, abort = new AbortController();
   socket.addEventListener('close', () => abort.abort(), { once: true, signal: abort.signal });
   uploadingImage = true; updateRun();
   try {
     for (const file of files) {
-      toast('Uploading ' + file.name + '…');
+      toast('Uploading ' + file.name + '…', 'info');
       const path = await uploadImage(herdrTerminal ? herdrEndpoint('api/herdr/images/upload') : endpoint('api/images/upload'), accessToken, file, abort.signal);
       if (transport.socket !== socket || socket.readyState !== WebSocket.OPEN) throw new Error('The terminal disconnected. Attach the image again after reconnecting.');
       inline.prepareExternalPaste();
       if (herdrTerminal) { send({ type: 'paste', text: path }); state.inputRevision++; }
       else term.paste(path);
     }
-    toast(`${files.length} image${files.length === 1 ? '' : 's'} attached.`); term.focus();
+    toast(`${files.length} image${files.length === 1 ? '' : 's'} attached.`, 'done'); term.focus();
   } catch (error: any) { toast(abort.signal.aborted ? 'The terminal disconnected. Attach the image again after reconnecting.' : error.message); }
   finally { abort.abort(); uploadingImage = false; updateRun(); }
 }
@@ -560,7 +576,7 @@ function copyTerminalText(text: string) {
   window.focus(); return navigator.clipboard.writeText(text);
 }
 const gestures = new TerminalGestures(term, {
-  focus,
+  focus, notice: plainToast,
   link: (col, row) => terminalLinkAt(term, col, row, projection?.clickable),
   pan: { enabled: () => fullWidth() && terminalViewport.scrollWidth > terminalViewport.clientWidth, move: pixels => { terminalViewport.scrollLeft += pixels; } },
   scroll: {
@@ -792,7 +808,7 @@ const handlers: Handlers = {
     if (message.truncated) {
       const notice = '\r\n\x1b[33mOlder output is unavailable. Ctrl-L redraws the current program.\x1b[0m\r\n';
       if (handoff === undefined) term.write(notice); else handoff += notice;
-      toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.');
+      toast('Reconnected with limited scrollback. Use Ctrl-L to redraw if needed.', 'info', [{ id: 'redraw', label: 'Redraw' }]);
     }
   },
   'output': message => {
@@ -851,7 +867,7 @@ function socketClosed(event?: CloseEvent) {
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) { pendingCommand = undefined; toast('Connection lost before acknowledgement. Check the terminal before running again.'); }
   if ((event?.code === 1011 || event?.code === 1013) && event.reason) toast(event.reason);
-  if (event?.code === 4001) { unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason); return false; }
+  if (event?.code === 4001) { unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason, 'warning'); return false; }
   if (herdrTerminal && event?.code === 1000 && event.reason === 'Herdr terminal ended') { inline.disconnect(); connection('Session ended'); notify('terminal-ended'); return false; }
   if (embedded && state.exited) return false; // The workspace is replacing this finished shell.
   connection('Reconnecting');
@@ -900,8 +916,8 @@ transport.follow({ grace: backgroundGrace, hidden: () => {
   } });
 
 function execute(command: string) {
-  if (presentation.pending || capturedConnection || !state.ready && !herdrReady || state.exited || pendingCommand || transport.socket?.readyState !== WebSocket.OPEN) { toast('Wait for terminal input before running a command.'); return; }
-  if (!command.trim() || /[\x00-\x1f\x7f]/.test(command)) { toast('Use one command line at a time.'); return; }
+  if (presentation.pending || capturedConnection || !state.ready && !herdrReady || state.exited || pendingCommand || transport.socket?.readyState !== WebSocket.OPEN) { toast('Wait for terminal input before running a command.', 'warning'); return; }
+  if (!command.trim() || /[\x00-\x1f\x7f]/.test(command)) { toast('Use one command line at a time.', 'warning'); return; }
   if (herdrTerminal && state.ready && (readingRequest(command, ['look at']) || readingPipeline(command, ['look at']))) {
     const context = state.inputContext;
     inline.disconnect();
@@ -927,8 +943,8 @@ function execute(command: string) {
 for (const button of document.querySelectorAll<HTMLButtonElement>('[data-close]')) button.onclick = () => $<HTMLDialogElement>(button.dataset.close!).close();
 $('menu-button').onclick = () => $<HTMLDialogElement>('options-dialog').showModal();
 async function copySelection(text = gestures.text) {
-  if (!text) { toast('Select terminal text first.'); return; }
-  try { await copyTerminalText(text); toast('Selection copied.'); } catch { toast('Clipboard is unavailable in this browser context.'); }
+  if (!text) { toast('Select terminal text first.', 'warning'); return; }
+  try { await copyTerminalText(text); toast('Selection copied.', 'done'); } catch { toast('Clipboard is unavailable in this browser context.'); }
 }
 $('copy-selection').onclick = () => void copySelection();
 $('new-shell').onclick = async () => {
@@ -969,6 +985,7 @@ if (embedded) {
     }
     if (event.data?.type === 'authorize') { herdrPreview = false; accessToken = event.data.accessToken; void transport.connect(undefined, true); }
     if (event.data?.type === 'recovery-failed') connection('Session ended');
+    if (event.data?.type === 'notice-action') runTerminalAction(event.data.id);
     if (event.data?.type === 'herdr-park' && herdrTerminal) {
       const parked = event.data.parked === true;
       if (herdrParked === parked) return;

@@ -74,6 +74,9 @@ try {
   const release = async child => child.evaluate(() => { for(const message of window.__blockedRendered.splice(0)) parent.postMessage(message, location.origin); });
   const releaseShortcuts = async child => child.evaluate(() => { for(const message of window.__blockedShortcuts.splice(0)) parent.postMessage(message, location.origin); });
   const hotkeys = page.locator('#workspace-shortcut-buttons button');
+  // Loading behind a previous picture shows as a spinning orb state instead of covering the picture.
+  const orbLoading = async key => (await page.locator('#notice-orb').getAttribute('data-states')).split(' ').includes(key);
+  const paneLoaded = async id => await page.locator('#herdr-'+id+' .herdr-loading').isHidden() && !await orbLoading('loading');
   const captureBottomLayout = () => page.evaluate(async () => {
     window.__bottomLayouts=[]; window.__captureBottomLayout=true;
     // Start sampling before a fast handoff can finish within the current frame.
@@ -89,7 +92,7 @@ try {
   const initial = await frame(pane(first,'term_0'));
   await wait(async () => await initial.evaluate(() => window.__blockedRendered.length > 0 && window.__blockedShortcuts.length > 0), 'cold pane ready behind the loading screen');
   await assertVisible(pane(first,'term_0'),false); assert.equal(await page.locator('#terminal-loading').isVisible(),true);
-  assert.equal(await page.locator('#terminal-loading').evaluate(element => element.classList.contains('has-previous')),false);
+  assert.equal(await orbLoading('tab-loading'),false,'A cold start covers the empty screen instead of using the orb');
   assert.equal(await page.locator('#workspace-shortcuts').isVisible(),true,'The bar is present before the first terminal publishes shortcuts');
   assert.deepEqual(await hotkeys.allTextContents(),['Stop','Ctrl','Status','Image'],'Saved shortcuts are shown during loading');
   assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true);
@@ -109,7 +112,8 @@ try {
   await wait(async () => await beta.evaluate(() => window.__blockedRendered.length > 0 && window.__blockedShortcuts.length > 0), 'new pane painted behind the old view');
   await assertVisible(pane(first,'term_0'),true); await assertVisible(pane(first,'term_1'),false);
   assert.equal(await pane(first,'term_0').evaluate(element => element.inert),true);
-  assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),true);
+  assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),false,'Loading never covers the previous pane');
+  assert.equal(await orbLoading('loading'),true); assert.match(await page.locator('#notice-orb').getAttribute('aria-label'),/Loading /);
   assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true,'Pending shortcuts cannot send input to the previous pane');
   assert.deepEqual(await hotkeys.allTextContents(),['Stop','Ctrl','Status','Image']);
   const pendingActions = fixture.actions.length;
@@ -128,7 +132,7 @@ try {
   const resizedLayout = await captureBottomLayout();
   await page.evaluate(() => { window.__holdRendered=[]; }); await release(beta);
   await wait(async () => await pane(first,'term_1').evaluate(element => element.checkVisibility({checkVisibilityCSS:true})), 'atomic handoff to Beta');
-  await assertVisible(pane(first,'term_0'),false); assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),false);
+  await assertVisible(pane(first,'term_0'),false); assert.equal(await paneLoaded(first),true);
   assert.equal(await hotkeys.first().isDisabled(),true,'The bar stays visible when paint precedes shortcut state');
   await page.evaluate(() => { window.__holdShortcuts=[]; }); await releaseShortcuts(beta);
   await wait(async () => !(await hotkeys.first().isDisabled()),'incoming shortcuts enabled');
@@ -157,7 +161,7 @@ try {
   await wait(async () => await alpha.evaluate(() => window.__blockedRendered.length > 0), 'pending Alpha switch');
   await page.locator('#herdr-strip-'+first+' .herdr-agent-tab[data-terminal="term_1"]').click();
   await page.evaluate(() => { window.__holdRendered=[]; }); if (!alpha.isDetached()) await release(alpha);
-  await wait(async () => await page.locator('#herdr-'+first+' .herdr-loading').isHidden(), 'return to already displayed Beta');
+  await wait(() => paneLoaded(first), 'return to already displayed Beta');
   await assertVisible(pane(first,'term_1'),true); await assertVisible(pane(first,'term_0'),false);
 
   // Leaving the app tab keeps its last displayed pane for the return handoff.
@@ -165,10 +169,10 @@ try {
   await showTerminalTabs(page); await page.locator('#terminal-back').click();
   await page.locator('#nav-terminals').click();
   await assertVisible(pane(first,'term_1'),true);
-  assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),true);
+  assert.equal(await page.locator('#herdr-'+first+' .herdr-loading').isVisible(),false); assert.equal(await orbLoading('loading'),true);
   assert.equal(await pane(first,'term_1').evaluate(element => element.inert),true);
   await page.evaluate(() => { window.__holdRendered=[]; }); await release(beta);
-  await wait(async () => await page.locator('#herdr-'+first+' .herdr-loading').isHidden(), 'return to the retained app tab');
+  await wait(() => paneLoaded(first), 'return to the retained app tab');
 
   // A top-level Herdr tab prepares offscreen while the prior tab remains visible.
   const tabLayout = await captureBottomLayout();
@@ -177,8 +181,8 @@ try {
   const secondPane = page.locator('#herdr-'+second+' .herdr-terminal'), incoming = await frame(secondPane);
   await wait(async () => await incoming.evaluate(() => window.__blockedRendered.length > 0 && window.__blockedShortcuts.length > 0), 'top-level tab ready behind the previous tab');
   await assertVisible(page.locator('#herdr-'+first),true); await assertVisible(page.locator('#herdr-'+second),false);
-  assert.equal(await page.locator('#terminal-loading').isVisible(),true);
-  assert.equal(await page.locator('#terminal-loading-label').textContent(),'Loading Herdr…');
+  assert.equal(await page.locator('#terminal-loading').isVisible(),false,'Loading never covers the previous tab');
+  assert.equal(await orbLoading('tab-loading'),true); assert.match(await page.locator('#notice-orb').getAttribute('aria-label'),/Loading Herdr…/);
   assert.equal(await page.locator('#herdr-'+first).evaluate(element => element.inert),true);
   assert.equal(await hotkeys.evaluateAll(buttons => buttons.every(button => button.disabled)),true);
   await assertBottomLayout(tabLayout);
@@ -190,10 +194,10 @@ try {
   await page.locator('#tabs .tab').filter({hasText:'Herdr 1'}).click(); await page.evaluate(() => { window.__holdAllRendered=false; }); await release(incoming);
   await page.evaluate(() => { window.__holdAllShortcuts=false; }); await releaseShortcuts(incoming);
   await delay(100); await assertVisible(page.locator('#herdr-'+first),true); await assertVisible(page.locator('#herdr-'+second),false);
-  assert.equal(await page.locator('#terminal-loading').isVisible(),false);
+  assert.equal(await page.locator('#terminal-loading').isVisible(),false); assert.equal(await orbLoading('tab-loading'),false);
   await page.locator('#tabs .tab').filter({hasText:'Herdr 2'}).click();
   await wait(async () => await page.locator('#herdr-'+second).evaluate(element => element.checkVisibility({checkVisibilityCSS:true})), 'top-level completed handoff');
-  await assertVisible(page.locator('#herdr-'+first),false); assert.equal(await page.locator('#terminal-loading').isVisible(),false);
+  await assertVisible(page.locator('#herdr-'+first),false); assert.equal(await page.locator('#terminal-loading').isVisible(),false); assert.equal(await orbLoading('tab-loading'),false);
 
   // Opening the software keyboard resizes the loaded pane without taking input away.
   const input = incoming.locator('#terminal textarea');
@@ -219,16 +223,16 @@ try {
   const agentTab = terminal => page.locator('#herdr-strip-'+second+' .herdr-agent-tab[data-terminal="'+terminal+'"]');
   const shown = await page.locator('#herdr-'+second+' .herdr-terminal').getAttribute('data-terminal'), other = shown === 'term_0' ? 'term_1' : 'term_0';
   await agentTab(other).click();
-  await wait(async () => await page.locator('#herdr-'+second+' .herdr-terminal').getAttribute('data-terminal') === other && await page.locator('#herdr-'+second+' .herdr-loading').isHidden(), 'switch to another pane');
+  await wait(async () => await page.locator('#herdr-'+second+' .herdr-terminal').getAttribute('data-terminal') === other && await paneLoaded(second), 'switch to another pane');
   assert.equal(await pane(second, shown).getAttribute('class'), 'herdr-terminal-cached');
   const parked = await frame(pane(second, shown)), active = await frame(pane(second, other)), sockets = child => child.evaluate(() => window.__herdrSockets);
   const parkedSockets = await sockets(parked), activeSockets = await sockets(active);
   await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-terminals').click();
-  await wait(async () => await sockets(active) > activeSockets && await page.locator('#herdr-'+second+' .herdr-loading').isHidden(), 'the visible pane reconnects');
+  await wait(async () => await sockets(active) > activeSockets && await paneLoaded(second), 'the visible pane reconnects');
   await delay(500);
   assert.equal(await sockets(parked), parkedSockets, 'A parked pane stays disconnected while it is hidden');
   await agentTab(shown).click();
-  await wait(async () => await sockets(parked) > parkedSockets && await page.locator('#herdr-'+second+' .herdr-loading').isHidden(), 'the parked pane reconnects once shown');
+  await wait(async () => await sockets(parked) > parkedSockets && await paneLoaded(second), 'the parked pane reconnects once shown');
   assert.deepEqual(errors,[]);
   console.log('PASS: Herdr handoffs keep configured hotkeys and bottom bars stationary through delayed shortcut/paint messages, route input only to ready panes, reject stale/resized/cancelled switches, preserve input through keyboard opening, and reconnect parked panes only once shown.');
 } catch(error) { console.error(logs); throw error; }

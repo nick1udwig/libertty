@@ -28,10 +28,10 @@ try {
     localStorage.setItem('libertty.activeTab', JSON.stringify('saved-herdr'));
   }, { base, owner });
   await context.addInitScript(() => {
-    if (parent === window) return;
+    if (parent !== window) return;
     window.__bannerShown = false;
-    new MutationObserver(() => { if (document.getElementById('reconnect-banner')?.hidden === false) window.__bannerShown = true; })
-      .observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden'] });
+    new MutationObserver(() => { if (document.getElementById('notice-orb')?.dataset.states.split(' ').includes('terminal')) window.__bannerShown = true; })
+      .observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-states'] });
   });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
   let tickets = 0, terminalTickets = 0; page.on('request', request => { if (request.url().includes('/api/herdr/ticket')) tickets++; if (request.url().includes('/api/herdr/ticket') && new URL(request.url()).searchParams.has('terminalId')) terminalTickets++; });
@@ -82,7 +82,7 @@ try {
   assert.equal(await previewElement.evaluate(element => element.isConnected), true, 'Live metadata authorizes the same preview frame');
   await page.frameLocator('.herdr-screen iframe').locator('#terminal-viewport[aria-busy="false"]').waitFor();
   assert.equal(await page.evaluate(() => window.__previewHidden), false, 'Retained output stays displayed while live output replaces it');
-  assert.equal(await (await previewElement.contentFrame()).evaluate(() => window.__bannerShown), false, 'A working connection shows no reconnect banner');
+  assert.equal(await page.evaluate(() => window.__bannerShown), false, 'A working connection shows no reconnect state');
   await delay(500);
   const before = tickets;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); });
@@ -106,7 +106,7 @@ try {
     await foreground();
     await until(() => metadataAttempts >= 2, 'fresh foreground attempt', 2500);
   } finally { await stalled.abort('failed').catch(() => {}); }
-  await page.locator('.herdr-connection').filter({ hasText: 'timed out' }).waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => !document.getElementById('notice-orb').ariaLabel?.includes('timed out'));
   assert.deepEqual(errors, []);
   console.log('PASS Herdr reopen: expired sources restore automatically in the same tab, transient failures retry, and foregrounding cancels stalled attempts');
 } catch (error) {

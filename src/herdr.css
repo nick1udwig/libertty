@@ -37,7 +37,6 @@
 .herdr-screen{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}.herdr-terminal{position:static!important;flex:1;min-height:0;width:100%;height:100%;border:0}
 .herdr-screen.herdr-navigation-resizing{overflow:hidden;justify-content:flex-end}
 .herdr-navigation-resizing > .herdr-terminal{flex-grow:0;flex-shrink:0}
-.herdr-connection{flex:none;color:var(--text-2);background:var(--bg);font:13px var(--font-ui);padding:8px 12px}.herdr-connection:empty{display:none}
 .herdr-empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:24px;color:var(--muted);font:14px/1.6 var(--font-ui)}
 .herdr-tab-menu{position:absolute;z-index:12;min-width:180px;max-width:calc(100% - 16px);max-height:65%;overflow:auto;background:var(--overlay);border:1px solid var(--line-strong);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);padding:6px}
 .herdr-menu-backdrop{position:fixed;inset:0;z-index:11;touch-action:none}
@@ -51,8 +50,6 @@
 .herdr-terminal-pending{position:absolute!important;inset:0;pointer-events:none}
 .herdr-terminal-previous{position:static!important;flex:1;min-height:0;width:100%;height:100%;border:0;pointer-events:none}
 .herdr-loading{position:absolute;inset:0;z-index:2;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;background:var(--bg);color:var(--text-2);font:14px var(--font-ui);text-align:center;padding:24px;pointer-events:none}
-.herdr-loading.has-previous{inset:12px 12px auto auto;flex-direction:row;gap:10px;max-width:calc(100% - 24px);padding:10px 14px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--overlay);box-shadow:var(--shadow-pop)}
-.herdr-loading.has-previous .terminal-loading-spinner{width:16px;height:16px;border-width:2px;flex:none}
 .herdr-checkout-path{font-family:var(--font-mono);font-size:13px;overflow-wrap:anywhere;padding:10px 12px;border-radius:var(--r-md);background:var(--bg);border:1px solid var(--line)}
 .herdr-branch-suggestions{max-height:210px;overflow-y:auto;margin-top:-8px;margin-bottom:16px;border:1px solid var(--line-strong);border-radius:var(--r-md);background:var(--bg)}
 .herdr-branch-option{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:11px 12px;background:none;text-align:left;overflow-wrap:anywhere;font:13px var(--font-mono)}

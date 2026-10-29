@@ -2,12 +2,16 @@ import { node } from './dom.ts';
 import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
 import { terminalCanEvict } from './terminal-retention.ts';
+import { frameNotice, type Fail, type NoticeInput, type Notify } from './notice-model.ts';
 
-interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; verified:boolean; loaded?:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number }
+interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; verified:boolean; loaded?:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number; state?:NoticeInput }
 export interface FramesHost {
   url: string; session: string; source?: string;
   token(): string | undefined; authenticate(): Promise<void>;
-  notice(message: string): void;
+  notice: Notify;
+  fail: Fail;
+  /** Show the selected pane's connection state, or its loading state while it prepares behind the previous picture. */
+  state(key: 'terminal' | 'loading', state?: NoticeInput): void;
   reading(terminalId: string, request: ReadingOpen): void;
   visible(): boolean;
   /** A workspace handoff keeps the previous picture until it is released. */
@@ -19,7 +23,10 @@ export interface FramesHost {
 }
 /** Keep the selected terminal and one previous pane on phones or during a handoff. */
 export class HerdrFrames {
-  frame?: HTMLIFrameElement;
+  private selected?: HTMLIFrameElement;
+  get frame() { return this.selected; }
+  /** Selecting a frame shows its connection state. */
+  set frame(frame) { this.selected = frame; this.host.state('terminal', [...this.entries.values()].find(entry => entry.frame === frame)?.state); }
   displayed?: HTMLIFrameElement;
   /** The selected terminal has painted since it was chosen. */
   rendered = false;
@@ -43,7 +50,7 @@ export class HerdrFrames {
     if (!entry) return;
     const active = entry.frame === this.frame;
     if (event.data.type === 'terminal-loaded') {
-      entry.loaded = true;
+      entry.loaded = true; entry.state = undefined; if (active) this.host.state('terminal');
       entry.frame.contentWindow?.postMessage({ type: 'shortcut-host' }, location.origin);
       entry.frame.contentWindow?.postMessage({ type:'herdr-present', presentation:entry.presentation },location.origin);
       if (entry.verified) entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin);
@@ -59,14 +66,18 @@ export class HerdrFrames {
       this.rendered = true; this.setLoading(false); this.host.painted();
     }
     if (event.data.type === 'herdr-resize-ready') this.resizing.get(entry.frame)?.();
-    if (active && event.data.type === 'terminal-notice') this.host.notice(event.data.message);
+    const remote = frameNotice(event.data, entry.frame.contentWindow);
+    if (remote?.status) { entry.state = remote.input; if (active) this.host.state('terminal', entry.state); }
+    else if (active && remote?.input) this.host.notice(remote.input.message, remote.input.kind, remote.input.actions);
     if (event.data.type === 'reading-open' && readingOpen(event.data)) this.host.reading(entry.frame.dataset.terminal!, event.data);
     if (event.data.type === 'terminal-ended') this.host.ended();
     if (event.data.type === 'terminal-locked') entry.locked = true;
-    if (active && event.data.type === 'terminal-locked') void this.host.authenticate().then(() => entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin)).catch(error => this.host.notice(error.message));
+    if (active && event.data.type === 'terminal-locked') void this.host.authenticate().then(() => entry.frame.contentWindow?.postMessage({ type:'authorize', accessToken:this.host.token() },location.origin)).catch(this.host.fail);
   }
+  /** Cover an empty screen while loading; with a previous picture, the notice orb shows the progress instead. */
   setLoading(loading: boolean) {
-    this.loading.hidden = !loading; this.loading.classList.toggle('has-previous', !!this.displayed);
+    const behind = loading && !!this.displayed;
+    this.loading.hidden = !loading || behind; this.host.state('loading', behind ? { message: this.loadingLabel.textContent!, kind: 'progress' } : undefined);
     this.screen.setAttribute('aria-busy', String(loading));
   }
   private prepare(entry: CachedTerminal) {
@@ -127,7 +138,7 @@ export class HerdrFrames {
       this.frame = cached.frame;
       const bounds = cached.frame.getBoundingClientRect(), preserve = cached.rendered && cached.width === bounds.width && cached.height === bounds.height;
       this.prepare(cached);
-      if (cached.locked) { cached.locked = false; void this.host.authenticate().then(() => cached.frame.contentWindow?.postMessage({type:'authorize',accessToken:this.host.token()},location.origin)).catch(error => this.host.notice(error.message)); }
+      if (cached.locked) { cached.locked = false; void this.host.authenticate().then(() => cached.frame.contentWindow?.postMessage({type:'authorize',accessToken:this.host.token()},location.origin)).catch(this.host.fail); }
       cached.frame.contentWindow?.postMessage({type:'herdr-park',parked:false,preserve},location.origin);
       cached.frame.contentWindow?.postMessage({type:'tab-visibility',visible:this.host.visible()},location.origin);
     } else {

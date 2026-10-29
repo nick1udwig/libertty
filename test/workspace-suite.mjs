@@ -121,7 +121,16 @@ try {
     await page.screenshot({ path: '/tmp/libertty-bottom-controls.png' });
     await frame.locator('#copy-selection').evaluate(el => el.click());
     await page.getByText('Select terminal text first.', { exact: true }).waitFor({ state: 'visible' });
-    assert.equal(await frame.locator('#toast').isVisible(), false, 'Embedded notices must appear only in the workspace');
+    assert.equal(await frame.locator('#notice-orb').count(), 0, 'Embedded notices must appear only in the workspace');
+    const orb = page.locator('#notice-orb'), panel = page.locator('#notice-panel');
+    assert.equal(await page.locator('#notice-bubble').getAttribute('role'), 'alert', 'A warning waits in an alert bubble');
+    await orb.click(); await panel.waitFor({ state: 'visible' });
+    assert.equal(await page.locator('#notice-bubble').isVisible(), false, 'The notice list replaces the bubble');
+    await panel.locator('.notice-item').filter({ hasText: 'Select terminal text first.' }).getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await panel.getByText('Earlier', { exact: true }).waitFor();
+    await panel.getByRole('button', { name: 'Clear', exact: true }).click();
+    await panel.getByText('Nothing needs you.', { exact: true }).waitFor();
+    await orb.click(); await orb.waitFor({ state: 'hidden' });
     await command(frame, 'export TAB_ID=first');
     assert.equal(await page.locator('#terminal-options').count(), 0);
     await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
@@ -316,12 +325,12 @@ try {
       const replacementSession = new URL(frame.url()).searchParams.get('session');
       assert.notEqual(replacementSession, endedSession); assert.equal(sessionCreates, createsBeforeEnded + 1);
       assert.equal(await page.locator('#terminal-stack iframe:visible').getAttribute('id'), endedFrameId);
-      assert.equal(await frame.locator('#reconnect-banner').isVisible(), false);
+      assert.equal(await page.locator('#notice-orb').getAttribute('data-states'), '', 'A replaced terminal shows no connection state');
       // A session removed on the backend also gets replaced without leaving a dead tab.
       await page.evaluate(async sid => { const response = await fetch('/api/sessions/close?session=' + sid, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw Error('Could not close test session'); }, replacementSession);
       await until(async () => new URL((await page.locator('#terminal-stack iframe:visible').getAttribute('src')), origin).searchParams.get('session') !== replacementSession);
       frame = await activeFrame(page); assert.equal(sessionCreates, createsBeforeEnded + 2);
-      assert.equal(await frame.locator('#reconnect-banner').isVisible(), false);
+      assert.equal(await page.locator('#notice-orb').getAttribute('data-states'), '', 'A replaced terminal shows no connection state');
       await page.locator('#terminal-back').click();
       await page.getByRole('button', { name: 'Terminals for This machine (3 open)', exact: true }).waitFor();
       const createsBeforeRecoveredReuse = sessionCreates;

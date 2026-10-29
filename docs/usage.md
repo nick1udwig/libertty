@@ -354,9 +354,9 @@ This also works for wrapped URLs and labeled terminal hyperlinks, including in s
 Hold or drag a link to select and copy its text instead.
 Vertical swipes scroll with momentum and keep the keyboard closed.
 Drag sideways to select text, or hold a word and then drag; releasing copies the selected text automatically and keeps it highlighted.
-A small popover confirms how many characters were copied.
+A notice from the corner button confirms how many characters were copied.
 Selection handles adjust either end and copy the updated range on release; mouse selections also copy on release.
-The popover disappears after a moment, while the highlight stays until you tap, scroll, select another range, or type.
+The notice disappears after a moment, while the highlight stays until you tap, scroll, select another range, or type.
 Scroll and selection gestures block automatic keyboard focus after release; only a short tap or an input control requests it again.
 Closing the keyboard keeps the visible history in place through terminal resizing and shell redraws.
 Incoming output also preserves your position while reading scrollback; typing returns to the editable prompt.
@@ -374,6 +374,17 @@ Run `npm run test:herdr-spaces` for native space creation, repository grouping, 
 
 Run `node test/dictation-browser.mjs` for installation, cursor and fake-microphone integration checks.
 Audio accuracy and Android accessibility behavior still need verification on a real phone with the installed daemon.
+
+## Notices
+
+Errors, confirmations and connection problems appear from one round button in the top-right corner.
+The button shows only when something needs your attention, and its ring turns while a terminal reconnects.
+A new notice opens beside the button with any actions, such as **Retry**.
+Errors and warnings stay until you close them.
+Confirmations close on their own, and touches pass through them to the terminal.
+Swipe a notice to the side to dismiss it, or swipe it up to keep it for later.
+Tap the button to see current notices and the earlier ones.
+Drag the button to the left or right edge to park it there, or back to the corner to restore it.
 
 ## Files and transfers
 

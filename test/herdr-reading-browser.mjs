@@ -113,7 +113,7 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS Herdr reader: typed and dictated files, relative links, prefix and piped command output, reloads, source navigation and SSH context.');
 } catch (error) {
-  for (const frame of browser?.contexts().flatMap(context => context.pages()).flatMap(page => page.frames()) || []) console.error(await frame.evaluate(() => ({ url: location.href, state: window.__testShellState, notice: document.querySelector('#toast')?.textContent, text: document.body.innerText.slice(0, 1000) })).catch(() => ({})));
+  for (const frame of browser?.contexts().flatMap(context => context.pages()).flatMap(page => page.frames()) || []) console.error(await frame.evaluate(() => ({ url: location.href, state: window.__testShellState, notice: document.querySelector('#notice-bubble')?.textContent, text: document.body.innerText.slice(0, 1000) })).catch(() => ({})));
   console.error(logs); throw error;
 }
 finally {

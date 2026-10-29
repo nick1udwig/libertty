@@ -108,7 +108,7 @@ try {
     }
     const pages = context.pages().length, label = await pointFor('Labeled link');
     await touch('touchStart', label); await delay(400); await touch('touchEnd');
-    await scope.locator('.selection-notice').filter({ hasText: 'Copied 7 characters' }).waitFor({ state: 'visible' });
+    await page.locator('#notice-bubble').filter({ hasText: 'Copied 7 characters' }).waitFor({ state: 'visible' });
     assert.equal(await scope.evaluate(() => navigator.clipboard.readText()), 'Labeled');
     assert.equal(context.pages().length, pages, 'Holding a link must select it without opening a browser tab');
     assert.deepEqual(await snapshot(), before);
@@ -235,14 +235,14 @@ try {
   const from = { x: rowPoint.x, y: rowPoint.y };
   const copied = async (scope, text) => {
     const count = Array.from(text).length;
-    await scope.locator('.selection-notice').filter({ hasText: `Copied ${count} ${count === 1 ? 'character' : 'characters'} to clipboard` }).waitFor({ state: 'visible' });
+    await page.locator('#notice-bubble').filter({ hasText: `Copied ${count} ${count === 1 ? 'character' : 'characters'} to clipboard` }).waitFor({ state: 'visible' });
     assert.equal(await scope.evaluate(() => navigator.clipboard.readText()), text);
     assert.equal(await scope.locator('.selection-actions').count(), 0, 'Selection must not require a Copy/Clear menu');
   };
   await page.evaluate(() => navigator.clipboard.writeText('before selection'));
   await touch('touchStart', from); await delay(400);
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'before selection', 'Holding must not copy before release');
-  assert.equal(await page.locator('.selection-notice:visible').count(), 0);
+  assert.equal(await page.locator('#notice-bubble:visible').count(), 0);
   await page.locator('#terminal canvas').evaluate((el, point) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: point.x, clientY: point.y })), from);
   assert.equal(await focused(), false, 'The native long-press menu must not focus terminal input');
   await touch('touchEnd');
@@ -253,8 +253,8 @@ try {
   assert.equal(await focused(), false, 'Browser-native focus after long press must not activate the input');
   await copied(page, 'alpha');
   assert.ok(await page.locator('.terminal-selection span').count() > 0, 'Copied text must stay highlighted');
-  await page.locator('.selection-notice').waitFor({ state: 'hidden' });
-  assert.ok(await page.locator('.terminal-selection span').count() > 0, 'Hiding the popover must preserve the highlight');
+  await page.locator('#notice-bubble').waitFor({ state: 'hidden' });
+  assert.ok(await page.locator('.terminal-selection span').count() > 0, 'Hiding the confirmation must preserve the highlight');
   // Horizontal dragging replaces the range and copies only after release.
   await touch('touchStart', from); await touch('touchMove', { x: from.x + 9 * rowPoint.cell, y: from.y }); await touch('touchEnd');
   assert.equal(await page.locator('.selection-handle:visible').count(), 2);
@@ -268,13 +268,17 @@ try {
   assert.equal(await focused(), false, 'Adjusting handles must leave the keyboard closed');
   await page.screenshot({ path: path.join(root, '.test-artifacts/terminal-selection.png') });
   // A cancelled selection must not overwrite the previous clipboard contents.
+  await page.locator('#notice-bubble').waitFor({ state: 'hidden' });
   await touch('touchStart', from); await delay(400); await touch('touchCancel');
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'alpha beta gamma');
-  assert.equal(await page.locator('.selection-notice:visible').count(), 0);
+  assert.equal(await page.locator('#notice-bubble:visible').count(), 0);
   // Clipboard failures retain the selection and never claim success.
   await page.evaluate(() => window.__denyClipboard = true);
   await touch('touchStart', from); await delay(400); await touch('touchEnd');
-  await page.locator('.selection-notice').filter({ hasText: 'Clipboard is unavailable.' }).waitFor({ state: 'visible' });
+  const failure = page.locator('#notice-bubble').filter({ hasText: 'Clipboard is unavailable.' });
+  await failure.waitFor({ state: 'visible' });
+  assert.equal(await failure.getAttribute('role'), 'alert', 'A failed copy waits as an error');
+  await failure.getByRole('button', { name: 'Dismiss', exact: true }).click(); await failure.waitFor({ state: 'hidden' });
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'alpha beta gamma');
   assert.ok(await page.locator('.terminal-selection span').count() > 0);
   assert.equal(await focused(), false);
@@ -406,7 +410,7 @@ try {
   await copied(frame, 'alpha');
   assert.ok(await frame.locator('.terminal-selection span').count() > 0);
   assert.equal(await frame.locator('#terminal textarea').evaluate(el => el === document.activeElement), false, 'Workspace automatic copying must leave the keyboard closed');
-  assert.equal(await page.locator('#notice:visible').count(), 0, 'Selection confirmation must appear only once beside the text');
+  assert.equal(await frame.locator('#notice-orb').count(), 0, 'Selection confirmation must appear only once, in the workspace orb');
   await checkLinks(frame);
   // A slow but working connection keeps scrolling the application instead of switching to retained output.
   await frame.evaluate(() => {

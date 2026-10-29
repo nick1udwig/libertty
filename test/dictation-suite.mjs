@@ -213,7 +213,10 @@ try {
     const micPosition = await mic.boundingBox();
     let idleStatusReads = 0;
     const statusRead = request => { if (new URL(request.url()).pathname.endsWith('/api/dictation')) idleStatusReads++; };
-    page.on('request', statusRead); await page.clock.runFor(16000); page.off('request', statusRead);
+    // Advance in steps that let heartbeat replies arrive, because one large jump passes the reply deadline and reconnects.
+    page.on('request', statusRead);
+    for (let second = 0; second < 16; second++) { await page.clock.runFor(1000); await page.waitForTimeout(20); }
+    page.off('request', statusRead);
     assert.equal(idleStatusReads, 0, 'An idle terminal does not poll dictation availability');
     assert.equal(await mic.evaluate(el => getComputedStyle(el).borderRadius), '14px');
     assert.equal(await mic.locator('.dictation-microphone-icon').isVisible(), true);
@@ -348,7 +351,7 @@ try {
         await page.getByLabel('Cancel dictation', { exact: true }).click();
       } else {
         await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
-        assert.match(await page.locator('#toast').textContent(), /Microphone audio did not start or resume/);
+        assert.match(await page.locator('#notice-bubble').textContent(), /Microphone audio did not start or resume/);
         assert.equal(audioBytes, previous, 'A permanently stalled microphone never pretends to send audio');
       }
       await page.evaluate(() => { window.__stallCapture = false; });
@@ -360,7 +363,7 @@ try {
     await page.waitForFunction(() => window.__captureProcessor?.context === window.__captureContext);
     await page.evaluate(() => window.__captureProcessor.dispatchEvent(new Event('processorerror')));
     await page.waitForFunction(() => document.querySelector('#libertty-dictation').getAttribute('aria-pressed') === 'false');
-    assert.match(await page.locator('#toast').textContent(), /audio processing stopped/);
+    assert.match(await page.locator('#notice-bubble').textContent(), /audio processing stopped/);
     for (const interruption of ['suspend', 'ended', 'pagehide', 'denied', 'permission', 'disconnect']) {
       await page.evaluate(kind => { window.__messages = []; window.__denyWakeLock = kind === 'denied'; window.__denyMicrophone = kind === 'permission'; }, interruption);
       await mic.press('Enter');

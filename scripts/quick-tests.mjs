@@ -19,6 +19,7 @@ export const quickTests = [
   'herdr-spaces.test.ts',
   'inline-suggestions.test.ts',
   'input-line.test.ts',
+  'notice-model.test.ts',
   'lossy-link.test.mjs',
   'paste-mode.test.ts',
   'output-scheduler.test.ts',

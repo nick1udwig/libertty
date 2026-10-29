@@ -4,6 +4,7 @@ import {
   type HostProfile,
   type TerminalTab,
 } from './connections.ts';
+import type { Fail, Notify } from './notice-model.ts';
 import { saved, validSession } from './persistence.ts';
 
 export interface WorkspaceState {
@@ -33,7 +34,8 @@ export interface WorkspaceServices {
   backendFor: (id: string) => BackendProfile;
   tokenFor: (backend: BackendProfile) => string | undefined;
   store: () => void;
-  notice: (message: string) => void;
+  notice: Notify;
+  fail: Fail;
 }
 export function loadWorkspace(primary: BackendProfile): WorkspaceState {
   let backends: BackendProfile[] = saved<BackendProfile[]>('backends', []).filter((b) => {
@@ -75,7 +77,7 @@ export function loadWorkspace(primary: BackendProfile): WorkspaceState {
   let active = saved<string>('activeTab', '') || tabs[0]?.id || '';
   return { backends, hosts, tabs, active };
 }
-export function saveWorkspace(workspace: WorkspaceState, notice: (message: string) => void) {
+export function saveWorkspace(workspace: WorkspaceState, notice: WorkspaceServices['notice']) {
   try {
     for (const [key, value] of Object.entries({
       backends: workspace.backends.filter((b) => b.id !== 'primary'),
@@ -85,6 +87,6 @@ export function saveWorkspace(workspace: WorkspaceState, notice: (message: strin
     }))
       localStorage.setItem('libertty.' + key, JSON.stringify(value));
   } catch {
-    notice('Browser storage is unavailable. Connections will last for this page only.');
+    notice('Browser storage is unavailable. Connections will last for this page only.', 'warning');
   }
 }

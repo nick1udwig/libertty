@@ -21,7 +21,7 @@ export function currentShortcuts() {
     return structuredClone(defaults);
   }
 }
-interface Options extends Pick<WorkspaceServices, 'backendFor' | 'notice'> {
+interface Options extends Pick<WorkspaceServices, 'backendFor' | 'notice' | 'fail'> {
   workspace: WorkspaceState;
   registerExternal: (pkg: PluginPackage) => void;
   plugins: PluginRegistry;
@@ -39,6 +39,7 @@ export function createWorkspaceSettings(options: Options) {
     registerExternal,
     plugins,
     notice,
+    fail,
     pluginViews,
     herdrNotifications,
     tabLabel,
@@ -75,7 +76,7 @@ export function createWorkspaceSettings(options: Options) {
     try {
       localStorage.setItem('libertty.' + key, JSON.stringify(value));
     } catch {
-      notice('Browser storage is unavailable. Settings could not be saved.');
+      notice('Browser storage is unavailable. Settings could not be saved.', 'warning');
       return;
     }
     for (const view of pluginViews.values()) view.applySettings?.();
@@ -154,7 +155,7 @@ export function createWorkspaceSettings(options: Options) {
           refreshPluginTabs(id);
         } catch (error: any) {
           enabled.checked = !enabled.checked;
-          notice(error.message);
+          fail(error);
         }
       };
       label.append(enabled, document.createTextNode('Enabled'));
@@ -166,7 +167,7 @@ export function createWorkspaceSettings(options: Options) {
             plugins.remove(id);
             refreshPluginTabs(id);
           } catch (error: any) {
-            notice(error.message);
+            fail(error);
           }
         },
         'secondary',
@@ -204,7 +205,7 @@ export function createWorkspaceSettings(options: Options) {
         registerExternal(pkg);
         plugins.enable(pkg.manifest.id, true);
         refreshPluginTabs(pkg.manifest.id);
-        notice(pkg.manifest.name + ' loaded. Open a host’s menu to connect.');
+        notice(pkg.manifest.name + ' loaded. Open a host’s menu to connect.', 'done');
       } catch (error: any) {
         $('plugin-install-error').textContent = error.message || 'Could not load this package.';
       } finally {
@@ -260,7 +261,7 @@ export function createWorkspaceSettings(options: Options) {
     }
     $('reading-phrases-error').textContent = '';
     preferencesChanged('readingPhrases', phrases);
-    notice('Reading phrases saved.');
+    notice('Reading phrases saved.', 'done');
   };
   const prepareEditor = shortcutEditor(
     currentShortcuts,

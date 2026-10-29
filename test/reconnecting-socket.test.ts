@@ -39,7 +39,7 @@ function fixture(t: TestContext) {
     error: (_error: unknown) => true,
   };
   const connection = new ReconnectingSocket({
-    stalled: seconds => behavior.stalled.push(seconds),
+    stalled: lastContact => behavior.stalled.push(Math.floor((Date.now() - lastContact) / 1000)),
     available: () => available,
     prepare: (signal, token) => { signals.push(signal); tokens.push(token); return behavior.prepare(signal, token); },
     open: () => { opens++; },
