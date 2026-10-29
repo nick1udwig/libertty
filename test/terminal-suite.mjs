@@ -1,3 +1,4 @@
+import { verifyHistoryStorage } from './support/history-storage.mjs';
 import { decodeWire } from '../src/wire.ts';
 import { launchBrowser, freePort, delay, until } from './support/browser.mjs';
 import { installWireObserver } from './wire-observer.mjs';
@@ -276,6 +277,7 @@ try {
     await page.evaluate(() => window.__repairDelay = 0);
   }
   if (scenario === 'input') {
+    await verifyHistoryStorage(browser);
     await page.setViewportSize({ width: 390, height: 844 });
     await mkdir(path.join(root, '.test-artifacts'), { recursive: true });
     await command(page, 'python3 hello_world.py --myarg food');
