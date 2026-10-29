@@ -8,25 +8,24 @@ const printable = (text: string) => text.replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
 const blank = (cell: RenderCell) => (!cell.text || cell.text === ' ' || cell.text === '\0') && (!cell.backgroundSource || cell.backgroundSource.mode === 'default')
   && !cell.background && !cell.style.underline && !cell.style.strikethrough && !cell.style.overline && !cell.style.inverse && !cell.hyperlinkUri;
 
-function color(code: number, source: CellColor | undefined, resolved?: RenderColor | null) {
+function color(code: number, source: CellColor | undefined, palette: readonly RenderColor[], resolved?: RenderColor | null) {
   if (source?.mode === 'default') return '';
-  if (source?.mode === 'palette') return `;${code};5;${source.value}`;
-  const value = source?.mode === 'rgb' ? source.value : resolved;
+  const value = source?.mode === 'palette' ? palette[source.value] : source?.mode === 'rgb' ? source.value : resolved;
   return value ? `;${code};2;${value.r};${value.g};${value.b}` : '';
 }
-function style(cell: RenderCell) {
+function style(cell: RenderCell, palette: readonly RenderColor[]) {
   let codes = '0';
   for (const [attribute, code] of attributes) if (cell.style[attribute]) codes += ';' + code;
   if (cell.style.underline) codes += ';4:' + cell.style.underline;
-  return codes + color(38, cell.foregroundSource, cell.foreground) + color(48, cell.backgroundSource, cell.background) + color(58, cell.underlineSource);
+  return codes + color(38, cell.foregroundSource, palette, cell.foreground) + color(48, cell.backgroundSource, palette, cell.background) + color(58, cell.underlineSource, palette);
 }
-function row(cells: readonly RenderCell[], columns: number) {
+function row(cells: readonly RenderCell[], columns: number, palette: readonly RenderColor[]) {
   let end = Math.min(columns, cells.length), text = '', current = '0', hyperlink = '', previous: RenderCell | undefined;
   while (end > 0 && blank(cells[end - 1])) end--;
   for (const cell of cells.slice(0, end)) {
     if (cell.width !== 'narrow' && cell.width !== 'wide') continue;
     const next = previous?.style === cell.style && previous.foregroundSource === cell.foregroundSource
-      && previous.backgroundSource === cell.backgroundSource && previous.underlineSource === cell.underlineSource ? current : style(cell);
+      && previous.backgroundSource === cell.backgroundSource && previous.underlineSource === cell.underlineSource ? current : style(cell, palette);
     previous = cell;
     const uri = cell.hyperlinkUri?.replace(/[\x00-\x1f\x7f-\x9f]/g, '') ?? '';
     if (uri !== hyperlink) { text += `\x1b]8;;${uri}\x1b\\`; hyperlink = uri; }
@@ -47,15 +46,16 @@ export function terminalSnapshot(term: Terminal, limit = 5000) {
   const colors = terminal.getColors().foreground, foreground = colors.r << 16 | colors.g << 8 | colors.b;
   const revision = terminal.getRevision(), cached = snapshots.get(terminal);
   if (cached && cached.revision === revision && cached.limit === limit && cached.columns === columns && cached.rows === rows && cached.foreground === foreground) return cached.value;
+  const palette = terminal.getPalette();
   const history = term.buffer.active.type === 'normal' ? terminal.getScrollbackLength() : 0, lines: string[] = [];
   for (let offset = Math.max(0, history + rows - limit); offset < history; offset++) {
     const cells = terminal.getScrollbackLine(offset);
-    lines.push(cells ? row(cells, columns) : '');
+    lines.push(cells ? row(cells, columns, palette) : '');
   }
   const cursor = terminal.getCursor();
   let last = -1;
   for (let y = 0; y < rows; y++) {
-    const text = row(terminal.getLine(y) ?? [], columns);
+    const text = row(terminal.getLine(y) ?? [], columns, palette);
     if (text) last = y;
     lines.push(text);
   }

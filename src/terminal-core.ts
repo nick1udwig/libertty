@@ -80,6 +80,14 @@ export class GhosttyTerminal {
     const state = this.core.bufferState();
     return { x: state.cursorX, y: state.cursorY, visible: this.core.isMode(25) };
   }
+  getPalette() {
+    const { handle, host: { bindings } } = this.core as unknown as { handle: number; host: { bindings: CoreRuntime['bindings'] } };
+    const size = bindings.abi.size('GhosttyColorRgb'), palette = bindings.alloc(256 * size);
+    try {
+      bindings.check(bindings.exports.ghostty_terminal_get(handle, bindings.abi.value('GhosttyTerminalData', 'COLOR_PALETTE'), palette.pointer), 'read terminal palette');
+      return Array.from({ length: 256 }, (_, index) => bindings.readColor(palette.pointer + index * size));
+    } finally { palette.free(); }
+  }
   getColors() {
     if (!this.colors || this.theme !== this.core.theme) {
       this.theme = this.core.theme;
