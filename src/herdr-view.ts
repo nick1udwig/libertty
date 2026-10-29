@@ -172,7 +172,7 @@ export class HerdrView {
       if (['ArrowDown', 'ArrowUp'].includes(event.key)) { event.preventDefault(); const items = [...this.menu.querySelectorAll('button')], index = items.indexOf(document.activeElement as HTMLButtonElement); items[(index + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length]?.focus(); }
     };
     // Swiping the space tree down folds it into its chip, like the sheet its grab bar suggests.
-    let sheet: { id: number; y: number; dragging: boolean } | undefined, swiped = false;
+    let sheet: { id: number; y: number; dragging: boolean; scrolling?: boolean } | undefined, swiped = false;
     this.menu.addEventListener('pointerdown', event => {
       swiped = false;
       if (!this.tree || this.renaming || (event.target as HTMLElement).closest('input')) return;
@@ -180,19 +180,31 @@ export class HerdrView {
       cancelAnimationFrame(this.foldFrame); this.foldFrame = 0;
       sheet = { id: event.pointerId, y: event.clientY - this.fold * this.menu.offsetHeight, dragging: this.fold > 0 };
     });
-    this.menu.addEventListener('pointermove', event => {
-      if (!sheet || event.pointerId !== sheet.id) return;
-      const distance = event.clientY - sheet.y;
-      if (!sheet.dragging && (distance < 10 || this.menu.scrollTop > 0)) return;
-      sheet.dragging = true; this.foldTree(Math.min(1, Math.max(0, distance) / this.menu.offsetHeight));
-    });
-    const release = (event: PointerEvent) => {
-      if (!sheet || event.pointerId !== sheet.id) return;
-      const dismissed = sheet.dragging && event.type === 'pointerup' && event.clientY - sheet.y > 56;
+    const pull = (y: number) => {
+      if (!sheet) return;
+      if (!sheet.dragging) {
+        // A scrolled list restarts the pull, so the tree only follows the finger beyond the list's top.
+        if (this.menu.scrollTop > 0 || y < sheet.y) { sheet.y = y; return; }
+        if (y - sheet.y < 10) return;
+        sheet.dragging = true;
+      }
+      this.foldTree(Math.min(1, Math.max(0, y - sheet.y) / this.menu.offsetHeight));
+    };
+    const release = (y: number, completed: boolean) => {
+      if (!sheet) return;
+      const dismissed = sheet.dragging && completed && y - sheet.y > 56;
       swiped = sheet.dragging; sheet = undefined;
       if (swiped) this.settleFold(dismissed ? 1 : 0);
     };
-    this.menu.addEventListener('pointerup', release); this.menu.addEventListener('pointercancel', release);
+    this.menu.addEventListener('pointermove', event => { if (sheet?.id === event.pointerId) pull(event.clientY); });
+    this.menu.addEventListener('pointerup', event => { if (sheet?.id === event.pointerId) release(event.clientY, true); });
+    // Native scrolling takes over a touch on an overflowing tree, so its touch events carry the pull once the list reaches its top.
+    this.menu.addEventListener('pointercancel', event => {
+      if (sheet?.id !== event.pointerId) return;
+      if (event.pointerType === 'touch' && !sheet.dragging) sheet.scrolling = true; else release(event.clientY, false);
+    });
+    this.menu.addEventListener('touchmove', event => { if (sheet?.scrolling && event.touches.length === 1) pull(event.touches[0].clientY); }, { passive: true });
+    for (const type of ['touchend', 'touchcancel'] as const) this.menu.addEventListener(type, event => { if (sheet?.scrolling) release(event.changedTouches[0]?.clientY ?? 0, type === 'touchend'); });
     // A swipe that returns to its start must not also press the control it began on.
     this.menu.addEventListener('click', event => { if (swiped) { event.preventDefault(); event.stopPropagation(); swiped = false; } }, true);
     const reposition = () => { if (this.tree) this.refreshTree(); };
@@ -652,7 +664,7 @@ export class HerdrView {
     this.menu.style.width = width + 'px';
     this.menu.style.left = left - parent.left + 'px';
     this.menu.style.top = Math.max(8, strip.top - parent.top - this.menu.offsetHeight) + 'px';
-    // Without overflow the whole tree can be swiped away; otherwise only its grab bar can.
+    // Without overflow the whole tree folds under a swipe; otherwise the list scrolls natively and hands the swipe over at its top.
     this.menu.style.touchAction = this.menu.scrollHeight > this.menu.clientHeight ? '' : 'none';
     // The joint belongs to the chip inside the strip, so native scrolling moves it with the chip in the same frame.
     this.strip.style.setProperty('--herdr-tree-line-left', left - strip.left + 'px');

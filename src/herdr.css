@@ -70,7 +70,7 @@
 .herdr-tree-anchor::before{content:"";position:absolute;left:-9px;right:-9px;bottom:100%;height:var(--herdr-tree-reach,0);pointer-events:none;background:radial-gradient(circle at .5px 8.5px,transparent 7.5px,var(--accent-line) 7.5px 8.5px,var(--overlay) 8.5px) 0 0/9px 9px no-repeat,radial-gradient(circle at 8.5px 8.5px,transparent 7.5px,var(--accent-line) 7.5px 8.5px,var(--overlay) 8.5px) 100% 0/9px 9px no-repeat,linear-gradient(90deg,var(--accent-line) 1px,var(--overlay) 1px calc(100% - 1px),var(--accent-line) 0) 50% 0/calc(100% - 16px) 100% no-repeat}
 .herdr-tree-adrift .herdr-tree-anchor{border-top-color:var(--accent-line);border-radius:var(--r-md)}
 .herdr-tree-adrift .herdr-tree-anchor::before{content:none}
-.herdr-tab-menu.herdr-tree{max-width:100%;max-height:70%;box-sizing:border-box;border-color:var(--accent-line);border-bottom:0;border-radius:var(--r-lg) var(--r-lg) 0 0;clip-path:inset(-48px -48px 0);padding:0 8px 8px}
+.herdr-tab-menu.herdr-tree{max-width:100%;max-height:70%;box-sizing:border-box;border-color:var(--accent-line);border-bottom:0;border-radius:var(--r-lg) var(--r-lg) 0 0;clip-path:inset(-48px -48px 0);padding:0 8px 8px;overscroll-behavior:none}
 .herdr-screen-dim::after{content:"";position:absolute;inset:0;z-index:5;background:var(--scrim);pointer-events:none}
 .herdr-tree>*{opacity:calc(1 - 2 * var(--herdr-tree-fold,0))}
 .herdr-tree-grabber{display:grid;place-items:center;height:20px;touch-action:none}

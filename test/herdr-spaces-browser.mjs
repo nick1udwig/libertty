@@ -356,6 +356,25 @@ try {
   assert.equal(await tree.count(), 1, 'A short swipe returns the tree');
   await swipeTree(120); await wait(async () => await tree.count() === 0, 'swiping down dismisses the tree');
   assert.equal(await selected(), chip(beta), 'Swiping the tree away keeps the selection');
+  // An overflowing tree scrolls natively, then folds once a downward swipe passes its top.
+  const shortTree = await page.addStyleTag({ content: '.herdr-tab-menu.herdr-tree { max-height: 90px; }' });
+  try {
+    await hold(beta);
+    const scrollTree = async (distance, steps) => {
+      const panel = await box(tree), x = panel.x + panel.width / 2, y = panel.y + 30;
+      await touch('touchStart', x, y);
+      for (let step = 1; step <= steps; step++) { await touch('touchMove', x, y + distance * step / steps); await delay(16); }
+      await touch('touchEnd'); await delay(300);
+    };
+    assert.ok(await tree.evaluate(menu => menu.scrollHeight > menu.clientHeight), 'The short tree overflows');
+    await tree.evaluate(menu => { menu.scrollTop = menu.scrollHeight; });
+    const scrolled = await tree.evaluate(menu => menu.scrollTop);
+    await scrollTree(Math.min(30, scrolled - 5), 3);
+    assert.equal(await tree.count(), 1, 'Scrolling within the tree keeps it open');
+    assert.ok(await tree.evaluate(menu => menu.scrollTop) > 0, 'A short scroll stays inside the list');
+    await scrollTree(scrolled + 160, 12);
+    await wait(async () => await tree.count() === 0, 'swiping past the top of a scrolled tree dismisses it');
+  } finally { await shortTree.evaluate(style => style.remove()); }
   let releaseListing;
   const listingGate = new Promise(resolve => { releaseListing = resolve; });
   let listingPending = false;
