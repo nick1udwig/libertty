@@ -80,7 +80,7 @@ Point `VOXTYPE_MOBILE_CHECKOUT` to that checkout before packaging a distributabl
 npm ci
 npm run verify:local
 VOXTYPE_MOBILE_CHECKOUT=/path/to/pinned/voxtype-mobile npm run release:package
-npm run verify:package -- release/libertty-v0.2.13-linux-x64.tar.gz
+npm run verify:package -- release/libertty-v0.2.14-linux-x64.tar.gz
 ```
 
 Packaging requires a clean checkout, the pinned Node version and a complete Linux companion bundle.
