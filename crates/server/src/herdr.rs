@@ -334,12 +334,8 @@ impl Target {
             .request(self, method, params)
             .await
     }
-    pub async fn snapshot(&self) -> Result<Snapshot, String> {
-        self.shared
-            .resource(self)?
-            .snapshot(self)
-            .await
-            .map(|snapshot| (*snapshot).clone())
+    pub async fn snapshot(&self) -> Result<Arc<Snapshot>, String> {
+        self.shared.resource(self)?.snapshot(self).await
     }
     pub async fn options(&self) -> Result<Value, String> {
         static KIND: LazyLock<Regex> =

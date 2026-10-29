@@ -24,11 +24,40 @@ const BUILTINS: &[&str] = &[
     "cd", "echo", "printf", "export", "alias", "history", "source", "jobs", "fg", "bg", "type",
     "read", "pwd", "set", "unset", "umask", "ulimit", "pushd", "popd",
 ];
-type Entry = (String, Instant, SharedTask<Help>);
+#[derive(Default)]
+pub(crate) struct HelpCache(VecDeque<(String, Instant, SharedTask<Help>)>);
+impl HelpCache {
+    pub fn get_or_insert_with(
+        &mut self,
+        key: &str,
+        create: impl FnOnce() -> SharedTask<Help>,
+    ) -> SharedTask<Help> {
+        let now = Instant::now();
+        if let Some((_, _, task)) = self
+            .0
+            .iter()
+            .find(|(old, until, task)| old == key && *until > now && !task.aborted())
+        {
+            return task.clone();
+        }
+        self.0
+            .retain(|(old, until, task)| old != key && *until > now && !task.aborted());
+        if self.0.len() >= 200 {
+            self.0.pop_front();
+        }
+        let task = create();
+        self.0
+            .push_back((key.into(), now + Duration::from_secs(600), task.clone()));
+        task
+    }
+    pub fn remove(&mut self, key: &str) {
+        self.0.retain(|(old, _, _)| old != key);
+    }
+}
 #[derive(Clone)]
 pub struct HelpProvider {
     pool: ProbePool,
-    cache: Arc<Mutex<VecDeque<Entry>>>,
+    cache: Arc<Mutex<HelpCache>>,
     lifetime: CancellationToken,
     probes: Arc<AtomicUsize>,
 }
@@ -36,7 +65,7 @@ impl HelpProvider {
     pub fn new(pool: ProbePool) -> Self {
         Self {
             pool,
-            cache: Arc::new(Mutex::new(VecDeque::new())),
+            cache: Default::default(),
             lifetime: CancellationToken::new(),
             probes: Arc::new(AtomicUsize::new(0)),
         }
@@ -207,33 +236,20 @@ impl HelpProvider {
             .collect();
         let key =
             serde_json::to_string(&(&file, command, route, &stamp, &catalog.cwd, stable)).unwrap();
-        let task = {
-            let mut cache = self.cache.lock().await;
-            if let Some((_, _, task)) = cache.iter().find(|(old, until, task)| {
-                old == &key && *until > Instant::now() && !task.aborted()
-            }) {
-                task.clone()
-            } else {
-                cache.retain(|(old, _, _)| old != &key);
-                if cache.len() >= 200 {
-                    cache.pop_front();
-                }
-                let provider = self.clone();
-                let command = command.to_owned();
-                let route = route.to_vec();
-                let catalog = catalog.clone();
-                let env = env.clone();
-                let version = stamp.clone();
-                let task = SharedTask::new(move |cancel| {
-                    Box::pin(async move {
-                        provider.probes.fetch_add(1, Ordering::SeqCst);
-                        tokio::select! { biased; _ = provider.lifetime.cancelled() => Err(ABORTED.into()), result = provider.collect(&file, &command, &route, &catalog, &env, &cancel) => result.map(|mut help| { help.version = Some(version); help }) }
-                    })
-                });
-                cache.push_back((key, Instant::now() + Duration::from_secs(600), task.clone()));
-                task
-            }
-        };
+        let task = self.cache.lock().await.get_or_insert_with(&key, || {
+            let provider = self.clone();
+            let command = command.to_owned();
+            let route = route.to_vec();
+            let catalog = catalog.clone();
+            let env = env.clone();
+            let version = stamp.clone();
+            SharedTask::new(move |cancel| {
+                Box::pin(async move {
+                    provider.probes.fetch_add(1, Ordering::SeqCst);
+                    tokio::select! { biased; _ = provider.lifetime.cancelled() => Err(ABORTED.into()), result = provider.collect(&file, &command, &route, &catalog, &env, &cancel) => result.map(|mut help| { help.version = Some(version); help }) }
+                })
+            })
+        });
         tokio::select! { biased; _ = self.lifetime.cancelled() => Err(ABORTED.into()), result = task.wait(cancel) => result }
     }
     async fn collect(
@@ -425,4 +441,57 @@ fn valid_name(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "_-".contains(c))
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    fn success() -> SharedTask<Help> {
+        SharedTask::new(|_| Box::pin(async { Ok(Help::default()) }))
+    }
+    #[tokio::test]
+    async fn cache_reuses_tasks_until_expiry_cancellation_or_explicit_removal() {
+        let mut cache = HelpCache::default();
+        let task = cache.get_or_insert_with("help", success);
+        task.wait(&CancellationToken::new()).await.unwrap();
+        cache.get_or_insert_with("help", || panic!("duplicate probe"));
+        cache.0.front_mut().unwrap().1 = Instant::now() - Duration::from_secs(1);
+        let expired = cache.get_or_insert_with("help", || {
+            SharedTask::new(|_| Box::pin(async { Err("expired".into()) }))
+        });
+        assert_eq!(
+            expired.wait(&CancellationToken::new()).await.unwrap_err(),
+            "expired"
+        );
+        cache.get_or_insert_with("help", || panic!("local errors stay cached"));
+        cache.remove("help");
+        let pending = cache.get_or_insert_with("help", || {
+            SharedTask::new(|_| Box::pin(std::future::pending()))
+        });
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        assert_eq!(pending.wait(&cancelled).await.unwrap_err(), ABORTED);
+        assert!(pending.aborted());
+        cache
+            .get_or_insert_with("help", success)
+            .wait(&CancellationToken::new())
+            .await
+            .unwrap();
+    }
+    #[tokio::test]
+    async fn cache_evicts_oldest_entries_at_its_capacity() {
+        let mut cache = HelpCache::default();
+        for index in 0..201 {
+            cache.get_or_insert_with(&index.to_string(), success);
+        }
+        assert_eq!(cache.0.len(), 200);
+        cache.get_or_insert_with("200", || panic!("newest entry was evicted"));
+        let mut replaced = false;
+        cache.get_or_insert_with("0", || {
+            replaced = true;
+            success()
+        });
+        assert!(replaced);
+        assert_eq!(cache.0.len(), 200);
+    }
 }

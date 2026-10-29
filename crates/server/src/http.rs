@@ -246,12 +246,14 @@ fn file_failure(error: files::Error) -> Failure {
         error.message,
     )
 }
-fn json_response(status: StatusCode, data: Value) -> Response<Body> {
+fn json_response(status: StatusCode, data: impl serde::Serialize) -> Response<Body> {
     Response::builder()
         .status(status)
         .header("content-type", "application/json")
         .header("cache-control", "no-store")
-        .body(Body::from(data.to_string()))
+        .body(Body::from(
+            serde_json::to_vec(&data).expect("JSON response"),
+        ))
         .unwrap()
 }
 fn error(status: StatusCode, message: impl Into<String>) -> Response<Body> {

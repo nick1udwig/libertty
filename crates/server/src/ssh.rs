@@ -129,13 +129,7 @@ pub struct SSHHost {
     history_source: Mutex<String>,
     context: tokio::sync::Mutex<Option<(u64, ShellContext)>>,
     closed: AtomicBool,
-    pub(crate) help_cache: tokio::sync::Mutex<
-        std::collections::VecDeque<(
-            String,
-            std::time::Instant,
-            crate::probes::SharedTask<libertty_engine::types::Help>,
-        )>,
-    >,
+    pub(crate) help_cache: tokio::sync::Mutex<crate::help::HelpCache>,
     pub(crate) syntax_cache: Mutex<std::collections::VecDeque<(String, bool)>>,
     pub(crate) lifetime: CancellationToken,
 }

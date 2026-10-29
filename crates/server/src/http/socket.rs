@@ -196,13 +196,6 @@ impl Policy {
         }
     }
 }
-enum Event {
-    Slow,
-    Cancelled,
-    Heartbeat,
-    Output(Option<Outgoing>),
-    Input(Option<Result<Message, axum::Error>>),
-}
 type Sender = SplitSink<WebSocket, Message>;
 
 async fn send(sender: &mut Sender, message: Message, deadline: Option<Duration>) -> bool {
@@ -242,94 +235,82 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
             .and_then(|protocol| protocol.to_str().ok()),
     );
     let (mut sender, mut receive) = socket.split();
-    let mut heartbeat = tokio::time::interval(policy.heartbeat.unwrap_or(Duration::from_secs(30)));
-    // A blocked send must not turn missed ticks into an immediate disconnect.
-    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    heartbeat.tick().await;
-    let mut alive = true;
-    let mut pressure = Pressure::default();
-    loop {
-        let event = tokio::select! {
-            biased;
-            _ = policy.slow.cancelled() => Event::Slow,
-            _ = policy.cancel.cancelled() => Event::Cancelled,
-            item = output.receive() => Event::Output(item),
-            _ = heartbeat.tick(), if policy.heartbeat.is_some() => Event::Heartbeat,
-            message = receive.next() => Event::Input(message),
+    let pressure = std::sync::Mutex::new(Pressure::default());
+    let (control, mut controls) = mpsc::channel(32);
+    let reason = {
+        let writer = async {
+            loop {
+                tokio::select! {
+                    message = controls.recv() => {
+                        let message = message?;
+                        if !send(&mut sender, message, policy.send_timeout).await { return None; }
+                    }
+                    item = output.receive() => {
+                        let item = item?;
+                        let message = item.transport();
+                        if let Transport::Close(code, reason) = message { return Some((*code, reason.clone())); }
+                        let started = std::time::Instant::now();
+                        let selected = pressure.lock().unwrap().mode(mode, output.queued(), started);
+                        let encoded = encode(message, selected);
+                        // Acknowledgements can arrive while the writer is flushing.
+                        if mode == wire::Mode::GzipFast { pressure.lock().unwrap().sent(message.sequence(), started, started); }
+                        // The item retains its byte reservation through the complete send.
+                        if !send(&mut sender, encoded, policy.send_timeout).await { return None; }
+                        if mode == wire::Mode::GzipFast { pressure.lock().unwrap().sent(None, started, std::time::Instant::now()); }
+                    }
+                }
+            }
         };
-        match event {
-            Event::Slow => {
-                close(
-                    &mut sender,
-                    1013,
-                    "Viewer is too slow; reconnect for a fresh screen.",
-                    Some(Duration::from_secs(1)),
-                )
-                .await;
-                break;
-            }
-            Event::Cancelled => {
-                close(&mut sender, 1000, "Connection closed", None).await;
-                break;
-            }
-            Event::Output(Some(item)) => match item.transport() {
-                Transport::Close(code, reason) => {
-                    close(&mut sender, *code, reason, None).await;
-                    break;
-                }
-                message => {
-                    // Keep the queue reservation until the in-flight send completes.
-                    let started = std::time::Instant::now();
-                    let selected = pressure.mode(mode, output.queued(), started);
-                    if !send(&mut sender, encode(message, selected), policy.send_timeout).await {
-                        break;
+        let reader = async {
+            let mut heartbeat =
+                tokio::time::interval(policy.heartbeat.unwrap_or(Duration::from_secs(30)));
+            heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            heartbeat.tick().await;
+            let mut alive = true;
+            loop {
+                let reply = tokio::select! {
+                    _ = heartbeat.tick(), if policy.heartbeat.is_some() => {
+                        if !alive { return None; }
+                        alive = false;
+                        Some(Message::Ping(Vec::new().into()))
                     }
-                    if mode == wire::Mode::GzipFast {
-                        pressure.sent(message.sequence(), started, std::time::Instant::now());
-                    }
-                }
-            },
-            Event::Heartbeat => {
-                if !alive {
-                    break;
-                }
-                alive = false;
-                if !send(&mut sender, Message::Ping(Vec::new().into()), None).await {
-                    break;
-                }
-            }
-            Event::Input(Some(Ok(message))) => {
-                heartbeat.reset();
-                // Any client traffic proves the viewer is alive, including queued audio ahead of a pong.
-                alive = true;
-                let result = match message {
-                    Message::Text(text) => input.text(&text, &mut pressure),
-                    Message::Binary(bytes) => input.binary(&bytes, &mut pressure),
-                    Message::Ping(bytes) => {
-                        if !send(&mut sender, Message::Pong(bytes), None).await {
-                            break;
+                    message = receive.next() => {
+                        let Some(Ok(message)) = message else { return None };
+                        heartbeat.reset();
+                        alive = true;
+                        let result = match message {
+                            Message::Text(text) => input.text(&text, &mut pressure.lock().unwrap()),
+                            Message::Binary(bytes) => input.binary(&bytes, &mut pressure.lock().unwrap()),
+                            Message::Ping(bytes) => {
+                                if control.try_send(Message::Pong(bytes)).is_err() { return Some((1013, "Control queue is full".into())); }
+                                Ok(false)
+                            }
+                            Message::Pong(_) => Ok(false),
+                            Message::Close(_) => return None,
+                        };
+                        match result {
+                            Ok(true) => Some(encode(&Transport::Server(ServerMessage::Pong), mode)),
+                            Ok(false) => None,
+                            Err(reason) => return Some((1008, reason.into())),
                         }
-                        Ok(false)
                     }
-                    Message::Pong(_) => Ok(false),
-                    Message::Close(_) => break,
                 };
-                if matches!(result, Ok(true))
-                    && !send(
-                        &mut sender,
-                        encode(&Transport::Server(ServerMessage::Pong), mode),
-                        policy.send_timeout,
-                    )
-                    .await
+                if let Some(reply) = reply
+                    && control.try_send(reply).is_err()
                 {
-                    break;
-                }
-                if let Err(reason) = result {
-                    close(&mut sender, 1008, reason, None).await;
-                    break;
+                    return Some((1013, "Control queue is full".into()));
                 }
             }
-            Event::Output(None) | Event::Input(None | Some(Err(_))) => break,
+        };
+        tokio::select! {
+            biased;
+            _ = policy.slow.cancelled() => Some((1013, "Viewer is too slow; reconnect for a fresh screen.".into())),
+            _ = policy.cancel.cancelled() => Some((1000, "Connection closed".into())),
+            reason = reader => reason,
+            reason = writer => reason,
         }
+    };
+    if let Some((code, reason)) = reason {
+        close(&mut sender, code, &reason, Some(Duration::from_secs(1))).await;
     }
 }

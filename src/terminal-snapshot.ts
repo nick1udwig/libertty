@@ -18,22 +18,30 @@ function style(cell: GhosttyCell, foreground: number) {
   return codes;
 }
 function row(cells: ArrayLike<GhosttyCell>, offset: number, columns: number, grapheme: (col: number) => string, foreground: number) {
-  let end = columns, text = '', current = '0';
+  let end = columns, text = '', current = '0', previous: GhosttyCell | undefined;
   while (end > 0 && blank(cells[offset + end - 1])) end--;
   for (let col = 0; col < end; col++) {
     const cell = cells[offset + col];
     if (!cell.width) continue;
-    const next = style(cell, foreground);
+    const next = previous && cell.flags === previous.flags && cell.fg_r === previous.fg_r && cell.fg_g === previous.fg_g && cell.fg_b === previous.fg_b
+      && cell.bg_r === previous.bg_r && cell.bg_g === previous.bg_g && cell.bg_b === previous.bg_b ? current : style(cell, foreground);
+    previous = cell;
     if (next !== current) { text += `\x1b[${next}m`; current = next; }
     text += cell.grapheme_len ? printable(grapheme(col)) || ' ' : character(cell.codepoint);
   }
   return current === '0' ? text : text + '\x1b[0m';
 }
 
+type Snapshot = { text: string; picture: TerminalPicture };
+const snapshots = new WeakMap<object, { limit: number; columns: number; rows: number; foreground: number; value: Snapshot }>();
+export function invalidateSnapshot(term: Terminal) { if (term.wasmTerm) snapshots.delete(term.wasmTerm); }
+
 /** Styled rows that repaint through the same renderer; each row starts from default attributes. */
 export function terminalSnapshot(term: Terminal, limit = 5000) {
   const terminal = term.wasmTerm!, columns = terminal.cols, rows = terminal.rows;
   const colors = terminal.getColors().foreground, foreground = colors.r << 16 | colors.g << 8 | colors.b;
+  const cached = snapshots.get(terminal);
+  if (cached && cached.limit === limit && cached.columns === columns && cached.rows === rows && cached.foreground === foreground) return cached.value;
   const history = term.buffer.active.type === 'normal' ? terminal.getScrollbackLength() : 0, lines: string[] = [];
   for (let offset = Math.max(0, history + rows - limit); offset < history; offset++) {
     const cells = terminal.getScrollbackLine(offset);
@@ -48,7 +56,9 @@ export function terminalSnapshot(term: Terminal, limit = 5000) {
   }
   while (lines.at(-1) === '') lines.pop();
   const picture: TerminalPicture = { last, x: cursor.x, y: cursor.y, cursor: !!cursor.visible };
-  return { text: lines.join('\n'), picture };
+  const value = { text: lines.join('\n'), picture };
+  snapshots.set(terminal, { limit, columns, rows, foreground, value });
+  return value;
 }
 
 export function plainText(text: string) { return text.replace(/\x1b\[[0-9;]*m/g, ''); }

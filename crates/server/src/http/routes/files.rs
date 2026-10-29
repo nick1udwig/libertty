@@ -82,21 +82,18 @@ pub(super) async fn api_files_list(ctx: FileContext) -> Result<Response<Body>, F
     let session = ctx.session;
     let cwd = session.state().cwd;
     let home = session.home();
-    return ok(serde_json::to_value(
-        files::list_files_on(
-            &session.filesystem(),
-            &cwd,
-            &home,
-            query
-                .get("path")
-                .filter(|s| !s.is_empty())
-                .map(String::as_str)
-                .unwrap_or("."),
-        )
-        .await
-        .map_err(file_failure)?,
+    return ok(files::list_files_on(
+        &session.filesystem(),
+        &cwd,
+        &home,
+        query
+            .get("path")
+            .filter(|s| !s.is_empty())
+            .map(String::as_str)
+            .unwrap_or("."),
     )
-    .unwrap());
+    .await
+    .map_err(file_failure)?);
 }
 
 pub(super) async fn api_files_mkdir(

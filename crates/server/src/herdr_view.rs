@@ -363,6 +363,9 @@ impl View {
                     Some(view) => view.frames.lock().unwrap().background_delay(),
                     None => break,
                 };
+                if let Some(history) = &history {
+                    history.set_interval(delay);
+                }
                 if !delay.is_zero() {
                     tokio::select! { biased; _=lifetime.cancelled()=>break, changed=active.changed()=>{ if changed.is_err(){break;} continue; }, _=tokio::time::sleep(delay)=>{} }
                 }

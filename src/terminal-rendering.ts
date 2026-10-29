@@ -1,3 +1,4 @@
+import { invalidateSnapshot } from './terminal-snapshot.ts';
 import type { Terminal } from 'ghostty-web';
 import { OutputScheduler } from './output-scheduler.ts';
 import { isPreservingScrollback } from './terminal-viewport.ts';
@@ -34,11 +35,12 @@ export class TerminalRendering {
     const paint = renderer.render.bind(renderer);
     renderer.render = (...args) => { if (!this.disposed && this.visible && !document.hidden) paint(...args); };
     const write = term.wasmTerm!.write.bind(term.wasmTerm);
-    term.wasmTerm!.write = data => { write(data); this.refresh(); };
+    term.wasmTerm!.write = data => { write(data); invalidateSnapshot(term); this.refresh(); };
     for (const name of ['setHoveredHyperlinkId', 'setHoveredLinkRange'] as const) {
       const original = renderer[name].bind(renderer) as (...args: unknown[]) => void;
       (renderer[name] as (...args: unknown[]) => void) = (...args) => { original(...args); this.refresh(); };
     }
+    term.onResize(() => invalidateSnapshot(term));
     term.onSelectionChange(() => this.activity());
     term.onScroll(() => { if (isPreservingScrollback(term)) this.refresh(); else this.activity(); });
     const focus = () => this.activity();

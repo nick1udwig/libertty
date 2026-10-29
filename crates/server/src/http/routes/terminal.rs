@@ -232,9 +232,7 @@ pub(super) async fn api_suggest(
     let session = ctx.session;
     let input: crate::protocol::SuggestRequest = typed_body(&mut req, 16384).await?;
     let text = input.text.as_str();
-    ok(json!(
-        bounded(async |cancel| session.suggest(text, cancel).await).await?
-    ))
+    ok(bounded(async |cancel| session.suggest(text, cancel).await).await?)
 }
 
 pub(super) async fn api_new(
