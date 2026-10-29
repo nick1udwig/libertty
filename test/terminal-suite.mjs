@@ -476,6 +476,11 @@ try {
       const request = indexedDB.open('libertty-terminal-history');
       request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(JSON.stringify(read.result).includes('offline-history-proof')); }; };
     })));
+    const snapshotCache = await page.evaluate(() => new Promise(resolve => {
+      const request = indexedDB.open('libertty-terminal-history');
+      request.onsuccess = () => { const db = request.result, read = db.transaction('terminals').objectStore('terminals').getAll(); read.onsuccess = () => { db.close(); resolve(read.result.filter(record => record.records.length === 1 && record.records[0].text.includes('offline-history-proof')).map(record => ({ bytes: record.native?.bytes instanceof Uint8Array && record.native.bytes.byteLength, build: record.native?.build }))); }; };
+    }));
+    assert.ok(snapshotCache.length && snapshotCache.every(record => record.bytes > 0 && /^[a-f0-9]{64}$/.test(record.build)), 'Single-record caches include a native snapshot with a build checksum');
     // Retained output repaints through the terminal renderer with the colors it had while live.
     const paintedStyles = text => page.evaluate(text => {
       const cells = window.__paintStyled || [], chars = [...text];

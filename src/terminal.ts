@@ -1,3 +1,4 @@
+import { captureNativeSnapshot, restoreNativeSnapshot, type NativeTerminalSnapshot } from './terminal-native-snapshot.ts';
 import { requestJSON } from './api.ts';
 import { saved } from './persistence.ts';
 import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
@@ -206,6 +207,7 @@ let replayTarget: number | undefined, replayState = false;
 const transcript = new TerminalTranscript();
 const cache = new TerminalCache();
 const cacheKey = terminalCacheKey(baseURL.href, herdrTerminal ? params.get('herdrSession') || '' : session, herdrTerminal || '', params.get('herdrSource') || '', params.get('herdrPane') || '');
+let cachedNative: NativeTerminalSnapshot | undefined;
 let cachedUpdated = 0, cachedStream = '', clearedScreen: string | undefined, streamStarted = false;
 // Retained output painted through the terminal itself until live output replaces it at the same distance from the bottom.
 let cachePainted = false, handoffPosition = 0, picture: TerminalPicture = { last: 0, x: 0, y: 0, cursor: false };
@@ -227,7 +229,9 @@ function saveTranscript() {
   clearTimeout(cacheTimer); cacheTimer = undefined;
   if (!transcript.records.length || !synchronizedConnection && !cachePainted) return;
   if (synchronizedConnection) observeTerminal();
-  void cache.save({ key: cacheKey, version: 2, updated: lastOutputAt || cachedUpdated || Date.now(), stream: streamId || cachedStream,
+  const native = cachePainted ? cachedNative : transcript.records.length === 1 && transcript.records[0].text === terminalSnapshot(term).text
+    ? captureNativeSnapshot(term) : undefined;
+  void cache.save({ native, key: cacheKey, version: 2, updated: lastOutputAt || cachedUpdated || Date.now(), stream: streamId || cachedStream,
     records: transcript.records.map(record => ({ ...record })), picture, position: Math.floor(term.getViewportY()) });
 }
 function captureTranscript() {
@@ -238,10 +242,12 @@ function notifyCachedRendered() {
   if (herdrTerminal && cachePainted && herdrPresentation && tabVisible && !herdrParked) notify('terminal-rendered', { presentation: herdrPresentation, cols: term.cols, rows: term.rows });
 }
 /** Show retained output with the live renderer; the next live paint or replay replaces it. */
-function paintCache(position: number) {
+function paintCache(position: number, native?: NativeTerminalSnapshot) {
   const text = transcript.text();
   if (!text) return;
-  gestures.clear(); paintSnapshot(term, text, picture, position);
+  gestures.clear();
+  cachedNative = restoreNativeSnapshot(term, native, position) ? native : undefined;
+  if (!cachedNative) paintSnapshot(term, text, picture, position);
   cachePainted = true; projection?.invalidate(); herdrLayout.uncover();
   if (presentation.pending) presentation.wait();
   updateRun(); notifyCachedRendered();
@@ -265,7 +271,7 @@ function coverRetained() {
 function livePainted(position: number, covered: boolean) {
   if (!cachePainted) return;
   if (projection?.stale) { if (covered) presentation.wait(); return; }
-  cachePainted = false; if (covered) herdrHandoffUntil = Date.now() + 1500;
+  cachePainted = false; cachedNative = undefined; if (covered) herdrHandoffUntil = Date.now() + 1500;
   if (position) term.scrollToLine(position);
 }
 /** Hold the painted picture while the terminal changes, unless it already shows retained output. */
@@ -283,7 +289,7 @@ void cache.read(cacheKey).then(saved => {
     saveTranscript(); return;
   }
   cachedUpdated = saved.updated; cachedStream = saved.stream; picture = saved.picture;
-  paintCache(saved.position);
+  paintCache(saved.position, saved.native);
   // A working connection replaces retained output without announcing a reconnect.
   if (!navigator.onLine) connection('Offline');
   notify('terminal-ready');

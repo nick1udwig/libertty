@@ -369,3 +369,9 @@ The report counts the shared WASM memory capacity once and does not add retained
 The figures exclude browser canvases, GPU allocations, and small native bookkeeping structures.
 `npm run bench:terminal-memory` measures empty, filled, and freed headless terminals and writes `.test-artifacts/terminal-memory.json`.
 Freeing terminal pages permits reuse but does not shrink WASM linear memory.
+
+The local history cache can store a native screen snapshot of up to 2 MiB beside its styled text.
+A native snapshot is saved only when one transcript record matches the current screen and history.
+Restoration requires the exact WASM checksum and grid size, and corrupt or incompatible snapshots fall back to text.
+Multiple transcript records keep their text presentation so a native screen cannot hide older retained excerpts.
+Native snapshot bytes count toward the existing 8 MiB cache budget.

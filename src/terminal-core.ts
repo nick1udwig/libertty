@@ -50,6 +50,7 @@ export class GhosttyTerminal {
   get cols() { return this.core.geometry.cols; }
   get rows() { return this.core.geometry.rows; }
   write(data: string | Uint8Array) { this.core.write(data); this.onWrite?.(); }
+  restore(snapshot: Uint8Array) { this.core.restore(snapshot); this.onWrite?.(); }
   resize(cols: number, rows: number) { this.core.resize(cols, rows); this.onWrite?.(); }
   update() {
     const state = this.core.bufferState();
