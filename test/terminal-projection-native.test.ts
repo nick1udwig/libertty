@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { Ghostty, type Terminal } from 'ghostty-web';
+import { Ghostty } from '../src/terminal-core.ts';
+import type { Terminal } from '../src/terminal-adapter.ts';
 import { TerminalProjection } from '../src/terminal-projection.ts';
 import { mergeHerdrFrames, type HerdrFrameMessage } from '../src/terminal-frame-batch.ts';
 
-const wasm = await WebAssembly.instantiate(await readFile(new URL('../node_modules/ghostty-web/ghostty-vt.wasm', import.meta.url)), { env: { log() {} } });
-const ghostty = new Ghostty(wasm.instance);
+const ghostty = await Ghostty.load({
+  wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
+  callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+});
 
 test('history taps use native rows and reject older history, stale text and different geometry', () => {
   const display = ghostty.createTerminal(12, 6, { scrollbackLimit: 5000 });

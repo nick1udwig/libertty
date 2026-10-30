@@ -1,11 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { Ghostty, Terminal } from 'ghostty-web';
+import { Ghostty } from '../src/terminal-core.ts';
+import { Terminal } from '../src/terminal-adapter.ts';
 import { terminalLinkAt } from '../src/terminal-links.ts';
 
-const wasm = await WebAssembly.instantiate(await readFile(new URL('../node_modules/ghostty-web/ghostty-vt.wasm', import.meta.url)), { env: { log() {} } });
-const ghostty = new Ghostty(wasm.instance);
+const ghostty = await Ghostty.load({
+  wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
+  callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+});
 
 function terminal(rows: { text: string; wrapped?: boolean; uri?: string }[]) {
   const lines = rows.map(row => ({
@@ -34,6 +37,14 @@ test('web URLs open without sentence punctuation or adjacent ordinary text', () 
   assert.equal(terminalLinkAt(term, 0, 100), undefined);
 });
 
+test('URL punctuation preserves balanced path brackets and excludes surrounding punctuation', () => {
+  const text = 'See (https://example.com/a_(b)).';
+  const term = terminal([{ text }]);
+  assert.equal(terminalLinkAt(term, 5, 0), 'https://example.com/a_(b)');
+  assert.equal(terminalLinkAt(term, text.indexOf('(b)') + 2, 0), 'https://example.com/a_(b)');
+  for (const col of [4, text.length - 2, text.length - 1]) assert.equal(terminalLinkAt(term, col, 0), undefined);
+});
+
 test('every wrapped URL segment resolves to the complete link without joining hard line breaks', () => {
   const term = terminal([
     { text: 'https://example.com/' },
@@ -49,7 +60,7 @@ test('every wrapped URL segment resolves to the complete link without joining ha
 test('real terminal URLs remain complete when wrapped rows enter scrollback', () => {
   const url = 'https://example.com/a/long/path?q=1#fragment';
   for (const cols of [7, 20, 40]) for (const trailing of ['', '\r\nnext', '\r\nnext\r\nend', '\r\n'.repeat(8)]) {
-    const term = new Terminal({ ghostty, cols, rows: 3 });
+    const term = new Terminal({ cols, rows: 3 });
     term.wasmTerm = ghostty.createTerminal(cols, 3);
     try {
       term.wasmTerm.write(url + trailing);
@@ -60,7 +71,7 @@ test('real terminal URLs remain complete when wrapped rows enter scrollback', ()
 });
 
 test('short hard lines in real terminal history do not extend a URL', () => {
-  const term = new Terminal({ ghostty, cols: 40, rows: 3 });
+  const term = new Terminal({ cols: 40, rows: 3 });
   term.wasmTerm = ghostty.createTerminal(40, 3);
   try {
     term.wasmTerm.write('before\r\nhttps://example.com/path\r\nseparate-output\r\n' + '\r\n'.repeat(5));
@@ -74,7 +85,7 @@ test('native screen repaints resolve wrapped GitHub links without wrap flags', (
   const url = 'https://github.com/nick1udwig/libertty/pull/new/feat/links-work-across-linebreaks';
   const prefix = 'remote:      ', text = prefix + url;
   for (const cols of [40, 52, 70]) {
-    const term = new Terminal({ ghostty, cols, rows: 12 });
+    const term = new Terminal({ cols, rows: 12 });
     term.wasmTerm = ghostty.createTerminal(cols, 12);
     try {
       // Match the full-frame reset in TerminalProjection before painting absolute rows.
@@ -105,10 +116,36 @@ test('labeled hyperlinks resolve their destination in live output and scrollback
   assert.equal(terminalLinkAt(term, 2, 1), 'http://example.com/new');
 });
 
+test('real OSC 8 links resolve destinations in live output and scrollback', () => {
+  const term = new Terminal({ cols: 40, rows: 3 });
+  term.wasmTerm = ghostty.createTerminal(40, 3);
+  try {
+    term.wasmTerm.write('\x1b]8;;https://example.com/older\x07Older link\x1b]8;;\x07\r\n');
+    term.wasmTerm.write('\x1b]8;;https://example.com/new\x07New link\x1b]8;;\x07');
+    assert.equal(terminalLinkAt(term, 2, 0), 'https://example.com/older');
+    assert.equal(terminalLinkAt(term, 2, 1), 'https://example.com/new');
+    term.wasmTerm.write('\r\n'.repeat(5));
+    assert.equal(terminalLinkAt(term, 2, 0), 'https://example.com/older');
+    assert.equal(terminalLinkAt(term, 2, 1), 'https://example.com/new');
+  } finally { term.wasmTerm.free(); }
+});
+
 test('terminal text cannot activate non-web schemes or override an explicit unsafe hyperlink', () => {
   for (const uri of ['javascript:alert(1)', 'data:text/html,test', 'file:///tmp/readme', 'mailto:me@example.com', 'relative', 'https://']) {
     const term = terminal([{ text: 'https://example.com', uri }]);
     assert.equal(terminalLinkAt(term, 1, 0), undefined);
   }
   assert.equal(terminalLinkAt(terminal([{ text: 'ssh://example.com' }]), 1, 0), undefined);
+});
+
+
+test('cleared row tails stop URLs even when the following row retains a wrap flag', () => {
+  const term = terminal([
+    { text: 'https://example.com/path    ' },
+    { text: 'separate-output', wrapped: true },
+  ]);
+  for (const nativeFrame of [false, true]) {
+    assert.equal(terminalLinkAt(term, 0, 0, nativeFrame), 'https://example.com/path');
+    assert.equal(terminalLinkAt(term, 0, 1, nativeFrame), undefined);
+  }
 });

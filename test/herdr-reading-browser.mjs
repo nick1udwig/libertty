@@ -69,7 +69,7 @@ try {
   const returned = await terminal();
   await returned.evaluate(() => {
     document.querySelector('#terminal textarea').blur();
-    const canvas = document.querySelector('#terminal canvas');
+    const canvas = document.querySelector('#terminal .gespenst__background');
     for (const type of ['pointerdown', 'pointercancel']) canvas.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch', pointerId: 42, isPrimary: true }));
   });
   assert.equal(await returned.locator('#terminal textarea').evaluate(input => input.readOnly), true, 'A cancelled touch keeps the keyboard closed before intentional input');

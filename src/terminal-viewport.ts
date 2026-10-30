@@ -1,4 +1,4 @@
-import type { Terminal } from 'ghostty-web';
+import type { Terminal } from './terminal-adapter.ts';
 
 const preserving = new WeakSet<Terminal>();
 /** Synthetic scroll events during an anchored update are not user gestures. */

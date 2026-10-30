@@ -3,7 +3,7 @@ import { installWireObserver } from './wire-observer.mjs';
 // No injected network delay or CPU throttling; not a phone performance guarantee.
 import { chromium } from 'playwright-core';
 import { spawn, execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..'), temp = await mkdtemp('/tmp/libertty-ui-bench-');
 const baseline = process.env.BENCH_BEFORE || '2a99127', rounds = Number(process.env.BENCH_REPEATS || 9);
@@ -14,7 +14,7 @@ const median = xs => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 try {
   const before = temp + '/before'; await mkdir(before);
   execFileSync('tar', ['-x', '-C', before], { input: execFileSync('git', ['archive', baseline], { cwd: root, maxBuffer: 16 * 1024 * 1024 }) });
-  await symlink(root + '/node_modules', before + '/node_modules');
+  execFileSync('npm', ['ci', '--no-audit', '--no-fund'], { cwd: before, stdio: 'pipe' });
   execFileSync('npm', ['run', 'build'], { cwd: before, stdio: 'pipe' });
   browser = await chromium.launch({ executablePath: process.env.CHROMIUM || '/usr/bin/chromium', headless: true, args: ['--use-gl=angle', '--use-angle=gl'] });
   const variants = [...['server', 'client'].map(engine => ({ engine, name: 'before', cwd: before })), { engine: 'server', name: 'workspace', cwd: root }];

@@ -22,3 +22,15 @@ test('history identity separates backends, sessions, sources and recycled panes 
   assert.ok(!key.includes('secret'));
   for (const args of [['https://other.test/t/', 'session', 'terminal', 'source', 'pane'], ['https://example.com/t/', 'other', 'terminal', 'source', 'pane'], ['https://example.com/t/', 'session', 'terminal', 'other', 'pane'], ['https://example.com/t/', 'session', 'terminal', 'source', 'recycled']]) assert.notEqual(terminalCacheKey(...args as [string, string, string, string, string]), key);
 });
+
+test('optional native snapshots retain text fallback and count binary bytes in the cache budget', async () => {
+  const { GHOSTTY_BUILD } = await import('@gespenst/core/headless');
+  const native = { build: GHOSTTY_BUILD.sha256, cols: 80, rows: 24, bytes: new Uint8Array(2 * 1024 * 1024) };
+  const valid = cachedTerminal({ ...entry(), native }, now)!;
+  assert.equal(valid.native?.bytes.byteLength, native.bytes.byteLength);
+  const stale = cachedTerminal({ ...entry(), native: { ...native, build: 'old-build' } }, now)!;
+  assert.equal(stale.native, undefined);
+  assert.deepEqual(stale.records, valid.records);
+  const retained = retainedTerminals(Array.from({ length: 8 }, (_, index) => ({ ...entry(String(index), now - index), native })), now);
+  assert.equal(retained.length, 3);
+});

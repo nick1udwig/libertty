@@ -62,7 +62,7 @@ try {
   }, {first,second});
   await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
-    const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__terminal=new $1({ghostty:').replaceAll('parent.postMessage(', 'window.__postToParent(');
+    const body = original.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__terminal=new $1({fontSize:').replaceAll('parent.postMessage(', 'window.__postToParent(');
     assert.notEqual(body, original); assert.ok(body.includes('window.__postToParent')); await route.fulfill({response,body});
   });
   const page = await context.newPage(), errors = []; page.on('pageerror', error => errors.push(error.message));
@@ -144,7 +144,7 @@ try {
   const size=await beta.evaluate(() => ({width:window.__terminal.cols,height:window.__terminal.rows}));
   fixture.setScreen(1,'\x1b[48;2;20;200;240mSCREEN_BETA\x1b[0m\nNewly loaded\n',undefined,size);
   await wait(async () => {
-    const png=(await beta.locator('#terminal canvas').screenshot()).toString('base64');
+    const png=(await beta.locator('#terminal .gespenst__background').screenshot()).toString('base64');
     return page.evaluate(async png => {
       const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(png),c=>c.charCodeAt(0))],{type:'image/png'}));
       const canvas=new OffscreenCanvas(bitmap.width,bitmap.height),ctx=canvas.getContext('2d');ctx.drawImage(bitmap,0,0);bitmap.close();
@@ -202,7 +202,7 @@ try {
   // Opening the software keyboard resizes the loaded pane without taking input away.
   const input = incoming.locator('#terminal textarea');
   await input.evaluate(element => { window.__inputBlurs=0; element.addEventListener('blur',()=>window.__inputBlurs++); });
-  const canvas = await incoming.locator('#terminal canvas').boundingBox();
+  const canvas = await incoming.locator('#terminal .gespenst__background').boundingBox();
   await page.touchscreen.tap(canvas.x+canvas.width*.5,canvas.y+canvas.height*.3);
   assert.equal(await input.evaluate(element => element === document.activeElement && !element.readOnly),true,'A tap enables Herdr input');
   const rows = await incoming.evaluate(() => window.__terminal.rows);
@@ -216,7 +216,7 @@ try {
   await wait(() => fixture.actions.slice(inputStart).filter(action => action.method==='pane.send_text').map(action => action.params.text).join('')==='Still editable','typed input reaches Herdr after keyboard resize');
   await page.setViewportSize({width:390,height:844});
   await wait(async () => await input.evaluate(element => element !== document.activeElement && element.readOnly),'keyboard dismissal disarms input');
-  const restoredCanvas = await incoming.locator('#terminal canvas').boundingBox();
+  const restoredCanvas = await incoming.locator('#terminal .gespenst__background').boundingBox();
   await page.touchscreen.tap(restoredCanvas.x+restoredCanvas.width*.5,restoredCanvas.y+restoredCanvas.height*.3);
   assert.equal(await input.evaluate(element => element === document.activeElement && !element.readOnly),true,'A fresh tap reopens Herdr input after dismissal');
   // A parked pane that loses its connection waits until it is shown, so the visible pane reconnects alone.

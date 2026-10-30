@@ -1,6 +1,6 @@
 import { icon as svgIcon, uploadIcon, downloadIcon } from './icons.ts';
 import { transferAction, downloadPipeline } from './transfer-command.ts';
-import type { Terminal } from 'ghostty-web';
+import type { Terminal } from './terminal-adapter.ts';
 import type { ShellState, RepairIntent, RepairResult } from './protocol.ts';
 import { InputLine } from './input-line.ts';
 import { saved } from './persistence.ts';

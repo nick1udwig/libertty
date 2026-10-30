@@ -1,29 +1,16 @@
-import type { Ghostty, GhosttyTerminal, Terminal } from 'ghostty-web';
+import type { Ghostty, GhosttyTerminal } from './terminal-core.ts';
+import type { Terminal } from './terminal-adapter.ts';
 import { preserveScrollback } from './terminal-viewport.ts';
 
 const tokens = (text: string) => text.match(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][\s\S]*?(?:\x07|\x1b\\)|.)|[^\x1b]/gu) || [];
 const absoluteRow = (terminal: GhosttyTerminal) => terminal.getScrollbackLength() + terminal.getCursor().y;
 const appendSafe = (text: string) => !/[\x00-\x08\x0a-\x1f\x7f]/.test(text.replace(/\x1b\[[0-9;:]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replaceAll('\r\n', ''));
-const rowText = (terminal: GhosttyTerminal, row: number) => {
-  const history = terminal.getScrollbackLength();
-  const cells = row < history ? terminal.getScrollbackLine(row) : terminal.getLine(row - history);
-  return (cells || []).map((cell, col) => cell.width === 0 ? '' : row < history
-    ? terminal.getScrollbackGraphemeString(row, col) || ' ' : terminal.getGraphemeString(row - history, col) || ' ').join('').replaceAll('\0', ' ').trimEnd();
-};
+const rowText = (terminal: GhosttyTerminal, row: number) => (terminal.getBufferRow(row)?.cells ?? [])
+  .filter(cell => cell.width === 'narrow' || cell.width === 'wide')
+  .map(cell => cell.text.replaceAll('\0', ' ') || ' ').join('').trimEnd();
 const viewportText = (terminal: GhosttyTerminal) => {
-  terminal.update();
-  const cells = terminal.getViewport(), rows: string[] = [];
-  for (let row = 0; row < terminal.rows; row++) {
-    let text = '';
-    for (let col = 0; col < terminal.cols; col++) {
-      const cell = cells[row * terminal.cols + col];
-      if (!cell.width) continue;
-      text += cell.grapheme_len > 1 ? terminal.getGraphemeString(row, col)?.replaceAll('\0', ' ') || ' '
-        : cell.codepoint ? String.fromCodePoint(cell.codepoint) : ' ';
-    }
-    rows.push(text.trimEnd());
-  }
-  return rows;
+  const history = terminal.getScrollbackLength();
+  return Array.from({ length: terminal.rows }, (_, row) => rowText(terminal, history + row));
 };
 
 /** Matching mobile TUI grids consume Herdr's live ANSI frames. Shell history
@@ -135,7 +122,7 @@ export class TerminalProjection {
   }
   /** Paint the certified native baseline before exposing a previously hidden canvas. */
   paintBaseline() {
-    if (this.native && this.live && this.canRenderLive()) this.term.renderer?.render(this.native, true, 0, this.term);
+    if (this.native && this.live && this.canRenderLive()) this.term.renderCore(this.native);
   }
   private canRenderLive() {
     return this.mobile && this.complete && this.native?.cols === this.term.cols && this.native.rows === this.term.rows

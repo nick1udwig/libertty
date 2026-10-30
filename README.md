@@ -106,6 +106,6 @@ Keep libertty running; Tailscale Serve does not start it for you.
 ## License
 
 [MIT](LICENSE).
-Terminal rendering uses [ghostty-web](https://github.com/coder/ghostty-web) and [Ghostty](https://github.com/ghostty-org/ghostty); the bundled font is [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono).
+Terminal rendering uses [Gespenst](https://github.com/tobilg/gespenst) and [Ghostty](https://github.com/ghostty-org/ghostty); the bundled font is [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono).
 See [third-party notices](public/THIRD-PARTY-NOTICES.txt) for their licenses.
 Keep those notices with redistributed builds.

@@ -1,10 +1,12 @@
+import { captureNativeSnapshot, restoreNativeSnapshot, type NativeTerminalSnapshot } from './terminal-native-snapshot.ts';
 import { requestJSON } from './api.ts';
 import { saved } from './persistence.ts';
 import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
 import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
 import { imagePicker, uploadImage } from './image-upload.ts';
-import { Ghostty, Terminal, FitAddon } from 'ghostty-web';
+import { Terminal, FitAddon } from './terminal-adapter.ts';
+import '@gespenst/core/style.css';
 import type { ClientMessage, ServerMessage, ShellState, RepairResult } from './protocol.ts';
 import './style.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
@@ -180,20 +182,20 @@ try {
 } catch { /* Use the default when storage is unavailable or stale. */ }
 if (!fontSizeInput.checkValidity()) fontSizeInput.value = fontSizeInput.defaultValue;
 const fontFamily = getComputedStyle(document.documentElement).fontFamily;
-// Load the font before Ghostty measures cells, in parallel with its WASM.
-const [ghostty] = await Promise.all([Ghostty.load(), document.fonts.load(`14px ${fontFamily}`).catch(() => {})]);
-const term = new Terminal({ ghostty, fontSize: fontSizeInput.valueAsNumber * 4 / 3, fontFamily,
+// Load the font before Gespenst measures cells.
+await document.fonts.load(`14px ${fontFamily}`).catch(() => {});
+const term = new Terminal({ fontSize: fontSizeInput.valueAsNumber * 4 / 3, fontFamily,
   scrollback: 5000, cursorBlink: true, smoothScrollDuration: 0,
   theme: terminalThemes[terminalTheme] });
 const rendering = new TerminalRendering(term);
-term.open($('terminal'));
+await term.open($('terminal'));
 rendering.attach();
-if (terminalTheme === 'paper' || terminalTheme === 'flag') adaptDarkAppColors(term.renderer as unknown as Parameters<typeof adaptDarkAppColors>[0], terminalThemes[terminalTheme]);
+if (terminalTheme === 'paper' || terminalTheme === 'flag') adaptDarkAppColors(term, terminalThemes[terminalTheme]);
 const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
 const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
 let deferredScreen: string | undefined;
-const projection = herdrTerminal ? new TerminalProjection(term, ghostty) : undefined;
+const projection = herdrTerminal ? new TerminalProjection(term, term.ghostty!) : undefined;
 const terminalViewport = $('terminal-viewport');
 const herdrLayout = new HerdrLayout(terminalViewport);
 const echo = new TerminalEcho(term, $('terminal'));
@@ -205,6 +207,7 @@ let replayTarget: number | undefined, replayState = false;
 const transcript = new TerminalTranscript();
 const cache = new TerminalCache();
 const cacheKey = terminalCacheKey(baseURL.href, herdrTerminal ? params.get('herdrSession') || '' : session, herdrTerminal || '', params.get('herdrSource') || '', params.get('herdrPane') || '');
+let cachedNative: NativeTerminalSnapshot | undefined;
 let cachedUpdated = 0, cachedStream = '', clearedScreen: string | undefined, streamStarted = false;
 // Retained output painted through the terminal itself until live output replaces it at the same distance from the bottom.
 let cachePainted = false, handoffPosition = 0, picture: TerminalPicture = { last: 0, x: 0, y: 0, cursor: false };
@@ -226,7 +229,9 @@ function saveTranscript() {
   clearTimeout(cacheTimer); cacheTimer = undefined;
   if (!transcript.records.length || !synchronizedConnection && !cachePainted) return;
   if (synchronizedConnection) observeTerminal();
-  void cache.save({ key: cacheKey, version: 2, updated: lastOutputAt || cachedUpdated || Date.now(), stream: streamId || cachedStream,
+  const native = cachePainted ? cachedNative : transcript.records.length === 1 && transcript.records[0].text === terminalSnapshot(term).text
+    ? captureNativeSnapshot(term) : undefined;
+  void cache.save({ native, key: cacheKey, version: 2, updated: lastOutputAt || cachedUpdated || Date.now(), stream: streamId || cachedStream,
     records: transcript.records.map(record => ({ ...record })), picture, position: Math.floor(term.getViewportY()) });
 }
 function captureTranscript() {
@@ -237,10 +242,12 @@ function notifyCachedRendered() {
   if (herdrTerminal && cachePainted && herdrPresentation && tabVisible && !herdrParked) notify('terminal-rendered', { presentation: herdrPresentation, cols: term.cols, rows: term.rows });
 }
 /** Show retained output with the live renderer; the next live paint or replay replaces it. */
-function paintCache(position: number) {
+function paintCache(position: number, native?: NativeTerminalSnapshot) {
   const text = transcript.text();
   if (!text) return;
-  gestures.clear(); paintSnapshot(term, text, picture, position);
+  gestures.clear();
+  cachedNative = restoreNativeSnapshot(term, native, position) ? native : undefined;
+  if (!cachedNative) paintSnapshot(term, text, picture, position);
   cachePainted = true; projection?.invalidate(); herdrLayout.uncover();
   if (presentation.pending) presentation.wait();
   updateRun(); notifyCachedRendered();
@@ -264,7 +271,7 @@ function coverRetained() {
 function livePainted(position: number, covered: boolean) {
   if (!cachePainted) return;
   if (projection?.stale) { if (covered) presentation.wait(); return; }
-  cachePainted = false; if (covered) herdrHandoffUntil = Date.now() + 1500;
+  cachePainted = false; cachedNative = undefined; if (covered) herdrHandoffUntil = Date.now() + 1500;
   if (position) term.scrollToLine(position);
 }
 /** Hold the painted picture while the terminal changes, unless it already shows retained output. */
@@ -282,7 +289,7 @@ void cache.read(cacheKey).then(saved => {
     saveTranscript(); return;
   }
   cachedUpdated = saved.updated; cachedStream = saved.stream; picture = saved.picture;
-  paintCache(saved.position);
+  paintCache(saved.position, saved.native);
   // A working connection replaces retained output without announcing a reconnect.
   if (!navigator.onLine) connection('Offline');
   notify('terminal-ready');
@@ -436,9 +443,9 @@ function sizeTerminal() {
     refreshHerdrFrame();
   } catch { /* hidden during layout */ }
 }
-fontSizeInput.oninput = () => {
+fontSizeInput.oninput = async () => {
   if (!fontSizeInput.checkValidity() || fontSizeInput.valueAsNumber * 4 / 3 === term.options.fontSize) return;
-  term.options.fontSize = fontSizeInput.valueAsNumber * 4 / 3;
+  await term.setFontSize(fontSizeInput.valueAsNumber * 4 / 3);
   sizeTerminal();
   persist('fontSizePt', fontSizeInput.valueAsNumber);
 };

@@ -45,13 +45,13 @@ try {
     await page.getByRole('button', { name: 'Attach images', exact: true }).waitFor({ state: 'visible' });
     await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+u');
     await rm(imagePath);
-    await page.locator('#terminal canvas').click();
+    await page.locator('#terminal .gespenst__background').click();
     await page.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertReplacementText', data: 'Ls pipe through Grepp hello_world', bubbles: true, cancelable: true })));
     await page.locator('.alternative-choice .choice-command').filter({ hasText: /^ls \| grep hello_world$/ }).waitFor();
     const beforePipe = await page.evaluate(() => window.__state.prompt);
     await page.locator('.alternative-choice .choice-command').filter({ hasText: /^ls \| grep hello_world$/ }).click();
     await page.waitForFunction(prompt => window.__state.ready && window.__state.prompt > prompt, beforePipe);
-    await page.locator('#terminal canvas').click();
+    await page.locator('#terminal .gespenst__background').click();
     await page.locator('#terminal textarea').evaluate(el => el.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertReplacementText', data: 'upload', bubbles: true, cancelable: true })));
     await page.locator('.alternative-choice .choice-icon svg').waitFor();
     const path = await page.locator('.alternative-choice .choice-icon svg path').first().getAttribute('d');

@@ -1,4 +1,4 @@
-import type { ITheme } from 'ghostty-web';
+import type { ITheme } from './terminal-adapter.ts';
 import { saved } from './persistence.ts';
 
 export const themeChoices = ['forest', 'paper', 'ink', '1776', 'flag', 'auto'] as const;

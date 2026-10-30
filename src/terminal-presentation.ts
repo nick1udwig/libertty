@@ -1,11 +1,25 @@
+/** Composite the terminal's background and text without resampling their bitmaps. */
+function copyPicture(viewport: HTMLElement, snapshot: HTMLCanvasElement) {
+  const canvases = Array.from(viewport.querySelectorAll<HTMLCanvasElement>('#terminal canvas'))
+    .filter(canvas => canvas.width && canvas.height && canvas.getBoundingClientRect().width);
+  const first = canvases[0];
+  if (!first) return;
+  const source = first.getBoundingClientRect();
+  snapshot.width = first.width; snapshot.height = first.height;
+  const context = snapshot.getContext('2d')!;
+  for (const canvas of canvases) {
+    const bounds = canvas.getBoundingClientRect();
+    context.drawImage(canvas, (bounds.left - source.left) * first.width / source.width, (bounds.top - source.top) * first.height / source.height);
+  }
+  return source;
+}
+
 /** Copy the canvas bitmap without resampling and place it over the original, so held glyphs match the terminal pixel for pixel. */
 function holdPicture(viewport: HTMLElement, layer: HTMLElement, snapshot: HTMLCanvasElement) {
-  const canvas = viewport.querySelector<HTMLCanvasElement>('#terminal canvas');
   const bounds = viewport.getBoundingClientRect(), parent = viewport.parentElement!.getBoundingClientRect();
-  if (!canvas?.width || !bounds.width || !bounds.height) return false;
-  const source = canvas.getBoundingClientRect();
-  snapshot.width = canvas.width; snapshot.height = canvas.height;
-  snapshot.getContext('2d')!.drawImage(canvas, 0, 0);
+  if (!bounds.width || !bounds.height) return false;
+  const source = copyPicture(viewport, snapshot);
+  if (!source) return false;
   Object.assign(snapshot.style, { left: source.left - parent.left + 'px', top: source.top - bounds.top + 'px', width: source.width + 'px', height: source.height + 'px' });
   layer.style.top = bounds.top - parent.top + 'px';
   layer.style.height = bounds.height + 'px';
@@ -77,13 +91,11 @@ export class TerminalResizeCover {
   get held() { return !this.layer.hidden; }
   /** Fitted height is the viewport height that the canvas was last sized for. */
   hold(fittedHeight: number) {
-    const canvas = this.viewport.querySelector<HTMLCanvasElement>('#terminal canvas');
     const bounds = this.viewport.getBoundingClientRect(), parent = this.viewport.parentElement!.getBoundingClientRect();
-    if (this.held || !canvas?.width || !bounds.height) return;
-    const source = canvas.getBoundingClientRect();
+    if (this.held || !bounds.height) return;
+    const source = copyPicture(this.viewport, this.snapshot);
+    if (!source) return;
     ++this.generation;
-    this.snapshot.width = canvas.width; this.snapshot.height = canvas.height;
-    this.snapshot.getContext('2d')!.drawImage(canvas, 0, 0);
     Object.assign(this.layer.style, { top: bounds.top - parent.top + 'px', bottom: parent.bottom - bounds.bottom + 'px' });
     Object.assign(this.snapshot.style, { left: source.left - parent.left + 'px', bottom: fittedHeight - (source.bottom - bounds.top) + 'px', width: source.width + 'px', height: source.height + 'px' });
     this.layer.hidden = false;

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
-import { externalWasm, terminalPreloads } from '../build/assets.ts';
+import { terminalPreloads } from '../build/assets.ts';
 import { pages, renderPage } from './pages.ts';
 import { normalizeSiteUrl } from './urls.ts';
 
@@ -101,8 +101,8 @@ function demoEntries(base: string, site: string): Plugin {
 
 export default defineConfig(({ command }) => ({
   root, base: './',
-  build: { outDir: 'dist-site', emptyOutDir: true, target: 'es2022', rolldownOptions: { input: { site: 'site/index.html', app: 'index.html', terminal: 'terminal.html' } } },
-  optimizeDeps: { exclude: ['ghostty-web'] },
+  build: { outDir: 'dist-site', emptyOutDir: true, target: 'es2022', assetsInlineLimit: file => file.endsWith('.wasm') ? false : undefined, rolldownOptions: { input: { site: 'site/index.html', app: 'index.html', terminal: 'terminal.html' } } },
+  optimizeDeps: { exclude: ['@gespenst/core'] },
   server: { port: 5180, fs: { allow: [root] } },
-  plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/', normalizeSiteUrl(process.env.LIBERTTY_SITE_URL || 'https://libertty.sh/')), repository(), engine(), externalWasm(), terminalPreloads()],
+  plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/', normalizeSiteUrl(process.env.LIBERTTY_SITE_URL || 'https://libertty.sh/')), repository(), engine(), terminalPreloads()],
 }));

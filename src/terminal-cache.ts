@@ -1,8 +1,20 @@
 import type { TerminalPicture } from './terminal-snapshot.ts';
 import type { TranscriptRecord } from './terminal-transcript.ts';
 
+export interface NativeTerminalSnapshot { build: string; cols: number; rows: number; bytes: Uint8Array }
+
+/** Validate storage without loading the terminal engine; restoration checks the build checksum. */
+export function nativeTerminalSnapshot(value: unknown): NativeTerminalSnapshot | undefined {
+  if (!value || typeof value !== 'object') return;
+  const snapshot = value as NativeTerminalSnapshot;
+  if (typeof snapshot.build !== 'string' || !/^[a-f0-9]{64}$/.test(snapshot.build) || !Number.isInteger(snapshot.cols) || snapshot.cols < 2 || snapshot.cols > 1000
+    || !Number.isInteger(snapshot.rows) || snapshot.rows < 1 || snapshot.rows > 1000
+    || !(snapshot.bytes instanceof Uint8Array) || !snapshot.bytes.byteLength || snapshot.bytes.byteLength > 2 * 1024 * 1024) return;
+  return snapshot;
+}
+
 export interface CachedTerminal {
-  key: string; version: 2; updated: number; stream: string; records: TranscriptRecord[]; picture: TerminalPicture; position: number;
+  key: string; version: 2; updated: number; stream: string; records: TranscriptRecord[]; picture: TerminalPicture; position: number; native?: NativeTerminalSnapshot;
 }
 const lifetime = 7 * 24 * 60 * 60 * 1000, maximumBytes = 8 * 1024 * 1024;
 const encoder = new TextEncoder();
@@ -25,11 +37,12 @@ export function cachedTerminal(value: unknown, now = Date.now()): CachedTerminal
       || !['history', 'excerpt', 'gap'].includes(record.kind) || typeof record.text !== 'string') return;
     previous = record.id; length += record.text.length;
   }
-  return length <= 512 * 1024 ? v : undefined;
+  return length <= 512 * 1024 ? { ...v, native: nativeTerminalSnapshot(v.native) } : undefined;
 }
 interface CacheMetadata { key: string; updated: number; bytes: number }
 function metadata(entry: CachedTerminal): CacheMetadata {
-  return { key: entry.key, updated: entry.updated, bytes: encoder.encode(JSON.stringify(entry)).byteLength };
+  const { native, ...text } = entry;
+  return { key: entry.key, updated: entry.updated, bytes: encoder.encode(JSON.stringify(text)).byteLength + (native ? native.bytes.byteLength + native.build.length + 64 : 0) };
 }
 function retainedMetadata(entries: CacheMetadata[], now = Date.now()) {
   let bytes = 0;
@@ -84,7 +97,9 @@ export class TerminalCache {
     } catch { return; }
   }
   async save(entry: CachedTerminal): Promise<boolean> {
-    if (!cachedTerminal(entry)) return false;
+    const validated = cachedTerminal(entry);
+    if (!validated) return false;
+    entry = validated;
     try {
       const db = await this.open();
       await new Promise<void>((resolve, reject) => {

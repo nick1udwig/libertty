@@ -348,3 +348,38 @@ Only a socket with initial application state is healthy.
 Authorization has a 15-second budget, followed by eight seconds without progress for a WebSocket handshake or initial state.
 Measured slow links and repeated failures can extend that idle budget to 15 seconds, and the complete attempt is bounded to 45 seconds.
 Each successful connection phase or initial replay message renews the idle deadline.
+
+## Terminal engine
+
+The browser uses `@gespenst/core` 0.2.0 with its unchanged Ghostty WASM and callback bridge.
+The browser terminal and its headless projection terminals share one WASM runtime per view.
+`terminal-adapter.ts`, `terminal-core.ts`, and `terminal-buffer.ts` preserve the synchronous APIs that Libertty uses.
+The adapter uses Canvas 2D on the main thread because predicted echo, link detection, snapshots, and projection reads need synchronous terminal state.
+Worker and GPU modes are not enabled by this migration.
+The version-scoped adapter accesses Gespenst's local backend to share state, schedule paints, suppress its blink interval, and leave resize ownership with Libertty.
+Review these private integration points when upgrading Gespenst.
+Snapshots and projections read native cells without a legacy cell conversion.
+Styled transcripts retain underline variants and colors, overlines, explicit backgrounds, and OSC 8 links.
+Snapshot caches follow the core state revision so writes and cursor changes are visible before the next paint.
+Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
+Reconnect and resize covers combine the background and text canvases.
+
+`term.ghostty.memoryUsage()` reads per-terminal retained page and image bytes on demand, including projection terminals.
+The report counts the shared WASM memory capacity once and does not add retained bytes to that capacity.
+The figures exclude browser canvases, GPU allocations, and small native bookkeeping structures.
+`npm run bench:terminal-memory` measures empty, filled, and freed headless terminals and writes `.test-artifacts/terminal-memory.json`.
+Freeing terminal pages permits reuse but does not shrink WASM linear memory.
+
+The local history cache can store a native screen snapshot of up to 2 MiB beside its styled text.
+A native snapshot is saved only when one transcript record matches the current screen and history.
+Restoration requires the exact WASM checksum and grid size, and corrupt or incompatible snapshots fall back to text.
+Multiple transcript records keep their text presentation so a native screen cannot hide older retained excerpts.
+Native snapshot bytes count toward the existing 8 MiB cache budget.
+
+Native OSC 133 callbacks expose the current shell phase, reported command, and optional exit status through `term.wasmTerm.semantics.state`.
+The last completed command remains available through `semantics.lastCommand` when completion and the next prompt arrive in one output chunk.
+The adapter uses two shared typed WASM callback trampolines per runtime and does not parse the output stream again.
+Command output and completion suppress predicted echo until the next prompt or input event.
+These markers only constrain prediction and never authorize input or replace server readiness.
+Terminals without shell markers keep the existing prediction rules.
+A full reset or native snapshot restoration clears advisory shell state, and restoration reattaches the callbacks to the new native handle.

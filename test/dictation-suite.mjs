@@ -67,7 +67,7 @@ try {
   if (scenario === 'capture') await page.clock.install();
   await page.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
-    const body = original.replace(/new ([\w$]+)\(\{ghostty:/, 'window.__testTerminal=new $1({ghostty:');
+    const body = original.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__testTerminal=new $1({fontSize:');
     assert.notEqual(body, original); await route.fulfill({ response, body });
   });
   const errors = []; page.on('pageerror', error => errors.push(String(error)));
@@ -148,7 +148,7 @@ try {
     const point = await page.evaluate(() => {
       const term = window.__testTerminal, buffer = term.buffer.active;
       const position = buffer.cursorY * term.cols + buffer.cursorX - 3;
-      const rect = document.querySelector('#terminal canvas').getBoundingClientRect();
+      const rect = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
       return { position, x: rect.left + (position % term.cols + .25) * rect.width / term.cols, y: rect.top + (Math.floor(position / term.cols) + .5) * rect.height / term.rows };
     });
     await page.touchscreen.tap(point.x, point.y);

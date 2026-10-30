@@ -65,7 +65,7 @@ try {
   await page.locator('#token').fill(token); await page.locator('#login-form button').click();
   const focusInput = async () => {
     if (!new URL(page.url()).searchParams.has('herdrTerminal')) return focusShell(page);
-    await page.locator('#terminal canvas').tap({ position: { x: 10, y: 10 } });
+    await page.locator('#terminal .gespenst__background').tap({ position: { x: 10, y: 10 } });
     await page.waitForFunction(() => {
       const input = document.querySelector('#terminal textarea');
       return document.activeElement === input && !input.readOnly;
@@ -347,10 +347,10 @@ try {
     stalled = await stallNext('/ws'); states = await stateCount();
     await online(); await stalled.entered;
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
-    const retainedPixels = await page.locator('#terminal canvas').evaluate(canvas => {
+    const retainedPixels = await page.locator('#terminal .gespenst__text').evaluate(canvas => {
       const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
       let painted = 0;
-      for (let i = 0; i < pixels.length; i += 4) if (pixels[i] > 40 || pixels[i + 1] > 40 || pixels[i + 2] > 40) painted++;
+      for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] > 0) painted++;
       return painted;
     });
     assert.ok(retainedPixels > 100, 'Retain readable text while authorization is pending');
@@ -393,7 +393,7 @@ try {
     stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
     await online(); await stalled.entered;
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
-    assert.ok(await page.locator('#terminal canvas').evaluate(canvas => canvas.width > 0 && canvas.height > 0), 'Keep the Herdr screen during ticket acquisition');
+    assert.ok(await page.locator('#terminal .gespenst__background').evaluate(canvas => canvas.width > 0 && canvas.height > 0), 'Keep the Herdr screen during ticket acquisition');
     await background(); await page.evaluate(() => window.__expireBackground()); await foreground(); await connected(states);
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
     assert.equal(stalled.aborted(), true, 'backgrounding aborts Herdr ticket acquisition'); await stalled.done();
