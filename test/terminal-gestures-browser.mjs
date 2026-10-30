@@ -83,7 +83,7 @@ try {
         for (let row = 0; row < term.rows; row++) {
           const line = term.buffer.active.getLine(top + row), col = line?.translateToString(true).indexOf(needle) ?? -1;
           if (col >= 0 && (!wrapped || line.isWrapped))
-            return { x: (col + offset + .5) * bounds.width / term.cols, y: (row + .5) * bounds.height / term.rows };
+            return { x: (col + offset + .5) * bounds.width / term.cols, y: (row + .5 + term.getViewportY() % 1) * bounds.height / term.rows };
         }
         throw new Error('Missing visible link: ' + needle);
       }, { needle, wrapped, offset });
@@ -123,7 +123,7 @@ try {
     await scope.locator('#terminal textarea').evaluate(el => el.blur());
     const beforeScrollback = await snapshot();
     // Resolve the same URL from actual scrollback, rather than live output.
-    await scope.evaluate(() => { window.__testTerminal.write('\r\n'.repeat(50)); window.__testTerminal.scrollLines(-50); });
+    await scope.evaluate(() => { window.__testTerminal.write('\r\n'.repeat(50)); window.__testTerminal.scrollLines(-50.75); });
     const scrolled = await scope.evaluate(() => window.__testTerminal.getViewportY());
     for (const [needle, url, offset] of [
       ['WRAPPED https://', longURL, 8],
@@ -180,12 +180,69 @@ try {
     await track.waitFor({ state: 'visible' });
   }
   await checkScrollbar(page);
+  const pixels = await page.evaluate(async () => {
+    const term = window.__testTerminal;
+    term.clearSelection(); term.blur();
+    const canvases = [...document.querySelectorAll('#terminal canvas')];
+    const height = term.renderer.getMetrics().height;
+    const capture = async offset => {
+      term.scrollToLine(offset);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return canvases.map(canvas => canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height));
+    };
+    const lower = await capture(12), upper = await capture(13);
+    const shift = Math.floor(height / 2);
+    const fractional = await capture(12 + shift / height);
+    let changed = 0, mismatches = 0, samples = 0;
+    const channel = (data, index) => index % 4 === 3 ? data[index] : data[index] * data[index - index % 4 + 3] / 255;
+    for (let layer = 0; layer < canvases.length; layer++) {
+      const { width, height: rows, data } = fractional[layer];
+      const deviceShift = Math.round(shift * canvases[layer].height / (term.rows * height));
+      const deviceRow = Math.round(canvases[layer].height / term.rows);
+      for (let y = 0; y < rows; y++) {
+        const source = y < deviceShift ? upper[layer] : lower[layer];
+        const sourceY = y < deviceShift ? y + deviceRow - deviceShift : y - deviceShift;
+        for (let x = 0; x < width * 4; x++) {
+          const index = y * width * 4 + x;
+          if (Math.abs(channel(data, index) - channel(lower[layer].data, index)) > 2) changed++;
+          if (Math.abs(channel(data, index) - channel(source.data, sourceY * width * 4 + x)) > 2) mismatches++;
+          samples++;
+        }
+      }
+    }
+    const offset = term.getViewportY();
+    document.querySelector('#terminal canvas').dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 3 }));
+    const wheel = term.getViewportY();
+    await capture(12);
+    const restored = canvases.every((canvas, layer) => {
+      const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      return data.every((_, index) => Math.abs(channel(data, index) - channel(lower[layer].data, index)) <= 2);
+    });
+    term.scrollToLine(12.75);
+    const previous = term.buffer.active.getLine(term.buffer.active.viewportY - 1).translateToString(true).slice(0, 7);
+    const geometry = term.view.geometry;
+    for (const [action, x] of [['press', .1], ['motion', 7.9], ['release', 7.9]]) {
+      term.view.sendPointer({ action, x: x * geometry.cellWidthPx, y: .25 * geometry.cellHeightPx,
+        button: 'left', anyButtonPressed: action !== 'release', modifiers: 0, timeMs: performance.now() });
+    }
+    const selected = term.getSelection().trim(), selectionOffset = term.getViewportY();
+    term.clearSelection();
+    term.scrollToBottom();
+    return { changed, mismatches, samples, restored, selected, previous, selectionOffset, wheelDelta: offset - wheel, expectedWheel: 3 / height };
+  });
+  assert.ok(pixels.changed > 100, 'A partial row must visibly move terminal text');
+  assert.equal(pixels.mismatches, 0, 'Every pixel, including the entering edge row, must follow the fractional offset: ' + JSON.stringify(pixels));
+  assert.ok(pixels.restored, 'Returning to a whole row must clear all fractional paint');
+  assert.equal(pixels.selected, pixels.previous, 'Mouse selection must resolve the partial row at the top edge');
+  assert.equal(pixels.selectionOffset, 12.75, 'Mouse selection must preserve the fractional position');
+  assert.ok(Math.abs(pixels.wheelDelta - pixels.expectedWheel) < 1e-9, 'Pixel wheel deltas must retain their exact distance');
   const canvas = await page.locator('#terminal .gespenst__background').boundingBox();
   const start = { x: canvas.x + canvas.width * .6, y: canvas.y + canvas.height * .35 };
   const focusCalls = await page.evaluate(() => window.__inputFocusCalls);
   await touch('touchStart', start); await delay(25);
   await touch('touchMove', { x: start.x, y: start.y + 8 });
   assert.ok(await page.evaluate(() => window.__testTerminal.getViewportY() > 0), 'An 8px drag must already scroll');
+  assert.ok(await page.evaluate(() => Math.abs(window.__testTerminal.getViewportY() * window.__testTerminal.renderer.getMetrics().height - 8) < .01), 'Local history must follow the finger pixel for pixel');
   assert.equal(await focused(), false);
   await delay(20); await touch('touchMove', { x: start.x, y: start.y + 90 }); await touch('touchEnd');
   // Dispatch a fast swipe in one task so CDP round-trip delays cannot turn it into a hold.
@@ -222,13 +279,13 @@ try {
   assert.equal(await focused(), false, 'A release displaced from the press must never be treated as an input tap');
   // Stop momentum with a new touch, then select text from scrollback.
   await touch('touchStart', start); await touch('touchCancel');
-  await page.evaluate(() => window.__testTerminal.scrollToLine(40));
+  await page.evaluate(() => window.__testTerminal.scrollToLine(40.75));
   const rowPoint = await page.evaluate(() => {
     const term = window.__testTerminal, bounds = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
     const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
     for (let row = Math.floor(term.rows / 3); row < term.rows - 2; row++) {
       if (term.buffer.active.getLine(top + row)?.translateToString(true).startsWith('ROW-'))
-        return { x: bounds.left + 8.5 * bounds.width / term.cols, y: bounds.top + (row + .5) * bounds.height / term.rows, cell: bounds.width / term.cols };
+        return { x: bounds.left + 8.5 * bounds.width / term.cols, y: bounds.top + (row + .5 + term.getViewportY() % 1) * bounds.height / term.rows, cell: bounds.width / term.cols };
     }
     throw new Error('Missing visible scrollback row');
   });

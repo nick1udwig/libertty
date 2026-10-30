@@ -153,10 +153,13 @@ export class TerminalGestures {
       if (this.press || (capabilities?.firesTouchEvents ?? performance.now() - this.lastTouch < 800)) { stop(event); return; }
     }, { capture: true });
     element.addEventListener('wheel', event => {
-      if (!host.scroll?.enabled() || event.ctrlKey || !event.deltaY) return;
+      if (event.ctrlKey || !event.deltaY) return;
+      const remote = host.scroll?.enabled();
+      if (!remote && (term.buffer.active.type !== 'normal' || !event.shiftKey && [1000, 1002, 1003].some(mode => term.wasmTerm?.getMode(mode)))) return;
       stop(event); this.cancelMomentum();
-      const pixels = event.deltaMode === 1 ? event.deltaY * this.linePixels() : event.deltaMode === 2 ? event.deltaY * this.canvas.clientHeight : event.deltaY;
-      this.scroll(host, pixels / this.linePixels(), event.clientX, event.clientY);
+      const height = remote ? this.linePixels() : term.renderer.getMetrics().height;
+      const pixels = event.deltaMode === 1 ? event.deltaY * height : event.deltaMode === 2 ? event.deltaY * term.rows * height : event.deltaY;
+      this.scroll(host, pixels / height, event.clientX, event.clientY);
     }, { capture: true, passive: false });
     term.onSelectionChange(() => this.render());
     term.onScroll(() => { if (this.start && !this.selectionScroll && !isPreservingScrollback(term)) this.clear(); else this.render(); });
@@ -195,13 +198,14 @@ export class TerminalGestures {
   private point(x: number, y: number): Point {
     const bounds = this.canvas.getBoundingClientRect();
     let col = Math.max(0, Math.min(this.term.cols - 1, Math.floor((x - bounds.left) / (bounds.width / this.term.cols))));
-    const row = Math.max(this.selectionHistory?.first ?? 0, Math.min(this.selectionHistory?.last ?? this.term.rows - 1, Math.floor((y - bounds.top) / (bounds.height / this.term.rows))));
-    const line = this.term.buffer.active.getLine(Math.max(0, this.term.buffer.active.length - this.term.rows - Math.floor(this.term.getViewportY())) + row);
+    const top = this.topRow();
+    const row = Math.max(Math.floor(top + (this.selectionHistory?.first ?? 0)), Math.min(Math.ceil(top + (this.selectionHistory?.last ?? this.term.rows - 1)), Math.floor(top + (y - bounds.top) / (bounds.height / this.term.rows))));
+    const line = this.term.buffer.active.getLine(row);
     if (col > 0 && line?.getCell(col)?.getWidth() === 0 && line.getCell(col - 1)?.getWidth() === 2) col--;
-    return { col, row: this.topRow() + row };
+    return { col, row };
   }
-  private topRow() { return this.selectionHistory?.top ?? Math.max(0, this.term.buffer.active.length - this.term.rows - Math.floor(this.term.getViewportY())); }
-  private linePixels() { return this.scrollLinePixels ??= Math.max(6, this.canvas.getBoundingClientRect().height / this.term.rows * .65); }
+  private topRow() { return this.selectionHistory?.top ?? Math.max(0, this.term.buffer.active.length - this.term.rows - this.term.getViewportY()); }
+  private linePixels() { return this.scrollLinePixels ??= Math.max(6, this.canvas.getBoundingClientRect().height / this.term.rows * (this.host.scroll?.enabled() ? .65 : 1)); }
   private range() {
     if (!this.start || !this.end) return;
     const before = this.start.row < this.end.row || this.start.row === this.end.row && this.start.col <= this.end.col;
@@ -247,7 +251,7 @@ export class TerminalGestures {
     const bounds = this.canvas.getBoundingClientRect(), container = this.term.element!.getBoundingClientRect();
     const viewport = this.term.element!.parentElement?.id === 'terminal-viewport' ? this.term.element!.parentElement.getBoundingClientRect() : container;
     const width = bounds.width / this.term.cols, height = bounds.height / this.term.rows, top = this.topRow();
-    for (let row = Math.max(top + (this.selectionHistory?.first ?? 0), range.start.row); row <= Math.min(top + (this.selectionHistory?.last ?? this.term.rows - 1), range.end.row); row++) {
+    for (let row = Math.max(Math.floor(top + (this.selectionHistory?.first ?? 0)), range.start.row); row <= Math.min(Math.ceil(top + (this.selectionHistory?.last ?? this.term.rows - 1)), range.end.row); row++) {
       const first = row === range.start.row ? range.start.col : 0, last = row === range.end.row ? range.end.col : this.term.cols - 1;
       const highlight = document.createElement('span');
       Object.assign(highlight.style, { left: `${bounds.left - container.left + first * width}px`, top: `${bounds.top - container.top + (row - top) * height}px`, width: `${(last - first + 1) * width}px`, height: `${height}px` });
@@ -255,7 +259,7 @@ export class TerminalGestures {
     }
     [this.start!, this.end!].forEach((point, i) => {
       const handle = this.handles[i];
-      handle.hidden = this.dragHandle !== i && (point.row < top + (this.selectionHistory?.first ?? 0) || point.row > top + (this.selectionHistory?.last ?? this.term.rows - 1));
+      handle.hidden = this.dragHandle !== i && (point.row + 1 <= top + (this.selectionHistory?.first ?? 0) || point.row >= top + (this.selectionHistory?.last ?? this.term.rows - 1) + 1);
       handle.style.left = `${Math.max(viewport.left - container.left, Math.min(viewport.right - container.left - 32, bounds.left - container.left + (point.col + (i ? 1 : 0)) * width - 16))}px`;
       handle.style.top = `${Math.max(0, Math.min(container.height - 32, bounds.top - container.top + (point.row - top + 1) * height - 4))}px`;
     });

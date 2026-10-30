@@ -77,9 +77,9 @@ test('full viewport frames transform the rows that the renderer consumes', () =>
 
 test('scrolling preserves fractional positions and clears them after native scrolling', () => {
   const terminal = new Terminal({});
-  let offset = 0;
+  let offset = 0, maximum = 100;
   Reflect.set(terminal, 'wasmTerm', {
-    getScrollbackLength: () => 100,
+    getScrollbackLength: () => maximum,
     getViewportY: () => offset,
     setViewportY: (value: number) => { offset = value; },
   });
@@ -94,6 +94,9 @@ test('scrolling preserves fractional positions and clears them after native scro
   assert.equal(terminal.getViewportY(), 100);
   terminal.scrollToBottom();
   assert.equal(terminal.getViewportY(), 0);
+  terminal.scrollToLine(.75);
+  maximum = 0;
+  assert.equal(terminal.getViewportY(), 0, 'An alternate screen must clear a partial row even when the integer offset stays zero');
 });
 
 
@@ -142,6 +145,7 @@ test('modified mouse clicks open safe links at the scrolled cell and preserve co
   Reflect.set(terminal, 'wasmTerm', {
     cols: 40, rows: 4, core: { getSelection: () => selection },
     getScrollbackLength: () => 10, getScrollbackHyperlinkUri: () => uri,
+    getViewportY: () => 2,
   });
   terminal.setCopyHandler(text => copied.push(text));
   const click = (overrides = {}) => Reflect.get(terminal, 'handlePointerUp').call(terminal, {
@@ -190,4 +194,28 @@ test('fitting uses the retained renderer scale across device pixel ratio changes
       else Reflect.deleteProperty(globalThis, key);
     }
   }
+});
+
+test('fractional frames draw the preceding row and preserve the terminal grid', () => {
+  const terminal = new Terminal({ cols: 40, rows: 4 });
+  terminal.setRenderScheduler(() => {});
+  terminal.setColorTransform((r, g, b) => [255 - r, 255 - g, 255 - b]);
+  const previous = { text: 'previous', cells: [{ foreground: { r: 1, g: 2, b: 3 } }] };
+  Reflect.set(terminal, 'wasmTerm', {
+    getViewportY: () => 2,
+    getScrollbackLength: () => 10,
+    setViewportY: () => {},
+    getBufferRow: (index: number) => { assert.equal(index, 7); return previous; },
+  });
+  Reflect.set(terminal, 'buffer', { active: { viewportY: 8 } });
+  terminal.scrollToLine(2.25);
+  const frame = { cols: 40, rows: 4, cursor: { visible: true }, viewportRows: Array.from({ length: 4 }, (_, y) => ({ y, text: String(y) })) };
+  const shifted = Reflect.get(terminal, 'scrollFrame').call(terminal, frame);
+  assert.deepEqual(shifted.viewportRows.map((row: { y: number }) => row.y), [-.75, .25, 1.25, 2.25, 3.25]);
+  assert.deepEqual(shifted.viewportRows[0].cells[0].foreground, { r: 254, g: 253, b: 252 });
+  assert.equal(shifted.cursor.visible, false);
+  assert.equal(shifted.rows, 4);
+  assert.equal(frame.viewportRows[0].y, 0);
+  terminal.scrollToLine(2);
+  assert.equal(Reflect.get(terminal, 'scrollFrame').call(terminal, frame), frame);
 });

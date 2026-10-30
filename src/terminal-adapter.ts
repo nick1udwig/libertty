@@ -20,6 +20,7 @@ type ColorTransform = (r: number, g: number, b: number) => [number, number, numb
 /** Version-scoped access to Gespenst 0.2.0's local core and render scheduling. */
 interface LocalBackend {
   terminal: CoreTerminal;
+  pointer(input: Parameters<GespenstTerminal['sendPointer']>[0]): void;
   retained: { runtime: CoreRuntime; changed(): void };
   pipeline: { host: { schedule(callback: () => void): void }; scheduleRender(): Promise<void> };
   painter: {
@@ -27,6 +28,9 @@ interface LocalBackend {
     focused: boolean;
     render(frame: Frame): void | Promise<void>;
     setFocused(focused: boolean): void;
+    paint(frame: ViewportSnapshot, damage: ReadonlySet<number>): void;
+    text: CanvasRenderingContext2D;
+    metrics: { width: number; height: number };
   };
 }
 
@@ -106,6 +110,29 @@ export class Terminal {
       if (this.fullFrame) { this.fullFrame = false; frame = backend.terminal.viewport(); }
       return this.paintFrame!(frame);
     };
+    const paintViewport = backend.painter.paint.bind(backend.painter);
+    let shifted = false;
+    backend.painter.paint = (frame, damage) => {
+      const fractional = this.getViewportY() % 1 !== 0;
+      if (fractional || shifted) {
+        frame = this.scrollFrame(frame);
+        backend.painter.text.clearRect(0, 0, backend.painter.metrics.width, backend.painter.metrics.height);
+        damage = new Set(frame.viewportRows.map(row => row.y));
+      }
+      shifted = fractional;
+      paintViewport(frame, damage);
+    };
+    const sendPointer = backend.pointer.bind(backend);
+    backend.pointer = input => {
+      const fraction = this.getViewportY() % 1;
+      if (!fraction) { sendPointer(input); return; }
+      const height = view.geometry.cellHeightPx, base = this.wasmTerm!.getViewportY();
+      const previous = input.y < fraction * height;
+      // Ghostty resolves selection points inside its integer viewport.
+      if (previous) this.wasmTerm!.setViewportY(base + 1);
+      try { sendPointer({ ...input, y: input.y + (previous ? 1 - fraction : -fraction) * height }); }
+      finally { if (previous) this.wasmTerm!.setViewportY(base); }
+    };
     backend.painter.setFocused = focused => { backend.painter.focused = focused; this.fullFrame = true; this.requestRender(); };
     view.focus = () => this.requestAutomaticFocus();
     view.on('input', event => this.emit('data', new TextDecoder().decode(event.data)));
@@ -127,9 +154,10 @@ export class Terminal {
     if (event.button !== 0 || !(event.ctrlKey || event.metaKey)) return;
     const bounds = this.view!.element.getBoundingClientRect(), metrics = this.renderer.getMetrics();
     const col = Math.floor((event.clientX - bounds.left) / metrics.width);
-    const row = Math.floor((event.clientY - bounds.top) / metrics.height);
-    if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return;
-    const link = terminalLinkAt(this, col, this.buffer.active.viewportY + row);
+    const y = (event.clientY - bounds.top) / metrics.height;
+    if (col < 0 || col >= this.cols || y < 0 || y >= this.rows) return;
+    const row = Math.floor(this.buffer.active.viewportY - this.getViewportY() % 1 + y);
+    const link = terminalLinkAt(this, col, row);
     if (link) window.open(link, '_blank', 'noopener,noreferrer');
   }
   private transformFrame(frame: Frame): Frame {
@@ -144,6 +172,14 @@ export class Terminal {
     })) });
     return 'viewportRows' in frame ? { ...frame, cursor, viewportRows: frame.viewportRows.map(row) }
       : { ...frame, cursor, changedRows: frame.changedRows.map(row) };
+  }
+  private scrollFrame(frame: ViewportSnapshot): ViewportSnapshot {
+    const fraction = this.getViewportY() % 1;
+    if (!fraction) return frame;
+    const above = this.wasmTerm!.getBufferRow(this.buffer.active.viewportY - 1);
+    const extra = above ? (this.transformFrame({ ...frame, viewportRows: [{ ...above, y: -1 }] }) as ViewportSnapshot).viewportRows : [];
+    return { ...frame, cursor: { ...frame.cursor, visible: false },
+      viewportRows: [...extra, ...frame.viewportRows].map(row => ({ ...row, y: row.y + fraction })) };
   }
   private scheduleFrame(callback: () => void) { this.pendingFrame = callback; if (!this.schedulingNow) this.requestRender(); }
   private requestRender() { if (this.scheduler) this.scheduler(); else requestAnimationFrame(() => this.renderNow()); }
@@ -176,7 +212,7 @@ export class Terminal {
   clearSelection() { this.view?.clearSelection(); }
   getViewportY() {
     const offset = this.wasmTerm?.getViewportY() ?? 0;
-    if (offset !== this.viewportBase) this.viewportFraction = 0;
+    if (offset !== this.viewportBase || this.viewportFraction > 0 && offset + this.viewportFraction > (this.wasmTerm?.getScrollbackLength() ?? 0)) this.viewportFraction = 0;
     return offset + this.viewportFraction;
   }
   scrollLines(lines: number) { this.scrollToLine(this.getViewportY() - lines); }
