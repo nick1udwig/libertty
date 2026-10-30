@@ -33,6 +33,7 @@ export class GhosttyTerminal {
   readonly semantics: TerminalSemantics;
   private revision = -1;
   private bufferRows = new Map<number, TerminalBufferRow>();
+  private bufferTheme?: Readonly<TerminalTheme>;
   private colors?: RenderColors;
   private theme?: Readonly<TerminalTheme>;
   private replies: Uint8Array[] = [];
@@ -57,8 +58,9 @@ export class GhosttyTerminal {
   resize(cols: number, rows: number) { this.core.resize(cols, rows); this.onWrite?.(); }
   update() {
     const state = this.core.bufferState();
-    if (state.revision !== this.revision) {
+    if (state.revision !== this.revision || this.bufferTheme !== this.core.theme) {
       this.revision = state.revision;
+      this.bufferTheme = this.core.theme;
       this.bufferRows.clear();
     }
     return state;
@@ -70,8 +72,13 @@ export class GhosttyTerminal {
     return state.scrollbackRows - state.viewportY;
   }
   setViewportY(offset: number) {
-    const current = this.getViewportY(), target = Math.max(0, Math.min(this.getScrollbackLength(), offset));
-    if (current !== target) this.core.scrollLines(current - target);
+    const state = this.update(), current = state.scrollbackRows - state.viewportY;
+    const target = Math.max(0, Math.min(state.scrollbackRows, offset));
+    if (current !== target) {
+      this.core.scrollLines(current - target);
+      // Scrolling changes the native revision but preserves absolute buffer rows.
+      this.revision = this.getRevision();
+    }
   }
   isAlternateScreen() { return this.core.bufferState().screen === 'alternate'; }
   isMode(mode: number, ansi = false) { return this.core.isMode(mode, ansi); }

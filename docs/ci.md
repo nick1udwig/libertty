@@ -159,9 +159,33 @@ npm run bench:terminal-scroll
 The terminal scroll benchmark needs a current frontend build and debug backend and measures the real renderer at mobile and desktop viewport sizes.
 It reports native scroll calls, decoded rows, glyph runs, paint times and browser task time for slow scrolling, fast scrolling and scrolling during output.
 Use `BENCH_REPORT` to save each implementation's report and `BENCH_REPEATS` to change the default three samples per case.
+Set `BENCH_CPU_RATE=4` to repeat the comparison with Chromium's fourfold CPU throttling.
 Compare reports from separate builds under the same machine load; these measurements do not measure battery drain.
 The architecture benchmark retains correctness, cold and warm latency, request-count checks and reversed-order confirmation of suspected regressions.
 Its default `0e0646c` reference is the historical TypeScript architecture, and `BENCH_BEFORE_MASTER` and `BENCH_BEFORE_CLIENT` can select other compatible TypeScript references from local Git history.
 The workspace benchmark retains startup, reload, echo and submit measurements against its historical `2a99127` reference, selectable with `BENCH_BEFORE`.
 These historical loaders require the old TypeScript server layout and do not accept arbitrary modern Rust revisions as baselines.
 Reports are written to ignored `.test-artifacts` files, and historical comparisons should be reviewed alongside current measurements rather than treated as current phone performance guarantees.
+
+### Pixel scrolling comparison, 2026-10-30
+
+The baseline is the initial pixel renderer at `a94b567`.
+The optimized renderer skips unchanged scroll targets, schedules one render boundary per frame, and retains decoded rows across viewport-only movement.
+Output, resize, screen changes and theme changes still invalidate cached rows, and the cache limit stays at 128 rows.
+The table shows median Chromium task time for 120 frames from three runs with four distinct scroll movements per frame.
+Mobile means a 390×844 viewport at device scale 2 on the test computer; desktop means 1440×900 at scale 1.
+
+| Viewport | Workload | Baseline | Optimized | Reduction |
+| --- | --- | ---: | ---: | ---: |
+| Mobile | Slow scroll | 658 ms | 586 ms | 11% |
+| Mobile | Fast scroll | 711 ms | 675 ms | 5% |
+| Mobile | Scroll with output | 632 ms | 611 ms | 3% |
+| Desktop | Slow scroll | 840 ms | 578 ms | 31% |
+| Desktop | Fast scroll | 1,112 ms | 854 ms | 23% |
+| Desktop | Scroll with output | 868 ms | 625 ms | 28% |
+
+Median decoded-row counts fell from 7,296 to 64 for slow scrolling and from 5,760 to 128 for fast scrolling.
+The measured paint p95 improved in all six cases, and stationary scrollback made no extra text draws.
+A separate bitmap-cache prototype reduced glyph drawing by 94% during slow scrolling and passed pixel and selection checks, but increased paint spikes at row boundaries and needed about 10 MB of extra bitmap storage at these sizes.
+The bitmap prototype was not retained because its fast-scroll results and memory cost did not give a consistent improvement.
+These instrumented CPU measurements do not establish battery savings or parity with the older discrete-row renderer.

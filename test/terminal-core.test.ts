@@ -71,6 +71,45 @@ test('unchanged scroll targets preserve native revisions and cached buffer rows'
   } finally { terminal.free(); }
 });
 
+test('scrolling reuses decoded rows while intervening native mutations still invalidate them', () => {
+  const terminal = ghostty.createTerminal(20, 4);
+  try {
+    terminal.write('history\r\n'.repeat(100));
+    const row = terminal.getBufferRow(20);
+    for (let offset = 1; offset <= 20; offset++) {
+      terminal.setViewportY(offset);
+      assert.equal(terminal.getBufferRow(20), row);
+    }
+    terminal.core.write('new output');
+    terminal.setViewportY(10);
+    const changed = terminal.getBufferRow(20);
+    assert.notEqual(changed, row, 'Scrolling must not mark a stale page as current after a direct native write');
+    terminal.core.resize(10, 4);
+    terminal.setViewportY(5);
+    assert.notEqual(terminal.getBufferRow(20), changed);
+    terminal.core.write('\x1b[?1049h\x1b[Halternate');
+    terminal.setViewportY(0);
+    assert.equal(terminal.getBufferRow(20), undefined);
+    assert.equal(terminal.getBufferRow(0)?.text.trimEnd(), 'alternate');
+  } finally { terminal.free(); }
+});
+
+test('cached row colors follow theme changes even when the native revision stays unchanged', async () => {
+  const terminal = ghostty.createTerminal(20, 4);
+  try {
+    terminal.write('\x1b[31mhistory\r\n'.repeat(100));
+    const row = terminal.getBufferRow(20), revision = terminal.getRevision();
+    await terminal.core.setTheme({ red: '#123456' });
+    terminal.core.render();
+    assert.equal(terminal.getRevision(), revision);
+    terminal.setViewportY(10);
+    const changed = terminal.getBufferRow(20);
+    assert.notEqual(changed, row);
+    const color = changed!.cells[0].foreground!;
+    assert.deepEqual([color.r, color.g, color.b], [0x12, 0x34, 0x56]);
+  } finally { terminal.free(); }
+});
+
 test('adopted terminals detect direct writes, screen switches and resize without reparsing', () => {
   const core = ghostty.core.createTerminal({ cols: 10, rows: 3 });
   let writes = 0;

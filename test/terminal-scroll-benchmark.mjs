@@ -12,6 +12,7 @@ let browser, logs = '';
 server.stdout.on('data', data => logs += data);
 server.stderr.on('data', data => logs += data);
 const samples = [];
+const cpuRate = Number(process.env.BENCH_CPU_RATE || 1);
 try {
   await waitForBackend(base, server);
   browser = await launchBrowser();
@@ -41,12 +42,14 @@ try {
       const scroll = core.scrollLines.bind(core), read = core.readBuffer.bind(core);
       core.scrollLines = (...args) => { counters.coreScrolls++; return scroll(...args); };
       core.readBuffer = (...args) => { const result = read(...args); counters.bufferReads++; counters.decodedRows += result.rows.length; return result; };
-      const fill = painter.text.fillText.bind(painter.text), render = painter.render.bind(painter);
-      painter.text.fillText = (...args) => { counters.glyphRuns++; return fill(...args); };
+      const fill = CanvasRenderingContext2D.prototype.fillText, render = painter.render.bind(painter);
+      let painting = false;
+      CanvasRenderingContext2D.prototype.fillText = function (...args) { if (painting) counters.glyphRuns++; return fill.apply(this, args); };
       painter.render = frame => {
-        const start = performance.now(), result = render(frame);
-        counters.paints.push(performance.now() - start);
-        return result;
+        const start = performance.now();
+        painting = true;
+        try { return render(frame); }
+        finally { painting = false; counters.paints.push(performance.now() - start); }
       };
       window.__scrollRun = async (kind, frames) => {
         term.scrollToLine(20);
@@ -58,10 +61,10 @@ try {
           const now = await new Promise(requestAnimationFrame);
           if (previous !== undefined) intervals.push(now - previous);
           previous = now;
-          const offset = kind === 'fast' ? 20 + i * 1.25 : 20 + i * .05;
+          const step = kind === 'fast' ? 1.25 : .05;
           if (kind === 'live' && i % 12 === 0) term.write(`\r\n\x1b[33mLIVE ${i}\x1b[0m changing output`);
           // Multiple input events can arrive before one browser frame.
-          for (let event = 0; event < 4; event++) term.scrollToLine(offset);
+          for (let event = 1; event <= 4; event++) term.scrollToLine(20 + (i - 1) * step + step * event / 4);
         }
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const percentile = (values, fraction) => [...values].sort((a, b) => a - b)[Math.floor((values.length - 1) * fraction)] ?? 0;
@@ -69,6 +72,7 @@ try {
       };
     });
     const cdp = await context.newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuRate });
     await cdp.send('Performance.enable');
     const cpu = async () => (await cdp.send('Performance.getMetrics')).metrics.find(metric => metric.name === 'TaskDuration').value * 1000;
     await page.evaluate(() => window.__scrollRun('slow', 60));
@@ -76,7 +80,7 @@ try {
       for (const kind of ['slow', 'fast', 'live']) {
         const before = await cpu();
         const result = await page.evaluate(kind => window.__scrollRun(kind, 120), kind);
-        const sample = { width, height, deviceScaleFactor, repeat, kind, ...result, taskMs: await cpu() - before };
+        const sample = { width, height, deviceScaleFactor, cpuRate, repeat, kind, ...result, taskMs: await cpu() - before };
         assert.equal(result.offset, kind === 'fast' ? 170 : 26);
         samples.push(sample);
         console.log(JSON.stringify(sample));

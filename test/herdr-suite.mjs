@@ -346,12 +346,14 @@ try {
     await touch('touchStart', x, y); await touch('touchCancel');
     const historyOffset = await terminal.evaluate(() => window.__testTerminal.getViewportY()); await delay(200);
     assert.ok(Math.abs(await terminal.evaluate(() => window.__testTerminal.getViewportY()) - historyOffset) < 1e-6, 'Live cursor frames preserve the scrolled viewport');
-    const historyWord = await terminal.evaluate(() => {
+    const historyWord = await terminal.evaluate(async () => {
       const term = window.__testTerminal, rect = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
+      term.scrollToLine(Math.floor(term.getViewportY()) + .75);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
       for (let row = Math.floor(term.rows / 3); row < term.rows - 2; row++) {
         const col = term.buffer.active.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1;
-        if (col >= 0) return { x: (col + .5) * rect.width / term.cols, y: (row + .5) * rect.height / term.rows, cell: rect.width / term.cols };
+        if (col >= 0) return { x: (col + .5) * rect.width / term.cols, y: (row + .5 + term.getViewportY() % 1) * rect.height / term.rows, cell: rect.width / term.cols };
       }
       throw new Error('No history word for live selection');
     });
