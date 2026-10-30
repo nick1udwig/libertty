@@ -71,7 +71,7 @@ export class GhosttyTerminal {
   }
   setViewportY(offset: number) {
     const current = this.getViewportY(), target = Math.max(0, Math.min(this.getScrollbackLength(), offset));
-    this.core.scrollLines(current - target);
+    if (current !== target) this.core.scrollLines(current - target);
   }
   isAlternateScreen() { return this.core.bufferState().screen === 'alternate'; }
   isMode(mode: number, ansi = false) { return this.core.isMode(mode, ansi); }

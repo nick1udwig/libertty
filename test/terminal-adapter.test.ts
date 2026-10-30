@@ -131,6 +131,27 @@ test('programmatic selection scrolling emits once and still reports native chang
   assert.deepEqual(notifications, [5.5, 6, 7, 3]);
 });
 
+test('fractional scroll bursts share one render boundary and unchanged targets do no work', () => {
+  const { terminal, calls } = scheduledTerminal();
+  let offset = 0;
+  Reflect.set(terminal, 'wasmTerm', {
+    getScrollbackLength: () => 100,
+    getViewportY: () => offset,
+    setViewportY: (value: number) => { offset = value; },
+  });
+  terminal.scrollToLine(5.25);
+  terminal.scrollToLine(5.5);
+  terminal.scrollToLine(5.75);
+  assert.equal(calls.schedules, 0, 'Scroll input must not allocate a pipeline waiter per event');
+  assert.equal(calls.requests, 3);
+  terminal.scrollToLine(5.75);
+  assert.equal(calls.requests, 3);
+  terminal.renderNow();
+  assert.equal(calls.schedules, 1);
+  assert.equal(calls.paints, 1);
+  assert.equal(terminal.getViewportY(), 5.75);
+});
+
 test('modified mouse clicks open safe links at the scrolled cell and preserve copying', () => {
   const terminal = new Terminal({ cols: 40, rows: 4 });
   const opened: unknown[][] = [], copied: string[] = [];

@@ -53,6 +53,24 @@ test('history, hyperlinks and wrapped rows remain addressable while the viewport
   } finally { terminal.free(); }
 });
 
+test('unchanged scroll targets preserve native revisions and cached buffer rows', () => {
+  const terminal = ghostty.createTerminal(20, 4);
+  try {
+    terminal.write('history\r\n'.repeat(100));
+    terminal.setViewportY(10);
+    const revision = terminal.getRevision(), row = terminal.getBufferRow(20);
+    for (let i = 0; i < 10; i++) terminal.setViewportY(10);
+    assert.equal(terminal.getRevision(), revision);
+    assert.equal(terminal.getBufferRow(20), row);
+    terminal.setViewportY(11);
+    assert.notEqual(terminal.getRevision(), revision);
+    terminal.setViewportY(-1);
+    const bottom = terminal.getRevision();
+    terminal.setViewportY(-1);
+    assert.equal(terminal.getRevision(), bottom);
+  } finally { terminal.free(); }
+});
+
 test('adopted terminals detect direct writes, screen switches and resize without reparsing', () => {
   const core = ghostty.core.createTerminal({ cols: 10, rows: 3 });
   let writes = 0;

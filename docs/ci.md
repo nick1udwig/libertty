@@ -152,9 +152,14 @@ The manual GitHub performance workflow has been removed because shared runners a
 npm run verify:performance
 BENCH_SUITE=shared npm run bench:architecture
 npm run bench:workspace
+npm run bench:terminal-scroll
 ```
 
 [scripts/check-performance.mjs](../scripts/check-performance.mjs) builds the optimized native wire host, measures JSON and compression under fast and mobile profiles, then enforces the existing transport latency budgets.
+The terminal scroll benchmark needs a current frontend build and debug backend and measures the real renderer at mobile and desktop viewport sizes.
+It reports native scroll calls, decoded rows, glyph runs, paint times and browser task time for slow scrolling, fast scrolling and scrolling during output.
+Use `BENCH_REPORT` to save each implementation's report and `BENCH_REPEATS` to change the default three samples per case.
+Compare reports from separate builds under the same machine load; these measurements do not measure battery drain.
 The architecture benchmark retains correctness, cold and warm latency, request-count checks and reversed-order confirmation of suspected regressions.
 Its default `0e0646c` reference is the historical TypeScript architecture, and `BENCH_BEFORE_MASTER` and `BENCH_BEFORE_CLIENT` can select other compatible TypeScript references from local Git history.
 The workspace benchmark retains startup, reload, echo and submit measurements against its historical `2a99127` reference, selectable with `BENCH_BEFORE`.

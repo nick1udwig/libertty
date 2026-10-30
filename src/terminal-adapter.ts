@@ -220,11 +220,12 @@ export class Terminal {
   scrollToTop() { this.scrollToLine(this.wasmTerm?.getScrollbackLength() ?? 0); }
   scrollToLine(offset: number) {
     const target = Math.max(0, Math.min(this.wasmTerm?.getScrollbackLength() ?? 0, offset));
+    if (target === this.getViewportY()) return;
     this.viewportFraction = target - Math.floor(target);
     this.wasmTerm?.setViewportY(Math.floor(target));
     this.viewportBase = this.wasmTerm?.getViewportY() ?? 0;
     this.notifyScroll();
-    if (this.backend) void this.backend.pipeline.scheduleRender();
+    if (this.backend) this.requestRender();
   }
   private notifyScroll() {
     const offset = this.getViewportY();
