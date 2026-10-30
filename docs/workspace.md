@@ -365,6 +365,9 @@ Styled transcripts retain underline variants and colors, overlines, explicit bac
 Snapshot caches follow the core state revision so writes and cursor changes are visible before the next paint.
 Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
 Reconnect and resize covers combine the background and text canvases.
+The canvases are one row taller than the grid and hold the line above the viewport in their first row.
+Partial-row scrolling moves them with a CSS transform inside the clipped `.terminal-screen` element, so only a changed row, output or a resize paints.
+Read terminal grid geometry from `term.screen`, because the canvas bounds move and include the hidden row.
 
 `term.ghostty.memoryUsage()` reads per-terminal retained page and image bytes on demand, including projection terminals.
 The report counts the shared WASM memory capacity once and does not add retained bytes to that capacity.

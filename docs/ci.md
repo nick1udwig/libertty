@@ -189,3 +189,23 @@ The measured paint p95 improved in all six cases, and stationary scrollback made
 A separate bitmap-cache prototype reduced glyph drawing by 94% during slow scrolling and passed pixel and selection checks, but increased paint spikes at row boundaries and needed about 10 MB of extra bitmap storage at these sizes.
 The bitmap prototype was not retained because its fast-scroll results and memory cost did not give a consistent improvement.
 These instrumented CPU measurements do not establish battery savings or parity with the older discrete-row renderer.
+
+### Compositor scrolling comparison, 2026-10-30
+
+The baseline is the pixel renderer at `f1382cb`, which repainted every visible row for each partial-row frame.
+The compositor renderer moves canvases that are one row taller with a CSS transform and paints only when the integer row, output or size changes.
+Scroll events also no longer request a terminal frame unless the cursor must reappear.
+The table shows median Chromium task time and paint count for 120 frames from six runs with four scroll movements per frame.
+
+| Viewport | Workload | Baseline | Compositor | Baseline paints | Compositor paints |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Mobile | Slow scroll | 606 ms | 305 ms | 120 | 6 |
+| Mobile | Fast scroll | 675 ms | 680 ms | 120 | 120 |
+| Mobile | Scroll with output | 603 ms | 338 ms | 120 | 14 |
+| Desktop | Slow scroll | 588 ms | 294 ms | 120 | 6 |
+| Desktop | Fast scroll | 887 ms | 850 ms | 120 | 120 |
+| Desktop | Scroll with output | 646 ms | 357 ms | 120 | 14 |
+
+Fast scrolling crosses at least one row in every frame, so it still repaints the full viewport each frame.
+Task time includes the benchmark's own scroll loop and excludes compositor and GPU process work.
+These measurements do not establish battery savings.

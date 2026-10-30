@@ -69,9 +69,8 @@ export class TerminalEcho {
       clearTimeout(this.expiry);
       this.layer.hidden = !prediction;
       if (!prediction) return;
-      const canvas = host.querySelector('canvas');
-      if (!canvas) { this.layer.hidden = true; return; }
-      const bounds = canvas.getBoundingClientRect(), parent = host.getBoundingClientRect();
+      if (!term.screen) { this.layer.hidden = true; return; }
+      const bounds = term.screen.getBoundingClientRect(), parent = host.getBoundingClientRect();
       const width = bounds.width / term.cols, height = bounds.height / term.rows;
       const row = prediction.row - Math.max(0, term.buffer.active.length - term.rows);
       this.layer.replaceChildren(...Array.from(prediction.text, text => { const cell = document.createElement('span'); cell.textContent = text; return cell; }));

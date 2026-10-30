@@ -217,7 +217,7 @@ test('fitting uses the retained renderer scale across device pixel ratio changes
   }
 });
 
-test('fractional frames draw the preceding row and preserve the terminal grid', () => {
+test('screen frames move rows below the preceding line and skip it at the live bottom', () => {
   const terminal = new Terminal({ cols: 40, rows: 4 });
   terminal.setRenderScheduler(() => {});
   terminal.setColorTransform((r, g, b) => [255 - r, 255 - g, 255 - b]);
@@ -230,13 +230,45 @@ test('fractional frames draw the preceding row and preserve the terminal grid', 
   });
   Reflect.set(terminal, 'buffer', { active: { viewportY: 8 } });
   terminal.scrollToLine(2.25);
-  const frame = { cols: 40, rows: 4, cursor: { visible: true }, viewportRows: Array.from({ length: 4 }, (_, y) => ({ y, text: String(y) })) };
-  const shifted = Reflect.get(terminal, 'scrollFrame').call(terminal, frame);
-  assert.deepEqual(shifted.viewportRows.map((row: { y: number }) => row.y), [-.75, .25, 1.25, 2.25, 3.25]);
-  assert.deepEqual(shifted.viewportRows[0].cells[0].foreground, { r: 254, g: 253, b: 252 });
-  assert.equal(shifted.cursor.visible, false);
-  assert.equal(shifted.rows, 4);
+  const frame = { cols: 40, rows: 4, cursor: { visible: true, y: 1 }, viewportRows: Array.from({ length: 4 }, (_, y) => ({ y, text: String(y) })) };
+  const screen = (frame: object) => Reflect.get(terminal, 'screenFrame').call(terminal, frame);
+  const partial = screen(frame);
+  assert.deepEqual(partial.viewportRows.map((row: { y: number }) => row.y), [0, 1, 2, 3, 4]);
+  assert.deepEqual(partial.viewportRows[0].cells[0].foreground, { r: 254, g: 253, b: 252 });
+  assert.deepEqual(partial.cursor, { visible: true, y: 2 });
+  assert.equal(partial.rows, 4);
   assert.equal(frame.viewportRows[0].y, 0);
   terminal.scrollToLine(2);
-  assert.equal(Reflect.get(terminal, 'scrollFrame').call(terminal, frame), frame);
+  assert.equal(screen(frame).viewportRows.length, 5, 'History keeps the preceding line ready for the next partial row');
+  Object.assign(Reflect.get(terminal, 'wasmTerm') as object, { getViewportY: () => 0 });
+  terminal.scrollToBottom();
+  const live = screen(frame);
+  assert.deepEqual(live.viewportRows.map((row: { y: number }) => row.y), [1, 2, 3, 4]);
+  assert.deepEqual(live.cursor, { visible: true, y: 2 });
+});
+
+test('partial rows inside the painted row move the screen without rendering', () => {
+  const { terminal, calls } = scheduledTerminal();
+  let offset = 5;
+  Reflect.set(terminal, 'wasmTerm', {
+    getScrollbackLength: () => 100,
+    getViewportY: () => offset,
+    setViewportY: (value: number) => { offset = value; },
+  });
+  const layer = { style: { transform: '' } };
+  Reflect.get(terminal, 'backend').painter = { metrics: { cellHeight: 32, devicePixelRatio: 2 } };
+  Object.assign(terminal, { viewportBase: 5, screenLayer: layer, paintedBase: 5, paintedAbove: 5 });
+  terminal.scrollToLine(5.25);
+  assert.equal(layer.style.transform, 'translate3d(0, -12px, 0)');
+  layer.style.transform = '';
+  terminal.scrollToLine(5.251);
+  assert.equal(layer.style.transform, '', 'Moves below one device pixel must not touch styles');
+  terminal.scrollToLine(5);
+  assert.equal(layer.style.transform, 'translate3d(0, -16px, 0)');
+  assert.equal(calls.requests, 0);
+  Reflect.set(terminal, 'paintedAbove', undefined);
+  terminal.scrollToLine(5.5);
+  assert.equal(calls.requests, 1, 'An unpainted preceding line needs one render');
+  terminal.scrollToLine(6.5);
+  assert.equal(calls.requests, 2, 'Crossing a row needs one render');
 });

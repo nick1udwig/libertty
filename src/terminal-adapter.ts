@@ -17,6 +17,7 @@ interface TerminalOptions {
 }
 type Frame = RenderFrame | ViewportSnapshot;
 type ColorTransform = (r: number, g: number, b: number) => [number, number, number];
+type ScreenMetrics = { width: number; height: number; cellHeight: number; devicePixelRatio: number };
 /** Version-scoped access to Gespenst 0.2.0's local core and render scheduling. */
 interface LocalBackend {
   terminal: CoreTerminal;
@@ -29,8 +30,8 @@ interface LocalBackend {
     render(frame: Frame): void | Promise<void>;
     setFocused(focused: boolean): void;
     paint(frame: ViewportSnapshot, damage: ReadonlySet<number>): void;
-    text: CanvasRenderingContext2D;
-    metrics: { width: number; height: number };
+    resize(metrics: ScreenMetrics): void;
+    metrics: ScreenMetrics;
   };
 }
 
@@ -39,6 +40,8 @@ export class Terminal {
   readonly options: TerminalOptions;
   readonly buffer = createTerminalBuffer(() => this.wasmTerm);
   element?: HTMLElement;
+  /** Clipped terminal grid; its canvases move inside it during partial-row scrolling. */
+  screen?: HTMLElement;
   textarea?: HTMLTextAreaElement;
   wasmTerm?: GhosttyTerminal;
   ghostty?: Ghostty;
@@ -53,6 +56,10 @@ export class Terminal {
   private fullFrame = false;
   private viewportFraction = 0;
   private viewportBase = 0;
+  private screenLayer?: HTMLElement;
+  private screenShift?: number;
+  private paintedBase?: number;
+  private paintedAbove?: number;
   private colorTransform?: ColorTransform;
   private focusHandler?: () => void;
   private automaticFocusHandler?: () => void;
@@ -110,17 +117,35 @@ export class Terminal {
       if (this.fullFrame) { this.fullFrame = false; frame = backend.terminal.viewport(); }
       return this.paintFrame!(frame);
     };
+    const screen = this.screen = document.createElement('div'), layer = this.screenLayer = document.createElement('div');
+    screen.className = 'terminal-screen';
+    Object.assign(screen.style, { position: 'absolute', left: '0', top: '0', overflow: 'hidden' });
+    // The compositor moves this layer between rows, so partial-row scrolling repaints no pixels.
+    Object.assign(layer.style, { position: 'absolute', inset: '0', willChange: 'transform' });
+    layer.append(...view.element.querySelectorAll('canvas'));
+    screen.append(layer);
+    view.element.prepend(screen);
+    const resizePainter = backend.painter.resize.bind(backend.painter);
+    backend.painter.resize = metrics => {
+      // Canvas row 0 holds the line above the viewport, hidden until a partial row reveals it.
+      resizePainter({ ...metrics, height: metrics.height + metrics.cellHeight });
+      const ratio = metrics.devicePixelRatio, width = `${metrics.width / ratio}px`, height = `${(metrics.height + metrics.cellHeight) / ratio}px`;
+      Object.assign(screen.style, { width, height: `${metrics.height / ratio}px` });
+      for (const canvas of layer.querySelectorAll('canvas')) Object.assign(canvas.style, { width, height });
+      this.paintedBase = this.paintedAbove = this.screenShift = undefined;
+      this.fullFrame = true;
+      this.moveScreen();
+    };
+    backend.painter.resize(backend.painter.metrics);
     const paintViewport = backend.painter.paint.bind(backend.painter);
-    let shifted = false;
     backend.painter.paint = (frame, damage) => {
-      const fractional = this.getViewportY() % 1 !== 0;
-      if (fractional || shifted) {
-        frame = this.scrollFrame(frame);
-        backend.painter.text.clearRect(0, 0, backend.painter.metrics.width, backend.painter.metrics.height);
-        damage = new Set(frame.viewportRows.map(row => row.y));
-      }
-      shifted = fractional;
-      paintViewport(frame, damage);
+      const above = this.showsAbove(), base = this.wasmTerm!.getViewportY();
+      const rows = new Set(Array.from(damage, y => y + 1));
+      if (above) rows.add(0);
+      paintViewport(this.screenFrame(frame), rows);
+      this.paintedBase = base;
+      this.paintedAbove = above ? base : undefined;
+      this.moveScreen();
     };
     const sendPointer = backend.pointer.bind(backend);
     backend.pointer = input => {
@@ -173,13 +198,25 @@ export class Terminal {
     return 'viewportRows' in frame ? { ...frame, cursor, viewportRows: frame.viewportRows.map(row) }
       : { ...frame, cursor, changedRows: frame.changedRows.map(row) };
   }
-  private scrollFrame(frame: ViewportSnapshot): ViewportSnapshot {
-    const fraction = this.getViewportY() % 1;
-    if (!fraction) return frame;
+  /** Moves viewport rows down one canvas row and adds the preceding line while history shows. */
+  private screenFrame(frame: ViewportSnapshot): ViewportSnapshot {
+    const rows = frame.viewportRows.map(row => ({ ...row, y: row.y + 1 }));
+    const cursor = { ...frame.cursor, y: frame.cursor.y === null ? null : frame.cursor.y + 1 };
+    if (!this.showsAbove()) return { ...frame, cursor, viewportRows: rows };
     const above = this.wasmTerm!.getBufferRow(this.buffer.active.viewportY - 1);
-    const extra = above ? (this.transformFrame({ ...frame, viewportRows: [{ ...above, y: -1 }] }) as ViewportSnapshot).viewportRows : [];
-    return { ...frame, cursor: { ...frame.cursor, visible: false },
-      viewportRows: [...extra, ...frame.viewportRows].map(row => ({ ...row, y: row.y + fraction })) };
+    const row = above ? (this.transformFrame({ ...frame, viewportRows: [{ ...above, y: 0 }] }) as ViewportSnapshot).viewportRows[0]
+      : { y: 0, text: '', cells: [], wrapped: false, wrapContinuation: false, selection: null };
+    return { ...frame, cursor, viewportRows: [row, ...rows] };
+  }
+  /** Live output skips the hidden preceding line, while history keeps it ready for the next partial row. */
+  private showsAbove() { return this.getViewportY() > 0; }
+  private moveScreen() {
+    const metrics = this.backend?.painter.metrics;
+    if (!metrics || !this.screenLayer) return;
+    const shift = Math.round(this.getViewportY() % 1 * metrics.cellHeight) - metrics.cellHeight;
+    if (shift === this.screenShift) return;
+    this.screenShift = shift;
+    this.screenLayer.style.transform = `translate3d(0, ${shift / metrics.devicePixelRatio}px, 0)`;
   }
   private scheduleFrame(callback: () => void) { this.pendingFrame = callback; if (!this.schedulingNow) this.requestRender(); }
   private requestRender() { if (this.scheduler) this.scheduler(); else requestAnimationFrame(() => this.renderNow()); }
@@ -201,7 +238,11 @@ export class Terminal {
     }
     const callback = this.pendingFrame; this.pendingFrame = undefined; callback?.();
   }
-  renderCore(core: GhosttyTerminal) { void this.paintFrame?.(core.core.viewport()); }
+  renderCore(core: GhosttyTerminal) {
+    void this.paintFrame?.(core.core.viewport());
+    // Another core's picture cannot serve this terminal's next partial row.
+    this.paintedBase = this.paintedAbove = undefined;
+  }
   write(data: string | Uint8Array, callback?: () => void) { this.view ? this.view.write(data) : this.wasmTerm?.write(data); callback?.(); }
   resize(cols: number, rows: number) { if (this.view) this.view.resize(cols, rows); else this.wasmTerm?.resize(cols, rows); }
   focus() { if (this.focusHandler) this.focusHandler(); else this.view?.focus(); }
@@ -225,7 +266,9 @@ export class Terminal {
     this.wasmTerm?.setViewportY(Math.floor(target));
     this.viewportBase = this.wasmTerm?.getViewportY() ?? 0;
     this.notifyScroll();
-    if (this.backend) this.requestRender();
+    if (!this.backend) return;
+    const painted = this.viewportBase === this.paintedBase && (!this.viewportFraction || this.paintedAbove === this.viewportBase);
+    if (painted) this.moveScreen(); else this.requestRender();
   }
   private notifyScroll() {
     const offset = this.getViewportY();

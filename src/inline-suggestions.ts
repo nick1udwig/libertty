@@ -50,7 +50,7 @@ export class InlineSuggestions {
   private lastDelete?: { data: string; at: number };
   private lastCommit = { text: '', at: 0 };
   private positionFrame = 0;
-  private canvas?: HTMLCanvasElement;
+  private screen?: HTMLElement;
   private pane?: HTMLElement;
   private toggle = document.getElementById('alternatives-toggle')! as HTMLButtonElement;
   private menu = document.getElementById('alternatives-menu')!;
@@ -343,9 +343,9 @@ export class InlineSuggestions {
     if (visible) this.render();
   }
   moveCursor(x: number, y: number) {
-    const buffer = this.term.buffer.active, canvas = this.term.element?.querySelector('canvas');
-    if (!canvas || !this.line.known || !this.host.state().ready || this.loading || this.composing || buffer.type !== 'normal' || this.term.getViewportY() > 0) return;
-    const bounds = canvas.getBoundingClientRect();
+    const buffer = this.term.buffer.active, screen = this.term.screen;
+    if (!screen || !this.line.known || !this.host.state().ready || this.loading || this.composing || buffer.type !== 'normal' || this.term.getViewportY() > 0) return;
+    const bounds = screen.getBoundingClientRect();
     const col = Math.floor((x - bounds.left) / (bounds.width / this.term.cols));
     const row = Math.floor((y - bounds.top) / (bounds.height / this.term.rows));
     if (col < 0 || col >= this.term.cols || row < 0 || row >= this.term.rows) return;
@@ -445,12 +445,12 @@ export class InlineSuggestions {
   }
   private position() {
     if (!this.literal && !this.transcribing) return;
-    if (!this.canvas?.isConnected) {
-      this.canvas = document.querySelector<HTMLCanvasElement>('#terminal canvas') || undefined;
-      this.pane = this.canvas?.closest<HTMLElement>('.terminal-pane') || undefined;
+    if (!this.screen?.isConnected) {
+      this.screen = this.term.screen;
+      this.pane = this.screen?.closest<HTMLElement>('.terminal-pane') || undefined;
     }
-    if (!this.canvas || !this.pane) return;
-    const bounds = this.canvas.getBoundingClientRect(), pane = this.pane.getBoundingClientRect();
+    if (!this.screen || !this.pane) return;
+    const bounds = this.screen.getBoundingClientRect(), pane = this.pane.getBoundingClientRect();
     const buffer = this.term.buffer.active;
     const row = this.pendingCursor?.row ?? buffer.baseY + buffer.cursorY - buffer.viewportY;
     if (row < 0 || row >= this.term.rows || this.term.getViewportY() > 0) { this.toggle.hidden = true; this.menu.hidden = true; return; }

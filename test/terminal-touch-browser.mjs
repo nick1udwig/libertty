@@ -77,7 +77,7 @@ try {
     const contacts = async (events, measure = false) => {
       if (process.env.TEST_GESTURE_DELAY_MS) await delay(Number(process.env.TEST_GESTURE_DELAY_MS));
       return frame.evaluate(({ events, measure }) => {
-      const canvas = document.querySelector('#terminal .gespenst__background'), bounds = canvas.getBoundingClientRect;
+      const canvas = document.querySelector('#terminal .terminal-screen'), bounds = canvas.getBoundingClientRect;
       let measurements = 0;
       if (measure) canvas.getBoundingClientRect = function () { measurements++; return bounds.call(this); };
       try {
@@ -100,7 +100,7 @@ try {
     const touch = (type, point, selector = '#terminal .gespenst__background') => contacts([{ type, point, selector }]);
     const start = { x: 150, y: 180 }, end = { x: 150, y: 280 };
     const idleWork = await frame.evaluate(() => {
-      const term = window.__testTerminal, canvas = document.querySelector('#terminal .gespenst__background'), highlights = document.querySelector('.terminal-selection');
+      const term = window.__testTerminal, canvas = document.querySelector('#terminal .terminal-screen'), highlights = document.querySelector('.terminal-selection');
       const bounds = canvas.getBoundingClientRect, replace = highlights.replaceChildren;
       let measurements = 0, replacements = 0;
       canvas.getBoundingClientRect = function () { measurements++; return bounds.call(this); };
@@ -140,7 +140,7 @@ try {
     await drag(['touchstart', 'pointerdown', 'pointercancel', 'touchmove', 'touchend', 'touchstart', 'touchcancel']);
     assert.ok(await frame.evaluate(() => window.__testTerminal.getViewportY() > 0), 'Touch-first event ordering must also keep touch ownership');
     const word = await frame.evaluate(() => {
-      const t = window.__testTerminal, b = t.buffer.active, rect = document.querySelector('#terminal .gespenst__background').getBoundingClientRect(), top = b.length - t.rows - Math.floor(t.getViewportY());
+      const t = window.__testTerminal, b = t.buffer.active, rect = document.querySelector('#terminal .terminal-screen').getBoundingClientRect(), top = b.length - t.rows - Math.floor(t.getViewportY());
       for (let row = Math.floor(t.rows / 3); row < t.rows - 2; row++) {
         const y = rect.y + (row + .5) * rect.height / t.rows;
         const col = b.getLine(top + row)?.translateToString(true).indexOf('alpha') ?? -1;
@@ -161,7 +161,7 @@ try {
     const endHandle = '.selection-handle[aria-label="Selection end"]';
     await contacts([{ type: 'touchstart', point: handle, selector: endHandle }, { type: 'touchmove', point: { ...handle, x: handle.x + 6 * word.cell }, selector: endHandle }, { type: 'touchend', point: { ...handle, x: handle.x + 6 * word.cell }, selector: endHandle }]);
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta gamma');
-    const selectionEdge = await frame.evaluate(x => ({ x, y: document.querySelector('#terminal .gespenst__background').getBoundingClientRect().top + 1 }), word.x + 9 * word.cell);
+    const selectionEdge = await frame.evaluate(x => ({ x, y: document.querySelector('#terminal .terminal-screen').getBoundingClientRect().top + 1 }), word.x + 9 * word.cell);
     const beforeEdge = await frame.evaluate(() => window.__testTerminal.getViewportY());
     await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
     await contacts([{ type: 'touchstart', point: word }, { type: 'touchmove', point: { ...word, x: selectionEdge.x } }, { type: 'touchmove', point: selectionEdge }]);
@@ -180,7 +180,7 @@ try {
       ['Open help', 'https://example.com/help'],
     ]) {
       const linkPoint = () => frame.evaluate(({ needle, offset }) => {
-        const t = window.__testTerminal, b = t.buffer.active, r = document.querySelector('#terminal .gespenst__background').getBoundingClientRect(), top = b.length - t.rows;
+        const t = window.__testTerminal, b = t.buffer.active, r = document.querySelector('#terminal .terminal-screen').getBoundingClientRect(), top = b.length - t.rows;
         for (let row = 0; row < t.rows; row++) { const col = b.getLine(top + row)?.translateToString(true).indexOf(needle) ?? -1; if (col >= 0) return { x: r.x + (col + offset + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; } throw new Error('Missing link');
       }, { needle, offset });
       const point = await linkPoint();
