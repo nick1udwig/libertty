@@ -15,7 +15,8 @@ const samples = [];
 const cpuRate = Number(process.env.BENCH_CPU_RATE || 1);
 try {
   await waitForBackend(base, server);
-  browser = await launchBrowser();
+  // Headless Chromium otherwise rasterizes and composites canvases in software, unlike phones.
+  browser = await launchBrowser(process.env.BENCH_GPU === '1' ? { args: ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=gl'] } : {});
   for (const [width, height, deviceScaleFactor] of [[390, 844, 2], [1440, 900, 1]]) {
     const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor, serviceWorkers: 'block' });
     await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
@@ -80,7 +81,7 @@ try {
       for (const kind of ['slow', 'fast', 'live']) {
         const before = await cpu();
         const result = await page.evaluate(kind => window.__scrollRun(kind, 120), kind);
-        const sample = { width, height, deviceScaleFactor, cpuRate, repeat, kind, ...result, taskMs: await cpu() - before };
+        const sample = { width, height, deviceScaleFactor, cpuRate, gpu: process.env.BENCH_GPU === '1', repeat, kind, ...result, taskMs: await cpu() - before };
         assert.equal(result.offset, kind === 'fast' ? 170 : 26);
         samples.push(sample);
         console.log(JSON.stringify(sample));

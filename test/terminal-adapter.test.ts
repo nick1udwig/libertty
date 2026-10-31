@@ -272,3 +272,31 @@ test('partial rows inside the painted row move the screen without rendering', ()
   terminal.scrollToLine(6.5);
   assert.equal(calls.requests, 2, 'Crossing a row needs one render');
 });
+
+test('the text ring draws only lines it does not hold and fills both copies while moving', () => {
+  const terminal = new Terminal({ cols: 40, rows: 4 });
+  const paint = (top: number, { damage = [] as number[], generation = 1, cursor = null as number | null } = {}) => {
+    const rows = [...Reflect.get(terminal, 'ringRows').call(terminal, 4, new Set(damage), top, generation, true, cursor)].sort((a, b) => a - b);
+    Object.assign(terminal, { paintedTop: top, paintedGeneration: generation, paintedCursor: cursor === null ? undefined : top + cursor });
+    return rows;
+  };
+  assert.deepEqual(paint(10), [0, 1, 2, 3, 4], 'An empty ring draws the visible copy of every line');
+  assert.deepEqual(paint(12), [0, 1, 5, 6], 'Entering lines fill both copies');
+  assert.deepEqual(paint(13), [2, 7]);
+  assert.deepEqual(paint(15), [3, 4, 8, 9], 'Wrapping to the first half reuses copies drawn while moving');
+  assert.deepEqual(paint(15, { damage: [1], generation: 2 }), [0, 2], 'Output in place draws damaged lines and the preceding line once');
+  assert.deepEqual(paint(16, { generation: 3 }), [1, 2, 3, 4, 5], 'Moving with new output draws every visible line once');
+  assert.deepEqual(paint(16, { generation: 3, cursor: 2 }), [3], 'A new cursor line repaints its glyph colors');
+  assert.deepEqual(paint(17, { generation: 3, cursor: 2 }), [1, 3, 4, 6, 8, 9], 'The old and new cursor lines repaint both copies after a move');
+  assert.deepEqual(paint(17, { damage: [0, 1, 2, 3], generation: 3, cursor: 2 }), [2, 3, 4, 5, 6], 'A full repaint in place draws the visible copies once');
+  assert.deepEqual(paint(20, { generation: 3 }), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'Copies hidden during that repaint are drawn again after wrapping');
+});
+
+test('the background paints only the visible ring window from its top', () => {
+  const terminal = new Terminal({ cols: 40, rows: 4 });
+  Object.assign(terminal, { ringStart: 3 });
+  const frame = { rows: 4, cursor: { y: 5 }, viewportRows: Array.from({ length: 10 }, (_, y) => ({ y, text: String(y) })) };
+  const window = Reflect.get(terminal, 'windowFrame').call(terminal, frame);
+  assert.deepEqual(window.viewportRows.map((row: { y: number; text: string }) => [row.y, row.text]), [[0, '3'], [1, '4'], [2, '5'], [3, '6'], [4, '7']]);
+  assert.equal(window.cursor.y, 2);
+});

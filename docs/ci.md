@@ -160,6 +160,7 @@ The terminal scroll benchmark needs a current frontend build and debug backend a
 It reports native scroll calls, decoded rows, glyph runs, paint times and browser task time for slow scrolling, fast scrolling and scrolling during output.
 Use `BENCH_REPORT` to save each implementation's report and `BENCH_REPEATS` to change the default three samples per case.
 Set `BENCH_CPU_RATE=4` to repeat the comparison with Chromium's fourfold CPU throttling.
+Set `BENCH_GPU=1` to use hardware canvas and compositing, because headless Chromium otherwise copies software canvases on every frame.
 Compare reports from separate builds under the same machine load; these measurements do not measure battery drain.
 The architecture benchmark retains correctness, cold and warm latency, request-count checks and reversed-order confirmation of suspected regressions.
 Its default `0e0646c` reference is the historical TypeScript architecture, and `BENCH_BEFORE_MASTER` and `BENCH_BEFORE_CLIENT` can select other compatible TypeScript references from local Git history.
@@ -209,3 +210,23 @@ The table shows median Chromium task time and paint count for 120 frames from si
 Fast scrolling crosses at least one row in every frame, so it still repaints the full viewport each frame.
 Task time includes the benchmark's own scroll loop and excludes compositor and GPU process work.
 These measurements do not establish battery savings.
+
+### Text ring comparison, 2026-10-30
+
+The baseline is the compositor renderer at `72c2f38`, which drew every visible line again whenever scrolling crossed a row.
+The text ring keeps each line in a fixed slot of a two-window canvas and draws only lines that its slots do not hold.
+The table shows median Chromium task time with `BENCH_GPU=1` for 120 frames from nine runs on an Intel Iris Xe GPU.
+
+| Viewport | Workload | Baseline | Text ring | Baseline glyph runs | Text ring glyph runs |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Mobile | Slow scroll | 177 ms | 174 ms | 1,176 | 48 |
+| Mobile | Fast scroll | 516 ms | 357 ms | 23,520 | 1,416 |
+| Mobile | Scroll with output | 207 ms | 219 ms | 2,360 | 1,608 |
+| Desktop | Slow scroll | 204 ms | 211 ms | 1,224 | 48 |
+| Desktop | Fast scroll | 723 ms | 562 ms | 24,480 | 1,424 |
+| Desktop | Scroll with output | 253 ms | 306 ms | 2,456 | 1,672 |
+
+Slow scrolling and scrolling with output stayed within the run-to-run spread, which exceeded 100 ms in both builds.
+Software rendering added about 0.4 ms per frame for the larger text canvas, so compare canvas size changes with `BENCH_GPU=1`.
+The text canvas uses about 5 MB more memory at both measured viewport sizes.
+Fast scrolling still decodes every visible row in Gespenst's render reader after each native viewport move.

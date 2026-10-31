@@ -62,8 +62,12 @@ test('unchanged scroll targets preserve native revisions and cached buffer rows'
     for (let i = 0; i < 10; i++) terminal.setViewportY(10);
     assert.equal(terminal.getRevision(), revision);
     assert.equal(terminal.getBufferRow(20), row);
+    const generation = terminal.contentGeneration();
     terminal.setViewportY(11);
     assert.notEqual(terminal.getRevision(), revision);
+    assert.equal(terminal.contentGeneration(), generation, 'Viewport-only scrolling keeps painted content reusable');
+    terminal.write('changed');
+    assert.notEqual(terminal.contentGeneration(), generation);
     terminal.setViewportY(-1);
     const bottom = terminal.getRevision();
     terminal.setViewportY(-1);

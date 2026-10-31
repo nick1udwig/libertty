@@ -32,6 +32,7 @@ export class GhosttyTerminal {
   onWrite?: () => void;
   readonly semantics: TerminalSemantics;
   private revision = -1;
+  private generation = 0;
   private bufferRows = new Map<number, TerminalBufferRow>();
   private bufferTheme?: Readonly<TerminalTheme>;
   private colors?: RenderColors;
@@ -62,9 +63,12 @@ export class GhosttyTerminal {
       this.revision = state.revision;
       this.bufferTheme = this.core.theme;
       this.bufferRows.clear();
+      this.generation++;
     }
     return state;
   }
+  /** Changes with buffer content or theme, but not when only the viewport scrolls through this terminal. */
+  contentGeneration() { this.update(); return this.generation; }
   getRevision() { return this.core.bufferState().revision; }
   getScrollbackLength() { return this.core.bufferState().scrollbackRows; }
   getViewportY() {

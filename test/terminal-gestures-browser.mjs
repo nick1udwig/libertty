@@ -183,12 +183,12 @@ try {
   const pixels = await page.evaluate(async () => {
     const term = window.__testTerminal;
     term.clearSelection(); term.blur();
-    const canvases = [...document.querySelectorAll('#terminal canvas')], layer = canvases[0].parentElement;
+    const canvases = [...document.querySelectorAll('#terminal canvas')], screen = document.querySelector('#terminal .terminal-screen');
     const height = term.renderer.getMetrics().height;
-    // Read the pixels the clipped screen shows through the moved canvas layer.
+    // Read the pixels the clipped screen shows through each moved canvas.
     const visible = canvas => {
-      const row = canvas.height / (term.rows + 1), shift = Math.round(new DOMMatrixReadOnly(getComputedStyle(layer).transform).m42 * canvas.height / canvas.getBoundingClientRect().height);
-      return canvas.getContext('2d').getImageData(0, -shift, canvas.width, term.rows * row);
+      const box = canvas.getBoundingClientRect(), view = screen.getBoundingClientRect(), scale = canvas.height / box.height;
+      return canvas.getContext('2d').getImageData(0, Math.round((view.top - box.top) * scale), canvas.width, Math.round(view.height * scale));
     };
     const capture = async offset => {
       term.scrollToLine(offset);
@@ -202,7 +202,7 @@ try {
     const channel = (data, index) => index % 4 === 3 ? data[index] : data[index] * data[index - index % 4 + 3] / 255;
     for (let layer = 0; layer < canvases.length; layer++) {
       const { width, height: rows, data } = fractional[layer];
-      const deviceRow = Math.round(canvases[layer].height / (term.rows + 1));
+      const deviceRow = Math.round(height * canvases[layer].height / canvases[layer].getBoundingClientRect().height);
       const deviceShift = Math.round(shift * deviceRow / height);
       for (let y = 0; y < rows; y++) {
         const source = y < deviceShift ? upper[layer] : lower[layer];
@@ -223,6 +223,12 @@ try {
       const { data } = visible(canvas);
       return data.every((_, index) => Math.abs(channel(data, index) - channel(lower[layer].data, index)) <= 2);
     });
+    // Rows reused by shifting the canvas must match a fresh paint of every row.
+    for (const offset of [14, 11.5, 17, 16, 16.25, 13]) await capture(offset);
+    const walked = canvases.map(visible);
+    term.fullFrame = true; term.renderNow();
+    const repainted = canvases.map(visible);
+    const shiftMismatches = walked.reduce((sum, image, index) => sum + image.data.filter((_, i) => Math.abs(channel(image.data, i) - channel(repainted[index].data, i)) > 2).length, 0);
     term.scrollToLine(12.75);
     const previous = term.buffer.active.getLine(term.buffer.active.viewportY - 1).translateToString(true).slice(0, 7);
     const geometry = term.view.geometry;
@@ -233,8 +239,9 @@ try {
     const selected = term.getSelection().trim(), selectionOffset = term.getViewportY();
     term.clearSelection();
     term.scrollToBottom();
-    return { changed, mismatches, samples, restored, selected, previous, selectionOffset, wheelDelta: offset - wheel, expectedWheel: 3 / height };
+    return { changed, mismatches, samples, restored, shiftMismatches, selected, previous, selectionOffset, wheelDelta: offset - wheel, expectedWheel: 3 / height };
   });
+  assert.equal(pixels.shiftMismatches, 0, 'Shifted rows must match a full repaint after crossing rows in both directions');
   assert.ok(pixels.changed > 100, 'A partial row must visibly move terminal text');
   assert.equal(pixels.mismatches, 0, 'Every pixel, including the entering edge row, must follow the fractional offset: ' + JSON.stringify(pixels));
   assert.ok(pixels.restored, 'Returning to a whole row must clear all fractional paint');
