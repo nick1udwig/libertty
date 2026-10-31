@@ -34,6 +34,8 @@ export class TerminalRendering {
     this.scheduler.activity();
     if (paint) this.refresh();
   }
+  /** Paints a requested frame now, so an animation frame shows the change it made. */
+  flush() { this.scheduler.runNow(); }
   refresh() {
     clearTimeout(this.blink);
     if (this.disposed || !this.visible || document.hidden) { this.scheduler.cancel(); return; }

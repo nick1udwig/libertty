@@ -281,6 +281,21 @@ try {
   });
   await delay(25);
   assert.equal(await focused(), false, 'Delayed automatic focus after release must stay blocked');
+  // A timed fling whose last event slows down must still glide about as far as a native scroller.
+  await touch('touchStart', start); await touch('touchCancel');
+  await page.evaluate(() => window.__testTerminal.scrollToBottom());
+  // Explicit timestamps keep the 16 ms touch spacing independent of protocol round trips.
+  const began = Date.now() / 1000, timed = (type, point, step) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: point ? [{ ...point, id: 1 }] : [], timestamp: began + step * .016 });
+  await timed('touchStart', start, 0);
+  for (let step = 1; step <= 5; step++) await timed('touchMove', { x: start.x, y: start.y + step * 30 }, step);
+  await timed('touchMove', { x: start.x, y: start.y + 156 }, 6); await timed('touchEnd', undefined, 6.5);
+  const flung = await page.evaluate(async () => {
+    const term = window.__testTerminal, released = term.getViewportY();
+    let previous = -1, settled = released;
+    for (let wait = 0; wait < 60 && settled !== previous; wait++) { previous = settled; await new Promise(resolve => setTimeout(resolve, 100)); settled = term.getViewportY(); }
+    return (settled - released) * term.renderer.getMetrics().height;
+  });
+  assert.ok(flung > 500, `A fast fling must glide well past the old 220 ms decay distance: ${flung}px`);
   // Some browsers coalesce movement: the release alone must disqualify a tap.
   await page.locator('#terminal .gespenst__background').evaluate((el, point) => {
     const options = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, pointerId: 99, clientX: point.x, clientY: point.y };

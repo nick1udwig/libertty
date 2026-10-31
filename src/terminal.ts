@@ -619,7 +619,7 @@ const gestures = new TerminalGestures(term, {
     const column = Math.floor((x - bounds.left) * term.cols / bounds.width), row = Math.floor((y - bounds.top) * term.rows / bounds.height);
     const cell = projection?.nativeCell(column, row);
     if (cell && send({ type: 'terminal-click', ...cell, cols: term.cols, rows: term.rows })) state.inputRevision++;
-  }, copy: copyTerminalText,
+  }, copy: copyTerminalText, render: () => rendering.flush(),
 });
 
 async function socketURL(signal: AbortSignal) {

@@ -6,6 +6,7 @@ import { isPreservingScrollback } from './terminal-viewport.ts';
 import { terminalContact } from './terminal-contact.ts';
 import { TerminalSelectionHistory } from './terminal-selection-history.ts';
 import type { Notify } from './notice-model.ts';
+import { momentumDecay, recordScrollSample, releaseVelocity, type ScrollSample } from './scroll-momentum.ts';
 
 interface Point { row: number; col: number }
 interface Host {
@@ -14,6 +15,8 @@ interface Host {
   link?(col: number, row: number): string | undefined;
   pan?: { enabled(): boolean; move(pixels: number): void };
   scroll?: { enabled(): boolean; move(lines: number, x: number, y: number): void };
+  /** Paints pending terminal changes now, so an animation frame shows its own scroll. */
+  render?(): void;
 }
 
 /** Keep a tap, a scroll and a text selection separate from keyboard focus. */
@@ -24,7 +27,7 @@ export class TerminalGestures {
   private handles = [document.createElement('button'), document.createElement('button')];
   private start?: Point;
   private end?: Point;
-  private press?: { x: number; y: number; lastX: number; lastY: number; started: number; at: number; velocity: number; mode: 'pending' | 'scroll' | 'select' | 'pan' };
+  private press?: { x: number; y: number; lastX: number; lastY: number; started: number; samples: ScrollSample[]; mode: 'pending' | 'scroll' | 'select' | 'pan' };
   private hold?: ReturnType<typeof setTimeout>;
   private frame = 0;
   private dragHandle?: number;
@@ -91,9 +94,8 @@ export class TerminalGestures {
       else if (press.mode === 'select') this.extendSelection(host, x, y);
       else {
         const delta = y - press.lastY;
-        press.velocity = delta / Math.max(8, at - press.at);
+        recordScrollSample(press.samples, y, at);
         this.scroll(host, -delta / this.linePixels(), x, y);
-        press.at = at;
       }
       press.lastX = x; press.lastY = y;
     };
@@ -106,7 +108,7 @@ export class TerminalGestures {
         }
         host.focus.suppress(); this.cancelCopy(); this.lastTouch = performance.now();
         this.cancelMomentum(); this.clear(); this.scrollFraction = 0; this.scrollLinePixels = undefined; clearTimeout(this.hold);
-        this.press = { x, y, lastX: x, lastY: y, started: at, at, velocity: 0, mode: 'pending' };
+        this.press = { x, y, lastX: x, lastY: y, started: at, samples: [{ y, at }], mode: 'pending' };
         this.hold = setTimeout(() => {
           if (!this.press || this.press.mode !== 'pending') return;
           this.press.mode = 'select'; this.selectWord(this.point(x, y));
@@ -134,7 +136,7 @@ export class TerminalGestures {
           else { host.tap(press.x, press.y); host.focus.focus(); }
         }
         else if (press.mode === 'select') void this.copy(host);
-        else if (press.mode === 'scroll' && at - press.at < 100) this.momentum(host, press.velocity, x, y);
+        else if (press.mode === 'scroll') this.momentum(host, releaseVelocity(press.samples, at), x, y);
       },
       cancel: () => { this.lastTouch = performance.now(); this.cancelGesture(); },
     });
@@ -359,8 +361,10 @@ export class TerminalGestures {
     if (Math.abs(velocity) < .08) return;
     let last = performance.now();
     const step = (at: number) => {
-      const dt = Math.min(32, at - last); last = at;
-      const moved = this.scroll(host, -velocity * dt / this.linePixels(), x, y); velocity *= Math.exp(-dt / 220);
+      // A frame timestamp can precede the release that started momentum.
+      const dt = Math.max(0, Math.min(32, at - last)); last = at;
+      const moved = this.scroll(host, -velocity * dt / this.linePixels(), x, y); velocity *= Math.exp(-dt / momentumDecay);
+      host.render?.();
       if (Math.abs(velocity) > .03 && moved) this.frame = requestAnimationFrame(step);
       else this.frame = 0;
     };

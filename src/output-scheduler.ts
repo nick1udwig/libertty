@@ -37,6 +37,8 @@ export class OutputScheduler {
     const frame = () => { this.timer = undefined; if (this.visible()) this.frame = this.clock.frame(() => this.run()); else this.cancel(); };
     if (wait) this.timer = this.clock.timer(frame, wait); else frame();
   }
+  /** Runs a pending flush now instead of in a later frame. */
+  runNow() { if (this.pending) { this.cancel(); this.run(); } }
   private run() {
     this.frame = this.timer = undefined; this.pending = false;
     if (!this.visible()) return;

@@ -30,6 +30,7 @@ export const quickTests = [
   'predicted-echo.test.ts',
   'queue.test.ts',
   'reconnecting-socket.test.ts',
+  'scroll-momentum.test.ts',
   'service-worker.test.ts',
   'shell-words.test.ts',
   'shortcuts.test.ts',

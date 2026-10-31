@@ -18,6 +18,8 @@ The tab header supplies new-tab and back controls.
 On touch screens, hold a word and drag to select text, or drag either selection handle.
 Local terminal history scrolls by pixels with touch, trackpad, mouse wheel and scrollbar input.
 Text can stop between rows, and selection and links follow the visible text.
+A released swipe glides with deceleration close to iOS, using finger speed fitted over the last 100 ms of movement.
+A finger that rests for 40 ms before lifting does not start a glide.
 Hold the dragged endpoint near the top or bottom edge to extend the selection through terminal history.
 Release to copy the selected text.
 Agent TUIs scroll through their application history one request at a time and retain rows only when unique overlapping text confirms their position.
