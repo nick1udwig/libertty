@@ -39,7 +39,8 @@ try {
       term.scrollToLine(20);
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       const core = term.wasmTerm.core, painter = term.backend.painter;
-      const counters = window.__scrollCounters = { coreScrolls: 0, bufferReads: 0, decodedRows: 0, glyphRuns: 0, paints: [] };
+      const counters = window.__scrollCounters = { coreScrolls: 0, bufferReads: 0, decodedRows: 0, renderedRows: 0, glyphRuns: 0, paints: [] };
+      core.on('render', frame => { counters.renderedRows += frame.changedRows.length; });
       const scroll = core.scrollLines.bind(core), read = core.readBuffer.bind(core);
       core.scrollLines = (...args) => { counters.coreScrolls++; return scroll(...args); };
       core.readBuffer = (...args) => { const result = read(...args); counters.bufferReads++; counters.decodedRows += result.rows.length; return result; };
@@ -55,7 +56,7 @@ try {
       window.__scrollRun = async (kind, frames) => {
         term.scrollToLine(20);
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        Object.assign(counters, { coreScrolls: 0, bufferReads: 0, decodedRows: 0, glyphRuns: 0, paints: [] });
+        Object.assign(counters, { coreScrolls: 0, bufferReads: 0, decodedRows: 0, renderedRows: 0, glyphRuns: 0, paints: [] });
         const intervals = [];
         let previous;
         for (let i = 1; i <= frames; i++) {

@@ -300,3 +300,35 @@ test('the background paints only the visible ring window from its top', () => {
   assert.deepEqual(window.viewportRows.map((row: { y: number; text: string }) => [row.y, row.text]), [[0, '3'], [1, '4'], [2, '5'], [3, '6'], [4, '7']]);
   assert.equal(window.cursor.y, 2);
 });
+
+test('viewport-only moves build frames from cached history rows instead of Ghostty rendering', () => {
+  const terminal = new Terminal({ cols: 40, rows: 3 });
+  const state = { generation: 1, cursorY: 2 }, active = { viewportY: 10 };
+  Reflect.set(terminal, 'buffer', { active });
+  Reflect.set(terminal, 'wasmTerm', {
+    cols: 40, rows: 3, contentGeneration: () => state.generation, getScrollbackLength: () => 20, getCursor: () => ({ y: state.cursorY }),
+    getBufferRow: (index: number) => ({ index, text: `line ${index}`, cells: [], wrapped: false, wrapContinuation: false, selection: null }),
+  });
+  Reflect.set(terminal, 'backend', { terminal: {} });
+  const moved = () => Reflect.get(terminal, 'movedFrame').call(terminal);
+  assert.equal(moved(), undefined, 'The first frame comes from Ghostty');
+  Reflect.get(terminal, 'recordView').call(terminal, { cols: 40, rows: 3, cursor: { y: 1, visible: true }, colors: { foreground: 'colors' } });
+  assert.equal(moved(), undefined, 'An unmoved viewport keeps Ghostty damage');
+  active.viewportY = 9;
+  const frame = moved();
+  assert.deepEqual(frame.changedRows.map((row: { y: number; text: string }) => [row.y, row.text]), [[0, 'line 9'], [1, 'line 10'], [2, 'line 11']]);
+  assert.deepEqual([frame.dirty, frame.cursor.y, frame.colors], ['full', 2, { foreground: 'colors' }]);
+  active.viewportY = 7;
+  assert.equal(moved().cursor.y, null, 'A cursor that leaves the viewport is hidden');
+  active.viewportY = 20;
+  assert.equal(moved(), undefined, 'A cursor entering from outside the last frame needs Ghostty');
+  active.viewportY = 5;
+  state.generation = 2;
+  assert.equal(moved(), undefined, 'Changed content needs Ghostty');
+  state.generation = 1;
+  Reflect.set(terminal, 'selectionActive', true);
+  assert.equal(moved(), undefined, 'History rows carry no selection');
+  Reflect.set(terminal, 'selectionActive', false);
+  Reflect.set(terminal, 'backend', { terminal: { themeAlpha: new Map([['1:2:3', .5]]) } });
+  assert.equal(moved(), undefined, 'History rows carry no translucent theme colors');
+});

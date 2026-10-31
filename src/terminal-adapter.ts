@@ -70,6 +70,8 @@ export class Terminal {
   private paintedCursor?: number;
   private paintedTop?: number;
   private selectionChanged = false;
+  private selectionActive = false;
+  private nativeView?: { top: number; generation: number; cols: number; rows: number; cursor: RenderFrame['cursor']; colors: RenderFrame['colors'] };
   private slotLines: number[] = [];
   private slotStamps: number[] = [];
   private stamp = 0;
@@ -124,6 +126,9 @@ export class Terminal {
     }, { capture: true });
     clearInterval(backend.painter.blinkTimer);
     backend.pipeline.host.schedule = callback => this.scheduleFrame(callback);
+    const renderNative = backend.terminal.render.bind(backend.terminal);
+    // Viewport-only moves reuse cached history rows instead of decoding every visible row again.
+    backend.terminal.render = () => this.movedFrame() ?? this.recordView(renderNative());
     const paint = backend.painter.render.bind(backend.painter);
     this.paintFrame = frame => paint(this.transformFrame(frame));
     backend.painter.render = frame => {
@@ -194,7 +199,10 @@ export class Terminal {
     view.focus = () => this.requestAutomaticFocus();
     view.on('input', event => this.emit('data', new TextDecoder().decode(event.data)));
     view.on('resize', () => this.emit('resize', { cols: this.cols, rows: this.rows }));
-    view.on('selectionChange', () => { this.selectionChanged = true; this.emit('selection'); });
+    view.on('selectionChange', () => {
+      this.selectionChanged = true; this.selectionActive = !!this.wasmTerm?.core.getSelection();
+      this.emit('selection');
+    });
     view.on('scroll', () => this.notifyScroll());
     view.on('viewportChange', () => {
       const cursor = this.wasmTerm!.getCursor(), key = `${cursor.x},${cursor.y}`;
@@ -268,6 +276,31 @@ export class Terminal {
     return draw;
   }
   private clearRing() { this.slotLines = []; this.slotStamps = []; this.paintedTop = undefined; this.ringStart = 0; }
+  private recordView(frame: RenderFrame) {
+    this.nativeView = { top: this.buffer.active.viewportY, generation: this.wasmTerm!.contentGeneration(), cols: frame.cols, rows: frame.rows, cursor: frame.cursor, colors: frame.colors };
+    return frame;
+  }
+  /**
+   * Builds the frame for a viewport-only move from cached history rows, or returns nothing when Ghostty must render.
+   * History rows carry no selection or translucent theme colors, so either one needs Ghostty's frame.
+   */
+  private movedFrame(): RenderFrame | undefined {
+    const view = this.nativeView, term = this.wasmTerm!, top = this.buffer.active.viewportY, shift = top - (view?.top ?? top);
+    const translucent = (this.backend!.terminal as unknown as { themeAlpha?: ReadonlyMap<string, number> }).themeAlpha?.size;
+    if (!view || !shift || this.selectionActive || this.selectionChanged || translucent || view.generation !== term.contentGeneration() || view.cols !== term.cols || view.rows !== term.rows) return;
+    let y = view.cursor.y === null ? null : view.cursor.y - shift;
+    if (y !== null && (y < 0 || y >= view.rows)) y = null;
+    const line = term.getScrollbackLength() + term.getCursor().y;
+    // Only Ghostty knows the style of a cursor that enters from outside the last frame.
+    if (y === null && view.cursor.y === null && line >= top && line < top + view.rows) return;
+    const changedRows = Array.from({ length: view.rows }, (_, row) => {
+      const history = term.getBufferRow(top + row);
+      return history ? { ...history, y: row } : { y: row, text: '', cells: [], wrapped: false, wrapContinuation: false, selection: null };
+    });
+    const cursor = { ...view.cursor, y };
+    this.nativeView = { ...view, top, cursor };
+    return { cols: view.cols, rows: view.rows, dirty: 'full', cursor, colors: view.colors, changedRows };
+  }
   /** Background rows in the visible window, numbered from the window top. */
   private windowFrame(frame: ViewportSnapshot): ViewportSnapshot {
     const start = this.ringStart, size = frame.rows + 1;

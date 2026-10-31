@@ -157,7 +157,7 @@ npm run bench:terminal-scroll
 
 [scripts/check-performance.mjs](../scripts/check-performance.mjs) builds the optimized native wire host, measures JSON and compression under fast and mobile profiles, then enforces the existing transport latency budgets.
 The terminal scroll benchmark needs a current frontend build and debug backend and measures the real renderer at mobile and desktop viewport sizes.
-It reports native scroll calls, decoded rows, glyph runs, paint times and browser task time for slow scrolling, fast scrolling and scrolling during output.
+It reports native scroll calls, history and Ghostty frame rows decoded, glyph runs, paint times and browser task time for slow scrolling, fast scrolling and scrolling during output.
 Use `BENCH_REPORT` to save each implementation's report and `BENCH_REPEATS` to change the default three samples per case.
 Set `BENCH_CPU_RATE=4` to repeat the comparison with Chromium's fourfold CPU throttling.
 Set `BENCH_GPU=1` to use hardware canvas and compositing, because headless Chromium otherwise copies software canvases on every frame.
@@ -230,3 +230,17 @@ Slow scrolling and scrolling with output stayed within the run-to-run spread, wh
 Software rendering added about 0.4 ms per frame for the larger text canvas, so compare canvas size changes with `BENCH_GPU=1`.
 The text canvas uses about 5 MB more memory at both measured viewport sizes.
 Fast scrolling still decodes every visible row in Gespenst's render reader after each native viewport move.
+
+### History frame comparison, 2026-10-31
+
+The baseline is the text ring with fling physics at `137a077`, where Ghostty decoded every visible row after each viewport move.
+The history frame path builds viewport-only frames from libertty's cached history rows.
+The table shows median results with `BENCH_GPU=1` from six runs, and the throttled columns show task time per frame with `BENCH_CPU_RATE=4`.
+
+| Viewport | Workload | Baseline | History frames | Ghostty rows | Throttled baseline | Throttled history frames |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Mobile | Fast scroll | 382 ms | 339 ms | 5,760 → 0 | 8.5 ms | 7.0 ms |
+| Desktop | Fast scroll | 577 ms | 349 ms | 6,000 → 0 | 15.7 ms | 9.1 ms |
+
+Slow scrolling and scrolling with output stayed within run-to-run spread.
+History rows load in 64-row pages, so fast scrolling decodes about 1.5 history rows per visible row crossed.
