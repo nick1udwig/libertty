@@ -43,6 +43,7 @@ const embedded = params.get('embedded') === '1' && parent !== window;
 const baseURL = new URL(params.get('backend') || document.baseURI);
 const session = params.get('session') || 'default';
 const herdrTerminal = params.get('herdrTerminal');
+const herdrCore = params.get('herdrCore') === '1';
 let herdrReady = false;
 let herdrParked = false;
 // A parked Herdr pane that loses its connection waits until it is shown, so the visible pane reconnects alone.
@@ -59,7 +60,7 @@ const keepingGeometry = () => !document.hidden || !transport.backgroundExpired;
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
 function herdrEndpoint(name: string) {
   const url = new URL(name, baseURL);
-  for (const key of ['herdrSession', 'herdrSource']) if (params.get(key)) url.searchParams.set(key, params.get(key)!);
+  for (const key of ['herdrSession', 'herdrSource', 'herdrCore']) if (params.get(key)) url.searchParams.set(key, params.get(key)!);
   if (herdrTerminal) url.searchParams.set('terminalId', herdrTerminal);
   return url;
 }
@@ -195,7 +196,7 @@ const focus = new TerminalFocus(term);
 const fit = new FitAddon(); term.loadAddon(fit);
 const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
 let deferredScreen: string | undefined;
-const projection = herdrTerminal ? new TerminalProjection(term, term.ghostty!) : undefined;
+const projection = herdrTerminal && !herdrCore ? new TerminalProjection(term, term.ghostty!) : undefined;
 const terminalViewport = $('terminal-viewport');
 const herdrLayout = new HerdrLayout(terminalViewport);
 const echo = new TerminalEcho(term, $('terminal'));
@@ -206,7 +207,7 @@ const presentation = new TerminalPresentation(terminalViewport, () => {
 let replayTarget: number | undefined, replayState = false;
 const transcript = new TerminalTranscript();
 const cache = new TerminalCache();
-const cacheKey = terminalCacheKey(baseURL.href, herdrTerminal ? params.get('herdrSession') || '' : session, herdrTerminal || '', params.get('herdrSource') || '', params.get('herdrPane') || '');
+const cacheKey = terminalCacheKey(baseURL.href, herdrTerminal ? (herdrCore ? 'core:' : '') + (params.get('herdrSession') || '') : session, herdrTerminal || '', params.get('herdrSource') || '', params.get('herdrPane') || '');
 let cachedNative: NativeTerminalSnapshot | undefined;
 let cachedUpdated = 0, cachedStream = '', clearedScreen: string | undefined, streamStarted = false;
 // Retained output painted through the terminal itself until live output replaces it at the same distance from the bottom.
@@ -350,19 +351,20 @@ function synchronizeInput() {
   scheduleBackfill();
 }
 function revealReplay() {
-  if (!herdrTerminal && replayState && handoff === undefined && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) {
+  if ((!herdrTerminal || herdrCore) && replayState && handoff === undefined && transport.socket?.readyState === WebSocket.OPEN && !queue.length && after >= (replayTarget ?? after)) {
     if (handoffPosition) { term.scrollToLine(handoffPosition); handoffPosition = 0; }
     presentation.reveal(); synchronizeInput();
+    if (herdrCore) { notifyHerdrSizing(); scheduleHerdrRendered(); }
   }
 }
 const mobileViewport = matchMedia('(pointer: coarse) and (max-width: 1024px)');
-function mobileTerminal() { return !!herdrTerminal && mobileViewport.matches; }
+function mobileTerminal() { return !!herdrTerminal && !herdrCore && mobileViewport.matches; }
 function refreshHerdrFrame() {
   if (herdrReady && transport.socket?.readyState === WebSocket.OPEN && projection?.requestFrame()) send({ type: 'herdr-frame-request' });
 }
 // Resizes and screen updates check the layout often, so it is read again only when settings change.
 let fullWidthLayout = saved<string>('herdrLayout', '') === 'full-width';
-function fullWidth() { return !!herdrTerminal && !mobileTerminal() && fullWidthLayout; }
+function fullWidth() { return !!herdrTerminal && !herdrCore && !mobileTerminal() && fullWidthLayout; }
 // Keep output outside UI state. Ghostty parses synchronously; its callback is an rAF.
 function drain() {
   frameQueued = false;
@@ -406,7 +408,7 @@ function coverResize() {
 function releaseResizeCover() { clearTimeout(resizeCoverTimer); resizeCover.release(); }
 function sizeTerminal() {
   if (herdrParked) {
-    if (!mobileTerminal() && herdrReady) send({ type:'resize', cols:term.cols, rows:term.rows, mobile:false });
+    if (!herdrCore && !mobileTerminal() && herdrReady) send({ type:'resize', cols:term.cols, rows:term.rows, mobile:false });
     return;
   }
   try {
@@ -511,7 +513,7 @@ const dictation = new DictationControl({ api, send, state: () => state, context:
 function showReading(request: { path: string } | { capture: string; name: string; exitCode: number }) {
   if (embedded) { notify('reading-open', request); return; }
   const workspace = new URL('.', document.baseURI);
-  sessionStorage.setItem('libertty.pendingReading:' + workspace.pathname, JSON.stringify({ ...request, session, backendUrl: baseURL.href, ...(herdrTerminal ? { herdrTerminal, herdrSession: params.get('herdrSession') || '', herdrSource: params.get('herdrSource') || '' } : {}) }));
+  sessionStorage.setItem('libertty.pendingReading:' + workspace.pathname, JSON.stringify({ ...request, session, backendUrl: baseURL.href, ...(herdrTerminal ? { herdrTerminal, herdrCore, herdrSession: params.get('herdrSession') || '', herdrSource: params.get('herdrSource') || '' } : {}) }));
   location.assign(workspace.href);
 }
 term.onData(rawInput);
@@ -1008,11 +1010,11 @@ if (embedded) {
         const cols = term.cols, rows = term.rows; sizeTerminal();
         const preserve = event.data.preserve === true && cols === term.cols && rows === term.rows;
         herdrLayout.rendered = preserve && mobileTerminal(); layout({ pending: mobileTerminal(), preserve });
-        send({ type:'herdr-frame-request' }); notifyCachedRendered();
+        send({ type:'herdr-frame-request' }); notifyCachedRendered(); if (herdrCore) revealReplay();
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); flushTranscript(); releaseResizeCover(); gestures.cancelGesture(); hold(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal) layout({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length || handoff !== undefined) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); notifyCachedRendered(); } }
+    if (event.data?.type === 'tab-visibility') { tabVisible = event.data.visible; if (!tabVisible) { cancelBackfill(); flushTranscript(); releaseResizeCover(); gestures.cancelGesture(); hold(); discardHerdrFrames(); } else { rendering.activity(); frameScheduler.activity(); } rendering.setVisible(tabVisible && !herdrParked); if (!tabVisible && herdrTerminal && !herdrCore) layout({ pending: true, preserve: false, barrierReady: herdrLayout.barrierReady }); dictation.visibility(tabVisible); cancelAnimationFrame(outputFrame); frameQueued = false; if (queue.length || handoff !== undefined) scheduleDrain(); if (tabVisible) { sizeTerminal(); shortcutState = ''; publishShortcuts(); revealReplay(); notifyCachedRendered(); } }
     if (event.data?.type === 'tab-visibility' && herdrTerminal) {
       if (!tabVisible) transport.suspend();
       else transport.foreground();

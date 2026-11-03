@@ -61,23 +61,24 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       },
       async close(tab) { await s.closeSession(tab); return true; },
     },
-    { version: BUILTIN_VERSION, id: 'herdr', name: 'Herdr', connectLabel: 'Connect Herdr', icon: 'H', iconHTML: herdrIcon, panelPrefix: 'herdr-', className: 'herdr-tab', available: () => true,
-      connect: host => s.connect(host, 'herdr'),
+    ...['herdr', 'herdr-core'].map((id): TabPlugin => ({ version: BUILTIN_VERSION, id, name: id === 'herdr-core' ? 'Herdr Core' : 'Herdr', connectLabel: id === 'herdr-core' ? 'Connect Herdr Core' : 'Connect Herdr', icon: 'H', iconHTML: herdrIcon, panelPrefix: 'herdr-', className: 'herdr-tab', available: host => id === 'herdr' || host.kind !== 'herdr',
+      connect: host => s.connect(host, id),
       async mount(tab) {
         const backend = s.backend(tab);
         const { HerdrView } = await import('./herdr-view.ts');
         if (!s.active(tab)) throw new Error('This tab has closed.');
         const session = herdrSession(tab.herdrSession), source = tab.herdrSource, sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
-        const connection = backend.url + '#' + (source ? sourceHost || tab.hostId || source : '') + '#' + session;
-        const view = new HerdrView({ url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'libertty.herdr.' + connection,
+        const core = id === 'herdr-core';
+        const connection = (core ? 'core:' : '') + backend.url + '#' + (source ? sourceHost || tab.hostId || source : '') + '#' + session;
+        const view = new HerdrView({ core, url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'libertty.herdr.' + connection,
           reading: (terminalId, request) => {
-            const source = { ...tab, readHerdrTerminal: terminalId };
+            const source = { ...tab, herdrCore: core, readHerdrTerminal: terminalId };
             if ('path' in request) s.openReading(source, request.path);
             else s.openReadingCapture(source, request.capture, request.name, request.exitCode);
           },
           notificationDevice: () => s.notificationDevice(tab.backendId), toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
           api: async <T>(name: string, data?: unknown, signal?: AbortSignal) => {
-            try { return await s.api<T>(backend, name + (name.includes('?') ? '&' : '?') + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }
+            try { return await s.api<T>(backend, name + (name.includes('?') ? '&' : '?') + new URLSearchParams({ ...(core ? { herdrCore: '1' } : {}), herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }
             catch (error: any) { if (!signal?.aborted && error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
           },
           changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice, fail: s.fail, state: (key, state) => s.tabState(tab, key, state) });
@@ -87,7 +88,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
           dispose() { view.dispose(); s.herdr(tab); } };
       },
       async close(tab) { await s.unwatch(tab); if (tab.ownsSession) await s.closeSession(tab); return true; },
-    },
+    })),
     readingPlugin(s),
   ];
 }

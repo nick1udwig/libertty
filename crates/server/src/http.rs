@@ -957,6 +957,7 @@ async fn herdr_websocket(
         || ticket.until <= Instant::now()
         || ticket.session != session_name
         || ticket.source != source
+        || ticket.target.core != query.get("herdrCore").is_some_and(|value| value == "1")
         || ticket.terminal != terminal
         || !app.owners.lock().unwrap().has(&ticket.owner)
         || (!source.is_empty()
@@ -1020,6 +1021,26 @@ async fn herdr_socket_session(
         let Some(source) = source else { return };
         Some(source)
     };
+    let recording_scope = json!([
+        ticket.owner,
+        ticket.source,
+        ticket.session,
+        ticket.terminal,
+        ticket.target.path().ok()
+    ])
+    .to_string();
+    if ticket.target.core && !ticket.terminal.is_empty() {
+        crate::herdr_core::terminal(
+            socket,
+            &ticket.target,
+            &ticket.terminal,
+            ticket.size,
+            &recording_scope,
+            cancel,
+        )
+        .await;
+        return;
+    }
     let (send, output, slow) = crate::viewer_queue::channel();
     let notification_target = ticket.target.clone();
     let view = if ticket.terminal.is_empty() {
@@ -1066,14 +1087,6 @@ async fn herdr_socket_session(
         } else {
             None
         };
-        let recording_scope = json!([
-            ticket.owner,
-            ticket.source,
-            ticket.session,
-            ticket.terminal,
-            ticket.target.path().ok()
-        ])
-        .to_string();
         match herdr_view::View::open(
             ticket.target,
             agent,

@@ -77,7 +77,7 @@ try {
   page.on('request', request => { if (/herdr-view|api\/herdr/.test(request.url())) network.push('request ' + request.url()); });
   await context.route(/\/assets\/terminal-[A-Za-z0-9_-]{8}\.js$/, async route => {
     const response = await route.fetch(), original = await response.text();
-    const body = original.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__testTerminal=new $1({fontSize:').replace(/([\w$]+)=([\w$]+)\?new ([\w$]+)\(([\w$]+),([\w$]+\.ghostty)\):void 0/, '$1=$2?(window.__testProjection=new $3($4,$5)):void 0');
+    const body = original.replace(/new ([\w$]+)\(\{fontSize:/, 'window.__testTerminal=new $1({fontSize:').replace(/new ([\w$]+)\(([\w$]+),([\w$]+\.ghostty)\)/, '(window.__testProjection=new $1($2,$3))');
     assert.notEqual(body, original); assert.ok(body.includes('window.__testProjection')); await route.fulfill({ response, body });
   });
   await installWireObserver(context);

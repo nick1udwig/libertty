@@ -273,3 +273,11 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+herdr-client-lib
+================
+Version: 0.1.0 at 60a1bed82b92e4bbc537b7cffef771ed1912e54f
+Component: native Herdr Core backend adapter dependency
+License: Apache License 2.0
+Full license: HERDR-CLIENT-LIB-LICENSE.txt
+Upstream notices: HERDR-CLIENT-LIB-NOTICES.txt

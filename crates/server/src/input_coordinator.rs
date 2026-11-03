@@ -68,7 +68,7 @@ pub(crate) fn repair<T: RepairTarget>(
     });
 }
 
-async fn prepare<'a>(
+pub(crate) async fn prepare<'a>(
     text: &str,
     intent: &alternatives::Intent,
     cancel: &CancellationToken,

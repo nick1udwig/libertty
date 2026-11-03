@@ -36,6 +36,8 @@ pub struct Capture {
 }
 #[derive(Deserialize)]
 pub struct HerdrConnect {
+    #[serde(default)]
+    pub core: bool,
     pub source: Option<String>,
     pub session: Option<String>,
 }

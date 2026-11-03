@@ -40,7 +40,7 @@ try {
   const cookieOwner = await page.evaluate(async () => (await (await fetch(new URL('api/connect', document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"noSession":true}' })).json()).accessToken);
   bearer = cookieOwner;
   await hosts(); await page.getByRole('button', { name: /^Terminals for This machine / }).click();
-  assert.deepEqual(await page.locator('#host-terminal-menu button').allTextContents(), ['Connect new terminal', 'Connect SFTP / Files', 'Connect Herdr', 'This machine', 'Edit host']);
+  assert.deepEqual(await page.locator('#host-terminal-menu button').allTextContents(), ['Connect new terminal', 'Connect SFTP / Files', 'Connect Herdr', 'Connect Herdr Core', 'This machine', 'Edit host']);
   await page.getByRole('menuitem', { name: 'Connect SFTP / Files', exact: true }).click();
   await page.locator('.file-browser').waitFor();
   const filesTab = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'files'));

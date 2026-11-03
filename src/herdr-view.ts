@@ -26,7 +26,7 @@ const icons = {
 };
 
 interface Host {
-  url: string; session: string; source?: string; key: string;
+  url: string; session: string; source?: string; core?: boolean; key: string;
   token(): string | undefined; authenticate(): Promise<void>;
   api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
@@ -137,7 +137,7 @@ export class HerdrView {
     this.dropIndicator.append(this.dropLabel); document.body.append(this.dropIndicator);
     const viewed = () => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     this.frames = new HerdrFrames(this.screen, {
-      url: host.url, session: host.session, source: host.source,
+      core: host.core, url: host.url, session: host.session, source: host.source,
       token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), fail: error => host.fail(error), state: (key, state) => host.state(key, state), reading: (terminalId, request) => host.reading(terminalId, request),
       visible: () => this.visible, held: () => this.handoffHeld, agentName: terminalId => this.terminals.find(agent => agent.terminalId === terminalId)?.name,
       painted: () => { viewed(); this.host.ready?.(); },
@@ -289,7 +289,7 @@ export class HerdrView {
   get terminalFrame() { return this.frames.frame; }
   /** Cached metadata mounts an unauthorized preview; the live snapshot verifies the pane before it connects. */
   private mountTerminal(force = false) { if (!this.disposed) this.frames.mount(this.terminals, this.selected, force, this.liveSnapshot); }
-  private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
+  private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.core) url.searchParams.set('herdrCore', '1'); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
   private connect() { return this.transport.connect(); }
   private status(message = '', kind: NoticeKind = 'progress') {
     if (message === this.statusText) return;

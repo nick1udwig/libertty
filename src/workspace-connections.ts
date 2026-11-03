@@ -1,3 +1,4 @@
+import { isHerdrPlugin } from './plugins.ts';
 import { BrowserVault } from './browser-vault.ts';
 import {
   type BackendProfile,
@@ -288,15 +289,19 @@ export function createWorkspaceConnections(options: Options) {
     pluginId: string,
     pkg?: PluginPackage,
   ): Promise<void> {
-    if ((pluginId !== 'herdr' && !pkg) || host.kind === 'herdr')
+    if ((!isHerdrPlugin(pluginId) && !pkg) || host.kind === 'herdr')
       return openHost(host, true, { pluginId });
     pendingConnection = { host, request: { pluginId, pluginVersion: pkg?.manifest.version } };
-    $('plugin-connect-title').textContent = pkg ? pkg.manifest.connectLabel : 'Connect Herdr';
+    $('plugin-connect-title').textContent = pkg
+      ? pkg.manifest.connectLabel
+      : pluginId === 'herdr-core'
+        ? 'Connect Herdr Core'
+        : 'Connect Herdr';
     $('plugin-connect-host').textContent = host.name;
     $('plugin-read-fields').hidden = !pkg;
     input('plugin-read-path').required = !!pkg;
     input('plugin-read-path').value = '';
-    $('plugin-herdr-fields').hidden = pluginId !== 'herdr';
+    $('plugin-herdr-fields').hidden = !isHerdrPlugin(pluginId);
     input('plugin-herdr-session').value = host.herdrSession || '';
     $('plugin-connect-error').textContent = '';
     dialog('plugin-connect-dialog').showModal();
@@ -307,7 +312,7 @@ export function createWorkspaceConnections(options: Options) {
     if (!pendingConnection) return;
     const { host, request } = pendingConnection;
     try {
-      if (request.pluginId === 'herdr')
+      if (isHerdrPlugin(request.pluginId))
         request.herdrSession = herdrSession(input('plugin-herdr-session').value);
       else {
         const path = input('plugin-read-path').value.trim();
@@ -332,7 +337,7 @@ export function createWorkspaceConnections(options: Options) {
           open.find((tab) => tab.id === workspace.active) ||
           open.sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))[0];
       if (existing) {
-        if (request.pluginId === 'herdr') await resumeHerdr(existing);
+        if (isHerdrPlugin(request.pluginId)) await resumeHerdr(existing);
         else activate(existing.id);
         return;
       }
@@ -360,13 +365,13 @@ export function createWorkspaceConnections(options: Options) {
       return;
     }
     try {
-      const target =
-        request.pluginId === 'herdr'
-          ? await api<{ herdrSession: string; herdrSource: string }>(backend, 'api/herdr/connect', {
-              source: session,
-              session: request.herdrSession || '',
-            })
-          : undefined;
+      const target = isHerdrPlugin(request.pluginId)
+        ? await api<{ herdrSession: string; herdrSource: string }>(backend, 'api/herdr/connect', {
+            source: session,
+            session: request.herdrSession || '',
+            core: request.pluginId === 'herdr-core',
+          })
+        : undefined;
       const read = request.readPath
         ? await api<{ path: string }>(
             backend,
@@ -391,9 +396,7 @@ export function createWorkspaceConnections(options: Options) {
           host.name +
           (target?.herdrSession ? ' · ' + target.herdrSession : ''),
         lastUsed: Date.now(),
-        ...(target
-          ? { herdrSession: target.herdrSession, herdrSource: target.herdrSource }
-          : {}),
+        ...(target ? { herdrSession: target.herdrSession, herdrSource: target.herdrSource } : {}),
       };
       if (request.herdrTab && !workspace.tabs.includes(request.herdrTab)) {
         await api(backend, 'api/sessions/close', {}, session);
@@ -433,6 +436,7 @@ export function createWorkspaceConnections(options: Options) {
           'api/herdr/snapshot?' +
             new URLSearchParams({
               herdrSession: tab.herdrSession || '',
+              ...(tab.pluginId === 'herdr-core' ? { herdrCore: '1' } : {}),
               ...(tab.herdrSource ? { herdrSource: tab.herdrSource } : {}),
             }),
         );
@@ -483,7 +487,7 @@ export function createWorkspaceConnections(options: Options) {
     if (tab.ownsSession)
       await api(backendFor(tab.backendId), 'api/sessions/close', {}, tab.session);
     await connectHost(source, {
-      pluginId: 'herdr',
+      pluginId: tab.pluginId,
       herdrSession: tab.herdrSession,
       herdrTab: tab,
       ...(host.kind === 'herdr' ? { herdrHost: host } : {}),
@@ -524,10 +528,10 @@ export function createWorkspaceConnections(options: Options) {
       await mount(tab);
       return;
     }
-    if (request.pluginId === 'herdr' && !request.herdrTab) {
+    if (isHerdrPlugin(request.pluginId) && !request.herdrTab) {
       const existing = workspace.tabs.find(
         (tab) =>
-          tabPluginId(tab) === 'herdr' &&
+          tabPluginId(tab) === request.pluginId &&
           tab.hostId === host.id &&
           (tab.herdrSession || '') === (request.herdrSession || ''),
       );

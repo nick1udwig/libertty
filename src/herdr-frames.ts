@@ -6,7 +6,7 @@ import { frameNotice, type Fail, type NoticeInput, type Notify } from './notice-
 
 interface CachedTerminal { frame:HTMLIFrameElement; session:string; pane:string; rendered:boolean; verified:boolean; loaded?:boolean; presentation?:string; geometry?:string; locked?:boolean; width?:number; height?:number; state?:NoticeInput }
 export interface FramesHost {
-  url: string; session: string; source?: string;
+  url: string; session: string; source?: string; core?: boolean;
   token(): string | undefined; authenticate(): Promise<void>;
   notice: Notify;
   fail: Fail;
@@ -146,7 +146,7 @@ export class HerdrFrames {
       const frame = node('iframe','herdr-terminal'); frame.title = 'Herdr agent terminal'; frame.dataset.terminal = selected; frame.dataset.pane = agent.paneId; frame.style.visibility = 'hidden';
       frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write';
       const url = new URL('terminal.html',document.baseURI);
-      url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:selected,herdrPane:agent.paneId,herdrSession:this.host.session,...(this.host.source?{herdrSource:this.host.source}:{}),...(verified?{}:{herdrPreview:'1'})}).toString();
+      url.search = new URLSearchParams({embedded:'1',backend:this.host.url,session,herdrTerminal:selected,herdrPane:agent.paneId,herdrSession:this.host.session,...(this.host.core?{herdrCore:'1'}:{}),...(this.host.source?{herdrSource:this.host.source}:{}),...(verified?{}:{herdrPreview:'1'})}).toString();
       frame.src = url.href; this.frame = frame;
       const entry = {frame,session,pane:agent.paneId,rendered:false,verified}; this.entries.set(selected,entry); this.screen.append(frame); this.prepare(entry);
     }

@@ -40,6 +40,7 @@
     "bench:terminal-memory": "node --expose-gc test/terminal-memory-benchmark.mjs",
     "bench:workspace": "node test/workspace-benchmark.mjs",
     "test:workspace": "node test/workspace-browser.mjs",
+    "test:herdr-core": "node test/herdr-core-browser.mjs",
     "test:herdr": "node test/herdr-browser.mjs",
     "test:herdr-dictation": "node test/herdr-dictation-browser.mjs",
     "test:herdr-resize": "node test/herdr-resize-native.mjs",

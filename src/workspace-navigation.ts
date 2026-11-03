@@ -1,3 +1,4 @@
+import { isHerdrPlugin } from './plugins.ts';
 import { closeIcon } from './icons.ts';
 import { type BackendProfile, type HostProfile, type TerminalTab } from './connections.ts';
 import { $, button, input, select } from './dom.ts';
@@ -340,13 +341,15 @@ export function createWorkspaceNavigation(options: Options) {
     if (page === 'terminal' && tab && !target) void mount(tab).catch(fail);
     target?.setHeld?.(false);
     target?.setVisible(
-      tab && ['terminal', 'herdr'].includes(tabPluginId(tab)) ? page === 'terminal' : visible,
+      tab && ['terminal', 'herdr', 'herdr-core'].includes(tabPluginId(tab))
+        ? page === 'terminal'
+        : visible,
     );
     if (!pluginViews.has(presentedTab)) presentedTab = '';
     const waiting =
       visible &&
       tab &&
-      tabPluginId(tab) === 'herdr' &&
+      isHerdrPlugin(tabPluginId(tab)) &&
       (!target || herdrViews.has(workspace.active)) &&
       !herdrViews.get(workspace.active)?.ready;
     const preparing = !!waiting && presentedTab !== workspace.active;
@@ -401,7 +404,8 @@ export function createWorkspaceNavigation(options: Options) {
     const tab = workspace.tabs.find((tab) => tab.id === workspace.active),
       herdr = herdrViews.get(workspace.active);
     $('workspace-shortcuts').hidden =
-      page !== 'terminal' || !(state || (tab && ['terminal', 'herdr'].includes(tabPluginId(tab))));
+      page !== 'terminal' ||
+      !(state || (tab && ['terminal', 'herdr', 'herdr-core'].includes(tabPluginId(tab))));
     const ready = !!state && !frame?.inert && (!herdr || herdr.ready);
     // Reserve the configured controls before the incoming terminal publishes its state.
     const shortcuts = state?.shortcuts || currentShortcuts();
@@ -497,7 +501,7 @@ export function createWorkspaceNavigation(options: Options) {
       close.innerHTML = closeIcon;
       close.setAttribute('aria-label', 'Close ' + tab.name);
       close.addEventListener('click', (event) => event.stopPropagation());
-      if (tabPluginId(tab) === 'herdr') {
+      if (isHerdrPlugin(tabPluginId(tab))) {
         el.classList.add('herdr-tab');
         const badge = document.createElement('span');
         badge.className = 'herdr-attention';
@@ -694,7 +698,7 @@ export function createWorkspaceNavigation(options: Options) {
     const plugin = plugins.forTab(tab);
     if (plugin) {
       if (!(await plugin.close(tab))) return;
-    } else if (tab.ownsSession ?? !['herdr', 'reading'].includes(tabPluginId(tab)))
+    } else if (tab.ownsSession ?? !['herdr', 'herdr-core', 'reading'].includes(tabPluginId(tab)))
       await closeTabSession(tab);
     const wasActive = workspace.active === tab.id;
     cancelReconnect(tab.id);

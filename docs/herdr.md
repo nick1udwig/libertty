@@ -231,3 +231,26 @@ It never touches user agents.
 The native scroll browser test also needs Herdr and uses an isolated fullscreen app with zero terminal scrollback.
 It verifies multi-line touch wheel delivery in both directions, local selection/copy, plain and OSC-8 links and suppressed keyboard focus.
 It checks shell-to-TUI and joining-view baselines, animation with history snapshots withheld, incremental frame rendering and rejection of stale snapshots.
+
+## Herdr Core
+
+Select **Connect Herdr Core** from a direct or SSH host menu.
+The session field selects an explicit core session; an empty field selects `default`.
+Install `hc` on the selected host and make it available on its `PATH`.
+Local backends can set `LIBERTTY_HC_BINARY` to an absolute binary path.
+The backend uses `herdr-client-lib` over `hc connect`, including over the existing authenticated SSH connection.
+The pinned library source and its licenses are in `vendor/herdr-client-lib`.
+
+Herdr Core reuses the Herdr space strip, agent status, dialogs, notifications, reader, microphone, terminal renderer, and tab lifecycle.
+It stores shared spaces, tabs, and panes in the `herdr-app` document through version-checked library operations.
+The browser retains its own selected pane and attention state.
+Core terminal bytes use the existing browser renderer and negotiated transport compression.
+Output credit returns after the browser acknowledges processed output.
+A hidden pane releases focus and detaches; its programs remain in core.
+Reopening a pane restores core's current screen and available history.
+Core supplies raw output, so the legacy Herdr rendered-frame and mobile redraw-barrier protocols do not apply.
+Shell alternatives replace only the latest dictated text after checking the foreground process and screen.
+
+Run `npm run build` and `npm run test:herdr-core` with `hc`, Chromium, and OpenSSH installed.
+The integration harness uses temporary core, SSH, and browser state.
+It checks shared edits, worktrees, streaming, dictation alternatives, repair cancellation, reader isolation, connection ownership, detach, mobile rendering, and reload.

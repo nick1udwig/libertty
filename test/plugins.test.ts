@@ -24,13 +24,14 @@ test('the registry preserves pinned versions and unavailable tabs', () => {
   registry.enable(old.id, true); assert.equal(registry.get(old.id), next);
   registry.remove(old.id); assert.equal(registry.get(old.id, '1'), undefined); assert.equal(registry.get(old.id, '2'), undefined);
 });
-test('Herdr readers and linked files retain the pane connection and return to their source tab', () => {
-  const source = { ...tab, pluginId: 'herdr', herdrSession: 'work', herdrSource: 'source-id', readHerdrTerminal: 'term_0' };
+for (const pluginId of ['herdr', 'herdr-core']) test(pluginId + ' readers and linked files retain the pane connection and return to their source tab', () => {
+  const source = { ...tab, pluginId, herdrCore: pluginId === 'herdr-core', herdrSession: 'work', herdrSource: 'source-id', readHerdrTerminal: 'term_0' };
   const file = readingTab(source, { name: 'Notes', readPath: '/work/README.md' });
   const linked = readingTab(file, { name: 'Linked', readPath: '/work/linked.md' });
   for (const reader of [file, linked]) {
     assert.equal(reader.parentTabId, source.id);
     assert.equal(reader.herdrSession, 'work'); assert.equal(reader.herdrSource, 'source-id');
+    assert.equal(reader.herdrCore === true, source.herdrCore);
     assert.equal(reader.readHerdrTerminal, 'term_0'); assert.equal(reader.ownsSession, false);
   }
 });

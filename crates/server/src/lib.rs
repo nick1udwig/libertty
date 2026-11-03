@@ -13,6 +13,7 @@ pub mod filesystem;
 pub mod help;
 pub mod herdr;
 pub mod herdr_action;
+pub mod herdr_core;
 pub mod herdr_metadata;
 pub mod herdr_poll;
 pub mod herdr_reading;
