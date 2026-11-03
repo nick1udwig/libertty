@@ -1,4 +1,4 @@
-import { assertPaneStack } from './support/herdr-tree.mjs';
+import { assertPaneStack, assertPaneTitleRoom } from './support/herdr-tree.mjs';
 import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import assert from 'node:assert/strict';
 import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
@@ -442,6 +442,7 @@ try {
   await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === newPane, 'new split opens automatically');
   await hold(alpha);
   await assertPaneStack(page.locator('.herdr-tree-node').filter({ has: page.locator('.herdr-pane[data-terminal="' + newPane + '"]') }).locator('.herdr-tree-panes'));
+  await assertPaneTitleRoom(page.locator('.herdr-tree-node').filter({ has: page.locator('.herdr-pane[data-terminal="' + newPane + '"]') }).locator('.herdr-tree-panes'));
   await page.keyboard.press('Escape');
   let releaseCreationListing, releaseCreation;
   const creationListingGate = new Promise(resolve => { releaseCreationListing = resolve; }), creationGate = new Promise(resolve => { releaseCreation = resolve; });

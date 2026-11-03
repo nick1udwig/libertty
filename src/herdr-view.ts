@@ -741,7 +741,7 @@ export class HerdrView {
       if (!terminal) continue;
       const pill = node('div', 'herdr-pane'), focus = node('button', 'herdr-pane-focus'), status = this.tracker.status(terminal);
       pill.dataset.terminal = id; pill.dataset.status = status;
-      focus.type = 'button'; focus.append(node('span', 'herdr-status-dot'), node('span', 'herdr-pane-name', terminal.name));
+      focus.type = 'button'; focus.title = terminal.name; focus.append(node('span', 'herdr-status-dot'), node('span', 'herdr-pane-name', terminal.name));
       focus.setAttribute('aria-label', terminal.name + ' · ' + status + '. Hold to rename.');
       if (id === this.selected) focus.setAttribute('aria-current', 'true');
       tabGestures(focus, { select: () => this.selectTerminal(id), hold: () => this.renameInline(pill, terminal) });
