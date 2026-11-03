@@ -619,6 +619,12 @@ try {
   assert.equal(browserCreation.request().postDataJSON().terminalId, treeSplit.terminalId);
   const browserLinked = await browserCreation.json();
   await until(async () => await page.locator('.herdr-space-action').count() === 0, 'created worktree selected');
+  const unselectedChip = page.locator('.herdr-agent-strip:visible .herdr-agent-tab[aria-selected=false]');
+  await until(async () => await unselectedChip.count() === 1 && await unselectedChip.locator('.herdr-agent-name').textContent() === basename(root), 'unselected repository shows its directory instead of its space name');
+  assert.equal(await unselectedChip.locator('.herdr-space-label').count(), 0, 'Unselected repositories use one label');
+  assert.equal(await selectedLabel.locator('.herdr-repo-name').textContent(), 'other-repo');
+  assert.equal(await selectedLabel.locator('.herdr-agent-name').textContent(), 'browser-linked');
+  await page.screenshot({ path: '.test-artifacts/herdr-core-strip-labels.png' });
   await api(route('action'), { action: 'close-space', workspaceId: created.workspaceId });
   selectedSocket.ws.close();
   await until(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === browserLinked.terminalId && await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').count() === 1, 'only linked checkout remains');

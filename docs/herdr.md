@@ -108,7 +108,7 @@ Hold menus open upward so their actions remain visible above the controls.
 Creating from Agents switches the view to Spaces so the new space is visible.
 Spaces include ordinary terminals.
 Once a repository has a worktree, Herdr reports its repository and the strip shows its checkouts as one chip.
-A grouped chip shows the repository name and checkout count, and while selected also names its current checkout.
+A repository chip shows its directory name and any checkout count, and while selected also names its current checkout.
 Other spaces, including repositories without worktrees, keep their own chips.
 Selecting a chip reopens the checkout and pane last used in it.
 Settings → **Tapping a repository with worktrees opens** can instead open the most urgent worktree, the root checkout, or the tree without selecting a checkout.

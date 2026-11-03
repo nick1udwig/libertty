@@ -365,7 +365,7 @@ export class HerdrView {
     if (!this.spaceMode) return this.tracker.agents;
     return this.repos.map(repo => {
       const space = repoSpace(repo, this.preferences.repoSpaces![repo.id]);
-      return { ...this.spaceItem(space), terminalId: repo.id, workspace: repo.name, name: repo.spaces.length > 1 ? repo.name : space.name, repo };
+      return { ...this.spaceItem(space), terminalId: repo.id, workspace: repo.name, name: repo.name, repo };
     });
   }
   private statusFor(item: StripItem) {
@@ -453,7 +453,7 @@ export class HerdrView {
     const status = this.statusFor(agent);
     if (tab.dataset.status === status && tab.title) return;
     tab.dataset.status = status;
-    const place = agent.repo && agent.repo.spaces.length > 1 ? agent.space!.name : agent.workspace;
+    const place = agent.repo?.git ? agent.space!.name : agent.workspace;
     tab.setAttribute('aria-label', agent.name + ' · ' + status + ' · ' + place);
     tab.title = agent.name + ' · ' + agent.kind + ' · ' + status + ' · ' + place;
     const lane = tab.parentElement?.dataset.lane;
@@ -489,7 +489,7 @@ export class HerdrView {
       const checkouts = agent.repo && agent.repo.spaces.length > 1 ? agent.repo.spaces.length : 0;
       this.updateStatus(tab, agent);
       tab.append(node('span', 'herdr-status-dot'));
-      if ((checkouts || this.host.core && agent.repo?.git) && agent.terminalId === this.stripSelection) {
+      if (agent.repo?.git && agent.terminalId === this.stripSelection) {
         // The open repository names its current checkout beneath the repository and any checkout count.
         const label = node('span', 'herdr-space-label');
         label.append(node('span', 'herdr-repo-name', agent.repo!.name + (checkouts ? ' · ' + checkouts : '')), node('span', 'herdr-agent-name', agent.space!.name)); tab.append(label);
