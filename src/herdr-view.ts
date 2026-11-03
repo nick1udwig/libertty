@@ -320,6 +320,7 @@ export class HerdrView {
     this.transport.ready(); this.connected = this.ws?.readyState === WebSocket.OPEN;
     this.liveSnapshot = true; this.cached = false; this.cacheLater(message.snapshot);
     const previousSpace = this.terminalsById.get(this.selected)?.workspaceId;
+    const previousRepo = this.repoOf(previousSpace)?.id;
     this.status();
     this.metadata(message.snapshot.terminals, message.snapshot.spaces);
     const notifications = this.tracker.update(message.snapshot);
@@ -334,7 +335,7 @@ export class HerdrView {
     this.preferences.spaceOrder = layout.order; this.preferences.spaceGroups = layout.groups;
     this.preferences.collapsedGroups = this.preferences.collapsedGroups!.map(id => grouped.get(id) || id).filter(id => layout.groups.some(group => group[0] === id));
     for (const [repo, space] of Object.entries(this.preferences.repoSpaces!)) if (!grouped.has('space:' + space)) delete this.preferences.repoSpaces![repo];
-    this.ensureSelection(previousSpace);
+    this.ensureSelection(previousSpace, previousRepo);
     if (this.requestedTerminal && this.terminals.some(agent => agent.terminalId === this.requestedTerminal)) { this.selected = this.requestedTerminal; this.requestedTerminal = ''; }
     this.save(); this.render(); this.mountTerminal();
     if (!this.selected) this.host.ready?.();
@@ -390,11 +391,12 @@ export class HerdrView {
     if (!item.space) return item.terminalId;
     return spaceTerminal(item.space, this.preferences.spaceTerminals![item.space.id]);
   }
-  private ensureSelection(previousSpace?: string) {
+  private ensureSelection(previousSpace?: string, previousRepo?: string) {
     if (this.terminals.some(t => t.terminalId === this.selected) && this.ordered().some(item => item.terminalId === this.stripSelection)) return;
-    // Closing the open pane keeps its space open when another of its panes survives.
-    const space = this.spaceMode ? this.spaces.find(space => space.id === previousSpace && space.terminalIds.length) : undefined;
-    this.selected = space ? this.terminalFor(this.spaceItem(space)) : this.terminalFor(this.ordered()[0]);
+    // Keep a surviving pane in the same space, then prefer the repository's main checkout.
+    const repo = this.repos.find(repo => repo.id === previousRepo);
+    const space = this.spaceMode ? this.spaces.find(space => space.id === previousSpace && space.terminalIds.length) || repo?.root : undefined;
+    this.selected = space?.terminalIds.length ? this.terminalFor(this.spaceItem(space)) : this.terminalFor(this.ordered()[0]);
   }
   private select(id: string) {
     const item = this.entries().find(item => item.terminalId === id);

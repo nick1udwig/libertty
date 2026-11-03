@@ -554,7 +554,10 @@ try {
   await page.route('**/api/herdr/action*', async route => {
     if (route.request().postDataJSON()?.action !== 'delete-worktree') return route.continue();
     assert.equal(route.request().postDataJSON().force, true, 'Only an explicit Force delete submits force');
-    deletes++; await delay(300); await route.continue();
+    deletes++; await delay(300);
+    const response = await route.fetch();
+    await wait(async () => await selected() === alphaRepo, 'deletion selects the same repository before its HTTP response arrives');
+    await route.fulfill({ response });
   });
   await deletion.locator('form').evaluate(form => {
     const submitter = [...form.querySelectorAll('button')].find(button => button.textContent === 'Force delete');
@@ -565,6 +568,8 @@ try {
   await page.unroute('**/api/herdr/action*');
   assert.equal(await access(checkout).then(() => true, () => false), false, 'Deletion removes the checkout folder');
   assert.equal((await order()).includes(worktreeSpace.id), false, 'Deletion closes the Herdr workspace');
+  assert.equal(await selected(), alphaRepo, 'Deleting the selected worktree keeps its repository selected instead of the first tab');
+  await wait(async () => alphaSplit.terminalIds.includes(await page.locator('.herdr-terminal:visible').getAttribute('data-terminal')), 'deletion opens the main checkout');
   execFileSync('git', ['-C', dir + '/alpha', 'show-ref', '--verify', 'refs/heads/mobile-review']);
   await tab(beta).click();
   await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === (await herdrSnapshot(target)).spaces.find(space => space.id === beta).selectedTerminalId, 'Beta terminal presented after checkout deletion');
@@ -577,9 +582,11 @@ try {
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
   const existingBranchSpace = await added(previous);
   assert.equal(execFileSync('git', ['-C', existingBranchSpace.checkoutPath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(), existingBranchCommit, 'Selecting a suggestion checks out the existing branch commit rather than recreating it from HEAD');
+  await tab(beta).click();
   await deleteFromTree(existingBranchSpace);
   await page.getByRole('dialog', { name: 'Delete worktree checkout?' }).getByRole('button', { name: 'Delete worktree checkout', exact: true }).click();
   await page.locator('.herdr-space-action').waitFor({ state: 'detached' });
+  assert.equal(await selected(), chip(beta), 'Deleting an inactive worktree keeps the active tab selected');
   previous = await order();
   await hold(alpha); await treeAction('Open worktree…');
   await page.getByLabel('Worktree', { exact: true }).selectOption(dir + '/existing-review');

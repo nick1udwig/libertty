@@ -48,6 +48,7 @@ A drag parks the orb on the nearer side, and a drag back to the top-right corner
 Local storage keeps the parked position.
 The orb shows only while a notice or state is current, so it does not cover the terminal at other times.
 A stalled connection shows the clock time of its last contact, so its state does not change every second.
+Temporary terminal failures show their close reason in the reconnecting state and clear after recovery.
 States last while they are true, so the user can hide them from the bubble but cannot dismiss them.
 An error or warning state unfurls when it appears or changes, in a standalone terminal and in the workspace alike.
 A state that the user puts away stays folded when it returns unchanged, such as after a tab switch.
