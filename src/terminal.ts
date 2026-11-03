@@ -122,6 +122,7 @@ const runTerminalAction = (id: string) => { if (Object.hasOwn(noticeActions, id)
 const notices = embedded ? undefined : new NoticeCenter();
 const localNotice = (notice: RemoteNotice) => ({ ...notice, actions: remoteActions(notice, runTerminalAction) });
 let connectionStatus = 'null';
+let connectionReason = '';
 function toast(message: string, kind: NoticeKind = 'error', actions: TerminalAction[] = []) {
   const notice = { message, kind, actions };
   if (embedded) notify('terminal-notice', notice); else notices!.notify(localNotice(notice));
@@ -129,12 +130,13 @@ function toast(message: string, kind: NoticeKind = 'error', actions: TerminalAct
 /** Terminal parts without frame actions show plain notices. */
 const plainToast: Notify = (message, kind) => toast(message, kind);
 function connection(label: string, online = false) {
+  if (online) connectionReason = '';
   $('connection-label').textContent = label;
   const updated = lastOutputAt || cachedUpdated ? ` · last output ${new Date(lastOutputAt || cachedUpdated).toLocaleTimeString()}` : '';
   // The workspace reports an ended embedded terminal itself, so only a standalone terminal shows that state.
   const status: RemoteNotice | undefined = online || ['Connecting', 'Locked', 'Other tab'].includes(label) || embedded && label === 'Session ended' ? undefined
     : label === 'Session ended' ? { message: 'This terminal has ended. Open its saved host to reconnect.', kind: 'error', actions: [] }
-    : { message: label.startsWith('Connection stalled') ? label : 'Reconnecting' + updated, kind: 'progress', actions: [{ id: 'reconnect', label: 'Retry now' }] };
+    : { message: label.startsWith('Connection stalled') ? label : 'Reconnecting' + (connectionReason ? ' · ' + connectionReason : updated), kind: 'progress', actions: [{ id: 'reconnect', label: 'Retry now' }] };
   const serialized = JSON.stringify(status ?? null);
   if (serialized !== connectionStatus) {
     connectionStatus = serialized;
@@ -875,7 +877,7 @@ function socketClosed(event?: CloseEvent) {
   for (const [id, resolve] of repairs) resolve({ id, accepted: false, candidates: [], original: '', selected: '', prompt: state.prompt, revision: state.inputRevision }); repairs.clear();
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) { pendingCommand = undefined; toast('Connection lost before acknowledgement. Check the terminal before running again.'); }
-  if ((event?.code === 1011 || event?.code === 1013) && event.reason) toast(event.reason);
+  if ((event?.code === 1011 || event?.code === 1013) && event.reason) connectionReason = event.reason;
   if (event?.code === 4001) { unsentInput.clear(); sentInput.clear(); disconnectedContext = undefined; dictation.cancel(); connection('Other tab'); toast(event.reason, 'warning'); return false; }
   if (herdrTerminal && event?.code === 1000 && event.reason === 'Herdr terminal ended') { inline.disconnect(); connection('Session ended'); notify('terminal-ended'); return false; }
   if (embedded && state.exited) return false; // The workspace is replacing this finished shell.

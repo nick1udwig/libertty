@@ -369,11 +369,7 @@ pub async fn terminal(
         tokio::select! { _ = cancel.cancelled() => return, result = work => result };
     cancel.cancel();
     if let Err(message) = result {
-        let _ = send(
-            &mut socket,
-            json!({"type":"reading-error","message":message}),
-        )
-        .await;
+        eprintln!("Herdr Core terminal connection ended: {message}");
         let _ = socket
             .send(Message::Close(Some(CloseFrame {
                 code: 1011,

@@ -481,6 +481,12 @@ try {
     );
     await route.fulfill({ response, body });
   });
+  let terminalServer;
+  const terminalCloses = [];
+  await context.routeWebSocket(url => url.pathname === '/herdr/ws' && url.searchParams.has('terminalId'), socket => {
+    const server = terminalServer = socket.connectToServer();
+    server.onClose((code, reason) => { terminalCloses.push({ code, reason }); socket.close({ code, reason }); });
+  });
   const page = await context.newPage();
   page.setDefaultTimeout(15000);
   const errors = [];
@@ -554,6 +560,32 @@ try {
     'reloaded output',
   );
   assert.equal((await api(route('snapshot'))).terminals.length, 1, 'Reload keeps shared work');
+  let releaseTicket, ticketEntered;
+  const ticketHeld = new Promise(resolve => ticketEntered = resolve);
+  const ticketRelease = new Promise(resolve => releaseTicket = resolve);
+  const ticketMatcher = url => url.pathname === '/api/herdr/ticket' && url.searchParams.has('terminalId');
+  await page.route(ticketMatcher, async route => { ticketEntered(); await ticketRelease; await route.continue(); });
+  await frame.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  terminalServer.send(JSON.stringify({ type: 'ack', seq: Number.MAX_SAFE_INTEGER }));
+  await until(() => terminalCloses.some(event => event.code === 1011 && event.reason === 'Herdr Core connection ended'), 'core stream failure');
+  await frame.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await ticketHeld;
+  await until(() => page.locator('#notice-orb').getAttribute('data-states').then(states => states.includes('terminal')), 'reconnect state');
+  assert.equal(await page.locator('#notice-bubble').isVisible(), false, 'A temporary core disconnect stays quiet');
+  await page.locator('#notice-orb').click();
+  assert.match(await page.locator('#notice-panel').textContent(), /Reconnecting · Herdr Core connection ended/);
+  assert.equal(await page.locator('#notice-panel .notice-mark[data-kind=error]').count(), 0, 'Connection failures are not reading errors');
+  await page.locator('#notice-orb').click();
+  releaseTicket();
+  await until(() => frame.locator('#connection-label').textContent().then(label => label === 'Connected'), 'core reconnect');
+  await page.unroute(ticketMatcher);
+  await until(() => page.locator('#notice-orb').isHidden(), 'recovery clears the connection notice');
   await page.setViewportSize({ width: 430, height: 700 });
   await until(
     () =>
