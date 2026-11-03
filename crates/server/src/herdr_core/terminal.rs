@@ -143,6 +143,50 @@ impl Credits {
         Ok(bytes)
     }
 }
+/// Herdr splits queued stream output into frames of this size, so a shorter frame ends the queued first paint.
+const HERDR_FRAME: usize = 16 * 1024;
+const PAINT_DEADLINE: Duration = Duration::from_millis(1500);
+trait PaintSource {
+    async fn next(&mut self) -> Result<Option<StreamEvent>, String>;
+    async fn consumed(&mut self, bytes: u32) -> Result<(), String>;
+}
+impl PaintSource for Stream {
+    async fn next(&mut self) -> Result<Option<StreamEvent>, String> {
+        Stream::next(self).await.map_err(error)
+    }
+    async fn consumed(&mut self, bytes: u32) -> Result<(), String> {
+        Stream::consumed(self, bytes).await.map_err(error)
+    }
+}
+#[derive(Debug, Default, PartialEq)]
+struct Paint {
+    bytes: Vec<u8>,
+    ended: bool,
+}
+/// Herdr sends a large first paint one credit window at a time.
+/// Collecting and crediting it here lets the browser replace retained output in one paint instead of scrolling through each window.
+async fn first_paint(source: &mut impl PaintSource, deadline: Duration) -> Result<Paint, String> {
+    let deadline = tokio::time::Instant::now() + deadline;
+    let mut paint = Paint::default();
+    let mut largest = HERDR_FRAME;
+    while let Ok(event) = tokio::time::timeout_at(deadline, source.next()).await {
+        match event? {
+            Some(StreamEvent::Data(bytes)) => {
+                source.consumed(bytes.len() as u32).await?;
+                paint.bytes.extend_from_slice(&bytes);
+                if bytes.len() < largest {
+                    break;
+                }
+                largest = bytes.len();
+            }
+            Some(StreamEvent::Closed(_)) | None => {
+                paint.ended = true;
+                break;
+            }
+        }
+    }
+    Ok(paint)
+}
 fn state(record: &herdr_client_lib::protocol::Terminal, revision: u64, prompt: u64) -> Value {
     let ready = shell(record).is_some();
     json!({"type":"state","state":{"cwd":record.folder().unwrap_or_default(),"inputRevision":revision,"inputContext":context(record),"promptRevision":0,"ready":ready,"prompt":prompt,"exited":false,"inputTarget":if ready {"shell"} else {"program"},"terminalScroll":false}})
@@ -190,7 +234,18 @@ pub async fn terminal(
         if attached.identity != record.identity {
             return Err("The terminal was replaced; reopen its pane.".into());
         }
-        send(&mut socket, json!({"type":"hello","engine":"server","reset":true,"truncated":false,"firstSeq":1,"lastSeq":1,"streamId":id})).await?;
+        let paint = first_paint(&mut stream, PAINT_DEADLINE).await?;
+        let mut parser = vt100::Parser::new(size.rows, size.cols, 0);
+        let mut decoder = Decoder::default();
+        let mut credits = Credits::default();
+        parser.process(&paint.bytes);
+        // The paint is already credited, so its acknowledgement releases nothing.
+        let replay = if paint.bytes.is_empty() {
+            0
+        } else {
+            credits.sent(0)
+        };
+        send(&mut socket, json!({"type":"hello","engine":"server","reset":true,"truncated":false,"firstSeq":1,"lastSeq":replay,"streamId":id})).await?;
         let mut current = attached;
         let mut prompt = 1;
         let mut revision = 0;
@@ -205,9 +260,22 @@ pub async fn terminal(
             replies,
             dictated,
         });
-        let mut parser = vt100::Parser::new(size.rows, size.cols, 0);
-        let mut decoder = Decoder::default();
-        let mut credits = Credits::default();
+        if replay > 0 {
+            send(
+                &mut socket,
+                json!({"type":"output","seq":replay,"data":decoder.push(&paint.bytes)}),
+            )
+            .await?;
+        }
+        if paint.ended {
+            let _ = socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: 1000,
+                    reason: "Herdr terminal ended".into(),
+                })))
+                .await;
+            return Ok(());
+        }
         let mut active = true;
         let mut last_contact = tokio::time::Instant::now();
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
@@ -388,6 +456,73 @@ mod tests {
         assert_eq!(decoder.push(&[0xf0, 0x9f]), "");
         assert_eq!(decoder.push(&[0x98, 0x80, b'a', 0xff]), "😀a�");
         assert_eq!(decoder.push(b"\x1b[31m"), "\x1b[31m");
+    }
+    #[derive(Default)]
+    struct Frames {
+        events: VecDeque<StreamEvent>,
+        consumed: u32,
+    }
+    impl PaintSource for Frames {
+        async fn next(&mut self) -> Result<Option<StreamEvent>, String> {
+            match self.events.pop_front() {
+                Some(event) => Ok(Some(event)),
+                None => std::future::pending().await,
+            }
+        }
+        async fn consumed(&mut self, bytes: u32) -> Result<(), String> {
+            self.consumed += bytes;
+            Ok(())
+        }
+    }
+    fn frames(events: impl IntoIterator<Item = StreamEvent>) -> Frames {
+        Frames {
+            events: events.into_iter().collect(),
+            ..Default::default()
+        }
+    }
+    #[tokio::test]
+    async fn first_paint_collects_every_credit_window_before_live_output() {
+        let full = vec![b'a'; HERDR_FRAME];
+        let mut source = frames([
+            StreamEvent::Data(full.clone()),
+            StreamEvent::Data(full.clone()),
+            StreamEvent::Data(b"end".to_vec()),
+            StreamEvent::Data(b"live".to_vec()),
+        ]);
+        let paint = first_paint(&mut source, PAINT_DEADLINE).await.unwrap();
+        assert_eq!(paint.bytes.len(), 2 * HERDR_FRAME + 3);
+        assert!(paint.bytes.ends_with(b"end") && !paint.ended);
+        assert_eq!(source.consumed as usize, paint.bytes.len());
+        assert_eq!(source.events.len(), 1);
+    }
+    #[tokio::test]
+    async fn first_paint_follows_larger_herdr_frames() {
+        let full = vec![b'a'; 2 * HERDR_FRAME];
+        let mut source = frames([
+            StreamEvent::Data(full.clone()),
+            StreamEvent::Data(full.clone()),
+            StreamEvent::Data(vec![b'b'; HERDR_FRAME + 1]),
+            StreamEvent::Data(b"live".to_vec()),
+        ]);
+        let paint = first_paint(&mut source, PAINT_DEADLINE).await.unwrap();
+        assert_eq!(paint.bytes.len(), 5 * HERDR_FRAME + 1);
+        assert_eq!(source.events.len(), 1);
+    }
+    #[tokio::test]
+    async fn first_paint_reports_an_ended_terminal_and_a_silent_one() {
+        let mut ended = frames([
+            StreamEvent::Data(vec![b'a'; HERDR_FRAME]),
+            StreamEvent::Closed(Value::Null),
+        ]);
+        let paint = first_paint(&mut ended, PAINT_DEADLINE).await.unwrap();
+        assert!(paint.ended && paint.bytes.len() == HERDR_FRAME);
+        let mut silent = frames([]);
+        assert_eq!(
+            first_paint(&mut silent, Duration::from_millis(10))
+                .await
+                .unwrap(),
+            Paint::default()
+        );
     }
     #[test]
     fn acknowledgements_release_each_byte_once() {
