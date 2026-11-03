@@ -476,7 +476,7 @@ export class HerdrView {
     if (!lanes) this.pinnedLane = undefined;
     const agents = lanes ? lanes.flatMap(lane => lane.items) : this.ordered();
     const key = JSON.stringify([this.liveSnapshot, this.spaceMode, this.creatingSpace, this.stripSelection, this.preferences.collapsedLanes, this.preferences.collapsedGroups,
-      this.preferences.spaceGroups, lanes?.map(lane => [lane.lane, lane.items.map(item => item.terminalId)]), agents.map(agent => [agent.terminalId, agent.name, agent.kind, agent.workspace, agent.space?.name, agent.repo?.spaces.length])]);
+      this.preferences.spaceGroups, lanes?.map(lane => [lane.lane, lane.items.map(item => item.terminalId)]), agents.map(agent => [agent.terminalId, agent.name, agent.kind, agent.workspace, agent.space?.name, agent.repo?.name, agent.repo?.git, agent.repo?.spaces.length])]);
     if (key === this.stripKey) { if (this.tree) this.refreshTree(); return; }
     this.stripKey = key;
     const scroll = this.strip.scrollLeft; this.strip.replaceChildren(this.tabsToggle);
@@ -488,10 +488,10 @@ export class HerdrView {
       const checkouts = agent.repo && agent.repo.spaces.length > 1 ? agent.repo.spaces.length : 0;
       this.updateStatus(tab, agent);
       tab.append(node('span', 'herdr-status-dot'));
-      if (checkouts && agent.terminalId === this.stripSelection) {
-        // The open repository names its current checkout beneath the repository and its checkout count.
+      if ((checkouts || this.host.core && agent.repo?.git) && agent.terminalId === this.stripSelection) {
+        // The open repository names its current checkout beneath the repository and any checkout count.
         const label = node('span', 'herdr-space-label');
-        label.append(node('span', 'herdr-repo-name', agent.name + ' · ' + checkouts), node('span', 'herdr-agent-name', agent.space!.name)); tab.append(label);
+        label.append(node('span', 'herdr-repo-name', agent.repo!.name + (checkouts ? ' · ' + checkouts : '')), node('span', 'herdr-agent-name', agent.space!.name)); tab.append(label);
       } else tab.append(node('span', 'herdr-agent-name', agent.name), ...checkouts ? [node('span', 'herdr-repo-count', String(checkouts))] : []);
       const lane = lanes?.find(lane => lane.items.includes(agent));
       const group = !lane && agent.space && this.preferences.spaceGroups!.find(group => group.includes(agent.terminalId));

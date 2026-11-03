@@ -134,29 +134,64 @@ pub(super) struct Repository {
     path: String,
     linked: bool,
     name: String,
+    checkout: String,
 }
 pub(super) async fn repositories(
     session: &Session,
     snapshot: &mut Snapshot,
-    cache: &mut BTreeMap<(String, String), Option<Repository>>,
+    cache: &mut BTreeMap<(String, String), (std::time::Instant, Option<Repository>)>,
 ) {
     for space in &mut snapshot.spaces {
-        let Ok((machine, _)) = split(&space.id) else {
+        let Ok((machine, id)) = split(&space.id) else {
             continue;
         };
-        let cache_key = (machine.clone(), space.cwd.clone());
-        if !cache.contains_key(&cache_key) {
+        let cwd = space
+            .terminal_ids
+            .iter()
+            .find_map(|id| {
+                snapshot
+                    .terminals
+                    .iter()
+                    .find(|t| &t.terminal_id == id)
+                    .map(|t| t.cwd.as_str())
+                    .filter(|cwd| !cwd.is_empty())
+            })
+            .unwrap_or(&space.cwd);
+        let named = session
+            .document_ref(&machine)
+            .ok()
+            .and_then(|d| d.node(&id))
+            .and_then(|space| space["name"].as_str())
+            .is_some_and(|name| !name.is_empty());
+        if !named {
+            space.name = model::folder_name(cwd, "");
+        }
+        let cache_key = (machine.clone(), cwd.to_owned());
+        let now = std::time::Instant::now();
+        if !cache
+            .get(&cache_key)
+            .is_some_and(|(checked, _)| now.duration_since(*checked) < Duration::from_secs(2))
+        {
             let git = Git {
                 client: session.client.clone(),
                 machine: machine.clone(),
                 deadline: DEADLINE,
             };
             let found = async {
-                let path = git.toplevel(&space.cwd).await.ok()?;
+                let path = git.toplevel(cwd).await.ok()?;
                 let checkouts = git.list(&path).await.ok()?;
                 let root = checkouts.first()?.path.clone();
                 let name = model::folder_name(&root, "");
+                let checkout = checkouts.iter().find(|c| c.path == path)?;
+                let checkout = checkout.branch.clone().unwrap_or_else(|| {
+                    if checkout.head.is_empty() {
+                        model::folder_name(&path, "")
+                    } else {
+                        format!("detached {}", &checkout.head[..checkout.head.len().min(7)])
+                    }
+                });
                 Some(Repository {
+                    checkout,
                     linked: path != root,
                     root,
                     path,
@@ -167,9 +202,12 @@ pub(super) async fn repositories(
             if cache.len() >= 256 {
                 cache.clear();
             }
-            cache.insert(cache_key.clone(), found);
+            cache.insert(cache_key.clone(), (now, found));
         }
-        if let Some(repo) = cache.get(&cache_key).and_then(Option::as_ref) {
+        if let Some(repo) = cache.get(&cache_key).and_then(|(_, value)| value.as_ref()) {
+            if !named {
+                space.name = repo.checkout.clone();
+            }
             space.repo_key = Some(key(&machine, &repo.root));
             space.repo_name = Some(repo.name.clone());
             space.checkout_path = Some(repo.path.clone());

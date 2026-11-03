@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import { spawn, execFileSync } from 'node:child_process';
 import { tmpdir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { launchBrowser, freePort, until, pair, waitForBackend } from './support/browser.mjs';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
 import { WebSocket } from 'ws';
@@ -131,8 +131,57 @@ try {
   const snapshot = await api(route('snapshot'));
   assert.equal(snapshot.spaces.length, 1);
   assert.equal(snapshot.terminals.length, 1);
+  assert.equal(snapshot.spaces[0].repoName, basename(root));
+  assert.equal(
+    snapshot.spaces[0].name,
+    execFileSync('git', ['-C', root, 'branch', '--show-current'], { encoding: 'utf8' }).trim(),
+  );
   const metadata = await connectSocket();
   await until(() => metadata.messages.some((m) => m.type === 'snapshot'), 'metadata');
+  execFileSync('git', ['-C', root, 'switch', '-qc', 'core-label-update']);
+  await until(
+    () =>
+      metadata.messages.some((m) => m.snapshot?.spaces.some((s) => s.name === 'core-label-update')),
+    'branch labels refresh without a core event',
+  );
+  const directory = join(root, 'other-repo');
+  await mkdir(directory);
+  execFileSync('git', ['init', '-qb', 'side-branch', directory]);
+  execFileSync('git', [
+    '-C',
+    directory,
+    '-c',
+    'user.name=Fixture',
+    '-c',
+    'user.email=fixture@example.invalid',
+    'commit',
+    '--allow-empty',
+    '-qm',
+    'Nested fixture',
+  ]);
+  const moving = await connectSocket(created.terminalId);
+  await until(() => moving.messages.some((m) => m.type === 'output'), 'directory test shell');
+  moving.ws.send(JSON.stringify({ type: 'input', data: `cd '${directory}'\r` }));
+  await until(
+    () =>
+      metadata.messages.some((m) =>
+        m.snapshot?.spaces.some((s) => s.repoName === 'other-repo' && s.name === 'side-branch'),
+      ),
+    'labels follow terminal directory',
+  );
+  metadata.messages.length = 0;
+  moving.ws.send(JSON.stringify({ type: 'input', data: `cd '${root}'\r` }));
+  await until(
+    () =>
+      metadata.messages.some((m) =>
+        m.snapshot?.spaces.some(
+          (s) => s.repoName === basename(root) && s.name === 'core-label-update',
+        ),
+      ),
+    'labels return to original checkout',
+  );
+  moving.ws.close();
+
   await api(route('action'), {
     action: 'rename-space',
     workspaceId: created.workspaceId,
@@ -412,6 +461,12 @@ try {
     .locator('.herdr-agent-strip:visible')
     .getByText('Core workspace', { exact: true })
     .waitFor();
+  const selectedLabel = page.locator(
+    '.herdr-agent-strip:visible .herdr-agent-tab[aria-selected=true] .herdr-space-label',
+  );
+  assert.equal(await selectedLabel.locator('.herdr-repo-name').textContent(), basename(root));
+  assert.equal(await selectedLabel.locator('.herdr-agent-name').textContent(), 'Core workspace');
+
   async function ready() {
     await until(async () => {
       const handle = await page.locator('.herdr-terminal').first().elementHandle();

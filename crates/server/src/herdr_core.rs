@@ -96,6 +96,8 @@ async fn metadata_connection(
         let mut session = session(target).await?;
         let mut repositories = BTreeMap::new();
         let mut previous = None;
+        let mut refresh = tokio::time::interval(Duration::from_secs(2));
+        refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             let mut snapshot = projection::project(&session)?;
             projection::repositories(&session, &mut snapshot, &mut repositories).await;
@@ -111,8 +113,10 @@ async fn metadata_connection(
                     return Ok(());
                 }
             }
-            session.next().await.map_err(error)?;
-            reconcile(&mut session).await?;
+            tokio::select! {
+                event = session.next() => { event.map_err(error)?; reconcile(&mut session).await?; }
+                _ = refresh.tick() => (),
+            }
         }
     };
     tokio::select! {

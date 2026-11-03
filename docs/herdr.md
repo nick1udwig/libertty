@@ -244,6 +244,8 @@ The pinned library source and its licenses are in `vendor/herdr-client-lib`.
 Herdr Core reuses the Herdr space strip, agent status, dialogs, notifications, reader, microphone, terminal renderer, and tab lifecycle.
 It stores shared spaces, tabs, and panes in the `herdr-app` document through version-checked library operations.
 The browser retains its own selected pane and attention state.
+The selected repository chip shows its directory above the current branch or custom space name, including with one open checkout.
+These labels follow the terminal directory and refresh when the branch changes.
 Core terminal bytes use the existing browser renderer and negotiated transport compression.
 Output credit returns after the browser acknowledges processed output.
 A hidden pane releases focus and detaches; its programs remain in core.
