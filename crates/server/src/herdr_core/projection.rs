@@ -65,7 +65,7 @@ pub(super) fn project(session: &Session) -> Result<Snapshot, String> {
                 let terminal_id = terminal_key(identity, record);
                 terminal_ids.push(terminal_id.clone());
                 let pane = document.node(&place.pane).unwrap_or(&Value::Null);
-                let name = pane["name"]
+                let label = pane["name"]
                     .as_str()
                     .filter(|name| !name.is_empty())
                     .or_else(|| {
@@ -73,8 +73,8 @@ pub(super) fn project(session: &Session) -> Result<Snapshot, String> {
                             .node(&place.tab)
                             .and_then(|tab| tab["name"].as_str())
                             .filter(|name| !name.is_empty())
-                    })
-                    .or(record.name.as_deref())
+                    });
+                let name = label
                     .or_else(|| {
                         record
                             .status
@@ -82,6 +82,8 @@ pub(super) fn project(session: &Session) -> Result<Snapshot, String> {
                             .map(|s| s.title.as_str())
                             .filter(|s| !s.is_empty())
                     })
+                    .or_else(|| (!record.title.is_empty()).then_some(record.title.as_str()))
+                    .or(record.name.as_deref().filter(|name| !name.is_empty()))
                     .or_else(|| model::program_label(record))
                     .unwrap_or("Terminal")
                     .to_owned();
@@ -93,10 +95,18 @@ pub(super) fn project(session: &Session) -> Result<Snapshot, String> {
                     tab_id: Some(key(machine, &place.tab)),
                     workspace: model::space_name(space, |_| None, ""),
                     name,
+                    label: label.map(str::to_owned),
                     kind: if agent {
                         model::program_label(record).unwrap_or("Agent").into()
                     } else {
-                        "Terminal".into()
+                        record
+                            .foreground
+                            .as_ref()
+                            .map(|f| f.name.as_str())
+                            .filter(|name| !name.is_empty())
+                            .or_else(|| model::program_label(record))
+                            .unwrap_or("Terminal")
+                            .into()
                     },
                     status: match record.word() {
                         Some("working") => Status::Working,

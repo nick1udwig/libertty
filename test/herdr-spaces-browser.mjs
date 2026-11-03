@@ -441,8 +441,12 @@ try {
   const newPane = alphaSplit.terminalIds.find(id => !alphaBefore.terminalIds.includes(id));
   await wait(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === newPane, 'new split opens automatically');
   await hold(alpha);
-  await assertPaneStack(page.locator('.herdr-tree-node').filter({ has: page.locator('.herdr-pane[data-terminal="' + newPane + '"]') }).locator('.herdr-tree-panes'));
-  await assertPaneTitleRoom(page.locator('.herdr-tree-node').filter({ has: page.locator('.herdr-pane[data-terminal="' + newPane + '"]') }).locator('.herdr-tree-panes'));
+  const alphaPanes = page.locator('.herdr-tree-node').filter({ has: page.locator('.herdr-pane[data-terminal="' + newPane + '"]') }).locator('.herdr-tree-panes');
+  await assertPaneStack(alphaPanes);
+  await assertPaneTitleRoom(alphaPanes);
+  const paneTitles = await alphaPanes.locator('.herdr-pane-name').allTextContents();
+  assert.equal(new Set(paneTitles).size, paneTitles.length, 'Identical shell panes have distinct names');
+  assert.ok(paneTitles.every(title => !/^[^\s@]+@[^\s:]+:/.test(title)), 'Shell titles omit the repeated user and host');
   await page.keyboard.press('Escape');
   let releaseCreationListing, releaseCreation;
   const creationListingGate = new Promise(resolve => { releaseCreationListing = resolve; }), creationGate = new Promise(resolve => { releaseCreation = resolve; });

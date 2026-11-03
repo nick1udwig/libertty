@@ -12,6 +12,7 @@ import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
 import { dropSpace, repoSpace, repoTap, spaceLayout, spaceRepos, spaceTerminal, type RepoTap, type SpaceDrop, type SpaceRepo } from './herdr-spaces.ts';
 import { herdrLane, herdrLaneNames, statusLanes, type HerdrLane } from './herdr-lanes.ts';
+import { paneTitles } from './herdr-titles.ts';
 import type { Fail, NoticeInput, NoticeKind, Notify } from './notice-model.ts';
 import './herdr.css';
 
@@ -664,8 +665,8 @@ export class HerdrView {
     const anchor = repo && this.strip.querySelector<HTMLElement>('.herdr-agent-tab[data-terminal="' + CSS.escape(repo.id) + '"]');
     if (!this.tree || !repo || !anchor || anchor.hidden) { this.closeMenu(); return; }
     if (!this.renaming) {
-      const panes = this.terminals.filter(terminal => repo.spaces.some(space => space.id === terminal.workspaceId)).map(terminal => [terminal.terminalId, terminal.name]);
-      const signature = JSON.stringify([repo.spaces.map(space => [space.id, space.name, space.terminalIds]), panes, this.selected, [...this.closing]]);
+      const panes = this.terminals.filter(terminal => repo.spaces.some(space => space.id === terminal.workspaceId)).map(terminal => [terminal.terminalId, terminal.name, terminal.label, terminal.kind, terminal.cwd]);
+      const signature = JSON.stringify([repo.spaces.map(space => [space.id, space.name, space.terminalIds, space.cwd, space.checkoutPath]), panes, this.selected, [...this.closing]]);
       if (rebuild || signature !== this.tree.signature) { this.tree.signature = signature; this.buildTree(repo); }
       else for (const pane of this.menu.querySelectorAll<HTMLElement>('.herdr-pane')) {
         const terminal = this.terminals.find(terminal => terminal.terminalId === pane.dataset.terminal);
@@ -736,17 +737,19 @@ export class HerdrView {
     close.setAttribute('aria-label', 'Close ' + space.name); close.disabled = !this.liveSnapshot || this.closing.has(item.terminalId); close.onclick = () => this.dialogs.closeSpace(item);
     head.append(title, close);
     const panes = node('div', 'herdr-tree-panes'); panes.role = 'group'; panes.setAttribute('aria-label', space.name + ' panes');
+    const titles = paneTitles(space, this.terminals);
     for (const id of space.terminalIds) {
       const terminal = this.terminals.find(terminal => terminal.terminalId === id);
       if (!terminal) continue;
       const pill = node('div', 'herdr-pane'), focus = node('button', 'herdr-pane-focus'), status = this.tracker.status(terminal);
       pill.dataset.terminal = id; pill.dataset.status = status;
-      focus.type = 'button'; focus.title = terminal.name; focus.append(node('span', 'herdr-status-dot'), node('span', 'herdr-pane-name', terminal.name));
-      focus.setAttribute('aria-label', terminal.name + ' · ' + status + '. Hold to rename.');
+      const name = titles.get(id)!;
+      focus.type = 'button'; focus.title = [terminal.name, terminal.cwd].filter(Boolean).join('\n'); focus.append(node('span', 'herdr-status-dot'), node('span', 'herdr-pane-name', name));
+      focus.setAttribute('aria-label', name + ' · ' + status + '. Hold to rename.');
       if (id === this.selected) focus.setAttribute('aria-current', 'true');
       tabGestures(focus, { select: () => this.selectTerminal(id), hold: () => this.renameInline(pill, terminal) });
       const remove = node('button', 'herdr-pane-close'); remove.type = 'button'; remove.innerHTML = icons.close;
-      remove.setAttribute('aria-label', 'Close ' + terminal.name); remove.disabled = !this.liveSnapshot || this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
+      remove.setAttribute('aria-label', 'Close ' + name); remove.disabled = !this.liveSnapshot || this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
       pill.append(focus, remove); panes.append(pill);
     }
     const split = node('button', 'herdr-pane-add', '+ split'); split.type = 'button'; split.disabled = !this.liveSnapshot; split.setAttribute('aria-label', 'Split a pane in ' + space.name); split.onclick = () => void this.dialogs.spaceAction(item, 'split', this.terminalFor(item));
