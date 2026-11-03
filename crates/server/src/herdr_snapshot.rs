@@ -76,6 +76,8 @@ pub struct Terminal {
     pub tab_id: Option<String>,
     pub workspace: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub kind: String,
     pub status: Status,
     pub sequence: f64,
@@ -147,26 +149,34 @@ fn terminal(
         .and_then(|id| names.get(id))
         .cloned()
         .unwrap_or_else(|| "Workspace".into());
+    let name = first(
+        [
+            pane.label.as_deref(),
+            source.title.as_deref(),
+            pane.title.as_deref(),
+            source.name.as_deref(),
+            source.terminal_title_stripped.as_deref(),
+            pane.terminal_title_stripped.as_deref(),
+            tab.label.as_deref(),
+            source.display_agent.as_deref(),
+            source.agent.as_deref(),
+        ],
+        if agent { "Agent" } else { "Terminal" },
+    );
+    let label = pane
+        .label
+        .as_ref()
+        .filter(|label| !label.is_empty())
+        .or_else(|| tab.label.as_ref().filter(|label| **label == name))
+        .cloned();
     Some(Terminal {
         terminal_id: source.terminal_id.clone()?,
         pane_id: source.pane_id.clone()?,
         workspace_id: source.workspace_id.clone(),
         tab_id: source.tab_id.clone(),
         workspace,
-        name: first(
-            [
-                pane.label.as_deref(),
-                source.title.as_deref(),
-                pane.title.as_deref(),
-                source.name.as_deref(),
-                source.terminal_title_stripped.as_deref(),
-                pane.terminal_title_stripped.as_deref(),
-                tab.label.as_deref(),
-                source.display_agent.as_deref(),
-                source.agent.as_deref(),
-            ],
-            if agent { "Agent" } else { "Terminal" },
-        ),
+        name,
+        label,
         kind: if agent {
             first(
                 [source.display_agent.as_deref(), source.agent.as_deref()],

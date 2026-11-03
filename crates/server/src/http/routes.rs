@@ -123,6 +123,12 @@ impl FromRequestParts<Arc<App>> for HerdrContext {
             OwnerContext::from_request_parts(parts, app).await?;
         let session_name =
             herdr::session(query.get("herdrSession").map(String::as_str)).map_err(fail)?;
+        let core = query.get("herdrCore").is_some_and(|value| value == "1");
+        let storage_key = if core {
+            format!("core:{session_name}")
+        } else {
+            session_name.clone()
+        };
         let source = query
             .get("herdrSource")
             .filter(|source| !source.is_empty())
@@ -132,12 +138,13 @@ impl FromRequestParts<Arc<App>> for HerdrContext {
             Failure(StatusCode::NOT_FOUND, "This Herdr connection has ended. Reconnect from the host menu, or run herdr again in its source terminal.".into())
         };
         let target = if source.is_empty() {
-            let key = (SessionKey::new(&owner, ""), session_name.clone());
+            let key = (SessionKey::new(&owner, ""), storage_key.clone());
             let mut targets = app.herdr_targets.lock().unwrap();
             if let Some(target) = targets.get(&key) {
                 target.clone()
             } else {
-                let target = herdr::Target::local(&session_name).map_err(fail)?;
+                let mut target = herdr::Target::local(&session_name).map_err(fail)?;
+                target.core = core;
                 targets.insert(key, target.clone());
                 target
             }
@@ -154,7 +161,7 @@ impl FromRequestParts<Arc<App>> for HerdrContext {
             app.herdr_targets
                 .lock()
                 .unwrap()
-                .get(&(SessionKey::new(&owner, &source), session_name.clone()))
+                .get(&(SessionKey::new(&owner, &source), storage_key))
                 .cloned()
                 .ok_or_else(disconnected)?
         };

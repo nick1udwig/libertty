@@ -78,6 +78,7 @@ pub fn parse_command(command: &str, env: &Environment) -> Result<(String, String
 
 #[derive(Clone, Debug)]
 pub struct Target {
+    pub core: bool,
     pub session: String,
     pub socket_path: Option<String>,
     pub binary: String,
@@ -169,7 +170,23 @@ pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
 pub type Connection = Box<dyn Stream>;
 impl Target {
+    pub fn storage_key(&self) -> String {
+        if self.core {
+            format!("core:{}", self.session)
+        } else {
+            self.session.clone()
+        }
+    }
     pub(crate) async fn validate_terminal(&self, terminal: &Terminal) -> Result<(), String> {
+        if self.core {
+            return self
+                .snapshot()
+                .await?
+                .terminal(&terminal.terminal_id)
+                .filter(|t| t.pane_id == terminal.pane_id)
+                .map(|_| ())
+                .ok_or("This terminal ended or moved.".into());
+        }
         let response = self
             .request("pane.get", json!({"pane_id":terminal.pane_id}))
             .await?;
@@ -182,6 +199,9 @@ impl Target {
         self.input_state(pane).await.map(|(shell, _)| shell)
     }
     pub async fn input_state(&self, pane: &str) -> Result<(Option<ShellInput>, String), String> {
+        if self.core {
+            return crate::herdr_core::input_state(self, pane).await;
+        }
         let response = self
             .request("pane.process_info", json!({"pane_id":pane}))
             .await?;
@@ -289,6 +309,7 @@ impl Target {
     }
     pub fn local(session_name: &str) -> Result<Self, String> {
         Ok(Self {
+            core: false,
             session: session(Some(session_name))?,
             socket_path: None,
             binary: "herdr".into(),
@@ -299,6 +320,9 @@ impl Target {
         })
     }
     pub fn path(&self) -> Result<String, String> {
+        if self.core {
+            return Ok(format!("herdr-core:{}", self.session));
+        }
         self.socket_path
             .clone()
             .map(Ok)
@@ -335,9 +359,15 @@ impl Target {
             .await
     }
     pub async fn snapshot(&self) -> Result<Arc<Snapshot>, String> {
+        if self.core {
+            return crate::herdr_core::snapshot(self).await.map(Arc::new);
+        }
         self.shared.resource(self)?.snapshot(self).await
     }
     pub async fn options(&self) -> Result<Value, String> {
+        if self.core {
+            return crate::herdr_core::options(self).await;
+        }
         static KIND: LazyLock<Regex> =
             LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_-]{0,63}$").unwrap());
         let response = self.request("server.agent_manifests", json!({})).await?;
@@ -364,6 +394,9 @@ impl Target {
         let input: Action = input
             .try_into()
             .map_err(|error| format!("Invalid Herdr action: {error}"))?;
+        if self.core {
+            return crate::herdr_core::action(self, input).await;
+        }
         // Directory choices and checkout confirmations must reflect current metadata.
         let resource = self.shared.resource(self)?;
         let snapshot = if matches!(
@@ -671,6 +704,9 @@ impl Target {
         })
     }
     pub async fn ensure(&self, cwd: &str) -> Result<(), String> {
+        if self.core {
+            return crate::herdr_core::connect(self).await.map(|_| ());
+        }
         if self.request("session.snapshot", json!({})).await.is_ok() {
             return Ok(());
         }
@@ -769,6 +805,7 @@ impl Target {
             .map(|(key, value)| (key.into(), value.into()))
             .collect();
         Ok(Self {
+            core: false,
             session: session_name.into(),
             socket_path: Some(socket(session_name, &env)?),
             binary: "herdr".into(),
@@ -779,6 +816,11 @@ impl Target {
         })
     }
     pub async fn preview(&self, agent: &Terminal) -> String {
+        if self.core {
+            return crate::herdr_core::preview(self, &agent.terminal_id)
+                .await
+                .unwrap_or_default();
+        }
         let work = async {
             let current = self.request("pane.get", json!({"pane_id":agent.pane_id})).await?;
             if current["pane"]["terminal_id"] != agent.terminal_id { return Ok::<_, String>(String::new()); }
@@ -906,6 +948,10 @@ pub async fn metadata(
     send: tokio::sync::mpsc::Sender<Metadata>,
     cancel: CancellationToken,
 ) {
+    if target.core {
+        crate::herdr_core::metadata(&target, send, cancel).await;
+        return;
+    }
     let resource = match target.shared.resource(&target) {
         Ok(resource) => resource,
         Err(message) => {

@@ -17,9 +17,13 @@ pub(super) async fn api_herdr_connect(
         .filter(|s| s.files_only)
         .ok_or_else(|| fail("Open a dedicated connection before connecting Herdr."))?;
     let session_name = herdr::session(input.session.as_deref()).map_err(fail)?;
-    let target = herdr::Target::from_source(&source, &session_name)
+    let mut target = herdr::Target::from_source(&source, &session_name)
         .await
         .map_err(fail)?;
+    target.core = input.core;
+    if target.core {
+        target.env.insert("PWD".into(), source.state().cwd);
+    }
     target.ensure(&source.state().cwd).await.map_err(fail)?;
     if !app
         .sessions
@@ -30,10 +34,10 @@ pub(super) async fn api_herdr_connect(
     {
         return Err(fail("This connection has closed."));
     }
-    app.herdr_targets.lock().unwrap().insert(
-        (SessionKey::new(owner, &sid), target.session.clone()),
-        target,
-    );
+    app.herdr_targets
+        .lock()
+        .unwrap()
+        .insert((SessionKey::new(owner, &sid), target.storage_key()), target);
     ok(json!({"herdrSession":session_name,"herdrSource":sid}))
 }
 
@@ -83,6 +87,7 @@ pub(super) async fn api_herdr_captured(
         herdr::parse_command(capture["command"].as_str().unwrap_or(""), &env).map_err(fail)?;
     let socket_path = herdr::socket(&session, &env).map_err(fail)?;
     let target = herdr::Target {
+        core: false,
         remote: source.remote.clone(),
         session: session.clone(),
         binary,
@@ -105,7 +110,7 @@ pub(super) async fn api_herdr_captured(
         && socket_path == herdr::socket(&session, &std::env::vars().collect()).map_err(fail)?;
     let result = json!({"herdrSession":session,"herdrSource":if local{""}else{&sid},"name":if target.session.is_empty(){"Herdr".into()}else{format!("Herdr · {}",target.session)},"remote":source.remote.is_some()});
     app.herdr_targets.lock().unwrap().insert(
-        (SessionKey::new(owner, &sid), target.session.clone()),
+        (SessionKey::new(owner, &sid), target.storage_key()),
         target.clone(),
     );
     if local {
@@ -205,7 +210,7 @@ pub(super) async fn api_herdr_ticket(
     } else {
         crate::protocol::requests::HerdrTicket::default()
     };
-    let size = if input.mobile && !terminal.is_empty() {
+    let size = if (input.mobile || target.core) && !terminal.is_empty() {
         let dimension = |value: Option<u16>| value.filter(|value| (1..=1000).contains(value));
         Some(herdr_terminal_stream::Size {
             cols: dimension(input.cols).ok_or_else(|| fail("Invalid terminal size."))?,
@@ -279,7 +284,7 @@ pub(super) async fn api_herdr_reading(
         } => {
             let key = (
                 SessionKey::new(&ctx.owner, &ctx.source),
-                ctx.session_name.clone(),
+                ctx.target.storage_key(),
             );
             let mut readings = app.herdr_readings.lock().unwrap();
             if readings.len() >= 32
@@ -326,7 +331,7 @@ pub(super) async fn api_herdr_reading_capture(
 ) -> Result<Response<Body>, Failure> {
     let key = (
         SessionKey::new(&ctx.owner, &ctx.source),
-        ctx.session_name.clone(),
+        ctx.target.storage_key(),
     );
     let id = ctx.query.get("id").map(String::as_str).unwrap_or("");
     let mut readings = app.herdr_readings.lock().unwrap();

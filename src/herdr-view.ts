@@ -12,6 +12,7 @@ import { herdrCache } from './herdr-cache.ts';
 import { tabGestures } from './tab-gestures.ts';
 import { dropSpace, repoSpace, repoTap, spaceLayout, spaceRepos, spaceTerminal, type RepoTap, type SpaceDrop, type SpaceRepo } from './herdr-spaces.ts';
 import { herdrLane, herdrLaneNames, statusLanes, type HerdrLane } from './herdr-lanes.ts';
+import { paneTitles } from './herdr-titles.ts';
 import type { Fail, NoticeInput, NoticeKind, Notify } from './notice-model.ts';
 import './herdr.css';
 
@@ -26,7 +27,7 @@ const icons = {
 };
 
 interface Host {
-  url: string; session: string; source?: string; key: string;
+  url: string; session: string; source?: string; core?: boolean; key: string;
   token(): string | undefined; authenticate(): Promise<void>;
   api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
   changed(attention: number): void; notification(event: HerdrNotification): void;
@@ -137,7 +138,7 @@ export class HerdrView {
     this.dropIndicator.append(this.dropLabel); document.body.append(this.dropIndicator);
     const viewed = () => { if (this.visible && this.frames.rendered && !document.hidden && document.hasFocus() && this.tracker.viewed(this.selected)) { this.save(); this.render(); } };
     this.frames = new HerdrFrames(this.screen, {
-      url: host.url, session: host.session, source: host.source,
+      core: host.core, url: host.url, session: host.session, source: host.source,
       token: () => host.token(), authenticate: () => host.authenticate(), notice: (...args) => host.notice(...args), fail: error => host.fail(error), state: (key, state) => host.state(key, state), reading: (terminalId, request) => host.reading(terminalId, request),
       visible: () => this.visible, held: () => this.handoffHeld, agentName: terminalId => this.terminals.find(agent => agent.terminalId === terminalId)?.name,
       painted: () => { viewed(); this.host.ready?.(); },
@@ -289,7 +290,7 @@ export class HerdrView {
   get terminalFrame() { return this.frames.frame; }
   /** Cached metadata mounts an unauthorized preview; the live snapshot verifies the pane before it connects. */
   private mountTerminal(force = false) { if (!this.disposed) this.frames.mount(this.terminals, this.selected, force, this.liveSnapshot); }
-  private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
+  private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.core) url.searchParams.set('herdrCore', '1'); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
   private connect() { return this.transport.connect(); }
   private status(message = '', kind: NoticeKind = 'progress') {
     if (message === this.statusText) return;
@@ -364,7 +365,7 @@ export class HerdrView {
     if (!this.spaceMode) return this.tracker.agents;
     return this.repos.map(repo => {
       const space = repoSpace(repo, this.preferences.repoSpaces![repo.id]);
-      return { ...this.spaceItem(space), terminalId: repo.id, workspace: repo.name, name: repo.spaces.length > 1 ? repo.name : space.name, repo };
+      return { ...this.spaceItem(space), terminalId: repo.id, workspace: repo.name, name: repo.name, repo };
     });
   }
   private statusFor(item: StripItem) {
@@ -452,7 +453,7 @@ export class HerdrView {
     const status = this.statusFor(agent);
     if (tab.dataset.status === status && tab.title) return;
     tab.dataset.status = status;
-    const place = agent.repo && agent.repo.spaces.length > 1 ? agent.space!.name : agent.workspace;
+    const place = agent.repo?.git ? agent.space!.name : agent.workspace;
     tab.setAttribute('aria-label', agent.name + ' · ' + status + ' · ' + place);
     tab.title = agent.name + ' · ' + agent.kind + ' · ' + status + ' · ' + place;
     const lane = tab.parentElement?.dataset.lane;
@@ -476,7 +477,7 @@ export class HerdrView {
     if (!lanes) this.pinnedLane = undefined;
     const agents = lanes ? lanes.flatMap(lane => lane.items) : this.ordered();
     const key = JSON.stringify([this.liveSnapshot, this.spaceMode, this.creatingSpace, this.stripSelection, this.preferences.collapsedLanes, this.preferences.collapsedGroups,
-      this.preferences.spaceGroups, lanes?.map(lane => [lane.lane, lane.items.map(item => item.terminalId)]), agents.map(agent => [agent.terminalId, agent.name, agent.kind, agent.workspace, agent.space?.name, agent.repo?.spaces.length])]);
+      this.preferences.spaceGroups, lanes?.map(lane => [lane.lane, lane.items.map(item => item.terminalId)]), agents.map(agent => [agent.terminalId, agent.name, agent.kind, agent.workspace, agent.space?.name, agent.repo?.name, agent.repo?.git, agent.repo?.spaces.length])]);
     if (key === this.stripKey) { if (this.tree) this.refreshTree(); return; }
     this.stripKey = key;
     const scroll = this.strip.scrollLeft; this.strip.replaceChildren(this.tabsToggle);
@@ -488,10 +489,10 @@ export class HerdrView {
       const checkouts = agent.repo && agent.repo.spaces.length > 1 ? agent.repo.spaces.length : 0;
       this.updateStatus(tab, agent);
       tab.append(node('span', 'herdr-status-dot'));
-      if (checkouts && agent.terminalId === this.stripSelection) {
-        // The open repository names its current checkout beneath the repository and its checkout count.
+      if (agent.repo?.git && agent.terminalId === this.stripSelection) {
+        // The open repository names its current checkout beneath the repository and any checkout count.
         const label = node('span', 'herdr-space-label');
-        label.append(node('span', 'herdr-repo-name', agent.name + ' · ' + checkouts), node('span', 'herdr-agent-name', agent.space!.name)); tab.append(label);
+        label.append(node('span', 'herdr-repo-name', agent.repo!.name + (checkouts ? ' · ' + checkouts : '')), node('span', 'herdr-agent-name', agent.space!.name)); tab.append(label);
       } else tab.append(node('span', 'herdr-agent-name', agent.name), ...checkouts ? [node('span', 'herdr-repo-count', String(checkouts))] : []);
       const lane = lanes?.find(lane => lane.items.includes(agent));
       const group = !lane && agent.space && this.preferences.spaceGroups!.find(group => group.includes(agent.terminalId));
@@ -664,8 +665,8 @@ export class HerdrView {
     const anchor = repo && this.strip.querySelector<HTMLElement>('.herdr-agent-tab[data-terminal="' + CSS.escape(repo.id) + '"]');
     if (!this.tree || !repo || !anchor || anchor.hidden) { this.closeMenu(); return; }
     if (!this.renaming) {
-      const panes = this.terminals.filter(terminal => repo.spaces.some(space => space.id === terminal.workspaceId)).map(terminal => [terminal.terminalId, terminal.name]);
-      const signature = JSON.stringify([repo.spaces.map(space => [space.id, space.name, space.terminalIds]), panes, this.selected, [...this.closing]]);
+      const panes = this.terminals.filter(terminal => repo.spaces.some(space => space.id === terminal.workspaceId)).map(terminal => [terminal.terminalId, terminal.name, terminal.label, terminal.kind, terminal.cwd]);
+      const signature = JSON.stringify([repo.spaces.map(space => [space.id, space.name, space.terminalIds, space.cwd, space.checkoutPath]), panes, this.selected, [...this.closing]]);
       if (rebuild || signature !== this.tree.signature) { this.tree.signature = signature; this.buildTree(repo); }
       else for (const pane of this.menu.querySelectorAll<HTMLElement>('.herdr-pane')) {
         const terminal = this.terminals.find(terminal => terminal.terminalId === pane.dataset.terminal);
@@ -714,12 +715,12 @@ export class HerdrView {
       for (const space of children) kids.append(this.treeNode(space, repo));
       this.menu.append(kids);
     }
-    // Herdr records a repository only once a worktree exists, so any root checkout may still start one.
+    const source = this.host.core ? repoSpace(repo, this.preferences.repoSpaces![repo.id]) : root;
     const actions = node('div', 'herdr-tree-actions');
     for (const [label, action, svg] of [['New worktree', 'new-worktree', icons.plus], ['Open worktree…', 'open-worktree', icons.open]] as const) {
       const button = node('button'); button.type = 'button'; button.innerHTML = svg; button.append(label);
-      button.disabled = !this.liveSnapshot || !root; if (!root) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
-      button.onclick = () => { if (root) { const item = this.spaceItem(root); void this.dialogs.spaceAction(item, action, this.terminalFor(item)); } };
+      button.disabled = !this.liveSnapshot || !source; if (!source) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
+      button.onclick = () => { if (source) { const item = this.spaceItem(source); void this.dialogs.spaceAction(item, action, this.terminalFor(item)); } };
       actions.append(button);
     }
     this.menu.append(actions);
@@ -736,17 +737,19 @@ export class HerdrView {
     close.setAttribute('aria-label', 'Close ' + space.name); close.disabled = !this.liveSnapshot || this.closing.has(item.terminalId); close.onclick = () => this.dialogs.closeSpace(item);
     head.append(title, close);
     const panes = node('div', 'herdr-tree-panes'); panes.role = 'group'; panes.setAttribute('aria-label', space.name + ' panes');
+    const titles = paneTitles(space, this.terminals);
     for (const id of space.terminalIds) {
       const terminal = this.terminals.find(terminal => terminal.terminalId === id);
       if (!terminal) continue;
       const pill = node('div', 'herdr-pane'), focus = node('button', 'herdr-pane-focus'), status = this.tracker.status(terminal);
       pill.dataset.terminal = id; pill.dataset.status = status;
-      focus.type = 'button'; focus.append(node('span', 'herdr-status-dot'), node('span', 'herdr-pane-name', terminal.name));
-      focus.setAttribute('aria-label', terminal.name + ' · ' + status + '. Hold to rename.');
+      const name = titles.get(id)!;
+      focus.type = 'button'; focus.title = [terminal.name, terminal.cwd].filter(Boolean).join('\n'); focus.append(node('span', 'herdr-status-dot'), node('span', 'herdr-pane-name', name));
+      focus.setAttribute('aria-label', name + ' · ' + status + '. Hold to rename.');
       if (id === this.selected) focus.setAttribute('aria-current', 'true');
       tabGestures(focus, { select: () => this.selectTerminal(id), hold: () => this.renameInline(pill, terminal) });
       const remove = node('button', 'herdr-pane-close'); remove.type = 'button'; remove.innerHTML = icons.close;
-      remove.setAttribute('aria-label', 'Close ' + terminal.name); remove.disabled = !this.liveSnapshot || this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
+      remove.setAttribute('aria-label', 'Close ' + name); remove.disabled = !this.liveSnapshot || this.closing.has(id); remove.onclick = () => void this.closeTab(terminal);
       pill.append(focus, remove); panes.append(pill);
     }
     const split = node('button', 'herdr-pane-add', '+ split'); split.type = 'button'; split.disabled = !this.liveSnapshot; split.setAttribute('aria-label', 'Split a pane in ' + space.name); split.onclick = () => void this.dialogs.spaceAction(item, 'split', this.terminalFor(item));

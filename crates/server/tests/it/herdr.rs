@@ -263,6 +263,12 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
         fixture.target.snapshot().await.unwrap().agents[0].name,
         "API routes"
     );
+    assert_eq!(
+        fixture.target.snapshot().await.unwrap().agents[0]
+            .label
+            .as_deref(),
+        Some("API routes")
+    );
     assert!(
         fixture
             .target

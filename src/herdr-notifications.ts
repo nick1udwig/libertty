@@ -59,10 +59,10 @@ export class HerdrNotifications {
     this.devices.delete(id); localStorage.removeItem(storageKey(id)); this.changed();
   }
   async forgetBackend(id: string) { if (this.device(id) || this.saved(id)) await this.disable(id); }
-  async watch(id: string, tabId: string, session: string, source?: string) {
+  async watch(id: string, tabId: string, session: string, source?: string, core = false) {
     if (this.closedViews.has(tabId)) return;
     await this.restore(id); const device = this.device(id); if (!device || this.closedViews.has(tabId)) return;
-    await this.api(id, 'api/herdr/notifications?' + new URLSearchParams({ herdrSession: session, ...(source ? { herdrSource: source } : {}) }), { device, tabId });
+    await this.api(id, 'api/herdr/notifications?' + new URLSearchParams({ ...(core ? { herdrCore: '1' } : {}), herdrSession: session, ...(source ? { herdrSource: source } : {}) }), { device, tabId });
   }
   async unwatch(id: string, tabId: string) {
     this.closedViews.add(tabId);

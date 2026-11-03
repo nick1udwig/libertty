@@ -108,7 +108,7 @@ export class HerdrDialogs {
       dialog.busy = true; submit.disabled = cancel.disabled = true; input.disabled = picker.disabled = true; error.textContent = ''; progress.textContent = action === 'split' ? 'Splitting…' : action === 'new-worktree' ? 'Creating worktree…' : 'Opening worktree…';
       branch?.update();
       try {
-        const created = await this.host.api<Created>('api/herdr/action', { action, workspaceId: space.id, ...(action === 'split' ? { terminalId, direction: picker.value } : action === 'new-worktree' ? { branch: herdrName(input.value) } : { path: picker.value }) });
+        const created = await this.host.api<Created>('api/herdr/action', { action, workspaceId: space.id, terminalId, ...(action === 'split' ? { direction: picker.value } : action === 'new-worktree' ? { branch: herdrName(input.value) } : { path: picker.value }) });
         await this.host.refresh(created); modal.close();
       } catch (reason: any) { if (modal.open) error.textContent = reason.message; }
       finally { dialog.busy = false; submit.disabled = cancel.disabled = input.disabled = picker.disabled = false; progress.textContent = ''; branch?.update(); }
@@ -116,7 +116,7 @@ export class HerdrDialogs {
     if (action === 'split') return;
     progress.textContent = 'Loading worktrees…';
     try {
-      const listing = await this.host.api<HerdrWorktrees>('api/herdr/action', { action: 'list-worktrees', workspaceId: space.id });
+      const listing = await this.host.api<HerdrWorktrees>('api/herdr/action', { action: 'list-worktrees', workspaceId: space.id, terminalId });
       if (!modal.open) return;
       if (!dialog.busy) progress.textContent = '';
       context.textContent = space.name + ' · ' + listing.source.repo_root;

@@ -174,6 +174,7 @@ mod tests {
                 tab_id: None,
                 workspace: "Project".into(),
                 name: "Agent".into(),
+                label: None,
                 kind: "Codex".into(),
                 status,
                 sequence,

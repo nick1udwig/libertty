@@ -1,7 +1,7 @@
 # Runtime plugin experiment
 
 libertty's host menu gets its connection actions from a plugin registry.
-Terminal, SFTP / Files, Herdr and Reading Mode are included.
+Terminal, SFTP / Files, Herdr, Herdr Core, and Reading Mode are included.
 Browser plugins can add a connection action and a tab at runtime by loading a package in Settings, without rebuilding libertty or restarting its server.
 Reading Mode opens through terminal reading phrases such as `look at README.md` or `git diff | look at`, rather than a host-menu connection action.
 
@@ -28,6 +28,7 @@ The host and private frame bridge reconstruct the complete text, so existing plu
 ## Connect Herdr
 
 Choose **Connect Herdr** from an ordinary HTTP or SSH host's menu and enter an optional named session.
+Choose **Connect Herdr Core** to use the same interface with `hc` and `herdr-client-lib`, as described in [Herdr Core](herdr.md#herdr-core).
 An absent server starts automatically.
 Herdr gets a dedicated connection without creating a terminal or PTY, and SSH authentication uses the existing keychain, route selection and fingerprint checks.
 

@@ -1,3 +1,4 @@
+import { isHerdrPlugin } from './plugins.ts';
 import { requestJSON } from './api.ts';
 import { backendAccess, forgetBackendAccess, rememberBackendAccess } from './backend-access.ts';
 import { BrowserVault } from './browser-vault.ts';
@@ -120,7 +121,13 @@ const herdrNotifications = new HerdrNotifications(
       const tab = workspace.tabs.find((tab) => tab.id === id);
       if (tab)
         void herdrNotifications
-          .watch(tab.backendId, tab.id, herdrSession(tab.herdrSession), tab.herdrSource)
+          .watch(
+            tab.backendId,
+            tab.id,
+            herdrSession(tab.herdrSession),
+            tab.herdrSource,
+            tab.pluginId === 'herdr-core',
+          )
           .catch(fail);
     }
   },
@@ -186,6 +193,7 @@ for (const plugin of builtinPlugins({
       tab.id,
       herdrSession(tab.herdrSession),
       tab.herdrSource,
+      tab.pluginId === 'herdr-core',
     ),
   unwatch: (tab) => herdrNotifications.unwatch(tab.backendId, tab.id),
 }))
@@ -357,7 +365,7 @@ async function boot() {
       void idle().then(() =>
         Promise.all(
           workspace.tabs
-            .filter((tab) => tab !== active && tabPluginId(tab) === 'herdr')
+            .filter((tab) => tab !== active && isHerdrPlugin(tabPluginId(tab)))
             .map((tab) => mount(tab).catch(fail)),
         ),
       );
@@ -388,7 +396,7 @@ function idle() {
 }
 void boot();
 async function openHerdrNotification(tabId: unknown, terminalId: unknown) {
-  const tab = workspace.tabs.find((tab) => tab.id === tabId && tabPluginId(tab) === 'herdr');
+  const tab = workspace.tabs.find((tab) => tab.id === tabId && isHerdrPlugin(tabPluginId(tab)));
   if (!tab) {
     notice('This Herdr connection has closed. Open its host to view the agent.', 'warning');
     return;
@@ -479,6 +487,7 @@ async function consumePendingReading() {
         ? {
             ...source,
             readHerdrTerminal: request.herdrTerminal,
+            herdrCore: request.herdrCore === true,
             herdrSession: herdrSession(request.herdrSession),
             herdrSource: request.herdrSource || undefined,
           }

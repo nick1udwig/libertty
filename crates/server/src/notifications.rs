@@ -242,6 +242,8 @@ struct Watch {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WatchView {
+    #[serde(default)]
+    core: bool,
     id: String,
     source: String,
     session: String,
@@ -289,7 +291,11 @@ fn key(owner: &str, view: &WatchView) -> String {
     json!([
         owner,
         view.source,
-        view.session,
+        if view.core {
+            format!("core:{}", view.session)
+        } else {
+            view.session.clone()
+        },
         view.socket_path.as_deref().unwrap_or("")
     ])
     .to_string()
@@ -370,6 +376,7 @@ impl Notifications {
                 if !view.remote {
                     let mut target = Target::local(&view.session)?;
                     target.socket_path = view.socket_path.clone();
+                    target.core = view.core;
                     manager.watch(&device.owner, view, &target)?;
                 }
             }
@@ -457,6 +464,7 @@ impl Notifications {
             id: tab.into(),
             source: source.into(),
             session: target.session.clone(),
+            core: target.core,
             remote: false,
             socket_path: target.socket_path.clone(),
             extra: Map::new(),
@@ -558,6 +566,7 @@ impl Notifications {
                 id: String::new(),
                 source: source.into(),
                 session: target.session.clone(),
+                core: target.core,
                 socket_path: target.socket_path.clone(),
                 remote: false,
                 extra: Map::new(),

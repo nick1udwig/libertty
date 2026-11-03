@@ -108,7 +108,7 @@ Hold menus open upward so their actions remain visible above the controls.
 Creating from Agents switches the view to Spaces so the new space is visible.
 Spaces include ordinary terminals.
 Once a repository has a worktree, Herdr reports its repository and the strip shows its checkouts as one chip.
-A grouped chip shows the repository name and checkout count, and while selected also names its current checkout.
+A repository chip shows its directory name and any checkout count, and while selected also names its current checkout.
 Other spaces, including repositories without worktrees, keep their own chips.
 Selecting a chip reopens the checkout and pane last used in it.
 Settings → **Tapping a repository with worktrees opens** can instead open the most urgent worktree, the root checkout, or the tree without selecting a checkout.
@@ -123,7 +123,7 @@ Tap a checkout or pane to open it, or hold its name to rename it in place.
 Enter or the check button saves a rename, and Escape cancels it.
 **+ split** splits that checkout's remembered pane, falling back to its desktop-selected pane.
 **×** on a pane closes it at once and keeps the tree open, while **×** on a checkout asks before closing its space.
-**New worktree** and **Open worktree…** start from the root checkout just as on desktop, and are unavailable while only worktrees are open.
+With legacy Herdr, **New worktree** and **Open worktree…** start from the root checkout just as on desktop, and are unavailable while only worktrees are open.
 New worktree creates a branch from `HEAD` in Herdr’s configured worktree directory, while Open worktree lists existing usable checkouts.
 Split offers Right and Down, and the tree immediately includes the new pane; desktop and mobile see the same worktrees and splits.
 While a tree is open, tapping another chip opens that chip's tree without changing the selection.
@@ -231,3 +231,30 @@ It never touches user agents.
 The native scroll browser test also needs Herdr and uses an isolated fullscreen app with zero terminal scrollback.
 It verifies multi-line touch wheel delivery in both directions, local selection/copy, plain and OSC-8 links and suppressed keyboard focus.
 It checks shell-to-TUI and joining-view baselines, animation with history snapshots withheld, incremental frame rendering and rejection of stale snapshots.
+
+## Herdr Core
+
+Select **Connect Herdr Core** from a direct or SSH host menu.
+The session field selects an explicit core session; an empty field selects `default`.
+Install `hc` on the selected host and make it available on its `PATH`.
+Local backends can set `LIBERTTY_HC_BINARY` to an absolute binary path.
+The backend uses `herdr-client-lib` over `hc connect`, including over the existing authenticated SSH connection.
+The pinned library source and its licenses are in `vendor/herdr-client-lib`.
+
+Herdr Core reuses the Herdr space strip, agent status, dialogs, notifications, reader, microphone, terminal renderer, and tab lifecycle.
+It stores shared spaces, tabs, and panes in the `herdr-app` document through version-checked library operations.
+The browser retains its own selected pane and attention state.
+The selected repository chip shows its directory above the current branch or custom space name, including with one open checkout.
+These labels follow the terminal directory and refresh when the branch changes.
+**New worktree** and **Open worktree…** use the selected pane's current directory.
+From a linked checkout, both actions use its parent repository, even when the main checkout is not open.
+Core terminal bytes use the existing browser renderer and negotiated transport compression.
+Output credit returns after the browser acknowledges processed output.
+A hidden pane releases focus and detaches; its programs remain in core.
+Reopening a pane restores core's current screen and available history.
+Core supplies raw output, so the legacy Herdr rendered-frame and mobile redraw-barrier protocols do not apply.
+Shell alternatives replace only the latest dictated text after checking the foreground process and screen.
+
+Run `npm run build` and `npm run test:herdr-core` with `hc`, Chromium, and OpenSSH installed.
+The integration harness uses temporary core, SSH, and browser state.
+It checks shared edits, worktrees, streaming, dictation alternatives, repair cancellation, reader isolation, connection ownership, detach, mobile rendering, and reload.

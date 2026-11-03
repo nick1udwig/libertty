@@ -1,7 +1,8 @@
 import type { HostProfile, TerminalTab } from './connections.ts';
 
 export const BUILTIN_VERSION = '1';
-export const builtinIds = ['terminal', 'files', 'herdr', 'reading'] as const;
+export const builtinIds = ['terminal', 'files', 'herdr', 'herdr-core', 'reading'] as const;
+export function isHerdrPlugin(id: string): boolean { return id === 'herdr' || id === 'herdr-core'; }
 export function tabPluginId(tab: TerminalTab): string { return tab.pluginId; }
 export interface PluginView {
   element: HTMLElement;

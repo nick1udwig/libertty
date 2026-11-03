@@ -31,6 +31,7 @@ export function readingPlugin(s: ReadingServices): TabPlugin {
 function readingURL(tab: TerminalTab, backend: BackendProfile, capture = false) {
   const url = new URL((tab.readHerdrTerminal ? 'api/herdr/reading/' : 'api/reading/') + (capture ? 'capture' : 'file'), backend.url);
   if (tab.readHerdrTerminal) {
+    if (tab.herdrCore) url.searchParams.set('herdrCore', '1');
     url.searchParams.set('herdrSession', tab.herdrSession || '');
     if (tab.herdrSource) url.searchParams.set('herdrSource', tab.herdrSource);
   }
