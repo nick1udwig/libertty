@@ -65,7 +65,7 @@ try {
   await page.locator('#token').fill(token); await page.locator('#login-form button').click();
   const focusInput = async () => {
     if (!new URL(page.url()).searchParams.has('herdrTerminal')) return focusShell(page);
-    await page.locator('#terminal .gespenst__background').tap({ position: { x: 10, y: 10 } });
+    await page.locator('#terminal .terminal-screen').tap({ position: { x: 10, y: 10 } });
     await page.waitForFunction(() => {
       const input = document.querySelector('#terminal textarea');
       return document.activeElement === input && !input.readOnly;

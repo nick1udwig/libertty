@@ -245,7 +245,7 @@ try {
     assert.equal(await page.locator('#alternatives-toggle').isVisible(), true);
     await page.locator('#alternatives-toggle').click();
     assert.equal(await page.locator('#alternatives-menu').isVisible(), true);
-    await page.locator('#terminal .gespenst__background').click({ position: { x: 10, y: 300 } });
+    await page.locator('#terminal .terminal-screen').click({ position: { x: 10, y: 300 } });
     assert.equal(await page.locator('#alternatives-menu').isVisible(), false);
     assert.equal(await page.locator('#alternatives-toggle').isVisible(), true);
     await page.locator('#alternatives-toggle').click();

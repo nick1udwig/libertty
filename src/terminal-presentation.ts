@@ -2,14 +2,16 @@
 function copyPicture(viewport: HTMLElement, snapshot: HTMLCanvasElement) {
   const canvases = Array.from(viewport.querySelectorAll<HTMLCanvasElement>('#terminal canvas'))
     .filter(canvas => canvas.width && canvas.height && canvas.getBoundingClientRect().width);
-  const first = canvases[0];
-  if (!first) return;
-  const source = first.getBoundingClientRect();
-  snapshot.width = first.width; snapshot.height = first.height;
+  const first = canvases[0], screen = viewport.querySelector<HTMLElement>('#terminal .terminal-screen');
+  if (!first || !screen) return;
+  // The canvases extend past the clipped screen while history rests between rows.
+  const source = screen.getBoundingClientRect(), canvas = first.getBoundingClientRect();
+  const scaleX = first.width / canvas.width, scaleY = first.height / canvas.height;
+  snapshot.width = Math.round(source.width * scaleX); snapshot.height = Math.round(source.height * scaleY);
   const context = snapshot.getContext('2d')!;
   for (const canvas of canvases) {
     const bounds = canvas.getBoundingClientRect();
-    context.drawImage(canvas, (bounds.left - source.left) * first.width / source.width, (bounds.top - source.top) * first.height / source.height);
+    context.drawImage(canvas, Math.round((bounds.left - source.left) * scaleX), Math.round((bounds.top - source.top) * scaleY));
   }
   return source;
 }

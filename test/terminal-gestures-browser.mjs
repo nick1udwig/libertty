@@ -78,16 +78,16 @@ try {
     const before = await snapshot();
     async function pointFor(needle, wrapped = false, offset = 0) {
       const point = await scope.evaluate(({ needle, wrapped, offset }) => {
-        const term = window.__testTerminal, bounds = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
+        const term = window.__testTerminal, bounds = document.querySelector('#terminal .terminal-screen').getBoundingClientRect();
         const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
         for (let row = 0; row < term.rows; row++) {
           const line = term.buffer.active.getLine(top + row), col = line?.translateToString(true).indexOf(needle) ?? -1;
           if (col >= 0 && (!wrapped || line.isWrapped))
-            return { x: (col + offset + .5) * bounds.width / term.cols, y: (row + .5) * bounds.height / term.rows };
+            return { x: (col + offset + .5) * bounds.width / term.cols, y: (row + .5 + term.getViewportY() % 1) * bounds.height / term.rows };
         }
         throw new Error('Missing visible link: ' + needle);
       }, { needle, wrapped, offset });
-      const bounds = await scope.locator('#terminal .gespenst__background').boundingBox();
+      const bounds = await scope.locator('#terminal .terminal-screen').boundingBox();
       return { x: bounds.x + point.x, y: bounds.y + point.y };
     }
     for (const [needle, url, wrapped, offset] of [
@@ -123,7 +123,7 @@ try {
     await scope.locator('#terminal textarea').evaluate(el => el.blur());
     const beforeScrollback = await snapshot();
     // Resolve the same URL from actual scrollback, rather than live output.
-    await scope.evaluate(() => { window.__testTerminal.write('\r\n'.repeat(50)); window.__testTerminal.scrollLines(-50); });
+    await scope.evaluate(() => { window.__testTerminal.write('\r\n'.repeat(50)); window.__testTerminal.scrollLines(-50.75); });
     const scrolled = await scope.evaluate(() => window.__testTerminal.getViewportY());
     for (const [needle, url, offset] of [
       ['WRAPPED https://', longURL, 8],
@@ -180,12 +180,81 @@ try {
     await track.waitFor({ state: 'visible' });
   }
   await checkScrollbar(page);
-  const canvas = await page.locator('#terminal .gespenst__background').boundingBox();
+  const pixels = await page.evaluate(async () => {
+    const term = window.__testTerminal;
+    term.clearSelection(); term.blur();
+    const canvases = [...document.querySelectorAll('#terminal canvas')], screen = document.querySelector('#terminal .terminal-screen');
+    const height = term.renderer.getMetrics().height;
+    // Read the pixels the clipped screen shows through each moved canvas.
+    const visible = canvas => {
+      const box = canvas.getBoundingClientRect(), view = screen.getBoundingClientRect(), scale = canvas.height / box.height;
+      return canvas.getContext('2d').getImageData(0, Math.round((view.top - box.top) * scale), canvas.width, Math.round(view.height * scale));
+    };
+    const capture = async offset => {
+      term.scrollToLine(offset);
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return canvases.map(visible);
+    };
+    const lower = await capture(12), upper = await capture(13);
+    const shift = Math.floor(height / 2);
+    const fractional = await capture(12 + shift / height);
+    let changed = 0, mismatches = 0, samples = 0;
+    const channel = (data, index) => index % 4 === 3 ? data[index] : data[index] * data[index - index % 4 + 3] / 255;
+    for (let layer = 0; layer < canvases.length; layer++) {
+      const { width, height: rows, data } = fractional[layer];
+      const deviceRow = Math.round(height * canvases[layer].height / canvases[layer].getBoundingClientRect().height);
+      const deviceShift = Math.round(shift * deviceRow / height);
+      for (let y = 0; y < rows; y++) {
+        const source = y < deviceShift ? upper[layer] : lower[layer];
+        const sourceY = y < deviceShift ? y + deviceRow - deviceShift : y - deviceShift;
+        for (let x = 0; x < width * 4; x++) {
+          const index = y * width * 4 + x;
+          if (Math.abs(channel(data, index) - channel(lower[layer].data, index)) > 2) changed++;
+          if (Math.abs(channel(data, index) - channel(source.data, sourceY * width * 4 + x)) > 2) mismatches++;
+          samples++;
+        }
+      }
+    }
+    const offset = term.getViewportY();
+    document.querySelector('#terminal canvas').dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 3 }));
+    const wheel = term.getViewportY();
+    await capture(12);
+    const restored = canvases.every((canvas, layer) => {
+      const { data } = visible(canvas);
+      return data.every((_, index) => Math.abs(channel(data, index) - channel(lower[layer].data, index)) <= 2);
+    });
+    // Rows reused by shifting the canvas must match a fresh paint of every row.
+    for (const offset of [14, 11.5, 17, 16, 16.25, 13]) await capture(offset);
+    const walked = canvases.map(visible);
+    term.fullFrame = true; term.renderNow();
+    const repainted = canvases.map(visible);
+    const shiftMismatches = walked.reduce((sum, image, index) => sum + image.data.filter((_, i) => Math.abs(channel(image.data, i) - channel(repainted[index].data, i)) > 2).length, 0);
+    term.scrollToLine(12.75);
+    const previous = term.buffer.active.getLine(term.buffer.active.viewportY - 1).translateToString(true).slice(0, 7);
+    const geometry = term.view.geometry;
+    for (const [action, x] of [['press', .1], ['motion', 7.9], ['release', 7.9]]) {
+      term.view.sendPointer({ action, x: x * geometry.cellWidthPx, y: .25 * geometry.cellHeightPx,
+        button: 'left', anyButtonPressed: action !== 'release', modifiers: 0, timeMs: performance.now() });
+    }
+    const selected = term.getSelection().trim(), selectionOffset = term.getViewportY();
+    term.clearSelection();
+    term.scrollToBottom();
+    return { changed, mismatches, samples, restored, shiftMismatches, selected, previous, selectionOffset, wheelDelta: offset - wheel, expectedWheel: 3 / height };
+  });
+  assert.equal(pixels.shiftMismatches, 0, 'Shifted rows must match a full repaint after crossing rows in both directions');
+  assert.ok(pixels.changed > 100, 'A partial row must visibly move terminal text');
+  assert.equal(pixels.mismatches, 0, 'Every pixel, including the entering edge row, must follow the fractional offset: ' + JSON.stringify(pixels));
+  assert.ok(pixels.restored, 'Returning to a whole row must clear all fractional paint');
+  assert.equal(pixels.selected, pixels.previous, 'Mouse selection must resolve the partial row at the top edge');
+  assert.equal(pixels.selectionOffset, 12.75, 'Mouse selection must preserve the fractional position');
+  assert.ok(Math.abs(pixels.wheelDelta - pixels.expectedWheel) < 1e-9, 'Pixel wheel deltas must retain their exact distance');
+  const canvas = await page.locator('#terminal .terminal-screen').boundingBox();
   const start = { x: canvas.x + canvas.width * .6, y: canvas.y + canvas.height * .35 };
   const focusCalls = await page.evaluate(() => window.__inputFocusCalls);
   await touch('touchStart', start); await delay(25);
   await touch('touchMove', { x: start.x, y: start.y + 8 });
   assert.ok(await page.evaluate(() => window.__testTerminal.getViewportY() > 0), 'An 8px drag must already scroll');
+  assert.ok(await page.evaluate(() => Math.abs(window.__testTerminal.getViewportY() * window.__testTerminal.renderer.getMetrics().height - 8) < .01), 'Local history must follow the finger pixel for pixel');
   assert.equal(await focused(), false);
   await delay(20); await touch('touchMove', { x: start.x, y: start.y + 90 }); await touch('touchEnd');
   // Dispatch a fast swipe in one task so CDP round-trip delays cannot turn it into a hold.
@@ -212,23 +281,38 @@ try {
   });
   await delay(25);
   assert.equal(await focused(), false, 'Delayed automatic focus after release must stay blocked');
+  // A timed fling whose last event slows down must still glide about as far as a native scroller.
+  await touch('touchStart', start); await touch('touchCancel');
+  await page.evaluate(() => window.__testTerminal.scrollToBottom());
+  // Explicit timestamps keep the 16 ms touch spacing independent of protocol round trips.
+  const began = Date.now() / 1000, timed = (type, point, step) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: point ? [{ ...point, id: 1 }] : [], timestamp: began + step * .016 });
+  await timed('touchStart', start, 0);
+  for (let step = 1; step <= 5; step++) await timed('touchMove', { x: start.x, y: start.y + step * 30 }, step);
+  await timed('touchMove', { x: start.x, y: start.y + 156 }, 6); await timed('touchEnd', undefined, 6.5);
+  const flung = await page.evaluate(async () => {
+    const term = window.__testTerminal, released = term.getViewportY();
+    let previous = -1, settled = released;
+    for (let wait = 0; wait < 60 && settled !== previous; wait++) { previous = settled; await new Promise(resolve => setTimeout(resolve, 100)); settled = term.getViewportY(); }
+    return (settled - released) * term.renderer.getMetrics().height;
+  });
+  assert.ok(flung > 500, `A fast fling must glide well past the old 220 ms decay distance: ${flung}px`);
   // Some browsers coalesce movement: the release alone must disqualify a tap.
   await page.locator('#terminal .gespenst__background').evaluate((el, point) => {
     const options = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, pointerId: 99, clientX: point.x, clientY: point.y };
     el.dispatchEvent(new PointerEvent('pointerdown', options));
     el.dispatchEvent(new PointerEvent('pointerup', { ...options, clientY: point.y + 20 }));
-    el.parentElement.querySelector('textarea').focus();
+    el.closest('.gespenst').querySelector('textarea').focus();
   }, start);
   assert.equal(await focused(), false, 'A release displaced from the press must never be treated as an input tap');
   // Stop momentum with a new touch, then select text from scrollback.
   await touch('touchStart', start); await touch('touchCancel');
-  await page.evaluate(() => window.__testTerminal.scrollToLine(40));
+  await page.evaluate(() => window.__testTerminal.scrollToLine(40.75));
   const rowPoint = await page.evaluate(() => {
-    const term = window.__testTerminal, bounds = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
+    const term = window.__testTerminal, bounds = document.querySelector('#terminal .terminal-screen').getBoundingClientRect();
     const top = term.buffer.active.length - term.rows - Math.floor(term.getViewportY());
     for (let row = Math.floor(term.rows / 3); row < term.rows - 2; row++) {
       if (term.buffer.active.getLine(top + row)?.translateToString(true).startsWith('ROW-'))
-        return { x: bounds.left + 8.5 * bounds.width / term.cols, y: bounds.top + (row + .5) * bounds.height / term.rows, cell: bounds.width / term.cols };
+        return { x: bounds.left + 8.5 * bounds.width / term.cols, y: bounds.top + (row + .5 + term.getViewportY() % 1) * bounds.height / term.rows, cell: bounds.width / term.cols };
     }
     throw new Error('Missing visible scrollback row');
   });
@@ -295,7 +379,7 @@ try {
   // Select the lower row first so its handles do not cover the next test word.
   for (const [prefix, text] of [['SINGLE ', 'x'], ['UNICODE ', '界😀']]) {
     const point = await page.evaluate(prefix => {
-      const term = window.__testTerminal, bounds = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
+      const term = window.__testTerminal, bounds = document.querySelector('#terminal .terminal-screen').getBoundingClientRect();
       const top = term.buffer.active.length - term.rows;
       for (let row = 0; row < term.rows; row++) if (term.buffer.active.getLine(top + row)?.translateToString(true).startsWith(prefix))
         return { x: bounds.left + (prefix.length + .5) * bounds.width / term.cols, y: bounds.top + (row + .5) * bounds.height / term.rows };
@@ -316,9 +400,9 @@ try {
   // Simulate an Android keyboard opening and closing with a real PTY resize/redraw.
   await page.evaluate(() => window.__testTerminal.focus());
   await page.setViewportSize({ width: 390, height: 460 });
-  await page.waitForFunction(() => document.querySelector('#terminal .gespenst__background').getBoundingClientRect().height < 450);
+  await page.waitForFunction(() => document.querySelector('#terminal .terminal-screen').getBoundingClientRect().height < 450);
   await delay(150);
-  const smallCanvas = await page.locator('#terminal .gespenst__background').boundingBox();
+  const smallCanvas = await page.locator('#terminal .terminal-screen').boundingBox();
   const withKeyboard = { x: smallCanvas.x + smallCanvas.width * .6, y: smallCanvas.y + smallCanvas.height * .3 };
   const focusedCalls = await page.evaluate(() => window.__inputFocusCalls);
   await touch('touchStart', withKeyboard); await touch('touchMove', { x: withKeyboard.x, y: withKeyboard.y + 60 }); await touch('touchEnd');
@@ -372,7 +456,7 @@ try {
   await delay(150);
   await frame.locator('#terminal textarea').evaluate(el => el.blur());
   await checkScrollbar(frame);
-  const embeddedCanvas = await frame.locator('#terminal .gespenst__background').boundingBox();
+  const embeddedCanvas = await frame.locator('#terminal .terminal-screen').boundingBox();
   const embeddedStart = { x: embeddedCanvas.x + embeddedCanvas.width * .6, y: embeddedCanvas.y + embeddedCanvas.height * .3 };
   await touch('touchStart', embeddedStart); await touch('touchMove', { x: embeddedStart.x, y: embeddedStart.y + 60 }); await touch('touchEnd');
   await delay(100);
@@ -380,7 +464,7 @@ try {
   await touch('touchStart', embeddedStart); await touch('touchCancel');
   await frame.evaluate(() => window.__testTerminal.focus());
   await page.setViewportSize({ width: 390, height: 460 });
-  await frame.waitForFunction(() => document.querySelector('#terminal .gespenst__background').getBoundingClientRect().height < 410);
+  await frame.waitForFunction(() => document.querySelector('#terminal .terminal-screen').getBoundingClientRect().height < 410);
   await delay(150);
   await frame.evaluate(() => window.__testTerminal.scrollLines(-15));
   const embeddedView = await frame.evaluate(() => {
@@ -403,7 +487,7 @@ try {
     for (let row = 2; row < term.rows - 2; row++) if (term.buffer.active.getLine(top + row)?.translateToString(true).startsWith('EMBEDDED-')) return row;
     throw new Error('Missing embedded selection row');
   });
-  const embeddedBounds = await frame.locator('#terminal .gespenst__background').boundingBox();
+  const embeddedBounds = await frame.locator('#terminal .terminal-screen').boundingBox();
   const dimensions = await frame.evaluate(() => ({ rows: window.__testTerminal.rows, cols: window.__testTerminal.cols }));
   await touch('touchStart', { x: embeddedBounds.x + 13.5 * embeddedBounds.width / dimensions.cols, y: embeddedBounds.y + (visibleRow + .5) * embeddedBounds.height / dimensions.rows });
   await delay(400); await touch('touchEnd');
