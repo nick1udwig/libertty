@@ -26,13 +26,19 @@ export class Ghostty {
   dispose() { this.core.dispose(); }
 }
 
+/** Rows decoded per read, small enough that a row entering during a scroll does not decode a long run of history. */
+const bufferChunk = 16;
+const bufferCapacity = 128;
+
 /** Synchronous retained-buffer access shared by the browser and projection terminals. */
 export class GhosttyTerminal {
   readonly core: CoreTerminal;
   onWrite?: () => void;
   readonly semantics: TerminalSemantics;
   private revision = -1;
+  private generation = 0;
   private bufferRows = new Map<number, TerminalBufferRow>();
+  private bufferTheme?: Readonly<TerminalTheme>;
   private colors?: RenderColors;
   private theme?: Readonly<TerminalTheme>;
   private replies: Uint8Array[] = [];
@@ -57,12 +63,16 @@ export class GhosttyTerminal {
   resize(cols: number, rows: number) { this.core.resize(cols, rows); this.onWrite?.(); }
   update() {
     const state = this.core.bufferState();
-    if (state.revision !== this.revision) {
+    if (state.revision !== this.revision || this.bufferTheme !== this.core.theme) {
       this.revision = state.revision;
+      this.bufferTheme = this.core.theme;
       this.bufferRows.clear();
+      this.generation++;
     }
     return state;
   }
+  /** Changes with buffer content or theme, but not when only the viewport scrolls through this terminal. */
+  contentGeneration() { this.update(); return this.generation; }
   getRevision() { return this.core.bufferState().revision; }
   getScrollbackLength() { return this.core.bufferState().scrollbackRows; }
   getViewportY() {
@@ -70,8 +80,13 @@ export class GhosttyTerminal {
     return state.scrollbackRows - state.viewportY;
   }
   setViewportY(offset: number) {
-    const current = this.getViewportY(), target = Math.max(0, Math.min(this.getScrollbackLength(), offset));
-    this.core.scrollLines(current - target);
+    const state = this.update(), current = state.scrollbackRows - state.viewportY;
+    const target = Math.max(0, Math.min(state.scrollbackRows, offset));
+    if (current !== target) {
+      this.core.scrollLines(current - target);
+      // Scrolling changes the native revision but preserves absolute buffer rows.
+      this.revision = this.getRevision();
+    }
   }
   isAlternateScreen() { return this.core.bufferState().screen === 'alternate'; }
   isMode(mode: number, ansi = false) { return this.core.isMode(mode, ansi); }
@@ -99,9 +114,11 @@ export class GhosttyTerminal {
     const state = this.update();
     if (!Number.isInteger(index) || index < 0 || index >= state.totalRows) return;
     if (!this.bufferRows.has(index)) {
-      if (this.bufferRows.size + 64 > 128) { this.bufferRows.clear(); }
-      const start = Math.floor(index / 64) * 64;
-      for (const row of this.core.readBuffer({ start, end: Math.min(start + 64, state.totalRows) }).rows) this.bufferRows.set(row.index, row);
+      const start = Math.floor(index / bufferChunk) * bufferChunk;
+      const rows = this.core.readBuffer({ start, end: Math.min(start + bufferChunk, state.totalRows) }).rows;
+      // Map order is read order, so the oldest rows leave first and rows that a scroll still shows stay.
+      for (const line of this.bufferRows.keys()) { if (this.bufferRows.size + rows.length <= bufferCapacity) break; this.bufferRows.delete(line); }
+      for (const row of rows) this.bufferRows.set(row.index, row);
     }
     return this.bufferRows.get(index);
   }

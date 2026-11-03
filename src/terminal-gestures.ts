@@ -6,6 +6,7 @@ import { isPreservingScrollback } from './terminal-viewport.ts';
 import { terminalContact } from './terminal-contact.ts';
 import { TerminalSelectionHistory } from './terminal-selection-history.ts';
 import type { Notify } from './notice-model.ts';
+import { momentumDecay, recordScrollSample, releaseVelocity, type ScrollSample } from './scroll-momentum.ts';
 
 interface Point { row: number; col: number }
 interface Host {
@@ -14,17 +15,19 @@ interface Host {
   link?(col: number, row: number): string | undefined;
   pan?: { enabled(): boolean; move(pixels: number): void };
   scroll?: { enabled(): boolean; move(lines: number, x: number, y: number): void };
+  /** Paints pending terminal changes now, so an animation frame shows its own scroll. */
+  render?(): void;
 }
 
 /** Keep a tap, a scroll and a text selection separate from keyboard focus. */
 export class TerminalGestures {
-  private canvas: HTMLCanvasElement;
+  private screen: HTMLElement;
   private highlights = document.createElement('div');
   private copyGeneration = 0;
   private handles = [document.createElement('button'), document.createElement('button')];
   private start?: Point;
   private end?: Point;
-  private press?: { x: number; y: number; lastX: number; lastY: number; started: number; at: number; velocity: number; mode: 'pending' | 'scroll' | 'select' | 'pan' };
+  private press?: { x: number; y: number; lastX: number; lastY: number; started: number; samples: ScrollSample[]; mode: 'pending' | 'scroll' | 'select' | 'pan' };
   private hold?: ReturnType<typeof setTimeout>;
   private frame = 0;
   private dragHandle?: number;
@@ -45,13 +48,13 @@ export class TerminalGestures {
   constructor(term: Terminal, host: Host) {
     this.term = term; this.host = host;
     const element = term.element!;
-    this.canvas = element.querySelector('canvas')!;
+    this.screen = term.screen!;
     // Keep mobile touch adjustment on cells instead of nearby selection handles.
-    this.canvas.addEventListener('click', event => event.preventDefault());
+    this.screen.addEventListener('click', event => event.preventDefault());
     const geometry = new ResizeObserver(() => { this.scrollLinePixels = undefined; });
-    geometry.observe(this.canvas);
+    geometry.observe(this.screen);
     window.addEventListener('pagehide', event => { if (!event.persisted) geometry.disconnect(); });
-    const surface = (target: EventTarget | null) => target === element || target === this.canvas.parentElement || target === term.textarea || target instanceof HTMLCanvasElement && element.contains(target);
+    const surface = (target: EventTarget | null) => target === element || target === this.screen.parentElement || target === term.textarea || target instanceof HTMLCanvasElement && element.contains(target);
     const stop = (event: Event) => { if (event.cancelable) event.preventDefault(); event.stopImmediatePropagation(); };
     this.highlights.className = 'terminal-selection';
     element.append(this.highlights);
@@ -91,9 +94,8 @@ export class TerminalGestures {
       else if (press.mode === 'select') this.extendSelection(host, x, y);
       else {
         const delta = y - press.lastY;
-        press.velocity = delta / Math.max(8, at - press.at);
+        recordScrollSample(press.samples, y, at);
         this.scroll(host, -delta / this.linePixels(), x, y);
-        press.at = at;
       }
       press.lastX = x; press.lastY = y;
     };
@@ -106,7 +108,7 @@ export class TerminalGestures {
         }
         host.focus.suppress(); this.cancelCopy(); this.lastTouch = performance.now();
         this.cancelMomentum(); this.clear(); this.scrollFraction = 0; this.scrollLinePixels = undefined; clearTimeout(this.hold);
-        this.press = { x, y, lastX: x, lastY: y, started: at, at, velocity: 0, mode: 'pending' };
+        this.press = { x, y, lastX: x, lastY: y, started: at, samples: [{ y, at }], mode: 'pending' };
         this.hold = setTimeout(() => {
           if (!this.press || this.press.mode !== 'pending') return;
           this.press.mode = 'select'; this.selectWord(this.point(x, y));
@@ -126,7 +128,7 @@ export class TerminalGestures {
         const press = this.press; this.press = undefined; this.finishSelectionScroll();
         if (press.mode === 'pending') {
           this.clear();
-          const bounds = this.canvas.getBoundingClientRect();
+          const bounds = this.screen.getBoundingClientRect();
           const inside = press.x >= bounds.left && press.x < bounds.right && press.y >= bounds.top && press.y < bounds.bottom;
           const point = this.point(press.x, press.y);
           const link = inside ? (host.link ? host.link(point.col, point.row) : terminalLinkAt(term, point.col, point.row)) : undefined;
@@ -134,7 +136,7 @@ export class TerminalGestures {
           else { host.tap(press.x, press.y); host.focus.focus(); }
         }
         else if (press.mode === 'select') void this.copy(host);
-        else if (press.mode === 'scroll' && at - press.at < 100) this.momentum(host, press.velocity, x, y);
+        else if (press.mode === 'scroll') this.momentum(host, releaseVelocity(press.samples, at), x, y);
       },
       cancel: () => { this.lastTouch = performance.now(); this.cancelGesture(); },
     });
@@ -153,10 +155,13 @@ export class TerminalGestures {
       if (this.press || (capabilities?.firesTouchEvents ?? performance.now() - this.lastTouch < 800)) { stop(event); return; }
     }, { capture: true });
     element.addEventListener('wheel', event => {
-      if (!host.scroll?.enabled() || event.ctrlKey || !event.deltaY) return;
+      if (event.ctrlKey || !event.deltaY) return;
+      const remote = host.scroll?.enabled();
+      if (!remote && (term.buffer.active.type !== 'normal' || !event.shiftKey && [1000, 1002, 1003].some(mode => term.wasmTerm?.getMode(mode)))) return;
       stop(event); this.cancelMomentum();
-      const pixels = event.deltaMode === 1 ? event.deltaY * this.linePixels() : event.deltaMode === 2 ? event.deltaY * this.canvas.clientHeight : event.deltaY;
-      this.scroll(host, pixels / this.linePixels(), event.clientX, event.clientY);
+      const height = remote ? this.linePixels() : term.renderer.getMetrics().height;
+      const pixels = event.deltaMode === 1 ? event.deltaY * height : event.deltaMode === 2 ? event.deltaY * term.rows * height : event.deltaY;
+      this.scroll(host, pixels / height, event.clientX, event.clientY);
     }, { capture: true, passive: false });
     term.onSelectionChange(() => this.render());
     term.onScroll(() => { if (this.start && !this.selectionScroll && !isPreservingScrollback(term)) this.clear(); else this.render(); });
@@ -193,15 +198,16 @@ export class TerminalGestures {
     return chunks.join('');
   }
   private point(x: number, y: number): Point {
-    const bounds = this.canvas.getBoundingClientRect();
+    const bounds = this.screen.getBoundingClientRect();
     let col = Math.max(0, Math.min(this.term.cols - 1, Math.floor((x - bounds.left) / (bounds.width / this.term.cols))));
-    const row = Math.max(this.selectionHistory?.first ?? 0, Math.min(this.selectionHistory?.last ?? this.term.rows - 1, Math.floor((y - bounds.top) / (bounds.height / this.term.rows))));
-    const line = this.term.buffer.active.getLine(Math.max(0, this.term.buffer.active.length - this.term.rows - Math.floor(this.term.getViewportY())) + row);
+    const top = this.topRow();
+    const row = Math.max(Math.floor(top + (this.selectionHistory?.first ?? 0)), Math.min(Math.ceil(top + (this.selectionHistory?.last ?? this.term.rows - 1)), Math.floor(top + (y - bounds.top) / (bounds.height / this.term.rows))));
+    const line = this.term.buffer.active.getLine(row);
     if (col > 0 && line?.getCell(col)?.getWidth() === 0 && line.getCell(col - 1)?.getWidth() === 2) col--;
-    return { col, row: this.topRow() + row };
+    return { col, row };
   }
-  private topRow() { return this.selectionHistory?.top ?? Math.max(0, this.term.buffer.active.length - this.term.rows - Math.floor(this.term.getViewportY())); }
-  private linePixels() { return this.scrollLinePixels ??= Math.max(6, this.canvas.getBoundingClientRect().height / this.term.rows * .65); }
+  private topRow() { return this.selectionHistory?.top ?? Math.max(0, this.term.buffer.active.length - this.term.rows - this.term.getViewportY()); }
+  private linePixels() { return this.scrollLinePixels ??= Math.max(6, this.screen.getBoundingClientRect().height / this.term.rows * (this.host.scroll?.enabled() ? .65 : 1)); }
   private range() {
     if (!this.start || !this.end) return;
     const before = this.start.row < this.end.row || this.start.row === this.end.row && this.start.col <= this.end.col;
@@ -244,10 +250,10 @@ export class TerminalGestures {
     const range = this.range();
     if (!range) return;
     this.highlights.replaceChildren();
-    const bounds = this.canvas.getBoundingClientRect(), container = this.term.element!.getBoundingClientRect();
+    const bounds = this.screen.getBoundingClientRect(), container = this.term.element!.getBoundingClientRect();
     const viewport = this.term.element!.parentElement?.id === 'terminal-viewport' ? this.term.element!.parentElement.getBoundingClientRect() : container;
     const width = bounds.width / this.term.cols, height = bounds.height / this.term.rows, top = this.topRow();
-    for (let row = Math.max(top + (this.selectionHistory?.first ?? 0), range.start.row); row <= Math.min(top + (this.selectionHistory?.last ?? this.term.rows - 1), range.end.row); row++) {
+    for (let row = Math.max(Math.floor(top + (this.selectionHistory?.first ?? 0)), range.start.row); row <= Math.min(Math.ceil(top + (this.selectionHistory?.last ?? this.term.rows - 1)), range.end.row); row++) {
       const first = row === range.start.row ? range.start.col : 0, last = row === range.end.row ? range.end.col : this.term.cols - 1;
       const highlight = document.createElement('span');
       Object.assign(highlight.style, { left: `${bounds.left - container.left + first * width}px`, top: `${bounds.top - container.top + (row - top) * height}px`, width: `${(last - first + 1) * width}px`, height: `${height}px` });
@@ -255,7 +261,7 @@ export class TerminalGestures {
     }
     [this.start!, this.end!].forEach((point, i) => {
       const handle = this.handles[i];
-      handle.hidden = this.dragHandle !== i && (point.row < top + (this.selectionHistory?.first ?? 0) || point.row > top + (this.selectionHistory?.last ?? this.term.rows - 1));
+      handle.hidden = this.dragHandle !== i && (point.row + 1 <= top + (this.selectionHistory?.first ?? 0) || point.row >= top + (this.selectionHistory?.last ?? this.term.rows - 1) + 1);
       handle.style.left = `${Math.max(viewport.left - container.left, Math.min(viewport.right - container.left - 32, bounds.left - container.left + (point.col + (i ? 1 : 0)) * width - 16))}px`;
       handle.style.top = `${Math.max(0, Math.min(container.height - 32, bounds.top - container.top + (point.row - top + 1) * height - 4))}px`;
     });
@@ -283,7 +289,7 @@ export class TerminalGestures {
     if (host.scroll?.enabled() && !this.selectionHistory) {
       this.selectionHistory = new TerminalSelectionHistory(this.term);
     }
-    const bounds = this.canvas.getBoundingClientRect();
+    const bounds = this.screen.getBoundingClientRect();
     const adjustedX = this.dragHandle === undefined ? x : x + (handle ? -.5 : .5) * bounds.width / this.term.cols;
     const adjustedY = this.dragHandle === undefined ? y : y - 12 - bounds.height / this.term.rows / 2;
     this.selectionContact = { x: adjustedX, y: adjustedY, handle };
@@ -318,7 +324,7 @@ export class TerminalGestures {
         this.blockSelectionScroll(result === 'ambiguous' ? 'The view changed; start a new selection to copy more text.' : 'No more scrollable text; release to copy the selection.'); return;
       }
     }
-    const bounds = this.canvas.getBoundingClientRect();
+    const bounds = this.screen.getBoundingClientRect();
     const height = bounds.height / this.term.rows;
     const top = bounds.top + (this.selectionHistory?.first ?? 0) * height;
     const bottom = bounds.top + ((this.selectionHistory?.last ?? this.term.rows - 1) + 1) * height;
@@ -355,8 +361,10 @@ export class TerminalGestures {
     if (Math.abs(velocity) < .08) return;
     let last = performance.now();
     const step = (at: number) => {
-      const dt = Math.min(32, at - last); last = at;
-      const moved = this.scroll(host, -velocity * dt / this.linePixels(), x, y); velocity *= Math.exp(-dt / 220);
+      // A frame timestamp can precede the release that started momentum.
+      const dt = Math.max(0, Math.min(32, at - last)); last = at;
+      const moved = this.scroll(host, -velocity * dt / this.linePixels(), x, y); velocity *= Math.exp(-dt / momentumDecay);
+      host.render?.();
       if (Math.abs(velocity) > .03 && moved) this.frame = requestAnimationFrame(step);
       else this.frame = 0;
     };

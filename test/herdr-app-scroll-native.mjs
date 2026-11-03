@@ -167,7 +167,7 @@ try {
   for (let row = 0; row < Math.ceil((wrappedPrefix.length + wrappedURL.length) / linkColumns); row++)
     linkPoints.push([4 + row, wrappedURL, row ? 0 : wrappedPrefix.length]);
   for (const [row, url, col] of linkPoints) {
-    const point = await page.evaluate(({ row, col }) => { const t = window.__terminal, r = document.querySelector('#terminal .gespenst__background').getBoundingClientRect(); return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; }, { row, col });
+    const point = await page.evaluate(({ row, col }) => { const t = window.__terminal, r = document.querySelector('#terminal .terminal-screen').getBoundingClientRect(); return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows }; }, { row, col });
     const opened = context.waitForEvent('page'); await touch('touchStart', point.x, point.y); await touch('touchEnd');
     const popup = await opened; await popup.waitForLoadState(); assert.equal(popup.url(), url);
     assert.equal(await popup.evaluate(() => window.opener), null, 'Opened links cannot access the terminal');
@@ -180,7 +180,7 @@ try {
   await page.waitForFunction(() => !window.__terminal.buffer.active.getLine(1)?.translateToString(true).includes('ROW-100'));
   assert.equal(await page.evaluate(() => window.__terminal.getViewportY()), 0, 'The application, rather than local scrollback, moves');
   // Holding the displayed app text must continue to use local selection/copy.
-  const word = await page.evaluate(() => { const t = window.__terminal, r = document.querySelector('#terminal .gespenst__background').getBoundingClientRect(), col = t.buffer.active.getLine(1).translateToString(true).indexOf('alpha'); return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + 1.5 * r.height / t.rows }; });
+  const word = await page.evaluate(() => { const t = window.__terminal, r = document.querySelector('#terminal .terminal-screen').getBoundingClientRect(), col = t.buffer.active.getLine(1).translateToString(true).indexOf('alpha'); return { x: r.x + (col + .5) * r.width / t.cols, y: r.y + 1.5 * r.height / t.rows }; });
   await touch('touchStart', word.x, word.y); await delay(450); await touch('touchEnd'); await page.locator('#notice-bubble').filter({ hasText: 'Copied 5 characters' }).waitFor({ state: 'visible' });
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'alpha');
   assert.equal((await state()).offset, older.offset, 'Selecting does not scroll the app');
@@ -227,7 +227,7 @@ try {
   assert.ok(nativeReload.every(sample => sample.barrier || sample.text === nativeReload[0].text), 'Frames before the redraw barrier do not repaint retained output');
   const tapCell = async (column, row) => {
     const point = await page.evaluate(({ column, row }) => {
-      const t = window.__terminal, r = document.querySelector('#terminal .gespenst__background').getBoundingClientRect();
+      const t = window.__terminal, r = document.querySelector('#terminal .terminal-screen').getBoundingClientRect();
       return { x: r.x + (column + .5) * r.width / t.cols, y: r.y + (row + .5) * r.height / t.rows };
     }, { column, row });
     await touch('touchStart', point.x, point.y); await touch('touchEnd');

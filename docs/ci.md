@@ -152,11 +152,113 @@ The manual GitHub performance workflow has been removed because shared runners a
 npm run verify:performance
 BENCH_SUITE=shared npm run bench:architecture
 npm run bench:workspace
+npm run bench:terminal-scroll
 ```
 
 [scripts/check-performance.mjs](../scripts/check-performance.mjs) builds the optimized native wire host, measures JSON and compression under fast and mobile profiles, then enforces the existing transport latency budgets.
+The terminal scroll benchmark needs a current frontend build and debug backend and measures the real renderer at mobile and desktop viewport sizes.
+It reports native scroll calls, history and Ghostty frame rows decoded, glyph runs, paint times and browser task time for slow scrolling, fast scrolling and scrolling during output.
+Use `BENCH_REPORT` to save each implementation's report and `BENCH_REPEATS` to change the default three samples per case.
+Set `BENCH_CPU_RATE=4` to repeat the comparison with Chromium's fourfold CPU throttling.
+Set `BENCH_GPU=1` to use hardware canvas and compositing, because headless Chromium otherwise copies software canvases on every frame.
+Compare reports from separate builds under the same machine load; these measurements do not measure battery drain.
 The architecture benchmark retains correctness, cold and warm latency, request-count checks and reversed-order confirmation of suspected regressions.
 Its default `0e0646c` reference is the historical TypeScript architecture, and `BENCH_BEFORE_MASTER` and `BENCH_BEFORE_CLIENT` can select other compatible TypeScript references from local Git history.
 The workspace benchmark retains startup, reload, echo and submit measurements against its historical `2a99127` reference, selectable with `BENCH_BEFORE`.
 These historical loaders require the old TypeScript server layout and do not accept arbitrary modern Rust revisions as baselines.
 Reports are written to ignored `.test-artifacts` files, and historical comparisons should be reviewed alongside current measurements rather than treated as current phone performance guarantees.
+
+### Pixel scrolling comparison, 2026-10-30
+
+The baseline is the initial pixel renderer at `a94b567`.
+The optimized renderer skips unchanged scroll targets, schedules one render boundary per frame, and retains decoded rows across viewport-only movement.
+Output, resize, screen changes and theme changes still invalidate cached rows, and the cache limit stays at 128 rows.
+The table shows median Chromium task time for 120 frames from three runs with four distinct scroll movements per frame.
+Mobile means a 390×844 viewport at device scale 2 on the test computer; desktop means 1440×900 at scale 1.
+
+| Viewport | Workload | Baseline | Optimized | Reduction |
+| --- | --- | ---: | ---: | ---: |
+| Mobile | Slow scroll | 658 ms | 586 ms | 11% |
+| Mobile | Fast scroll | 711 ms | 675 ms | 5% |
+| Mobile | Scroll with output | 632 ms | 611 ms | 3% |
+| Desktop | Slow scroll | 840 ms | 578 ms | 31% |
+| Desktop | Fast scroll | 1,112 ms | 854 ms | 23% |
+| Desktop | Scroll with output | 868 ms | 625 ms | 28% |
+
+Median decoded-row counts fell from 7,296 to 64 for slow scrolling and from 5,760 to 128 for fast scrolling.
+The measured paint p95 improved in all six cases, and stationary scrollback made no extra text draws.
+A separate bitmap-cache prototype reduced glyph drawing by 94% during slow scrolling and passed pixel and selection checks, but increased paint spikes at row boundaries and needed about 10 MB of extra bitmap storage at these sizes.
+The bitmap prototype was not retained because its fast-scroll results and memory cost did not give a consistent improvement.
+These instrumented CPU measurements do not establish battery savings or parity with the older discrete-row renderer.
+
+### Compositor scrolling comparison, 2026-10-30
+
+The baseline is the pixel renderer at `f1382cb`, which repainted every visible row for each partial-row frame.
+The compositor renderer moves canvases that are one row taller with a CSS transform and paints only when the integer row, output or size changes.
+Scroll events also no longer request a terminal frame unless the cursor must reappear.
+The table shows median Chromium task time and paint count for 120 frames from six runs with four scroll movements per frame.
+
+| Viewport | Workload | Baseline | Compositor | Baseline paints | Compositor paints |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Mobile | Slow scroll | 606 ms | 305 ms | 120 | 6 |
+| Mobile | Fast scroll | 675 ms | 680 ms | 120 | 120 |
+| Mobile | Scroll with output | 603 ms | 338 ms | 120 | 14 |
+| Desktop | Slow scroll | 588 ms | 294 ms | 120 | 6 |
+| Desktop | Fast scroll | 887 ms | 850 ms | 120 | 120 |
+| Desktop | Scroll with output | 646 ms | 357 ms | 120 | 14 |
+
+Fast scrolling crosses at least one row in every frame, so it still repaints the full viewport each frame.
+Task time includes the benchmark's own scroll loop and excludes compositor and GPU process work.
+These measurements do not establish battery savings.
+
+### Text ring comparison, 2026-10-30
+
+The baseline is the compositor renderer at `72c2f38`, which drew every visible line again whenever scrolling crossed a row.
+The text ring keeps each line in a fixed slot of a two-window canvas and draws only lines that its slots do not hold.
+The table shows median Chromium task time with `BENCH_GPU=1` for 120 frames from nine runs on an Intel Iris Xe GPU.
+
+| Viewport | Workload | Baseline | Text ring | Baseline glyph runs | Text ring glyph runs |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Mobile | Slow scroll | 177 ms | 174 ms | 1,176 | 48 |
+| Mobile | Fast scroll | 516 ms | 357 ms | 23,520 | 1,416 |
+| Mobile | Scroll with output | 207 ms | 219 ms | 2,360 | 1,608 |
+| Desktop | Slow scroll | 204 ms | 211 ms | 1,224 | 48 |
+| Desktop | Fast scroll | 723 ms | 562 ms | 24,480 | 1,424 |
+| Desktop | Scroll with output | 253 ms | 306 ms | 2,456 | 1,672 |
+
+Slow scrolling and scrolling with output stayed within the run-to-run spread, which exceeded 100 ms in both builds.
+Software rendering added about 0.4 ms per frame for the larger text canvas, so compare canvas size changes with `BENCH_GPU=1`.
+The text canvas uses about 5 MB more memory at both measured viewport sizes.
+Fast scrolling still decodes every visible row in Gespenst's render reader after each native viewport move.
+
+### History frame comparison, 2026-10-31
+
+The baseline is the text ring with fling physics at `137a077`, where Ghostty decoded every visible row after each viewport move.
+The history frame path builds viewport-only frames from libertty's cached history rows.
+The table shows median results with `BENCH_GPU=1` from six runs, and the throttled columns show task time per frame with `BENCH_CPU_RATE=4`.
+
+| Viewport | Workload | Baseline | History frames | Ghostty rows | Throttled baseline | Throttled history frames |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Mobile | Fast scroll | 382 ms | 339 ms | 5,760 → 0 | 8.5 ms | 7.0 ms |
+| Desktop | Fast scroll | 577 ms | 349 ms | 6,000 → 0 | 15.7 ms | 9.1 ms |
+
+Slow scrolling and scrolling with output stayed within run-to-run spread.
+History rows load in 64-row pages, so fast scrolling decodes about 1.5 history rows per visible row crossed.
+
+### Entering row comparison, 2026-11-02
+
+The baseline is the history frame path at `c0761ce`, which read every visible row from the history cache and decoded 64-row pages after each row crossing.
+The entering row path moves rows that stay visible from the previous frame, reuses transformed cells for moved rows, and decodes 16-row pages.
+The table shows median results with `BENCH_GPU=1` and `BENCH_CPU_RATE=4` from twelve runs that alternated between the two builds.
+
+| Viewport | Workload | Baseline | Entering rows | Decoded rows | Paint p95 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Mobile | Fast scroll | 6.6 ms | 5.6 ms | 256 → 144 | 2.1 → 2.0 ms |
+| Mobile | Scroll with output | 4.7 ms | 4.5 ms | 862 → 352 | 9.5 → 7.1 ms |
+| Desktop | Fast scroll | 8.4 ms | 6.3 ms | 256 → 144 | 3.6 → 3.4 ms |
+| Desktop | Scroll with output | 6.0 ms | 5.6 ms | 862 → 352 | 15.5 → 9.7 ms |
+
+Times are task time per frame.
+Slow scrolling stayed within run-to-run spread.
+In an instrumented touch fling with fourfold throttling, frames that crossed a row fell from about 9.5 to 5 ms on average and from about 22 to 9 ms at worst.
+The worst baseline frames decoded a new 64-row page while the glide was slow enough for the eye to follow it.

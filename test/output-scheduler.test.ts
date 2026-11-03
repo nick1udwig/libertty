@@ -49,3 +49,15 @@ test('interactive frame parsing stays synchronous and activity flushes pending p
   assert.equal(f.flushes.length, 3, 'Pending terminal frames are parsed before interactive input continues');
   f.advance(100); assert.equal(f.flushes.length, 3);
 });
+
+test('an animation frame can run a pending paint immediately', () => {
+  const f = fixture(); f.advance(6000);
+  f.scheduler.runNow();
+  assert.deepEqual(f.flushes, [], 'Nothing pending does no work');
+  f.scheduler.activity(); f.scheduler.request();
+  f.scheduler.runNow();
+  assert.equal(f.flushes.length, 1);
+  assert.equal(f.jobs.size, 0, 'The scheduled frame is cancelled');
+  f.advance(100);
+  assert.equal(f.flushes.length, 1);
+});

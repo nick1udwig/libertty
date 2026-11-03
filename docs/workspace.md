@@ -16,6 +16,10 @@ A shell without a connected viewer is never paused by flow control, so a release
 After a reload, the selected tab mounts first and hidden Herdr metadata views mount once the browser is idle for notifications.
 The tab header supplies new-tab and back controls.
 On touch screens, hold a word and drag to select text, or drag either selection handle.
+Local terminal history scrolls by pixels with touch, trackpad, mouse wheel and scrollbar input.
+Text can stop between rows, and selection and links follow the visible text.
+A released swipe glides with deceleration close to iOS, using finger speed fitted over the last 100 ms of movement.
+A finger that rests for 40 ms before lifting does not start a glide.
 Hold the dragged endpoint near the top or bottom edge to extend the selection through terminal history.
 Release to copy the selected text.
 Agent TUIs scroll through their application history one request at a time and retain rows only when unique overlapping text confirms their position.
@@ -363,6 +367,17 @@ Styled transcripts retain underline variants and colors, overlines, explicit bac
 Snapshot caches follow the core state revision so writes and cursor changes are visible before the next paint.
 Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
 Reconnect and resize covers combine the background and text canvases.
+The visible window is one row taller than the grid and holds the line above the viewport in its first row.
+Partial-row scrolling moves the canvases with a CSS transform inside the clipped `.terminal-screen` element, so only a changed row, output or a resize paints.
+The text canvas holds two windows, and each history line has a fixed slot at its line number modulo the window height in either half.
+Any window is therefore contiguous, and crossing a row moves the text canvas and draws only the lines that its slots do not already hold.
+Lines drawn during a viewport-only move fill both halves, so wrapping between the halves draws nothing extra.
+Output, selection changes, resizes and theme changes still draw the visible lines from current terminal state.
+A viewport-only move builds its frame from cached history rows instead of asking Ghostty to decode every visible row again.
+Rows that stay visible move from the previous frame, so crossing a row reads only the rows that enter.
+History rows load in 16-row pages, and a full cache drops its oldest rows first, so one entering row does not decode a long run of history.
+Ghostty still renders when content, selection, size or a translucent theme changes, or when the cursor enters from outside the last frame.
+Read terminal grid geometry from `term.screen`, because the canvas bounds move and include hidden rows.
 
 `term.ghostty.memoryUsage()` reads per-terminal retained page and image bytes on demand, including projection terminals.
 The report counts the shared WASM memory capacity once and does not add retained bytes to that capacity.
