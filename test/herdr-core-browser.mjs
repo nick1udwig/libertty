@@ -344,6 +344,43 @@ try {
     'Named terminal',
   );
   await api(route('action'), { action: 'close', terminalId: extra.terminalId });
+  const subdirectory = join(directory, 'nested');
+  await mkdir(subdirectory);
+  const changed = await api(route('action'), {
+    action: 'split',
+    workspaceId: created.workspaceId,
+    terminalId: created.terminalId,
+    direction: 'right',
+  });
+  const changedSocket = await connectSocket(changed.terminalId);
+  await until(() => changedSocket.messages.some(m => m.type === 'output'), 'moving pane ready');
+  changedSocket.ws.send(JSON.stringify({ type: 'input', data: `cd '${subdirectory}'\r` }));
+  await until(async () => (await api(route('snapshot'))).terminals.some(t => t.terminalId === changed.terminalId && t.cwd === subdirectory), 'second pane changes repository');
+  const changedSource = { workspaceId: created.workspaceId, terminalId: changed.terminalId };
+  const changedListing = await api(route('action'), { action: 'list-worktrees', ...changedSource });
+  assert.equal(changedListing.source.repo_root, directory, 'Listing uses the selected pane CWD, including subdirectories');
+  const changedWorktree = await api(route('action'), { action: 'new-worktree', ...changedSource, branch: 'cwd-test' });
+  const changedCheckout = execFileSync('git', ['-C', directory, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  assert.match(changedCheckout, /refs\/heads\/cwd-test/, 'Creation uses the new repository');
+  await api(route('action'), { action: 'close', terminalId: changed.terminalId });
+  changedSocket.ws.close();
+  await assert.rejects(() => api(route('action'), { action: 'list-worktrees', ...changedSource }), /Choose a live terminal/);
+  const linkedSource = { workspaceId: changedWorktree.workspaceId, terminalId: changedWorktree.terminalId };
+  const linkedListing = await api(route('action'), { action: 'list-worktrees', ...linkedSource });
+  assert.equal(linkedListing.source.repo_root, directory, 'Linked checkouts resolve their parent without an open main checkout');
+  const firstCheckout = linkedListing.worktrees.find(w => w.branch === 'cwd-test');
+  assert.ok(firstCheckout);
+  const sibling = await api(route('action'), { action: 'new-worktree', ...linkedSource, branch: 'cwd-sibling' });
+  const siblingListing = await api(route('action'), { action: 'list-worktrees', ...linkedSource });
+  const siblingCheckout = siblingListing.worktrees.find(w => w.branch === 'cwd-sibling');
+  assert.ok(siblingCheckout);
+  assert.equal(siblingCheckout.open_workspace_id, sibling.workspaceId);
+  assert.equal(siblingCheckout.path, join(root, '.herdr/worktrees/other-repo/cwd-sibling'), 'Linked creation uses the parent repository name');
+  await api(route('action'), { action: 'close-space', workspaceId: sibling.workspaceId });
+  const reopenedSibling = await api(route('action'), { action: 'open-worktree', ...linkedSource, path: siblingCheckout.path });
+  assert.ok(reopenedSibling.workspaceId);
+  await api(route('action'), { action: 'delete-worktree', workspaceId: reopenedSibling.workspaceId, path: siblingCheckout.path, force: false });
+  await api(route('action'), { action: 'delete-worktree', workspaceId: changedWorktree.workspaceId, path: firstCheckout.path, force: false });
   const worktree = await api(route('action'), {
     action: 'new-worktree',
     workspaceId: created.workspaceId,
@@ -566,10 +603,36 @@ try {
   assert.equal(renamed.label, 'bash');
   assert.equal(renamed.name, 'bash');
   titled.ws.close();
+  const selectedSocket = await connectSocket(treeSplit.terminalId);
+  await until(() => selectedSocket.messages.some(m => m.type === 'output'), 'selected pane ready');
+  selectedSocket.ws.send(JSON.stringify({ type: 'input', data: `cd '${subdirectory}'\r` }));
+  await until(async () => (await api(route('snapshot'))).terminals.some(t => t.terminalId === treeSplit.terminalId && t.cwd === subdirectory), 'selected pane enters another repository');
+  await paneGroup.locator('.herdr-pane[data-terminal="' + treeSplit.terminalId + '"] .herdr-pane-focus').click();
+  await page.locator('.herdr-agent-strip:visible .herdr-agent-tab[aria-selected=true]').click();
+  await page.getByRole('button', { name: 'New worktree', exact: true }).click();
+  await until(async () => (await page.locator('.herdr-space-action').textContent()).includes(' · ' + directory), 'worktree dialog follows selected pane');
+  await page.getByRole('combobox', { name: 'Branch', exact: true }).fill('browser-linked');
+  const creationResponse = page.waitForResponse(response => response.url().includes('/api/herdr/action') && response.request().method() === 'POST' && response.request().postDataJSON()?.action === 'new-worktree');
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  const browserCreation = await creationResponse;
+  assert.equal(browserCreation.ok(), true);
+  assert.equal(browserCreation.request().postDataJSON().terminalId, treeSplit.terminalId);
+  const browserLinked = await browserCreation.json();
+  await until(async () => await page.locator('.herdr-space-action').count() === 0, 'created worktree selected');
+  await api(route('action'), { action: 'close-space', workspaceId: created.workspaceId });
+  selectedSocket.ws.close();
+  await until(async () => await page.locator('.herdr-terminal:visible').getAttribute('data-terminal') === browserLinked.terminalId && await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').count() === 1, 'only linked checkout remains');
+  await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').click();
+  for (const name of ['New worktree', 'Open worktree…']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await until(async () => (await page.locator('.herdr-space-action').textContent()).includes(' · ' + directory), 'linked checkout resolves parent for ' + name);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    if (name === 'New worktree') await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').click();
+  }
   assert.deepEqual(errors, []);
   await browser.close();
   browser = undefined;
-  await api(route('action'), { action: 'close-space', workspaceId: created.workspaceId });
+  await api(route('action'), { action: 'close-space', workspaceId: browserLinked.workspaceId });
   assert.equal((await api(route('snapshot'))).spaces.length, 0);
   console.log(
     'Herdr Core: metadata, creation, split, rename, worktrees, close, raw input, dictation alternatives, SSH ownership, detach, mobile UI and reload passed.',

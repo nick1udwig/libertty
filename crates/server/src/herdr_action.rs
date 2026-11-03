@@ -15,13 +15,16 @@ pub enum Action {
     },
     ListWorktrees {
         workspace_id: String,
+        terminal_id: Option<String>,
     },
     NewWorktree {
         workspace_id: String,
+        terminal_id: Option<String>,
         branch: String,
     },
     OpenWorktree {
         workspace_id: String,
+        terminal_id: Option<String>,
         path: String,
     },
     Split {
@@ -68,7 +71,7 @@ impl Action {
     pub fn workspace(&self) -> Option<&str> {
         match self {
             Self::DeleteWorktree { workspace_id, .. }
-            | Self::ListWorktrees { workspace_id }
+            | Self::ListWorktrees { workspace_id, .. }
             | Self::NewWorktree { workspace_id, .. }
             | Self::OpenWorktree { workspace_id, .. }
             | Self::Split { workspace_id, .. }

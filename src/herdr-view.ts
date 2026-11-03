@@ -715,12 +715,12 @@ export class HerdrView {
       for (const space of children) kids.append(this.treeNode(space, repo));
       this.menu.append(kids);
     }
-    // Herdr records a repository only once a worktree exists, so any root checkout may still start one.
+    const source = this.host.core ? repoSpace(repo, this.preferences.repoSpaces![repo.id]) : root;
     const actions = node('div', 'herdr-tree-actions');
     for (const [label, action, svg] of [['New worktree', 'new-worktree', icons.plus], ['Open worktree…', 'open-worktree', icons.open]] as const) {
       const button = node('button'); button.type = 'button'; button.innerHTML = svg; button.append(label);
-      button.disabled = !this.liveSnapshot || !root; if (!root) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
-      button.onclick = () => { if (root) { const item = this.spaceItem(root); void this.dialogs.spaceAction(item, action, this.terminalFor(item)); } };
+      button.disabled = !this.liveSnapshot || !source; if (!source) button.title = 'Open the repository’s main checkout as a space to add worktrees.';
+      button.onclick = () => { if (source) { const item = this.spaceItem(source); void this.dialogs.spaceAction(item, action, this.terminalFor(item)); } };
       actions.append(button);
     }
     this.menu.append(actions);

@@ -123,7 +123,7 @@ Tap a checkout or pane to open it, or hold its name to rename it in place.
 Enter or the check button saves a rename, and Escape cancels it.
 **+ split** splits that checkout's remembered pane, falling back to its desktop-selected pane.
 **×** on a pane closes it at once and keeps the tree open, while **×** on a checkout asks before closing its space.
-**New worktree** and **Open worktree…** start from the root checkout just as on desktop, and are unavailable while only worktrees are open.
+With legacy Herdr, **New worktree** and **Open worktree…** start from the root checkout just as on desktop, and are unavailable while only worktrees are open.
 New worktree creates a branch from `HEAD` in Herdr’s configured worktree directory, while Open worktree lists existing usable checkouts.
 Split offers Right and Down, and the tree immediately includes the new pane; desktop and mobile see the same worktrees and splits.
 While a tree is open, tapping another chip opens that chip's tree without changing the selection.
@@ -246,6 +246,8 @@ It stores shared spaces, tabs, and panes in the `herdr-app` document through ver
 The browser retains its own selected pane and attention state.
 The selected repository chip shows its directory above the current branch or custom space name, including with one open checkout.
 These labels follow the terminal directory and refresh when the branch changes.
+**New worktree** and **Open worktree…** use the selected pane's current directory.
+From a linked checkout, both actions use its parent repository, even when the main checkout is not open.
 Core terminal bytes use the existing browser renderer and negotiated transport compression.
 Output credit returns after the browser acknowledges processed output.
 A hidden pane releases focus and detaches; its programs remain in core.

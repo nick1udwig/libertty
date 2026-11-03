@@ -310,10 +310,39 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
                 machine: machine.clone(),
                 deadline: DEADLINE,
             };
-            let cwd = cwd.ok_or("This space has no working directory.")?;
+            let cwd = match &action {
+                Action::ListWorktrees { terminal_id, .. }
+                | Action::NewWorktree { terminal_id, .. }
+                | Action::OpenWorktree { terminal_id, .. } => {
+                    let workspace_id = projection::key(&machine, &space_id);
+                    let terminal = match terminal_id {
+                        Some(id) => snapshot.terminal(id),
+                        None => snapshot.terminals.iter().find(|terminal| {
+                            terminal.workspace_id.as_deref() == Some(workspace_id.as_str())
+                        }),
+                    }
+                    .filter(|terminal| {
+                        terminal.workspace_id.as_deref() == Some(workspace_id.as_str())
+                    })
+                    .ok_or("Choose a live terminal in this space.")?;
+                    let record = projection::record(&session, &terminal.terminal_id)?;
+                    let record = session
+                        .client
+                        .terminal_get(&record.address, DEADLINE)
+                        .await
+                        .map_err(error)?;
+                    if !record.is_live() {
+                        return Err("This terminal has ended.".into());
+                    }
+                    record
+                        .folder()
+                        .ok_or("This terminal has no working directory.")?
+                        .to_owned()
+                }
+                _ => cwd.ok_or("This space has no working directory.")?,
+            };
             let checkouts = git.list(&cwd).await.map_err(error)?;
             let root = &checkouts.first().ok_or("No repository found.")?.path;
-            let path = git.toplevel(&cwd).await.map_err(error)?;
             match action {
                 Action::ListWorktrees { .. } => {
                     let worktrees: Vec<_> = checkouts.iter().map(|checkout| {
@@ -325,9 +354,6 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
                     );
                 }
                 Action::NewWorktree { branch, .. } => {
-                    if path != *root {
-                        return Err("Create worktrees from the repository parent space.".into());
-                    }
                     let branch = crate::herdr::name(&branch)?;
                     let path = git.default_path(root, &branch).await.map_err(error)?;
                     let placement = placement(branch.clone());
@@ -388,6 +414,7 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
                     force,
                     ..
                 } => {
+                    let path = git.toplevel(&cwd).await.map_err(error)?;
                     if path == *root || confirmed.as_deref() != Some(&path) {
                         return Err("The linked checkout changed; reopen its confirmation.".into());
                     }

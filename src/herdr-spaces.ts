@@ -17,7 +17,7 @@ export function spaceRepos(spaces: HerdrSpace[]): SpaceRepo[] {
     repo.spaces.push(space); repos.set(id, repo);
   }
   for (const repo of repos.values()) {
-    // New and open worktree actions must start from a checkout that is not itself a linked worktree.
+    // The main checkout is the group's root when it is open.
     repo.root = repo.git ? repo.spaces.find(space => !space.linkedWorktree) : repo.spaces[0];
     if (repo.root) repo.spaces = [repo.root, ...repo.spaces.filter(space => space !== repo.root)];
   }
