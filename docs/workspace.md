@@ -314,6 +314,7 @@ Held pictures copy the canvas bitmap without resampling, so the cover is identic
 Retained output also keeps its own cursor until that replacement.
 The replacement shows no connection state or progress indicator.
 Retained output appears at once, and the connection state appears only while the browser is offline or a connection attempt fails.
+A Herdr Core pane shows retained output only when its live replay has not painted within 150 milliseconds of selection, so a fast replay replaces the previous pane directly.
 During use, retained output takes over a scroll only after the connection drops or stalls, when the live terminal has no more local rows to show.
 A remote scroll on a slow but working connection waits for the application instead.
 Retained output scrolls and selects like live output and marks gaps with an ellipsis.
