@@ -63,16 +63,20 @@ export class TerminalPresentation {
     this.snapshot.width = this.snapshot.height = 0;
     this.viewport.setAttribute('aria-busy', 'true');
   }
-  reveal() {
-    if (!this.waiting) return;
+  /** Revealed runs once the held picture is gone, so a host never shows the frame under a stale cover. */
+  reveal(revealed?: () => void) {
+    if (!this.waiting) { revealed?.(); return; }
     const generation = this.generation;
     // Terminal writes parse synchronously, but the renderer paints on a later frame.
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (generation !== this.generation || !this.waiting) return;
-      this.layer.hidden = true; this.held = this.waiting = false;
-      this.snapshot.width = this.snapshot.height = 0;
-      this.viewport.setAttribute('aria-busy', 'false');
-      this.ready();
+      if (generation !== this.generation) return;
+      if (this.waiting) {
+        this.layer.hidden = true; this.held = this.waiting = false;
+        this.snapshot.width = this.snapshot.height = 0;
+        this.viewport.setAttribute('aria-busy', 'false');
+        this.ready();
+      }
+      revealed?.();
     }));
   }
 }

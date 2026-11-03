@@ -680,9 +680,8 @@ function notifyHerdrRendered(presentationId = herdrPresentation) {
     clearTimeout(herdrHandoffTimer);
     if (herdrHandoffUntil > Date.now() && !projection?.hasHistory) { herdrHandoffTimer = setTimeout(() => notifyHerdrRendered(presentationId), herdrHandoffUntil - Date.now()); return; }
     herdrHandoffUntil = 0;
-    presentation.reveal(); synchronizeInput();
+    presentation.reveal(() => notify('terminal-rendered', { presentation: presentationId, cols:term.cols, rows:term.rows })); synchronizeInput();
     if (resizeCover.held && resizeTarget === term.cols + 'x' + term.rows) { clearTimeout(resizeCoverTimer); resizeCover.reveal(); }
-    notify('terminal-rendered', { presentation: presentationId, cols:term.cols, rows:term.rows });
   }
 }
 function notifyHerdrSizing() {

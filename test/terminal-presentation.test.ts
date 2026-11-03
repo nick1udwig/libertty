@@ -25,6 +25,30 @@ test('uncovered reconnects wait for paint and ignore obsolete reveals', () => {
   assert.equal(presentation.pending, false);
 });
 
+test('a host learns of a reveal only after the held picture is gone', () => {
+  const nodes: { hidden?: boolean; append(): void; setAttribute(): void }[] = [];
+  const callbacks: FrameRequestCallback[] = [];
+  globalThis.document = { createElement: () => { const node = { append() {}, setAttribute() {} }; nodes.push(node); return node; } } as unknown as Document;
+  globalThis.requestAnimationFrame = callback => callbacks.push(callback);
+  const viewport = { parentElement: { append() {} }, setAttribute() {} } as unknown as HTMLElement;
+  const presentation = new TerminalPresentation(viewport), revealed: string[] = [];
+  presentation.wait();
+  presentation.reveal(() => revealed.push('first'));
+  presentation.reveal(() => revealed.push('second'));
+  callbacks.shift()!(0); callbacks.shift()!(0);
+  assert.equal(revealed.length, 0, 'The held picture still covers the frame');
+  callbacks.shift()!(0); callbacks.shift()!(0);
+  assert.deepEqual(revealed, ['first', 'second'], 'A repeated reveal still reports after the first one uncovers the picture');
+  presentation.reveal(() => revealed.push('shown'));
+  assert.deepEqual(revealed, ['first', 'second', 'shown'], 'An uncovered picture reports at once');
+  presentation.wait();
+  presentation.reveal(() => revealed.push('obsolete'));
+  presentation.wait();
+  for (const callback of callbacks.splice(0)) callback(0);
+  for (const callback of callbacks.splice(0)) callback(0);
+  assert.equal(revealed.at(-1), 'shown', 'An obsolete reveal never reports');
+});
+
 
 test('reconnect and resize covers copy the visible screen from both Gespenst canvas layers', () => {
   const previous = globalThis.document;
