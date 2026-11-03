@@ -130,6 +130,7 @@ While a tree is open, tapping another chip opens that chip's tree without changi
 Tap elsewhere, press Escape or swipe the tree down by its grab bar to dismiss it.
 The dialogs show progress and errors, prevent repeated submissions, and preserve selection on cancellation or failure.
 Closing a linked worktree's space also offers Delete checkout, which removes the checkout folder and closes its Herdr workspace while preserving the Git branch.
+Deleting the selected worktree opens its repository's main checkout when it has an open space.
 If deletion reports that `--force` is required, the dialog shows a Force delete button that discards modified and untracked files in that checkout.
 Local and SSH connections route these actions through their selected Herdr server and session, with update guidance if its API is unavailable.
 Split checks that the libertty backend supports the action before submitting it, so an older running backend reports the version mismatch.
