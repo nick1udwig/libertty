@@ -317,7 +317,9 @@ Retained output appears at once, and the connection state appears only while the
 A Herdr Core pane shows retained output only when its live replay has not painted within 150 milliseconds of selection, so a fast replay replaces the previous pane directly.
 The server sends a Herdr Core pane's first paint as one replay message.
 Herdr Core gives a pane without viewers its headless size, so attaching usually resizes the pane and its program redraws.
-When attaching resizes the pane, the replay also includes that redraw until the program is quiet for 150 milliseconds, for at most 1.5 seconds after attaching.
+When attaching resizes a pane whose shell is not at its prompt, the replay also includes the program's redraw, for at most 1.5 seconds after attaching.
+A program that marks the redraw with synchronized output ends it at the closing marker, and Claude Code and Codex both do.
+Another program ends its redraw once it is quiet for 10 milliseconds, and a program silent for 50 milliseconds after the paint does not redraw.
 During use, retained output takes over a scroll only after the connection drops or stalls, when the live terminal has no more local rows to show.
 A remote scroll on a slow but working connection waits for the application instead.
 Retained output scrolls and selects like live output and marks gaps with an ellipsis.

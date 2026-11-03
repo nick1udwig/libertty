@@ -163,35 +163,72 @@ struct Paint {
     bytes: Vec<u8>,
     ended: bool,
 }
-/// An agent that the attach resized redraws its transcript, and the redraw ends once output stops for this long.
-const REDRAW_QUIET: Duration = Duration::from_millis(150);
+/// Claude Code and Codex start redrawing within 12 milliseconds of a resize, so a program silent this long after the paint does not redraw.
+const REDRAW_START: Duration = Duration::from_millis(50);
+/// A redraw without synchronized output ends once output stops for this long, as Herdr's own settled screen does.
+const REDRAW_QUIET: Duration = Duration::from_millis(10);
+const SYNC_BEGIN: &[u8] = b"\x1b[?2026h";
+const SYNC_END: &[u8] = b"\x1b[?2026l";
+/// Follows synchronized output markers across frame boundaries.
+#[derive(Default)]
+struct Synchronized {
+    carry: Vec<u8>,
+    open: bool,
+    /// A program began and ended a synchronized redraw; the paint's own reset ends nothing.
+    completed: bool,
+}
+impl Synchronized {
+    fn feed(&mut self, bytes: &[u8]) {
+        let mut text = std::mem::take(&mut self.carry);
+        text.extend_from_slice(bytes);
+        for at in 0..text.len().saturating_sub(SYNC_BEGIN.len() - 1) {
+            let marker = &text[at..at + SYNC_BEGIN.len()];
+            if marker == SYNC_BEGIN {
+                self.open = true;
+            } else if marker == SYNC_END && self.open {
+                self.open = false;
+                self.completed = true;
+            }
+        }
+        // A marker shorter than its full length cannot have matched, so its start waits for the next frame.
+        self.carry = text[text.len().saturating_sub(SYNC_BEGIN.len() - 1)..].to_vec();
+    }
+}
 /// Herdr sends a large first paint one credit window at a time.
 /// Collecting and crediting it here lets the browser replace retained output in one paint instead of scrolling through each window.
-/// A resized program's redraw follows the paint, so it joins the paint until the program is quiet.
+/// A program that the attach resized redraws after the paint, so its redraw joins the paint.
+/// Synchronized output marks where that redraw ends; a program without it ends its redraw by going quiet.
 async fn first_paint(
     source: &mut impl PaintSource,
     deadline: Duration,
-    redraw: Option<Duration>,
+    redraw: bool,
 ) -> Result<Paint, String> {
     let deadline = tokio::time::Instant::now() + deadline;
     let mut paint = Paint::default();
     let mut largest = HERDR_FRAME;
-    let mut painted = false;
+    let mut painted: Option<tokio::time::Instant> = None;
+    let mut redrawing = false;
+    let mut sync = Synchronized::default();
     loop {
-        let wait = match (painted, redraw) {
-            (false, _) => deadline,
-            (true, Some(quiet)) => (tokio::time::Instant::now() + quiet).min(deadline),
-            (true, None) => break,
+        let wait = match painted {
+            None => deadline,
+            Some(_) if !redraw || sync.completed && !sync.open => break,
+            Some(_) if sync.open => deadline,
+            Some(_) if redrawing => tokio::time::Instant::now() + REDRAW_QUIET,
+            Some(at) => at + REDRAW_START,
         };
-        let Ok(event) = tokio::time::timeout_at(wait, source.next()).await else {
+        let Ok(event) = tokio::time::timeout_at(wait.min(deadline), source.next()).await else {
             break;
         };
         match event? {
             Some(StreamEvent::Data(bytes)) => {
                 source.consumed(bytes.len() as u32).await?;
                 paint.bytes.extend_from_slice(&bytes);
-                if !painted && bytes.len() < largest {
-                    painted = true;
+                sync.feed(&bytes);
+                if painted.is_some() {
+                    redrawing = true;
+                } else if bytes.len() < largest {
+                    painted = Some(tokio::time::Instant::now());
                 }
                 largest = largest.max(bytes.len());
             }
@@ -250,9 +287,10 @@ pub async fn terminal(
         if attached.identity != record.identity {
             return Err("The terminal was replaced; reopen its pane.".into());
         }
-        let resized = (record.cols, record.rows) != (size.cols, size.rows);
-        let paint =
-            first_paint(&mut stream, PAINT_DEADLINE, resized.then_some(REDRAW_QUIET)).await?;
+        // A shell at its prompt redraws nothing that matters after a resize, so only another program's redraw is awaited.
+        let redraw =
+            (record.cols, record.rows) != (size.cols, size.rows) && shell(record).is_none();
+        let paint = first_paint(&mut stream, PAINT_DEADLINE, redraw).await?;
         let mut parser = vt100::Parser::new(size.rows, size.cols, 0);
         let mut decoder = Decoder::default();
         let mut credits = Credits::default();
@@ -515,7 +553,7 @@ mod tests {
             StreamEvent::Data(b"end".to_vec()),
             StreamEvent::Data(b"live".to_vec()),
         ]);
-        let paint = first_paint(&mut source, PAINT_DEADLINE, None)
+        let paint = first_paint(&mut source, PAINT_DEADLINE, false)
             .await
             .unwrap();
         assert_eq!(paint.bytes.len(), 2 * HERDR_FRAME + 3);
@@ -532,7 +570,7 @@ mod tests {
             StreamEvent::Data(vec![b'b'; HERDR_FRAME + 1]),
             StreamEvent::Data(b"live".to_vec()),
         ]);
-        let paint = first_paint(&mut source, PAINT_DEADLINE, None)
+        let paint = first_paint(&mut source, PAINT_DEADLINE, false)
             .await
             .unwrap();
         assert_eq!(paint.bytes.len(), 5 * HERDR_FRAME + 1);
@@ -544,46 +582,88 @@ mod tests {
             StreamEvent::Data(vec![b'a'; HERDR_FRAME]),
             StreamEvent::Closed(Value::Null),
         ]);
-        let paint = first_paint(&mut ended, PAINT_DEADLINE, None).await.unwrap();
+        let paint = first_paint(&mut ended, PAINT_DEADLINE, false)
+            .await
+            .unwrap();
         assert!(paint.ended && paint.bytes.len() == HERDR_FRAME);
         let mut silent = frames([]);
         assert_eq!(
-            first_paint(&mut silent, Duration::from_millis(10), None)
+            first_paint(&mut silent, Duration::from_millis(10), false)
                 .await
                 .unwrap(),
             Paint::default()
         );
     }
-    #[tokio::test]
-    async fn first_paint_includes_the_redraw_of_a_resized_program() {
-        let mut source = frames([
-            StreamEvent::Data(vec![b'a'; HERDR_FRAME]),
-            StreamEvent::Data(b"paint".to_vec()),
-            StreamEvent::Data(b"\x1b[2J\x1b[3J".to_vec()),
-            StreamEvent::Data(vec![b'r'; HERDR_FRAME]),
-            StreamEvent::Data(b"prompt".to_vec()),
-        ]);
-        let paint = first_paint(&mut source, PAINT_DEADLINE, Some(Duration::from_millis(20)))
-            .await
-            .unwrap();
-        assert!(paint.bytes.ends_with(b"prompt") && !paint.ended);
-        assert_eq!(source.consumed as usize, paint.bytes.len());
-        assert!(source.events.is_empty());
+    fn data(bytes: &[u8]) -> StreamEvent {
+        StreamEvent::Data(bytes.to_vec())
     }
     #[tokio::test]
-    async fn the_deadline_ends_the_redraw_of_a_busy_program() {
-        let mut source = frames([StreamEvent::Data(b"paint".to_vec())]);
-        source.busy = Some(Duration::from_millis(5));
+    async fn a_synchronized_redraw_ends_at_its_closing_marker() {
+        // The paint's own reset closes nothing, and the closing marker arrives split across two frames.
+        let mut source = frames([
+            StreamEvent::Data(vec![b'a'; HERDR_FRAME]),
+            data(b"\x18\x1b[?2026lpaint"),
+            data(b"\x1b[?2026h\x1b[2J\x1b[3J"),
+            StreamEvent::Data(vec![b'r'; HERDR_FRAME]),
+            data(b"prompt\x1b[?20"),
+            data(b"26l"),
+            data(b"\x1b[?2026hcursor\x1b[?2026l"),
+        ]);
         let started = tokio::time::Instant::now();
-        let paint = first_paint(
-            &mut source,
-            Duration::from_millis(100),
-            Some(Duration::from_millis(50)),
-        )
-        .await
-        .unwrap();
-        assert!(started.elapsed() < Duration::from_millis(400));
-        assert!(paint.bytes.starts_with(b"paint") && paint.bytes.ends_with(b"spinner"));
+        let paint = first_paint(&mut source, PAINT_DEADLINE, true)
+            .await
+            .unwrap();
+        assert!(paint.bytes.ends_with(b"prompt\x1b[?2026l") && !paint.ended);
+        assert_eq!(source.consumed as usize, paint.bytes.len());
+        assert_eq!(source.events.len(), 1, "A later frame stays live output");
+        assert!(
+            started.elapsed() < REDRAW_START,
+            "A closed redraw ends without waiting"
+        );
+    }
+    #[tokio::test]
+    async fn a_redraw_inside_the_last_paint_frame_needs_no_wait() {
+        let mut source = frames([data(b"paint\x1b[?2026hredraw\x1b[?2026l")]);
+        let started = tokio::time::Instant::now();
+        let paint = first_paint(&mut source, PAINT_DEADLINE, true)
+            .await
+            .unwrap();
+        assert!(paint.bytes.ends_with(b"redraw\x1b[?2026l"));
+        assert!(started.elapsed() < REDRAW_START);
+    }
+    #[tokio::test]
+    async fn a_program_that_does_not_redraw_costs_only_the_start_window() {
+        let mut source = frames([data(b"paint")]);
+        let started = tokio::time::Instant::now();
+        let paint = first_paint(&mut source, PAINT_DEADLINE, true)
+            .await
+            .unwrap();
+        assert_eq!(paint.bytes, b"paint");
+        assert!(started.elapsed() >= REDRAW_START && started.elapsed() < 4 * REDRAW_START);
+    }
+    #[tokio::test]
+    async fn an_unsynchronized_redraw_ends_when_output_goes_quiet() {
+        let mut source = frames([data(b"paint"), data(b"\x1b[2Jredraw"), data(b"prompt")]);
+        let paint = first_paint(&mut source, PAINT_DEADLINE, true)
+            .await
+            .unwrap();
+        assert_eq!(paint.bytes, b"paint\x1b[2Jredrawprompt");
+    }
+    #[tokio::test]
+    async fn the_deadline_ends_a_redraw_that_never_finishes() {
+        for opening in [&b"\x1b[?2026hframe"[..], b"unsynchronized"] {
+            let mut source = frames([data(b"paint"), data(opening)]);
+            source.busy = Some(Duration::from_millis(5));
+            let started = tokio::time::Instant::now();
+            let paint = first_paint(&mut source, Duration::from_millis(100), true)
+                .await
+                .unwrap();
+            assert!(
+                started.elapsed() >= Duration::from_millis(100)
+                    && started.elapsed() < Duration::from_millis(400)
+            );
+            assert!(paint.bytes.ends_with(b"spinner"));
+        }
     }
     #[test]
     fn acknowledgements_release_each_byte_once() {
