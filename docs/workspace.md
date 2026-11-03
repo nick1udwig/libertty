@@ -374,6 +374,8 @@ Any window is therefore contiguous, and crossing a row moves the text canvas and
 Lines drawn during a viewport-only move fill both halves, so wrapping between the halves draws nothing extra.
 Output, selection changes, resizes and theme changes still draw the visible lines from current terminal state.
 A viewport-only move builds its frame from cached history rows instead of asking Ghostty to decode every visible row again.
+Rows that stay visible move from the previous frame, so crossing a row reads only the rows that enter.
+History rows load in 16-row pages, and a full cache drops its oldest rows first, so one entering row does not decode a long run of history.
 Ghostty still renders when content, selection, size or a translucent theme changes, or when the cursor enters from outside the last frame.
 Read terminal grid geometry from `term.screen`, because the canvas bounds move and include hidden rows.
 

@@ -71,11 +71,13 @@ export class Terminal {
   private paintedTop?: number;
   private selectionChanged = false;
   private selectionActive = false;
-  private nativeView?: { top: number; generation: number; cols: number; rows: number; cursor: RenderFrame['cursor']; colors: RenderFrame['colors'] };
+  private nativeView?: { top: number; generation: number; cols: number; rows: number; cursor: RenderFrame['cursor']; colors: RenderFrame['colors']; viewportRows?: RenderRow[] };
   private slotLines: number[] = [];
   private slotStamps: number[] = [];
   private stamp = 0;
   private colorTransform?: ColorTransform;
+  /** Transformed cells by source cells, so a row that only moves keeps its transformed colors. */
+  private transformedCells = new WeakMap<RenderRow['cells'], RenderRow['cells']>();
   private focusHandler?: () => void;
   private automaticFocusHandler?: () => void;
   private copyHandler?: (text: string) => void;
@@ -232,9 +234,14 @@ export class Terminal {
       const [r, g, b] = this.colorTransform!(value.r, value.g, value.b);
       return { ...value, r, g, b };
     };
-    const row = (value: RenderRow): RenderRow => ({ ...value, cells: value.cells.map(cell => ({ ...cell,
-      foreground: cell.foreground && color(cell.foreground), background: cell.background && color(cell.background),
-    })) });
+    const cells = (value: RenderRow['cells']) => {
+      let transformed = this.transformedCells.get(value);
+      if (!transformed) this.transformedCells.set(value, transformed = value.map(cell => ({ ...cell,
+        foreground: cell.foreground && color(cell.foreground), background: cell.background && color(cell.background),
+      })));
+      return transformed;
+    };
+    const row = (value: RenderRow): RenderRow => ({ ...value, cells: cells(value.cells) });
     return 'viewportRows' in frame ? { ...frame, cursor, viewportRows: frame.viewportRows.map(row) }
       : { ...frame, cursor, changedRows: frame.changedRows.map(row) };
   }
@@ -293,12 +300,15 @@ export class Terminal {
     const line = term.getScrollbackLength() + term.getCursor().y;
     // Only Ghostty knows the style of a cursor that enters from outside the last frame.
     if (y === null && view.cursor.y === null && line >= top && line < top + view.rows) return;
-    const changedRows = Array.from({ length: view.rows }, (_, row) => {
+    // Rows that stay visible move from the last frame, so a crossing decodes only the rows that enter.
+    const changedRows = Array.from({ length: view.rows }, (_, row): RenderRow => {
+      const kept = view.viewportRows?.[row + shift];
+      if (kept) return { ...kept, y: row };
       const history = term.getBufferRow(top + row);
       return history ? { ...history, y: row } : { y: row, text: '', cells: [], wrapped: false, wrapContinuation: false, selection: null };
     });
     const cursor = { ...view.cursor, y };
-    this.nativeView = { ...view, top, cursor };
+    this.nativeView = { ...view, top, cursor, viewportRows: changedRows };
     return { cols: view.cols, rows: view.rows, dirty: 'full', cursor, colors: view.colors, changedRows };
   }
   /** Background rows in the visible window, numbered from the window top. */
@@ -321,7 +331,7 @@ export class Terminal {
   private requestRender() { if (this.scheduler) this.scheduler(); else requestAnimationFrame(() => this.renderNow()); }
   setRenderScheduler(callback: () => void) { this.scheduler = callback; }
   setCursorVisible(visible: boolean) { this.cursorVisible = visible; }
-  setColorTransform(transform: ColorTransform) { this.colorTransform = transform; this.fullFrame = true; this.requestRender(); }
+  setColorTransform(transform: ColorTransform) { this.colorTransform = transform; this.transformedCells = new WeakMap(); this.fullFrame = true; this.requestRender(); }
   setFocusHandler(callback: () => void) { this.focusHandler = callback; }
   setAutomaticFocusHandler(callback: () => void) { this.automaticFocusHandler = callback; }
   requestAutomaticFocus() {

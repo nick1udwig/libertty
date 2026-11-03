@@ -74,6 +74,18 @@ test('full viewport frames transform the rows that the renderer consumes', () =>
   assert.deepEqual(row.cells[0].foreground, { r: 1, g: 2, b: 3 });
 });
 
+test('a moved row keeps its transformed cells until the transform changes', () => {
+  const terminal = new Terminal({});
+  terminal.setRenderScheduler(() => {});
+  terminal.setColorTransform((r, g, b) => [255 - r, 255 - g, 255 - b]);
+  const cells = [{ foreground: { r: 1, g: 2, b: 3 }, background: null }];
+  const transform = (y: number) => Reflect.get(terminal, 'transformFrame').call(terminal, { cursor: {}, viewportRows: [{ y, cells }] }).viewportRows[0].cells;
+  const first = transform(0);
+  assert.equal(transform(1), first, 'A row that only moves reuses its transformed cells');
+  terminal.setColorTransform((r, g, b) => [r, g, b]);
+  assert.deepEqual(transform(1)[0].foreground, { r: 1, g: 2, b: 3 });
+});
+
 
 test('scrolling preserves fractional positions and clears them after native scrolling', () => {
   const terminal = new Terminal({});
@@ -303,11 +315,11 @@ test('the background paints only the visible ring window from its top', () => {
 
 test('viewport-only moves build frames from cached history rows instead of Ghostty rendering', () => {
   const terminal = new Terminal({ cols: 40, rows: 3 });
-  const state = { generation: 1, cursorY: 2 }, active = { viewportY: 10 };
+  const state = { generation: 1, cursorY: 2 }, active = { viewportY: 10 }, reads: number[] = [];
   Reflect.set(terminal, 'buffer', { active });
   Reflect.set(terminal, 'wasmTerm', {
     cols: 40, rows: 3, contentGeneration: () => state.generation, getScrollbackLength: () => 20, getCursor: () => ({ y: state.cursorY }),
-    getBufferRow: (index: number) => ({ index, text: `line ${index}`, cells: [], wrapped: false, wrapContinuation: false, selection: null }),
+    getBufferRow: (index: number) => (reads.push(index), { index, text: `line ${index}`, cells: [], wrapped: false, wrapContinuation: false, selection: null }),
   });
   Reflect.set(terminal, 'backend', { terminal: {} });
   const moved = () => Reflect.get(terminal, 'movedFrame').call(terminal);
@@ -318,6 +330,11 @@ test('viewport-only moves build frames from cached history rows instead of Ghost
   const frame = moved();
   assert.deepEqual(frame.changedRows.map((row: { y: number; text: string }) => [row.y, row.text]), [[0, 'line 9'], [1, 'line 10'], [2, 'line 11']]);
   assert.deepEqual([frame.dirty, frame.cursor.y, frame.colors], ['full', 2, { foreground: 'colors' }]);
+  active.viewportY = 8;
+  reads.length = 0;
+  const shifted = moved();
+  assert.deepEqual(shifted.changedRows.map((row: { y: number; text: string }) => [row.y, row.text]), [[0, 'line 8'], [1, 'line 9'], [2, 'line 10']]);
+  assert.deepEqual(reads, [8], 'Rows that stay visible move from the last frame instead of being read again');
   active.viewportY = 7;
   assert.equal(moved().cursor.y, null, 'A cursor that leaves the viewport is hidden');
   active.viewportY = 20;

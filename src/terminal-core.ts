@@ -26,6 +26,10 @@ export class Ghostty {
   dispose() { this.core.dispose(); }
 }
 
+/** Rows decoded per read, small enough that a row entering during a scroll does not decode a long run of history. */
+const bufferChunk = 16;
+const bufferCapacity = 128;
+
 /** Synchronous retained-buffer access shared by the browser and projection terminals. */
 export class GhosttyTerminal {
   readonly core: CoreTerminal;
@@ -110,9 +114,11 @@ export class GhosttyTerminal {
     const state = this.update();
     if (!Number.isInteger(index) || index < 0 || index >= state.totalRows) return;
     if (!this.bufferRows.has(index)) {
-      if (this.bufferRows.size + 64 > 128) { this.bufferRows.clear(); }
-      const start = Math.floor(index / 64) * 64;
-      for (const row of this.core.readBuffer({ start, end: Math.min(start + 64, state.totalRows) }).rows) this.bufferRows.set(row.index, row);
+      const start = Math.floor(index / bufferChunk) * bufferChunk;
+      const rows = this.core.readBuffer({ start, end: Math.min(start + bufferChunk, state.totalRows) }).rows;
+      // Map order is read order, so the oldest rows leave first and rows that a scroll still shows stay.
+      for (const line of this.bufferRows.keys()) { if (this.bufferRows.size + rows.length <= bufferCapacity) break; this.bufferRows.delete(line); }
+      for (const row of rows) this.bufferRows.set(row.index, row);
     }
     return this.bufferRows.get(index);
   }

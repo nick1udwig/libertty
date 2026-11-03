@@ -244,3 +244,21 @@ The table shows median results with `BENCH_GPU=1` from six runs, and the throttl
 
 Slow scrolling and scrolling with output stayed within run-to-run spread.
 History rows load in 64-row pages, so fast scrolling decodes about 1.5 history rows per visible row crossed.
+
+### Entering row comparison, 2026-11-02
+
+The baseline is the history frame path at `c0761ce`, which read every visible row from the history cache and decoded 64-row pages after each row crossing.
+The entering row path moves rows that stay visible from the previous frame, reuses transformed cells for moved rows, and decodes 16-row pages.
+The table shows median results with `BENCH_GPU=1` and `BENCH_CPU_RATE=4` from twelve runs that alternated between the two builds.
+
+| Viewport | Workload | Baseline | Entering rows | Decoded rows | Paint p95 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Mobile | Fast scroll | 6.6 ms | 5.6 ms | 256 → 144 | 2.1 → 2.0 ms |
+| Mobile | Scroll with output | 4.7 ms | 4.5 ms | 862 → 352 | 9.5 → 7.1 ms |
+| Desktop | Fast scroll | 8.4 ms | 6.3 ms | 256 → 144 | 3.6 → 3.4 ms |
+| Desktop | Scroll with output | 6.0 ms | 5.6 ms | 862 → 352 | 15.5 → 9.7 ms |
+
+Times are task time per frame.
+Slow scrolling stayed within run-to-run spread.
+In an instrumented touch fling with fourfold throttling, frames that crossed a row fell from about 9.5 to 5 ms on average and from about 22 to 9 ms at worst.
+The worst baseline frames decoded a new 64-row page while the glide was slow enough for the eye to follow it.
