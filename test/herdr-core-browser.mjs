@@ -607,7 +607,7 @@ try {
   await until(() => selectedSocket.messages.some(m => m.type === 'output'), 'selected pane ready');
   selectedSocket.ws.send(JSON.stringify({ type: 'input', data: `cd '${subdirectory}'\r` }));
   await until(async () => (await api(route('snapshot'))).terminals.some(t => t.terminalId === treeSplit.terminalId && t.cwd === subdirectory), 'selected pane enters another repository');
-  await paneGroup.locator('.herdr-pane[data-terminal="' + treeSplit.terminalId + '"] .herdr-pane-focus').click();
+  await paneGroup.locator('.herdr-pane[data-terminal=' + JSON.stringify(treeSplit.terminalId) + '] .herdr-pane-focus').click();
   await page.locator('.herdr-agent-strip:visible .herdr-agent-tab[aria-selected=true]').click();
   await page.getByRole('button', { name: 'New worktree', exact: true }).click();
   await until(async () => (await page.locator('.herdr-space-action').textContent()).includes(' · ' + directory), 'worktree dialog follows selected pane');

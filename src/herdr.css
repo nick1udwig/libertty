@@ -92,7 +92,7 @@ span.herdr-tree-title{display:flex;align-items:center;gap:7px;font:600 13px var(
 .herdr-pane:has([aria-current=true]){border-color:var(--accent);background:var(--accent-soft)}
 .herdr-tree .herdr-pane-focus{flex:1;min-width:0;gap:6px;padding:6px 10px;border-radius:0;font-size:12px}
 .herdr-tree .herdr-pane-focus[aria-current=true]{color:var(--text)}
-.herdr-pane-name{flex:1;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere;white-space:normal;line-height:1.35}
+.herdr-pane-name{flex:1;min-width:0;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.35}
 .herdr-tree .herdr-pane-close{flex:none;justify-content:center;width:32px;border-left:1px solid var(--line-strong);border-radius:0;color:var(--danger)}
 .herdr-tree .herdr-pane-add{grid-column:1/-1;justify-self:start;height:36px;padding:0 10px;border:1px dashed var(--line-strong);border-radius:8px;color:var(--muted);font-size:12px}
 .herdr-tree-actions{display:flex;gap:6px;margin-top:4px;padding-top:8px;border-top:1px solid var(--line)}
