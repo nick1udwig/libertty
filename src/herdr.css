@@ -87,8 +87,8 @@ span.herdr-tree-title{display:flex;align-items:center;gap:7px;font:600 13px var(
 .herdr-tree .herdr-tree-close{justify-content:center;width:40px;height:38px;color:var(--danger)}
 .herdr-tree .herdr-tree-close svg,.herdr-tree .herdr-pane-close svg,.herdr-tree .herdr-tree-save svg{color:inherit}
 .herdr-tree-kids{margin-left:11px;padding-left:10px;border-left:1px solid var(--line-strong)}
-.herdr-tree-panes{display:flex;flex-wrap:wrap;gap:6px;padding:0 0 8px 28px}
-.herdr-pane{display:flex;height:36px;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:8px;background:var(--bg);overflow:hidden}
+.herdr-tree-panes{display:grid;grid-template-columns:minmax(0,max-content) auto;align-items:end;justify-content:start;gap:6px;padding:0 0 8px 28px}
+.herdr-pane{grid-column:1;display:flex;height:36px;box-sizing:border-box;border:1px solid var(--line-strong);border-radius:8px;background:var(--bg);overflow:hidden}
 .herdr-pane:has([aria-current=true]){border-color:var(--accent);background:var(--accent-soft)}
 .herdr-tree .herdr-pane-focus{gap:6px;padding:0 6px 0 10px;border-radius:0;font-size:12px}
 .herdr-tree .herdr-pane-focus[aria-current=true]{color:var(--text)}

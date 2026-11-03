@@ -10,6 +10,7 @@ import { decodeWire } from '../src/wire.ts';
 import ssh2 from 'ssh2';
 import { sshdPath, sshdConfig } from './support/sshd.mjs';
 import { fingerprint } from './support/ssh-key.ts';
+import { assertPaneStack } from './support/herdr-tree.mjs';
 
 const root = await mkdtemp(join(tmpdir(), 'libertty-core-'));
 const hc = process.env.LIBERTTY_HC_BINARY || 'hc';
@@ -543,6 +544,14 @@ try {
   );
   await mkdir('.test-artifacts', { recursive: true });
   await page.screenshot({ path: '.test-artifacts/herdr-core-mobile.png' });
+  const treeSplit = await api(route('action'), { action:'split', workspaceId:created.workspaceId, terminalId:created.terminalId, direction:'right' });
+  await api(route('action'), { action:'rename', terminalId:treeSplit.terminalId, name:'codex' });
+  await api(route('action'), { action:'rename', terminalId:created.terminalId, name:'bash' });
+  await page.locator('.herdr-agent-strip:visible .herdr-agent-tab[aria-selected=true]').click();
+  const paneGroup = page.locator('.herdr-tree:visible .herdr-tree-panes').first();
+  await until(() => paneGroup.locator('.herdr-pane').count().then(count => count === 2), 'tree panes');
+  await assertPaneStack(paneGroup);
+  await page.screenshot({path:'.test-artifacts/herdr-core-tree.png'});
   assert.deepEqual(errors, []);
   await browser.close();
   browser = undefined;
