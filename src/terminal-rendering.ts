@@ -19,7 +19,8 @@ export class TerminalRendering {
   attach() {
     const term = this.term;
     term.onSelectionChange(() => this.activity());
-    term.onScroll(() => { if (isPreservingScrollback(term)) this.refresh(); else this.activity(); });
+    // The terminal paints its own scroll position, so scrolling repaints only a blinked-off cursor.
+    term.onScroll(() => { if (!isPreservingScrollback(term)) this.activity(!this.cursorVisible); });
     const focus = () => this.activity();
     for (const name of ['focusin', 'focusout']) term.element!.addEventListener(name, focus, { signal: this.events.signal });
     for (const name of ['focus', 'blur']) window.addEventListener(name, focus, { signal: this.events.signal });
@@ -28,10 +29,13 @@ export class TerminalRendering {
     this.refresh();
   }
   setVisible(visible: boolean) { this.visible = visible; this.refresh(); }
-  activity() {
+  activity(paint = true) {
     this.cursorVisible = true; this.term.setCursorVisible(true);
-    this.scheduler.activity(); this.refresh();
+    this.scheduler.activity();
+    if (paint) this.refresh();
   }
+  /** Paints a requested frame now, so an animation frame shows the change it made. */
+  flush() { this.scheduler.runNow(); }
   refresh() {
     clearTimeout(this.blink);
     if (this.disposed || !this.visible || document.hidden) { this.scheduler.cancel(); return; }

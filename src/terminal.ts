@@ -597,7 +597,7 @@ const gestures = new TerminalGestures(term, {
       if (disconnected()) { if (lines < 0) showRetained(lines); return; }
       if (!synchronizedConnection || !transport.healthy || presentation.pending || herdrLayout.pending) return;
       captureTranscript();
-      const bounds = term.element!.querySelector('canvas')!.getBoundingClientRect();
+      const bounds = term.screen!.getBoundingClientRect();
       const column = Math.max(0, Math.min(term.cols - 1, Math.floor((x - bounds.left) * term.cols / bounds.width)));
       const row = Math.max(0, Math.min(term.rows - 1, Math.floor((y - bounds.top) * term.rows / bounds.height)));
       if (herdrTerminal) send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
@@ -617,11 +617,11 @@ const gestures = new TerminalGestures(term, {
     if (presentation.pending || queue.length || capturedConnection || cachePainted) return;
     if (!herdrTerminal || state.ready) { inline.moveCursor(x, y); return; }
     if (!herdrReady || !mobileTerminal() || herdrLayout.pending || herdrParked || !tabVisible || document.hidden) return;
-    const bounds = term.element!.querySelector('canvas')!.getBoundingClientRect();
+    const bounds = term.screen!.getBoundingClientRect();
     const column = Math.floor((x - bounds.left) * term.cols / bounds.width), row = Math.floor((y - bounds.top) * term.rows / bounds.height);
     const cell = projection?.nativeCell(column, row);
     if (cell && send({ type: 'terminal-click', ...cell, cols: term.cols, rows: term.rows })) state.inputRevision++;
-  }, copy: copyTerminalText,
+  }, copy: copyTerminalText, render: () => rendering.flush(),
 });
 
 async function socketURL(signal: AbortSignal) {

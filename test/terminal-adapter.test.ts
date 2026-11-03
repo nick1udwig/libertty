@@ -74,12 +74,24 @@ test('full viewport frames transform the rows that the renderer consumes', () =>
   assert.deepEqual(row.cells[0].foreground, { r: 1, g: 2, b: 3 });
 });
 
+test('a moved row keeps its transformed cells until the transform changes', () => {
+  const terminal = new Terminal({});
+  terminal.setRenderScheduler(() => {});
+  terminal.setColorTransform((r, g, b) => [255 - r, 255 - g, 255 - b]);
+  const cells = [{ foreground: { r: 1, g: 2, b: 3 }, background: null }];
+  const transform = (y: number) => Reflect.get(terminal, 'transformFrame').call(terminal, { cursor: {}, viewportRows: [{ y, cells }] }).viewportRows[0].cells;
+  const first = transform(0);
+  assert.equal(transform(1), first, 'A row that only moves reuses its transformed cells');
+  terminal.setColorTransform((r, g, b) => [r, g, b]);
+  assert.deepEqual(transform(1)[0].foreground, { r: 1, g: 2, b: 3 });
+});
+
 
 test('scrolling preserves fractional positions and clears them after native scrolling', () => {
   const terminal = new Terminal({});
-  let offset = 0;
+  let offset = 0, maximum = 100;
   Reflect.set(terminal, 'wasmTerm', {
-    getScrollbackLength: () => 100,
+    getScrollbackLength: () => maximum,
     getViewportY: () => offset,
     setViewportY: (value: number) => { offset = value; },
   });
@@ -94,6 +106,9 @@ test('scrolling preserves fractional positions and clears them after native scro
   assert.equal(terminal.getViewportY(), 100);
   terminal.scrollToBottom();
   assert.equal(terminal.getViewportY(), 0);
+  terminal.scrollToLine(.75);
+  maximum = 0;
+  assert.equal(terminal.getViewportY(), 0, 'An alternate screen must clear a partial row even when the integer offset stays zero');
 });
 
 
@@ -128,6 +143,27 @@ test('programmatic selection scrolling emits once and still reports native chang
   assert.deepEqual(notifications, [5.5, 6, 7, 3]);
 });
 
+test('fractional scroll bursts share one render boundary and unchanged targets do no work', () => {
+  const { terminal, calls } = scheduledTerminal();
+  let offset = 0;
+  Reflect.set(terminal, 'wasmTerm', {
+    getScrollbackLength: () => 100,
+    getViewportY: () => offset,
+    setViewportY: (value: number) => { offset = value; },
+  });
+  terminal.scrollToLine(5.25);
+  terminal.scrollToLine(5.5);
+  terminal.scrollToLine(5.75);
+  assert.equal(calls.schedules, 0, 'Scroll input must not allocate a pipeline waiter per event');
+  assert.equal(calls.requests, 3);
+  terminal.scrollToLine(5.75);
+  assert.equal(calls.requests, 3);
+  terminal.renderNow();
+  assert.equal(calls.schedules, 1);
+  assert.equal(calls.paints, 1);
+  assert.equal(terminal.getViewportY(), 5.75);
+});
+
 test('modified mouse clicks open safe links at the scrolled cell and preserve copying', () => {
   const terminal = new Terminal({ cols: 40, rows: 4 });
   const opened: unknown[][] = [], copied: string[] = [];
@@ -142,6 +178,7 @@ test('modified mouse clicks open safe links at the scrolled cell and preserve co
   Reflect.set(terminal, 'wasmTerm', {
     cols: 40, rows: 4, core: { getSelection: () => selection },
     getScrollbackLength: () => 10, getScrollbackHyperlinkUri: () => uri,
+    getViewportY: () => 2,
   });
   terminal.setCopyHandler(text => copied.push(text));
   const click = (overrides = {}) => Reflect.get(terminal, 'handlePointerUp').call(terminal, {
@@ -190,4 +227,125 @@ test('fitting uses the retained renderer scale across device pixel ratio changes
       else Reflect.deleteProperty(globalThis, key);
     }
   }
+});
+
+test('screen frames move rows below the preceding line and skip it at the live bottom', () => {
+  const terminal = new Terminal({ cols: 40, rows: 4 });
+  terminal.setRenderScheduler(() => {});
+  terminal.setColorTransform((r, g, b) => [255 - r, 255 - g, 255 - b]);
+  const previous = { text: 'previous', cells: [{ foreground: { r: 1, g: 2, b: 3 } }] };
+  Reflect.set(terminal, 'wasmTerm', {
+    getViewportY: () => 2,
+    getScrollbackLength: () => 10,
+    setViewportY: () => {},
+    getBufferRow: (index: number) => { assert.equal(index, 7); return previous; },
+  });
+  Reflect.set(terminal, 'buffer', { active: { viewportY: 8 } });
+  terminal.scrollToLine(2.25);
+  const frame = { cols: 40, rows: 4, cursor: { visible: true, y: 1 }, viewportRows: Array.from({ length: 4 }, (_, y) => ({ y, text: String(y) })) };
+  const screen = (frame: object) => Reflect.get(terminal, 'screenFrame').call(terminal, frame);
+  const partial = screen(frame);
+  assert.deepEqual(partial.viewportRows.map((row: { y: number }) => row.y), [0, 1, 2, 3, 4]);
+  assert.deepEqual(partial.viewportRows[0].cells[0].foreground, { r: 254, g: 253, b: 252 });
+  assert.deepEqual(partial.cursor, { visible: true, y: 2 });
+  assert.equal(partial.rows, 4);
+  assert.equal(frame.viewportRows[0].y, 0);
+  terminal.scrollToLine(2);
+  assert.equal(screen(frame).viewportRows.length, 5, 'History keeps the preceding line ready for the next partial row');
+  Object.assign(Reflect.get(terminal, 'wasmTerm') as object, { getViewportY: () => 0 });
+  terminal.scrollToBottom();
+  const live = screen(frame);
+  assert.deepEqual(live.viewportRows.map((row: { y: number }) => row.y), [1, 2, 3, 4]);
+  assert.deepEqual(live.cursor, { visible: true, y: 2 });
+});
+
+test('partial rows inside the painted row move the screen without rendering', () => {
+  const { terminal, calls } = scheduledTerminal();
+  let offset = 5;
+  Reflect.set(terminal, 'wasmTerm', {
+    getScrollbackLength: () => 100,
+    getViewportY: () => offset,
+    setViewportY: (value: number) => { offset = value; },
+  });
+  const layer = { style: { transform: '' } };
+  Reflect.get(terminal, 'backend').painter = { metrics: { cellHeight: 32, devicePixelRatio: 2 } };
+  Object.assign(terminal, { viewportBase: 5, screenLayer: layer, paintedBase: 5, paintedAbove: 5 });
+  terminal.scrollToLine(5.25);
+  assert.equal(layer.style.transform, 'translate3d(0, -12px, 0)');
+  layer.style.transform = '';
+  terminal.scrollToLine(5.251);
+  assert.equal(layer.style.transform, '', 'Moves below one device pixel must not touch styles');
+  terminal.scrollToLine(5);
+  assert.equal(layer.style.transform, 'translate3d(0, -16px, 0)');
+  assert.equal(calls.requests, 0);
+  Reflect.set(terminal, 'paintedAbove', undefined);
+  terminal.scrollToLine(5.5);
+  assert.equal(calls.requests, 1, 'An unpainted preceding line needs one render');
+  terminal.scrollToLine(6.5);
+  assert.equal(calls.requests, 2, 'Crossing a row needs one render');
+});
+
+test('the text ring draws only lines it does not hold and fills both copies while moving', () => {
+  const terminal = new Terminal({ cols: 40, rows: 4 });
+  const paint = (top: number, { damage = [] as number[], generation = 1, cursor = null as number | null } = {}) => {
+    const rows = [...Reflect.get(terminal, 'ringRows').call(terminal, 4, new Set(damage), top, generation, true, cursor)].sort((a, b) => a - b);
+    Object.assign(terminal, { paintedTop: top, paintedGeneration: generation, paintedCursor: cursor === null ? undefined : top + cursor });
+    return rows;
+  };
+  assert.deepEqual(paint(10), [0, 1, 2, 3, 4], 'An empty ring draws the visible copy of every line');
+  assert.deepEqual(paint(12), [0, 1, 5, 6], 'Entering lines fill both copies');
+  assert.deepEqual(paint(13), [2, 7]);
+  assert.deepEqual(paint(15), [3, 4, 8, 9], 'Wrapping to the first half reuses copies drawn while moving');
+  assert.deepEqual(paint(15, { damage: [1], generation: 2 }), [0, 2], 'Output in place draws damaged lines and the preceding line once');
+  assert.deepEqual(paint(16, { generation: 3 }), [1, 2, 3, 4, 5], 'Moving with new output draws every visible line once');
+  assert.deepEqual(paint(16, { generation: 3, cursor: 2 }), [3], 'A new cursor line repaints its glyph colors');
+  assert.deepEqual(paint(17, { generation: 3, cursor: 2 }), [1, 3, 4, 6, 8, 9], 'The old and new cursor lines repaint both copies after a move');
+  assert.deepEqual(paint(17, { damage: [0, 1, 2, 3], generation: 3, cursor: 2 }), [2, 3, 4, 5, 6], 'A full repaint in place draws the visible copies once');
+  assert.deepEqual(paint(20, { generation: 3 }), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 'Copies hidden during that repaint are drawn again after wrapping');
+});
+
+test('the background paints only the visible ring window from its top', () => {
+  const terminal = new Terminal({ cols: 40, rows: 4 });
+  Object.assign(terminal, { ringStart: 3 });
+  const frame = { rows: 4, cursor: { y: 5 }, viewportRows: Array.from({ length: 10 }, (_, y) => ({ y, text: String(y) })) };
+  const window = Reflect.get(terminal, 'windowFrame').call(terminal, frame);
+  assert.deepEqual(window.viewportRows.map((row: { y: number; text: string }) => [row.y, row.text]), [[0, '3'], [1, '4'], [2, '5'], [3, '6'], [4, '7']]);
+  assert.equal(window.cursor.y, 2);
+});
+
+test('viewport-only moves build frames from cached history rows instead of Ghostty rendering', () => {
+  const terminal = new Terminal({ cols: 40, rows: 3 });
+  const state = { generation: 1, cursorY: 2 }, active = { viewportY: 10 }, reads: number[] = [];
+  Reflect.set(terminal, 'buffer', { active });
+  Reflect.set(terminal, 'wasmTerm', {
+    cols: 40, rows: 3, contentGeneration: () => state.generation, getScrollbackLength: () => 20, getCursor: () => ({ y: state.cursorY }),
+    getBufferRow: (index: number) => (reads.push(index), { index, text: `line ${index}`, cells: [], wrapped: false, wrapContinuation: false, selection: null }),
+  });
+  Reflect.set(terminal, 'backend', { terminal: {} });
+  const moved = () => Reflect.get(terminal, 'movedFrame').call(terminal);
+  assert.equal(moved(), undefined, 'The first frame comes from Ghostty');
+  Reflect.get(terminal, 'recordView').call(terminal, { cols: 40, rows: 3, cursor: { y: 1, visible: true }, colors: { foreground: 'colors' } });
+  assert.equal(moved(), undefined, 'An unmoved viewport keeps Ghostty damage');
+  active.viewportY = 9;
+  const frame = moved();
+  assert.deepEqual(frame.changedRows.map((row: { y: number; text: string }) => [row.y, row.text]), [[0, 'line 9'], [1, 'line 10'], [2, 'line 11']]);
+  assert.deepEqual([frame.dirty, frame.cursor.y, frame.colors], ['full', 2, { foreground: 'colors' }]);
+  active.viewportY = 8;
+  reads.length = 0;
+  const shifted = moved();
+  assert.deepEqual(shifted.changedRows.map((row: { y: number; text: string }) => [row.y, row.text]), [[0, 'line 8'], [1, 'line 9'], [2, 'line 10']]);
+  assert.deepEqual(reads, [8], 'Rows that stay visible move from the last frame instead of being read again');
+  active.viewportY = 7;
+  assert.equal(moved().cursor.y, null, 'A cursor that leaves the viewport is hidden');
+  active.viewportY = 20;
+  assert.equal(moved(), undefined, 'A cursor entering from outside the last frame needs Ghostty');
+  active.viewportY = 5;
+  state.generation = 2;
+  assert.equal(moved(), undefined, 'Changed content needs Ghostty');
+  state.generation = 1;
+  Reflect.set(terminal, 'selectionActive', true);
+  assert.equal(moved(), undefined, 'History rows carry no selection');
+  Reflect.set(terminal, 'selectionActive', false);
+  Reflect.set(terminal, 'backend', { terminal: { themeAlpha: new Map([['1:2:3', .5]]) } });
+  assert.equal(moved(), undefined, 'History rows carry no translucent theme colors');
 });

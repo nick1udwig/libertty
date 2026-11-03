@@ -90,7 +90,7 @@ try {
     const sample=()=>{
       for(const frame of document.querySelectorAll('.herdr-screen iframe')) {
         if(!frame.checkVisibility({checkVisibilityCSS:true})) continue;
-        const child=frame.contentWindow,t=child.__terminal,document=child.document,viewport=document.querySelector('#terminal-viewport'),canvas=document.querySelector('#terminal .gespenst__background');
+        const child=frame.contentWindow,t=child.__terminal,document=child.document,viewport=document.querySelector('#terminal-viewport'),canvas=document.querySelector('#terminal .terminal-screen');
         if(!t||!viewport||!canvas||[...document.querySelectorAll('.terminal-resize-cover,.terminal-presentation')].some(layer=>!layer.hidden)) continue;
         const height=canvas.getBoundingClientRect().height,stale=viewport.clientHeight-height>=height/t.rows||height>viewport.clientHeight+1,reflowed=child.__writtenSize!==t.cols+'x'+t.rows;
         if(stale||reflowed) window.__drawerFaults.push({stale,reflowed,viewport:viewport.clientHeight,canvas:height,size:t.cols+'x'+t.rows,written:child.__writtenSize});
