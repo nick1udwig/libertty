@@ -258,15 +258,19 @@ try {
   assert.equal(await focused(), false);
   await delay(20); await touch('touchMove', { x: start.x, y: start.y + 90 }); await touch('touchEnd');
   // Dispatch a fast swipe in one task so CDP round-trip delays cannot turn it into a hold.
-  await page.locator('#terminal .gespenst__background').evaluate((el, point) => {
+  // A fling coasts past all 180 history rows, so it starts at the bottom and is measured in the page before any coasting frame.
+  const coast = await page.locator('#terminal .gespenst__background').evaluate(async (el, point) => {
+    const term = window.__testTerminal;
+    term.scrollToBottom();
     const options = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, pointerId: 98, clientX: point.x, clientY: point.y };
     el.dispatchEvent(new PointerEvent('pointerdown', options));
     el.dispatchEvent(new PointerEvent('pointermove', { ...options, clientY: point.y + 60 }));
     el.dispatchEvent(new PointerEvent('pointerup', { ...options, clientY: point.y + 60 }));
+    const released = term.getViewportY(), deadline = performance.now() + 1000;
+    while (term.getViewportY() <= released && performance.now() < deadline) await new Promise(requestAnimationFrame);
+    return { released, coasted: term.getViewportY() };
   }, start);
-  const released = await page.evaluate(() => window.__testTerminal.getViewportY());
-  await delay(120);
-  assert.ok(await page.evaluate(() => window.__testTerminal.getViewportY()) > released, 'A swipe should coast after release');
+  assert.ok(coast.coasted > coast.released, 'A swipe should coast after release: ' + JSON.stringify(coast));
   assert.equal(await focused(), false, 'Scrolling must leave the keyboard closed');
   await page.locator('#terminal .gespenst__background').evaluate(el => {
     const options = { bubbles: true, cancelable: true, sourceCapabilities: new InputDeviceCapabilities({ firesTouchEvents: true }) };

@@ -361,9 +361,9 @@ export class TerminalGestures {
     if (Math.abs(velocity) < .08) return;
     let last = performance.now();
     const step = (at: number) => {
-      // A frame timestamp can precede the release that started momentum.
+      // A frame timestamp can precede the release that started momentum, and such a frame moves nothing without reaching the end of history.
       const dt = Math.max(0, Math.min(32, at - last)); last = at;
-      const moved = this.scroll(host, -velocity * dt / this.linePixels(), x, y); velocity *= Math.exp(-dt / momentumDecay);
+      const moved = dt === 0 || this.scroll(host, -velocity * dt / this.linePixels(), x, y); velocity *= Math.exp(-dt / momentumDecay);
       host.render?.();
       if (Math.abs(velocity) > .03 && moved) this.frame = requestAnimationFrame(step);
       else this.frame = 0;
