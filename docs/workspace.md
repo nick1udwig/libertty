@@ -373,6 +373,8 @@ Snapshots and projections read native cells without a legacy cell conversion.
 Styled transcripts retain underline variants and colors, overlines, explicit backgrounds, and OSC 8 links.
 Snapshot caches follow the core state revision so writes and cursor changes are visible before the next paint.
 Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
+Gespenst parses synchronized output (DEC mode 2026) but paints during it, so Libertty's scheduler skips paints while a program's synchronized update is open.
+An update split across socket messages therefore paints once it closes, and an update that never closes paints after one second.
 Reconnect and resize covers combine the background and text canvases.
 The visible window is one row taller than the grid and holds the line above the viewport in its first row.
 Partial-row scrolling moves the canvases with a CSS transform inside the clipped `.terminal-screen` element, so only a changed row, output or a resize paints.

@@ -35,6 +35,7 @@ export const quickTests = [
   'shell-words.test.ts',
   'shortcuts.test.ts',
   'site-urls.test.ts',
+  'synchronized-output.test.ts',
   'terminal-history.test.ts',
   'terminal-projection.test.ts',
   'touch-cursor.test.ts',
