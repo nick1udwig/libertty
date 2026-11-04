@@ -255,6 +255,400 @@ async fn paste(stream: &Stream, parser: &vt100::Parser, text: &str) -> Result<()
     };
     stream.input(text.into_bytes()).await.map_err(error)
 }
+const ENDED: &str = "Herdr terminal ended";
+/// One browser connection to an attached Herdr Core terminal, and the input state it guards.
+struct Pane<'a> {
+    socket: &'a mut WebSocket,
+    target: &'a Target,
+    id: &'a str,
+    recording_scope: &'a str,
+    cancel: &'a CancellationToken,
+    client: Client,
+    stream: Stream,
+    parser: vt100::Parser,
+    decoder: Decoder,
+    credits: Credits,
+    current: herdr_client_lib::protocol::Terminal,
+    prompt: u64,
+    revision: u64,
+    editable: Option<super::input::Editable>,
+    repair: Option<super::input::Pending>,
+    prepared: mpsc::Sender<super::input::Prepared>,
+    recording: Arc<Recording>,
+    active: bool,
+    last_contact: tokio::time::Instant,
+}
+impl Pane<'_> {
+    async fn send(&mut self, value: Value) -> Result<(), String> {
+        send(self.socket, value).await
+    }
+    async fn send_state(&mut self) -> Result<(), String> {
+        self.send(state(&self.current, self.revision, self.prompt))
+            .await
+    }
+    async fn close(&mut self) {
+        let _ = self
+            .socket
+            .send(Message::Close(Some(CloseFrame {
+                code: 1000,
+                reason: ENDED.into(),
+            })))
+            .await;
+    }
+    async fn replace(&mut self, text: &str) -> Result<(), String> {
+        self.editable
+            .as_ref()
+            .ok_or("Only dictated text can be replaced.")?
+            .replace(
+                &self.client,
+                &self.stream,
+                &self.parser,
+                &self.current,
+                text,
+            )
+            .await
+    }
+    fn dictated_text(&mut self, text: String, observe: bool) {
+        let mut editable = super::input::Editable::new(text, &self.current);
+        if observe {
+            editable.observe(&self.parser);
+        }
+        self.editable = Some(editable);
+    }
+    fn cancel_repair(&mut self) {
+        if let Some(previous) = self.repair.take() {
+            previous.cancel();
+        }
+    }
+    fn start_repair(&mut self, request: crate::protocol::Repair, backend: bool) {
+        self.cancel_repair();
+        self.repair = Some(super::input::prepare(
+            self.target.clone(),
+            self.id.into(),
+            request,
+            backend,
+            self.cancel,
+            self.prepared.clone(),
+        ));
+    }
+    /// Repairs a dictated shell command as the backend's own alternatives request.
+    fn repair_dictation(&mut self, text: String, phrases: &Value) {
+        let intent = crate::alternatives::Intent::detect(&text, phrases);
+        let request = crate::protocol::Repair {
+            id: crate::storage::random_hex(16),
+            text,
+            prompt: self.prompt,
+            revision: self.revision,
+            intent,
+        };
+        self.start_repair(request, true);
+    }
+    async fn facts(&mut self) -> Result<(), String> {
+        let next = self
+            .client
+            .terminal_get(&self.current.address, DEADLINE)
+            .await
+            .map_err(error)?;
+        if next.identity != self.current.identity || !next.is_live() {
+            return Err("The terminal ended or was replaced.".into());
+        }
+        let changed = context(&next) != context(&self.current);
+        if changed {
+            self.editable = None;
+            self.revision += 1;
+            if shell(&next).is_some() {
+                self.prompt += 1;
+            }
+        }
+        let moved = next.folder() != self.current.folder();
+        self.current = next;
+        if changed || moved {
+            self.send_state().await?;
+        }
+        Ok(())
+    }
+    async fn prepared(&mut self, mut prepared: super::input::Prepared) -> Result<(), String> {
+        if prepared.cancel.is_cancelled()
+            || prepared.prompt != self.prompt
+            || prepared.revision != self.revision
+        {
+            prepared.reply.error = Some("Terminal input changed during repair.".into());
+        } else if prepared.reply.error.is_none() {
+            let selected = prepared.reply.prepared.selected.clone();
+            let result = if self.editable.is_none() {
+                Err("Only the latest dictated text can be replaced.".into())
+            } else {
+                self.replace(&selected).await
+            };
+            prepared.reply.accepted = result.is_ok();
+            prepared.reply.error = result.err();
+            if prepared.reply.accepted {
+                self.revision += 1;
+                self.dictated_text(selected, true);
+            }
+        }
+        prepared.reply.revision = self.revision;
+        self.send(ServerMessage::RepairResult(prepared.reply).value())
+            .await
+    }
+    async fn dictated(&mut self, text: Dictated) -> Result<(), String> {
+        let current = self.active
+            && self.revision == text.revision
+            && self
+                .recording
+                .input
+                .lock()
+                .unwrap()
+                .current(&text.id, text.serial);
+        let result = if current {
+            paste(&self.stream, &self.parser, &text.text).await
+        } else {
+            Err("Terminal input changed during dictation.".into())
+        };
+        if result.is_ok() {
+            self.revision += 1;
+            let shell = shell(&self.current).is_some();
+            if shell {
+                self.dictated_text(text.text.clone(), false);
+            }
+            self.send(json!({"type":"pasted","text":text.text,"replace":false,"source":"dictation","prompt":self.prompt,"revision":self.revision,"repairing":shell}))
+                .await?;
+            self.send_state().await?;
+            if shell {
+                self.repair_dictation(text.text, &text.phrases);
+            }
+        }
+        let _ = text.done.send(result);
+        Ok(())
+    }
+    /// Forwards terminal output, returning false once the terminal ends.
+    async fn output(&mut self, event: Option<StreamEvent>) -> Result<bool, String> {
+        let Some(StreamEvent::Data(bytes)) = event else {
+            self.close().await;
+            return Ok(false);
+        };
+        self.parser.process(&bytes);
+        if let Some(editable) = &mut self.editable {
+            editable.observe(&self.parser);
+        }
+        let text = self.decoder.push(&bytes);
+        let seq = self.credits.sent(bytes.len() as u32);
+        self.send(json!({"type":"output","seq":seq,"data":text}))
+            .await?;
+        Ok(true)
+    }
+    /// Handles one browser frame, returning false once the browser leaves.
+    async fn input(&mut self, input: Option<Result<Message, axum::Error>>) -> Result<bool, String> {
+        let Some(Ok(input)) = input else {
+            return Ok(false);
+        };
+        self.last_contact = tokio::time::Instant::now();
+        let message = match input {
+            Message::Text(text) => serde_json::from_str::<ClientMessage>(&text).map_err(error)?,
+            Message::Binary(bytes) => match wire::decode(&bytes).map_err(error)? {
+                wire::Incoming::Message(message) => message,
+                wire::Incoming::Audio(audio) => {
+                    if let Some((_, recording)) = &self.recording.input.lock().unwrap().dictation {
+                        recording.audio(audio);
+                    }
+                    return Ok(true);
+                }
+            },
+            Message::Ping(data) => {
+                self.socket.send(Message::Pong(data)).await.map_err(error)?;
+                return Ok(true);
+            }
+            Message::Pong(_) => return Ok(true),
+            Message::Close(_) => return Ok(false),
+        };
+        if message.edits_input() {
+            self.cancel_repair();
+        }
+        self.message(message).await?;
+        Ok(true)
+    }
+    async fn message(&mut self, message: ClientMessage) -> Result<(), String> {
+        let active = self.active;
+        match message {
+            ClientMessage::Ping { .. } => self.send(json!({"type":"pong"})).await?,
+            ClientMessage::Ack { seq } => {
+                let bytes = self.credits.acknowledge(seq)?;
+                if bytes > 0 {
+                    self.stream.consumed(bytes).await.map_err(error)?;
+                }
+            }
+            ClientMessage::HerdrActive { active } => {
+                self.active = active;
+                self.stream.focus(active).await.map_err(error)?;
+            }
+            ClientMessage::Resize { cols, rows, .. }
+                if active
+                    && crate::protocol::terminal_dimension(cols)
+                    && crate::protocol::terminal_dimension(rows) =>
+            {
+                self.parser.screen_mut().set_size(rows, cols);
+                self.stream.resize(cols, rows).await.map_err(error)?;
+            }
+            ClientMessage::Input { data, .. } if active => {
+                if matches!(data.as_str(), "\x1b[I" | "\x1b[O") {
+                    self.stream.focus(data == "\x1b[I").await.map_err(error)?;
+                } else {
+                    self.stream.input(data.into_bytes()).await.map_err(error)?;
+                    self.editable = None;
+                    self.revision += 1;
+                }
+            }
+            ClientMessage::Paste { text } if active => {
+                paste(&self.stream, &self.parser, &text).await?;
+                self.editable = None;
+                self.revision += 1;
+                self.send_state().await?;
+            }
+            ClientMessage::Command {
+                id,
+                command,
+                prompt,
+            } if active => {
+                if command.trim().is_empty()
+                    || !crate::protocol::clean(&command, crate::protocol::MAX_TEXT)
+                {
+                    return Err("Invalid command.".into());
+                }
+                let result = if prompt.is_some_and(|expected| expected != self.prompt) {
+                    Err("The shell prompt changed.".into())
+                } else if self.editable.is_some() {
+                    match self.replace(&command).await {
+                        Ok(()) => self.stream.input(b"\r".to_vec()).await.map_err(error),
+                        Err(message) => Err(message),
+                    }
+                } else {
+                    self.stream
+                        .input(format!("{command}\r").into_bytes())
+                        .await
+                        .map_err(error)
+                };
+                if result.is_ok() {
+                    self.revision += 1;
+                    self.editable = None;
+                }
+                self.send(json!({"type":"result","id":id,"accepted":result.is_ok(),"message":result.err()}))
+                    .await?;
+                self.send_state().await?;
+            }
+            ClientMessage::Dictation(request) if active => {
+                let target = if shell(&self.current).is_some() {
+                    DictationTarget::Shell
+                } else {
+                    DictationTarget::Program
+                };
+                let line = crate::input_controller::Line {
+                    target: Some(target),
+                    prompt: self.prompt,
+                    revision: self.revision,
+                };
+                let mut controller = self.recording.input.lock().unwrap();
+                if !controller.control_dictation(&request) {
+                    match controller.begin_dictation(&request, Some(line)) {
+                        Ok(serial) => {
+                            let recording = crate::input_coordinator::recording(
+                                &self.recording,
+                                self.revision,
+                                request.id.clone(),
+                                serial,
+                                request.reading_phrases,
+                                self.recording_scope,
+                            );
+                            controller.dictation = Some((request.id, recording));
+                        }
+                        Err(message) => {
+                            let _ = self
+                                .recording
+                                .replies
+                                .try_send(ServerMessage::dictation_error(&request.id, message));
+                        }
+                    }
+                }
+            }
+            ClientMessage::Replace {
+                id,
+                text,
+                prompt,
+                revision,
+            } => {
+                let result = if active && prompt == self.prompt && revision == self.revision {
+                    self.replace(&text).await
+                } else {
+                    Err("Terminal input changed.".into())
+                };
+                if result.is_ok() {
+                    self.revision += 1;
+                    self.dictated_text(text, false);
+                }
+                self.send(json!({"type":"edit-result","id":id,"accepted":result.is_ok(),"revision":self.revision}))
+                    .await?;
+            }
+            ClientMessage::Repair(request)
+                if active && request.prompt == self.prompt && request.revision == self.revision =>
+            {
+                self.start_repair(request, false);
+            }
+            ClientMessage::Repair(request) => {
+                let reply = crate::protocol::RepairReply::new(
+                    request.id,
+                    request.text,
+                    self.prompt,
+                    self.revision,
+                    false,
+                );
+                self.send(ServerMessage::RepairResult(reply).value())
+                    .await?;
+            }
+            ClientMessage::RepairCancel { id } => {
+                if self.repair.as_ref().is_some_and(|pending| pending.id == id) {
+                    self.cancel_repair();
+                }
+            }
+            ClientMessage::DictationPaste {
+                text,
+                applied,
+                replace,
+                prompt,
+                revision,
+                reading_phrases,
+            } => {
+                let result = if !active
+                    || prompt != self.prompt
+                    || revision != self.revision
+                    || shell(&self.current).is_none()
+                {
+                    Err("Terminal input changed.".to_owned())
+                } else if applied {
+                    Ok(())
+                } else if replace {
+                    self.replace(&text).await
+                } else {
+                    paste(&self.stream, &self.parser, &text).await
+                };
+                if let Err(message) = result {
+                    self.send(json!({"type":"reading-error","message":message}))
+                        .await?;
+                } else {
+                    self.revision += 1;
+                    self.dictated_text(text.clone(), applied);
+                    self.send(json!({"type":"pasted","text":text,"replace":false,"source":"dictation","prompt":self.prompt,"revision":self.revision,"repairing":true}))
+                        .await?;
+                    self.repair_dictation(text, &reading_phrases);
+                }
+            }
+            ClientMessage::InputLine { id, .. } => {
+                self.send(json!({"type":"input-line","id":id,"prompt":self.prompt,"revision":self.revision}))
+                    .await?;
+            }
+            _ => (),
+        }
+        Ok(())
+    }
+}
 pub async fn terminal(
     mut socket: WebSocket,
     target: &Target,
@@ -292,201 +686,72 @@ pub async fn terminal(
         let redraw =
             (record.cols, record.rows) != (size.cols, size.rows) && shell(&record).is_none();
         let paint = first_paint(&mut stream, PAINT_DEADLINE, redraw).await?;
-        let mut parser = vt100::Parser::new(size.rows, size.cols, 0);
-        let mut decoder = Decoder::default();
-        let mut credits = Credits::default();
-        parser.process(&paint.bytes);
+        let (prepared, mut preparations) = mpsc::channel(4);
+        let (replies, mut receive) = mpsc::channel(32);
+        let (dictated, mut texts) = mpsc::channel(4);
+        let mut pane = Pane {
+            socket: &mut socket,
+            target,
+            id,
+            recording_scope,
+            cancel: &cancel,
+            client,
+            stream,
+            parser: vt100::Parser::new(size.rows, size.cols, 0),
+            decoder: Decoder::default(),
+            credits: Credits::default(),
+            current: attached,
+            prompt: 1,
+            revision: 0,
+            editable: None,
+            repair: None,
+            prepared,
+            recording: Arc::new(Recording {
+                input: Mutex::new(Default::default()),
+                replies,
+                dictated,
+            }),
+            active: true,
+            last_contact: tokio::time::Instant::now(),
+        };
+        pane.parser.process(&paint.bytes);
         // The paint is already credited, so its acknowledgement releases nothing.
         let replay = if paint.bytes.is_empty() {
             0
         } else {
-            credits.sent(0)
+            pane.credits.sent(0)
         };
-        send(&mut socket, json!({"type":"hello","engine":"server","reset":true,"truncated":false,"firstSeq":1,"lastSeq":replay,"streamId":id})).await?;
-        let mut current = attached;
-        let mut prompt = 1;
-        let mut revision = 0;
-        let mut editable: Option<super::input::Editable> = None;
-        let mut repair: Option<super::input::Pending> = None;
-        let (prepared, mut preparations) = mpsc::channel::<super::input::Prepared>(4);
-        send(&mut socket, state(&current, revision, prompt)).await?;
-        let (replies, mut receive) = mpsc::channel(32);
-        let (dictated, mut texts) = mpsc::channel(4);
-        let recording = Arc::new(Recording {
-            input: Mutex::new(Default::default()),
-            replies,
-            dictated,
-        });
-        if replay > 0 {
-            send(
-                &mut socket,
-                json!({"type":"output","seq":replay,"data":decoder.push(&paint.bytes)}),
-            )
+        pane.send(json!({"type":"hello","engine":"server","reset":true,"truncated":false,"firstSeq":1,"lastSeq":replay,"streamId":id}))
             .await?;
+        pane.send_state().await?;
+        if replay > 0 {
+            let data = pane.decoder.push(&paint.bytes);
+            pane.send(json!({"type":"output","seq":replay,"data":data}))
+                .await?;
         }
         if paint.ended {
-            let _ = socket
-                .send(Message::Close(Some(CloseFrame {
-                    code: 1000,
-                    reason: "Herdr terminal ended".into(),
-                })))
-                .await;
+            pane.close().await;
             return Ok(());
         }
-        let mut active = true;
-        let mut last_contact = tokio::time::Instant::now();
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
         let mut facts = tokio::time::interval(Duration::from_millis(500));
         loop {
-            tokio::select! {
-                _ = facts.tick(), if active => {
-                    let next = client.terminal_get(&current.address, DEADLINE).await.map_err(error)?;
-                    if next.identity != current.identity || !next.is_live() { return Err("The terminal ended or was replaced.".into()); }
-                    let changed = context(&next) != context(&current);
-                    if changed { editable = None; revision += 1; if shell(&next).is_some() { prompt += 1; } }
-                    if changed || next.folder() != current.folder() {
-                        current = next;
-                        send(&mut socket, state(&current,revision,prompt)).await?;
-                    } else { current = next; }
-                }
+            let open = tokio::select! {
+                _ = facts.tick(), if pane.active => pane.facts().await.map(|()| true)?,
                 _ = heartbeat.tick() => {
-                    if last_contact.elapsed() > Duration::from_secs(45) { return Err("Browser connection timed out.".into()); }
-                }
-                Some(mut prepared) = preparations.recv() => {
-                    if !prepared.cancel.is_cancelled() && prepared.prompt == prompt && prepared.revision == revision {
-                        if prepared.reply.error.is_none() {
-                            let result = match &editable {
-                                Some(previous) => previous.replace(&client, &stream, &parser, &current, &prepared.reply.prepared.selected).await,
-                                None => Err("Only the latest dictated text can be replaced.".into()),
-                            };
-                            prepared.reply.accepted = result.is_ok();
-                            prepared.reply.error = result.err();
-                            if prepared.reply.accepted {
-                                revision += 1;
-                                editable = Some(super::input::Editable::new(prepared.reply.prepared.selected.clone(), &current));
-                                editable.as_mut().unwrap().observe(&parser);
-                            }
-                        }
-                    } else { prepared.reply.error = Some("Terminal input changed during repair.".into()); }
-                    prepared.reply.revision = revision;
-                    send(&mut socket, ServerMessage::RepairResult(prepared.reply).value()).await?;
-                }
-                Some(reply) = receive.recv() => send(&mut socket, reply.value()).await?,
-                Some(text) = texts.recv() => {
-                    let result = if !active || revision != text.revision || !recording.input.lock().unwrap().current(&text.id, text.serial) { Err("Terminal input changed during dictation.".into()) } else { paste(&stream, &parser, &text.text).await };
-                    if result.is_ok() {
-                        revision += 1;
-                        let shell = shell(&current).is_some();
-                        if shell { editable = Some(super::input::Editable::new(text.text.clone(), &current)); }
-                        send(&mut socket, json!({"type":"pasted","text":text.text,"replace":false,"source":"dictation","prompt":prompt,"revision":revision,"repairing":shell})).await?;
-                        send(&mut socket, state(&current, revision, prompt)).await?;
-                        if shell {
-                            if let Some(previous) = repair.take() { previous.cancel(); }
-                            let intent = crate::alternatives::Intent::detect(&text.text, &text.phrases);
-                            repair = Some(super::input::prepare(target.clone(), id.into(), crate::protocol::Repair { id:crate::storage::random_hex(16), text:text.text, prompt, revision, intent }, true, &cancel, prepared.clone()));
-                        }
+                    if pane.last_contact.elapsed() > Duration::from_secs(45) {
+                        return Err("Browser connection timed out.".into());
                     }
-                    let _ = text.done.send(result);
+                    true
                 }
-                output = stream.next() => match output.map_err(error)? {
-                    Some(StreamEvent::Data(bytes)) => {
-                        parser.process(&bytes);
-                        if let Some(editable) = &mut editable { editable.observe(&parser); }
-                        let text = decoder.push(&bytes);
-                        let seq = credits.sent(bytes.len() as u32);
-                        send(&mut socket, json!({"type":"output","seq":seq,"data":text})).await?;
-                    }
-                    Some(StreamEvent::Closed(_)) | None => {
-                        let _ = socket.send(Message::Close(Some(CloseFrame { code:1000, reason:"Herdr terminal ended".into() }))).await;
-                        return Ok(());
-                    }
-                },
-                input = socket.recv() => {
-                    let Some(Ok(input)) = input else { return Ok(()) };
-                    last_contact = tokio::time::Instant::now();
-                    let message = match input {
-                        Message::Text(text) => serde_json::from_str::<ClientMessage>(&text).map_err(error)?,
-                        Message::Binary(bytes) => match wire::decode(&bytes).map_err(error)? {
-                            wire::Incoming::Message(message) => message,
-                            wire::Incoming::Audio(audio) => { if let Some((_, r)) = &recording.input.lock().unwrap().dictation { r.audio(audio); } continue; }
-                        },
-                        Message::Ping(data) => { socket.send(Message::Pong(data)).await.map_err(error)?; continue; }
-                        Message::Pong(_) => continue,
-                        Message::Close(_) => return Ok(()),
-                    };
-                    if message.edits_input() && let Some(previous) = repair.take() { previous.cancel(); }
-                    match message {
-                        ClientMessage::Ping { .. } => send(&mut socket, json!({"type":"pong"})).await?,
-                        ClientMessage::Ack { seq } => { let bytes = credits.acknowledge(seq)?; if bytes > 0 { stream.consumed(bytes).await.map_err(error)?; } }
-                        ClientMessage::HerdrActive { active: visible } => { active = visible; stream.focus(active).await.map_err(error)?; }
-                        ClientMessage::Resize { cols, rows, .. } if active && crate::protocol::terminal_dimension(cols) && crate::protocol::terminal_dimension(rows) => { parser.screen_mut().set_size(rows, cols); stream.resize(cols, rows).await.map_err(error)?; }
-                        ClientMessage::Input { data, .. } if active => {
-                            if matches!(data.as_str(), "\x1b[I" | "\x1b[O") { stream.focus(data == "\x1b[I").await.map_err(error)?; }
-                            else { stream.input(data.into_bytes()).await.map_err(error)?; editable = None; revision += 1; }
-                        }
-                        ClientMessage::Paste { text } if active => { paste(&stream, &parser, &text).await?; editable = None; revision += 1; send(&mut socket, state(&current,revision,prompt)).await?; }
-                        ClientMessage::Command { id: request, command, prompt: expected_prompt } if active => {
-                            if command.trim().is_empty() || !crate::protocol::clean(&command, crate::protocol::MAX_TEXT) { return Err("Invalid command.".into()); }
-                            let result = async {
-                                if expected_prompt.is_some_and(|expected| expected != prompt) { return Err("The shell prompt changed.".into()); }
-                                if let Some(previous) = &editable { previous.replace(&client, &stream, &parser, &current, &command).await?; stream.input(b"\r".to_vec()).await.map_err(error) }
-                                else { stream.input(format!("{command}\r").into_bytes()).await.map_err(error) }
-                            }.await;
-                            if result.is_ok() { revision += 1; editable = None; }
-                            send(&mut socket, json!({"type":"result","id":request,"accepted":result.is_ok(),"message":result.err()})).await?;
-                            send(&mut socket, state(&current,revision,prompt)).await?;
-                        }
-                        ClientMessage::Dictation(request) if active => {
-                            let mut controller = recording.input.lock().unwrap();
-                            if !controller.control_dictation(&request) {
-                                let line = crate::input_controller::Line { target:Some(if shell(&current).is_some() { DictationTarget::Shell } else { DictationTarget::Program }), prompt, revision };
-                                match controller.begin_dictation(&request, Some(line)) {
-                                    Ok(serial) => {
-                                        let id = request.id;
-                                        let r = crate::input_coordinator::recording(&recording, revision, id.clone(), serial, request.reading_phrases, recording_scope);
-                                        controller.dictation = Some((id,r));
-                                    }
-                                    Err(message) => { let _ = recording.replies.try_send(ServerMessage::dictation_error(&request.id,message)); }
-                                }
-                            }
-                        }
-                        ClientMessage::Replace { id, text, prompt: expected_prompt, revision: expected_revision } => {
-                            let result = if active && expected_prompt == prompt && expected_revision == revision {
-                                match &editable { Some(previous) => previous.replace(&client,&stream,&parser,&current,&text).await, None => Err("Only dictated text can be replaced.".into()) }
-                            } else { Err("Terminal input changed.".into()) };
-                            if result.is_ok() { revision += 1; editable = Some(super::input::Editable::new(text, &current)); }
-                            send(&mut socket,json!({"type":"edit-result","id":id,"accepted":result.is_ok(),"revision":revision})).await?;
-                        }
-                        ClientMessage::Repair(request) if active && request.prompt == prompt && request.revision == revision => {
-                            if let Some(previous) = repair.take() { previous.cancel(); }
-                            repair = Some(super::input::prepare(target.clone(),id.into(),request,false,&cancel,prepared.clone()));
-                        }
-                        ClientMessage::Repair(request) => send(&mut socket, ServerMessage::RepairResult(crate::protocol::RepairReply::new(request.id,request.text,prompt,revision,false)).value()).await?,
-                        ClientMessage::RepairCancel { id } => { if repair.as_ref().is_some_and(|pending| pending.id == id) && let Some(previous) = repair.take() { previous.cancel(); } }
-                        ClientMessage::DictationPaste { text, applied, replace, prompt: expected_prompt, revision: expected_revision, reading_phrases } => {
-                            let result = async {
-                                if !active || prompt != expected_prompt || revision != expected_revision || shell(&current).is_none() { return Err("Terminal input changed.".to_owned()); }
-                                if !applied {
-                                    if replace { editable.as_ref().ok_or("Only dictated text can be replaced.")?.replace(&client,&stream,&parser,&current,&text).await?; }
-                                    else { paste(&stream,&parser,&text).await?; }
-                                }
-                                Ok(())
-                            }.await;
-                            if let Err(message) = result { send(&mut socket,json!({"type":"reading-error","message":message})).await?; }
-                            else {
-                                revision += 1;
-                                editable = Some(super::input::Editable::new(text.clone(), &current));
-                                if applied { editable.as_mut().unwrap().observe(&parser); }
-                                send(&mut socket,json!({"type":"pasted","text":text,"replace":false,"source":"dictation","prompt":prompt,"revision":revision,"repairing":true})).await?;
-                                let intent = crate::alternatives::Intent::detect(&text,&reading_phrases);
-                                if let Some(previous) = repair.take() { previous.cancel(); }
-                                repair = Some(super::input::prepare(target.clone(),id.into(),crate::protocol::Repair { id:crate::storage::random_hex(16),text,prompt,revision,intent },true,&cancel,prepared.clone()));
-                            }
-                        }
-                        ClientMessage::InputLine { id, .. } => send(&mut socket,json!({"type":"input-line","id":id,"prompt":prompt,"revision":revision})).await?,
-                        _ => (),
-                    }
-                }
+                Some(prepared) = preparations.recv() => pane.prepared(prepared).await.map(|()| true)?,
+                Some(reply) = receive.recv() => pane.send(reply.value()).await.map(|()| true)?,
+                Some(text) = texts.recv() => pane.dictated(text).await.map(|()| true)?,
+                output = pane.stream.next() => pane.output(output.map_err(error)?).await?,
+                input = pane.socket.recv() => pane.input(input).await?,
+            };
+            if !open {
+                return Ok(());
             }
         }
     };
@@ -503,7 +768,6 @@ pub async fn terminal(
             .await;
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
