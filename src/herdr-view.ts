@@ -5,7 +5,7 @@ import type { ReadingOpen } from './reading-request.ts';
 import { HerdrFrames } from './herdr-frames.ts';
 import { wireProtocols } from './wire.ts';
 import { ReconnectingSocket, stalledLabel } from './reconnecting-socket.ts';
-import { herdrName, type HerdrAgent, type HerdrMessage, type HerdrSnapshot, type HerdrStatus, type HerdrSpace } from './herdr-protocol.ts';
+import { herdrName, herdrURL, type HerdrAgent, type HerdrMessage, type HerdrSnapshot, type HerdrStatus, type HerdrSpace } from './herdr-protocol.ts';
 import { HerdrDialogs, type Created, type StripItem } from './herdr-dialogs.ts';
 import { HerdrState, type HerdrNotification } from './herdr-state.ts';
 import { herdrCache } from './herdr-cache.ts';
@@ -290,7 +290,7 @@ export class HerdrView {
   get terminalFrame() { return this.frames.frame; }
   /** Cached metadata mounts an unauthorized preview; the live snapshot verifies the pane before it connects. */
   private mountTerminal(force = false) { if (!this.disposed) this.frames.mount(this.terminals, this.selected, force, this.liveSnapshot); }
-  private endpoint(name: string) { const url = new URL(name, this.host.url); if (this.host.core) url.searchParams.set('herdrCore', '1'); if (this.host.session) url.searchParams.set('herdrSession', this.host.session); if (this.host.source) url.searchParams.set('herdrSource', this.host.source); return url; }
+  private endpoint(name: string) { return herdrURL(name, this.host.url, this.host); }
   private connect() { return this.transport.connect(); }
   private status(message = '', kind: NoticeKind = 'progress') {
     if (message === this.statusText) return;

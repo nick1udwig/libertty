@@ -17,6 +17,7 @@ import { applyTheme, terminalThemes, watchSystemTheme } from './theme.ts';
 import { adaptDarkAppColors } from './terminal-colors.ts';
 import { ReconnectingSocket, stalledLabel } from './reconnecting-socket.ts';
 import { HerdrLayout } from './herdr-layout.ts';
+import { herdrURL } from './herdr-protocol.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { terminalLinkAt } from './terminal-links.ts';
 import { TerminalFocus } from './terminal-focus.ts';
@@ -59,8 +60,7 @@ let parkTimer: ReturnType<typeof setTimeout> | undefined;
 const keepingGeometry = () => !document.hidden || !transport.backgroundExpired;
 function endpoint(name: string) { const url = new URL(name.replace(/^\//, ''), baseURL); if (session !== 'default') url.searchParams.set('session', session); return url; }
 function herdrEndpoint(name: string) {
-  const url = new URL(name, baseURL);
-  for (const key of ['herdrSession', 'herdrSource', 'herdrCore']) if (params.get(key)) url.searchParams.set(key, params.get(key)!);
+  const url = herdrURL(name, baseURL, { core: herdrCore, session: params.get('herdrSession'), source: params.get('herdrSource') });
   if (herdrTerminal) url.searchParams.set('terminalId', herdrTerminal);
   return url;
 }

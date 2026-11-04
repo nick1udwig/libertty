@@ -3,6 +3,8 @@ import type { HostProfile, TerminalTab } from './connections.ts';
 export const BUILTIN_VERSION = '1';
 export const builtinIds = ['terminal', 'files', 'herdr', 'herdr-core', 'reading'] as const;
 export function isHerdrPlugin(id: string): boolean { return id === 'herdr' || id === 'herdr-core'; }
+/** Whether a tab shows a terminal pane with its shortcut controls. */
+export function showsTerminal(id: string): boolean { return id === 'terminal' || isHerdrPlugin(id); }
 export function tabPluginId(tab: TerminalTab): string { return tab.pluginId; }
 export interface PluginView {
   element: HTMLElement;
