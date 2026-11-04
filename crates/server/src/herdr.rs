@@ -360,7 +360,7 @@ impl Target {
     }
     pub async fn snapshot(&self) -> Result<Arc<Snapshot>, String> {
         if self.core {
-            return crate::herdr_core::snapshot(self).await.map(Arc::new);
+            return crate::herdr_core::snapshot(self).await;
         }
         self.shared.resource(self)?.snapshot(self).await
     }
@@ -705,7 +705,7 @@ impl Target {
     }
     pub async fn ensure(&self, cwd: &str) -> Result<(), String> {
         if self.core {
-            return crate::herdr_core::connect(self).await.map(|_| ());
+            return crate::herdr_core::snapshot(self).await.map(|_| ());
         }
         if self.request("session.snapshot", json!({})).await.is_ok() {
             return Ok(());

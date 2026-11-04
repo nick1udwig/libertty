@@ -264,14 +264,15 @@ pub async fn terminal(
     cancel: CancellationToken,
 ) {
     let work = async {
-        let session = session(target).await?;
-        let record = projection::record(&session, id)?;
+        let live = hub::live(target).await?;
+        let record = live.record(id)?.clone();
+        drop(live);
+        let client = connect(target).await?;
         let size = size.unwrap_or(crate::herdr_terminal_stream::Size {
             cols: record.cols.max(1),
             rows: record.rows.max(1),
         });
-        let (attached, mut stream) = session
-            .client
+        let (attached, mut stream) = client
             .attach(
                 &AttachParams {
                     terminal: record.address.clone(),
@@ -289,7 +290,7 @@ pub async fn terminal(
         }
         // A shell at its prompt redraws nothing that matters after a resize, so only another program's redraw is awaited.
         let redraw =
-            (record.cols, record.rows) != (size.cols, size.rows) && shell(record).is_none();
+            (record.cols, record.rows) != (size.cols, size.rows) && shell(&record).is_none();
         let paint = first_paint(&mut stream, PAINT_DEADLINE, redraw).await?;
         let mut parser = vt100::Parser::new(size.rows, size.cols, 0);
         let mut decoder = Decoder::default();
@@ -339,7 +340,7 @@ pub async fn terminal(
         loop {
             tokio::select! {
                 _ = facts.tick(), if active => {
-                    let next = session.client.terminal_get(&current.address, DEADLINE).await.map_err(error)?;
+                    let next = client.terminal_get(&current.address, DEADLINE).await.map_err(error)?;
                     if next.identity != current.identity || !next.is_live() { return Err("The terminal ended or was replaced.".into()); }
                     let changed = context(&next) != context(&current);
                     if changed { editable = None; revision += 1; if shell(&next).is_some() { prompt += 1; } }
@@ -355,7 +356,7 @@ pub async fn terminal(
                     if !prepared.cancel.is_cancelled() && prepared.prompt == prompt && prepared.revision == revision {
                         if prepared.reply.error.is_none() {
                             let result = match &editable {
-                                Some(previous) => previous.replace(&session.client, &stream, &parser, &current, &prepared.reply.prepared.selected).await,
+                                Some(previous) => previous.replace(&client, &stream, &parser, &current, &prepared.reply.prepared.selected).await,
                                 None => Err("Only the latest dictated text can be replaced.".into()),
                             };
                             prepared.reply.accepted = result.is_ok();
@@ -428,7 +429,7 @@ pub async fn terminal(
                             if command.trim().is_empty() || libertty_engine::utf16_len(&command) > crate::protocol::MAX_TEXT || crate::protocol::controls(&command) { return Err("Invalid command.".into()); }
                             let result = async {
                                 if expected_prompt.is_some_and(|expected| expected != prompt) { return Err("The shell prompt changed.".into()); }
-                                if let Some(previous) = &editable { previous.replace(&session.client, &stream, &parser, &current, &command).await?; stream.input(b"\r".to_vec()).await.map_err(error) }
+                                if let Some(previous) = &editable { previous.replace(&client, &stream, &parser, &current, &command).await?; stream.input(b"\r".to_vec()).await.map_err(error) }
                                 else { stream.input(format!("{command}\r").into_bytes()).await.map_err(error) }
                             }.await;
                             if result.is_ok() { revision += 1; editable = None; }
@@ -451,7 +452,7 @@ pub async fn terminal(
                         }
                         ClientMessage::Replace { id, text, prompt: expected_prompt, revision: expected_revision } => {
                             let result = if active && expected_prompt == prompt && expected_revision == revision {
-                                match &editable { Some(previous) => previous.replace(&session.client,&stream,&parser,&current,&text).await, None => Err("Only dictated text can be replaced.".into()) }
+                                match &editable { Some(previous) => previous.replace(&client,&stream,&parser,&current,&text).await, None => Err("Only dictated text can be replaced.".into()) }
                             } else { Err("Terminal input changed.".into()) };
                             if result.is_ok() { revision += 1; editable = Some(super::input::Editable::new(text, &current)); }
                             send(&mut socket,json!({"type":"edit-result","id":id,"accepted":result.is_ok(),"revision":revision})).await?;
@@ -466,7 +467,7 @@ pub async fn terminal(
                             let result = async {
                                 if !active || prompt != expected_prompt || revision != expected_revision || shell(&current).is_none() { return Err("Terminal input changed.".to_owned()); }
                                 if !applied {
-                                    if replace { editable.as_ref().ok_or("Only dictated text can be replaced.")?.replace(&session.client,&stream,&parser,&current,&text).await?; }
+                                    if replace { editable.as_ref().ok_or("Only dictated text can be replaced.")?.replace(&client,&stream,&parser,&current,&text).await?; }
                                     else { paste(&stream,&parser,&text).await?; }
                                 }
                                 Ok(())

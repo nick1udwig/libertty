@@ -101,7 +101,7 @@ async fn kinds(client: &Client) -> Result<Vec<String>, String> {
 }
 pub async fn options(target: &Target) -> Result<Value, String> {
     Ok(
-        json!({"kinds":kinds(&connect(target).await?).await?,"actions":["list-worktrees","new-worktree","open-worktree","delete-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
+        json!({"kinds":kinds(&hub::live(target).await?.client).await?,"actions":["list-worktrees","new-worktree","open-worktree","delete-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
     )
 }
 pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
