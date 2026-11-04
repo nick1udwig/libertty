@@ -22,7 +22,8 @@ Use [the ops skill](../libertty-ops/SKILL.md) for deployment, version bumps, and
 For deploy or push requests, apply the testing exception in [AGENTS.md](../../../AGENTS.md), including during preparatory commits, merges, version bumps and packaging.
 The test requirements below apply to other requests and when tests are explicitly requested as part of deploying or pushing.
 
-Run `npm run ci:quick`, `cargo fmt --all -- --check` and `npm run contracts:vocabulary -- --check` before creating a commit or merging.
+Run `npm run ci:quick`, `cargo fmt --all -- --check`, `npm run check:format` and `npm run contracts:vocabulary -- --check` before creating a commit or merging.
+Run `npm run format` to fix frontend formatting, and keep the Prettier version in `.github/workflows/ci.yml` equal to the one in `package.json`.
 For changes to application code, version metadata, dependencies, contracts, build scripts or workflows, also run `npm run verify:local` before creating a commit or merging.
 Use the Node version pinned in `build/release-config.json` and install dependencies with `npm ci` before full validation.
 The full script checks Rust lints and tests, builds the application, runs JavaScript and installer tests, and executes every browser and native Herdr harness once.

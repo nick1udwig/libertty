@@ -7,6 +7,7 @@ if (process.env.VERIFY_QUICK_DONE !== '1') {
   run('npm', ['run', 'ci:quick']);
   run('npm', ['run', 'contracts:vocabulary', '--', '--check']);
   run('cargo', ['fmt', '--all', '--', '--check']);
+  run('npm', ['run', 'check:format']);
 }
 run('cargo', ['clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings']);
 run('npm', ['run', 'test:rust']);

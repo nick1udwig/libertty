@@ -47,9 +47,10 @@ jobs:
           persist-credentials: false
       - name: Check syntax, data and dependency-free unit tests
         run: timeout --kill-after=2s 20s npm run ci:quick
-      - name: Check Rust formatting and canonical vocabulary
+      - name: Check Rust and frontend formatting and canonical vocabulary
         run: |
           cargo fmt --all -- --check
+          npx --yes prettier@3.6.2 --check src
           npm run contracts:vocabulary -- --check
 
   verify:
