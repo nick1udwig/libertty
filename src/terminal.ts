@@ -1157,7 +1157,7 @@ const gestures = new TerminalGestures(term, {
       !cachePainted &&
       ((term.buffer.active.length <= term.rows &&
         ((mobileTerminal() && !herdrParked && state.terminalScroll === true) ||
-          (!herdrTerminal && !!term.wasmTerm?.isAlternateScreen()))) ||
+          ((!herdrTerminal || herdrCore) && !!term.wasmTerm?.isAlternateScreen()))) ||
         (disconnected() && term.getViewportY() >= term.buffer.active.length - term.rows)),
     move: (lines, x, y) => {
       if (lines > 0 && term.buffer.active.length > term.rows) {
@@ -1186,7 +1186,7 @@ const gestures = new TerminalGestures(term, {
         0,
         Math.min(term.rows - 1, Math.floor(((y - bounds.top) * term.rows) / bounds.height)),
       );
-      if (herdrTerminal)
+      if (herdrTerminal && !herdrCore)
         send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
       else {
         const terminal = term.wasmTerm!,
@@ -1206,7 +1206,7 @@ const gestures = new TerminalGestures(term, {
                   Math.min(255, column + 33),
                   Math.min(255, row + 33),
                 );
-        rawInput(data.repeat(Math.min(100, Math.abs(lines))));
+        rawInput(data.repeat(Math.min(100, Math.abs(lines))), 'mouse');
       }
     },
   },
