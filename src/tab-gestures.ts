@@ -1,99 +1,233 @@
 interface TabGestures {
-  select(): void; hold(): void; drag?(clientX: number): void;
-  finish?(): void; scroll?: HTMLElement; dragging?(): void;
+  select(): void;
+  hold(): void;
+  drag?(clientX: number): void;
+  finish?(): void;
+  scroll?: HTMLElement;
+  dragging?(): void;
   drop?(clientX: number): void;
 }
 /** Swiping scrolls the strip; holding opens actions and allows reordering. */
 export function tabGestures(element: HTMLElement, actions: TabGestures) {
-  let press: { id: number; x: number; y: number; scroll: number; touch: boolean; held: boolean; dragged: boolean; moved: boolean; scrolling: boolean } | undefined;
-  let timer: ReturnType<typeof setTimeout>, suppress = false;
-  const preventHeldScroll = (event: TouchEvent) => { if (press?.held && event.cancelable) event.preventDefault(); };
+  let press:
+    | {
+        id: number;
+        x: number;
+        y: number;
+        scroll: number;
+        touch: boolean;
+        held: boolean;
+        dragged: boolean;
+        moved: boolean;
+        scrolling: boolean;
+      }
+    | undefined;
+  let timer: ReturnType<typeof setTimeout>,
+    suppress = false;
+  const preventHeldScroll = (event: TouchEvent) => {
+    if (press?.held && event.cancelable) event.preventDefault();
+  };
   const finish = () => {
     element.removeEventListener('touchmove', preventHeldScroll);
-    clearTimeout(timer); if (press) suppress = press.held || press.moved;
-    element.classList.remove('dragging'); press = undefined; actions.finish?.();
+    clearTimeout(timer);
+    if (press) suppress = press.held || press.moved;
+    element.classList.remove('dragging');
+    press = undefined;
+    actions.finish?.();
   };
-  element.addEventListener('pointerdown', event => {
+  element.addEventListener('pointerdown', (event) => {
     const button = (event.target as HTMLElement).closest('button');
-    if (event.button !== 0 || button && button !== element) return;
-    suppress = false; press = { id: event.pointerId, x: event.clientX, y: event.clientY, scroll: actions.scroll?.scrollLeft || 0, touch: event.pointerType === 'touch', held: false, dragged: false, moved: false, scrolling: false };
+    if (event.button !== 0 || (button && button !== element)) return;
+    suppress = false;
+    press = {
+      id: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      scroll: actions.scroll?.scrollLeft || 0,
+      touch: event.pointerType === 'touch',
+      held: false,
+      dragged: false,
+      moved: false,
+      scrolling: false,
+    };
     element.setPointerCapture(event.pointerId);
     timer = setTimeout(() => {
       if (!press || press.moved) return;
-      press.held = true; suppress = true;
+      press.held = true;
+      suppress = true;
       // Only a held tab needs to block native scrolling for reordering.
       if (press.touch) element.addEventListener('touchmove', preventHeldScroll, { passive: false });
       actions.hold();
     }, 450);
   });
-  element.addEventListener('pointermove', event => {
+  element.addEventListener('pointermove', (event) => {
     if (!press || event.pointerId !== press.id) return;
-    const dx = event.clientX - press.x, dy = event.clientY - press.y;
+    const dx = event.clientX - press.x,
+      dy = event.clientY - press.y;
     if (Math.hypot(dx, dy) < 8 && !press.dragged) return;
-    if (event.defaultPrevented && !press.held) { press.moved = true; clearTimeout(timer); return; }
+    if (event.defaultPrevented && !press.held) {
+      press.moved = true;
+      clearTimeout(timer);
+      return;
+    }
     if (press.held && actions.drag) {
       event.preventDefault();
-      clearTimeout(timer); press.moved = true;
-      if (!press.dragged) { press.dragged = true; element.classList.add('dragging'); actions.dragging?.(); }
+      clearTimeout(timer);
+      press.moved = true;
+      if (!press.dragged) {
+        press.dragged = true;
+        element.classList.add('dragging');
+        actions.dragging?.();
+      }
       actions.drag(event.clientX);
       // Reordering reparents the element, which can release pointer capture.
       if (element.isConnected) element.setPointerCapture(event.pointerId);
       return;
     }
-    press.moved = true; clearTimeout(timer);
+    press.moved = true;
+    clearTimeout(timer);
     // Once a mouse drag scrolls the strip it keeps following the pointer, even as it drifts off the strip vertically.
-    if (!press.touch && actions.scroll && (press.scrolling || Math.abs(dx) >= Math.abs(dy))) { event.preventDefault(); press.scrolling = true; actions.scroll.scrollLeft = press.scroll - dx; }
+    if (!press.touch && actions.scroll && (press.scrolling || Math.abs(dx) >= Math.abs(dy))) {
+      event.preventDefault();
+      press.scrolling = true;
+      actions.scroll.scrollLeft = press.scroll - dx;
+    }
   });
-  element.addEventListener('pointerup', event => { if (press?.id !== event.pointerId) return; if (press.dragged) actions.drop?.(event.clientX); finish(); });
+  element.addEventListener('pointerup', (event) => {
+    if (press?.id !== event.pointerId) return;
+    if (press.dragged) actions.drop?.(event.clientX);
+    finish();
+  });
   element.addEventListener('pointercancel', finish);
-  element.addEventListener('click', event => { if (suppress && event.detail) { event.preventDefault(); event.stopPropagation(); suppress = false; return; } suppress = false; actions.select(); });
-  element.addEventListener('contextmenu', event => { event.preventDefault(); actions.hold(); });
-  element.addEventListener('keydown', event => {
-    if (event.key === 'F10' && event.shiftKey || event.key === 'ContextMenu') { event.preventDefault(); actions.hold(); }
+  element.addEventListener('click', (event) => {
+    if (suppress && event.detail) {
+      event.preventDefault();
+      event.stopPropagation();
+      suppress = false;
+      return;
+    }
+    suppress = false;
+    actions.select();
+  });
+  element.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    actions.hold();
+  });
+  element.addEventListener('keydown', (event) => {
+    if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+      event.preventDefault();
+      actions.hold();
+    }
   });
 }
 
 /** Vertical swipes on either navigation strip share the terminal drawer controls. */
-export function tabStripSwipes(element: HTMLElement, context: () => unknown, actions: { move(dy: number): void; end(up?: boolean): void }) {
-  let press: { id: number; x: number; y: number; started: number; context: unknown; axis?: 'vertical' | 'other' } | undefined;
+export function tabStripSwipes(
+  element: HTMLElement,
+  context: () => unknown,
+  actions: { move(dy: number): void; end(up?: boolean): void },
+) {
+  let press:
+    | {
+        id: number;
+        x: number;
+        y: number;
+        started: number;
+        context: unknown;
+        axis?: 'vertical' | 'other';
+      }
+    | undefined;
   let suppressClick = false;
   const cancel = () => {
-    const current = press; press = undefined;
-    if (current?.axis === 'vertical') { suppressClick = true; actions.end(); }
-  };
-  element.addEventListener('pointerdown', event => {
-    cancel(); suppressClick = false;
-    if (!event.isPrimary) return;
-    const current = context();
-    if (event.pointerType === 'mouse' || event.button !== 0 || !current) return;
-    press = { id: event.pointerId, x: event.clientX, y: event.clientY, started: performance.now(), context: current };
-  }, true);
-  element.addEventListener('pointermove', event => {
-    if (!press || press.id !== event.pointerId) return;
-    if (context() !== press.context) { cancel(); return; }
-    const dx = event.clientX - press.x, dy = event.clientY - press.y;
-    if (!press.axis && Math.hypot(dx, dy) >= 8) {
-      press.axis = performance.now() - press.started < 450 && Math.abs(dy) > Math.abs(dx) * 1.25 ? 'vertical' : 'other';
+    const current = press;
+    press = undefined;
+    if (current?.axis === 'vertical') {
+      suppressClick = true;
+      actions.end();
     }
-    if (press.axis === 'vertical') { event.preventDefault(); suppressClick = true; actions.move(dy); }
-  }, true);
-  element.addEventListener('pointerup', event => {
-    if (!press || press.id !== event.pointerId) return;
-    const current = press; press = undefined;
-    if (current.axis !== 'vertical') return;
-    event.preventDefault(); suppressClick = true;
-    const dx = event.clientX - current.x, dy = event.clientY - current.y;
-    const up = Math.abs(dy) >= 28 && Math.abs(dy) > Math.abs(dx) * 1.25 ? dy < 0 : undefined;
-    queueMicrotask(() => actions.end(context() === current.context ? up : undefined));
-  }, true);
+  };
+  element.addEventListener(
+    'pointerdown',
+    (event) => {
+      cancel();
+      suppressClick = false;
+      if (!event.isPrimary) return;
+      const current = context();
+      if (event.pointerType === 'mouse' || event.button !== 0 || !current) return;
+      press = {
+        id: event.pointerId,
+        x: event.clientX,
+        y: event.clientY,
+        started: performance.now(),
+        context: current,
+      };
+    },
+    true,
+  );
+  element.addEventListener(
+    'pointermove',
+    (event) => {
+      if (!press || press.id !== event.pointerId) return;
+      if (context() !== press.context) {
+        cancel();
+        return;
+      }
+      const dx = event.clientX - press.x,
+        dy = event.clientY - press.y;
+      if (!press.axis && Math.hypot(dx, dy) >= 8) {
+        press.axis =
+          performance.now() - press.started < 450 && Math.abs(dy) > Math.abs(dx) * 1.25
+            ? 'vertical'
+            : 'other';
+      }
+      if (press.axis === 'vertical') {
+        event.preventDefault();
+        suppressClick = true;
+        actions.move(dy);
+      }
+    },
+    true,
+  );
+  element.addEventListener(
+    'pointerup',
+    (event) => {
+      if (!press || press.id !== event.pointerId) return;
+      const current = press;
+      press = undefined;
+      if (current.axis !== 'vertical') return;
+      event.preventDefault();
+      suppressClick = true;
+      const dx = event.clientX - current.x,
+        dy = event.clientY - current.y;
+      const up = Math.abs(dy) >= 28 && Math.abs(dy) > Math.abs(dx) * 1.25 ? dy < 0 : undefined;
+      queueMicrotask(() => actions.end(context() === current.context ? up : undefined));
+    },
+    true,
+  );
   element.addEventListener('pointercancel', cancel, true);
-  element.addEventListener('lostpointercapture', event => { if (press?.id === event.pointerId) cancel(); }, true);
+  element.addEventListener(
+    'lostpointercapture',
+    (event) => {
+      if (press?.id === event.pointerId) cancel();
+    },
+    true,
+  );
   window.addEventListener('blur', cancel);
   window.addEventListener('resize', cancel);
   window.visualViewport?.addEventListener('resize', cancel);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
-  element.addEventListener('click', event => {
-    if (suppressClick && event.detail) { event.preventDefault(); event.stopPropagation(); suppressClick = false; }
-  }, true);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) cancel();
+  });
+  element.addEventListener(
+    'click',
+    (event) => {
+      if (suppressClick && event.detail) {
+        event.preventDefault();
+        event.stopPropagation();
+        suppressClick = false;
+      }
+    },
+    true,
+  );
   return cancel;
 }

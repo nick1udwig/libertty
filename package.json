@@ -56,8 +56,8 @@
     "build:test-support": "cargo build --locked -p libertty-server --examples",
     "pretest": "npm run build:test-support",
     "contracts:vocabulary": "node scripts/engine-vocabulary.mjs",
-    "format:workspace": "prettier --write src/main.ts src/workspace-*.ts",
-    "check:workspace-format": "prettier --check src/main.ts src/workspace-*.ts"
+    "format": "prettier --write src",
+    "check:format": "prettier --check src"
   },
   "dependencies": {
     "@gespenst/core": "0.2.0",

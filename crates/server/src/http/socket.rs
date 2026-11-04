@@ -20,7 +20,7 @@ pub(super) enum Input<'a> {
         session: &'a Arc<Session>,
         attachment: u64,
     },
-    Herdr(&'a Arc<herdr_view::View>),
+    Herdr(&'a Arc<herdr::view::View>),
     Metadata {
         app: &'a App,
         connection: &'a str,

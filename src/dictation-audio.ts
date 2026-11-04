@@ -7,12 +7,24 @@ export class DictationAudio {
   private next = 0;
   finished = false;
   append(frame: ArrayBuffer) {
-    if (this.bytes + frame.byteLength > MAX_OPUS_BYTES || parseOpusFrame(new Uint8Array(frame)).sequence !== this.frames.length) throw new Error('Recording exceeded its audio limit.');
-    this.frames.push(frame); this.bytes += frame.byteLength;
+    if (
+      this.bytes + frame.byteLength > MAX_OPUS_BYTES ||
+      parseOpusFrame(new Uint8Array(frame)).sequence !== this.frames.length
+    )
+      throw new Error('Recording exceeded its audio limit.');
+    this.frames.push(frame);
+    this.bytes += frame.byteLength;
   }
   resume(accepted = 0, finished = false) {
-    if (!Number.isSafeInteger(accepted) || accepted < 0 || accepted > this.frames.length || finished && accepted !== this.frames.length) throw new Error('Voxtype returned an invalid audio checkpoint.');
-    this.next = accepted; this.finished = finished;
+    if (
+      !Number.isSafeInteger(accepted) ||
+      accepted < 0 ||
+      accepted > this.frames.length ||
+      (finished && accepted !== this.frames.length)
+    )
+      throw new Error('Voxtype returned an invalid audio checkpoint.');
+    this.next = accepted;
+    this.finished = finished;
   }
   upload(send: (frame: ArrayBuffer) => boolean) {
     for (let count = 0; this.next < this.frames.length && count < 4 && !this.finished; count++) {
@@ -21,5 +33,9 @@ export class DictationAudio {
     }
     return this.next === this.frames.length;
   }
-  clear() { this.frames = []; this.bytes = this.next = 0; this.finished = false; }
+  clear() {
+    this.frames = [];
+    this.bytes = this.next = 0;
+    this.finished = false;
+  }
 }

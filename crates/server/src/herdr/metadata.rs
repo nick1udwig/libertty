@@ -1,7 +1,5 @@
 //! Shared metadata subscriptions and cached snapshots per target.
-use crate::herdr::{
-    Connection, Lines, Metadata, Snapshot, Target, normalize, pane_key, read_line, truthy,
-};
+use crate::herdr::{Connection, Lines, Metadata, Snapshot, Target, normalize, read_line, truthy};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -339,4 +337,14 @@ fn check_event(reply: Option<Value>) -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+
+fn pane_key(snapshot: &Snapshot) -> Vec<String> {
+    let mut result: Vec<_> = snapshot
+        .agents
+        .iter()
+        .map(|agent| agent.pane_id.clone())
+        .collect();
+    result.sort();
+    result
 }

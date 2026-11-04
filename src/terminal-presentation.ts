@@ -1,28 +1,43 @@
 /** Composite the terminal's background and text without resampling their bitmaps. */
 function copyPicture(viewport: HTMLElement, snapshot: HTMLCanvasElement) {
-  const canvases = Array.from(viewport.querySelectorAll<HTMLCanvasElement>('#terminal canvas'))
-    .filter(canvas => canvas.width && canvas.height && canvas.getBoundingClientRect().width);
-  const first = canvases[0], screen = viewport.querySelector<HTMLElement>('#terminal .terminal-screen');
+  const canvases = Array.from(
+    viewport.querySelectorAll<HTMLCanvasElement>('#terminal canvas'),
+  ).filter((canvas) => canvas.width && canvas.height && canvas.getBoundingClientRect().width);
+  const first = canvases[0],
+    screen = viewport.querySelector<HTMLElement>('#terminal .terminal-screen');
   if (!first || !screen) return;
   // The canvases extend past the clipped screen while history rests between rows.
-  const source = screen.getBoundingClientRect(), canvas = first.getBoundingClientRect();
-  const scaleX = first.width / canvas.width, scaleY = first.height / canvas.height;
-  snapshot.width = Math.round(source.width * scaleX); snapshot.height = Math.round(source.height * scaleY);
+  const source = screen.getBoundingClientRect(),
+    canvas = first.getBoundingClientRect();
+  const scaleX = first.width / canvas.width,
+    scaleY = first.height / canvas.height;
+  snapshot.width = Math.round(source.width * scaleX);
+  snapshot.height = Math.round(source.height * scaleY);
   const context = snapshot.getContext('2d')!;
   for (const canvas of canvases) {
     const bounds = canvas.getBoundingClientRect();
-    context.drawImage(canvas, Math.round((bounds.left - source.left) * scaleX), Math.round((bounds.top - source.top) * scaleY));
+    context.drawImage(
+      canvas,
+      Math.round((bounds.left - source.left) * scaleX),
+      Math.round((bounds.top - source.top) * scaleY),
+    );
   }
   return source;
 }
 
 /** Copy the canvas bitmap without resampling and place it over the original, so held glyphs match the terminal pixel for pixel. */
 function holdPicture(viewport: HTMLElement, layer: HTMLElement, snapshot: HTMLCanvasElement) {
-  const bounds = viewport.getBoundingClientRect(), parent = viewport.parentElement!.getBoundingClientRect();
+  const bounds = viewport.getBoundingClientRect(),
+    parent = viewport.parentElement!.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return false;
   const source = copyPicture(viewport, snapshot);
   if (!source) return false;
-  Object.assign(snapshot.style, { left: source.left - parent.left + 'px', top: source.top - bounds.top + 'px', width: source.width + 'px', height: source.height + 'px' });
+  Object.assign(snapshot.style, {
+    left: source.left - parent.left + 'px',
+    top: source.top - bounds.top + 'px',
+    width: source.width + 'px',
+    height: source.height + 'px',
+  });
   layer.style.top = bounds.top - parent.top + 'px';
   layer.style.height = bounds.height + 'px';
   layer.hidden = false;
@@ -40,44 +55,58 @@ export class TerminalPresentation {
   private viewport: HTMLElement;
   private ready: () => void;
   constructor(viewport: HTMLElement, ready: () => void = () => {}, progress = true) {
-    this.viewport = viewport; this.ready = ready;
-    this.layer.className = progress ? 'terminal-presentation' : 'dictation-presentation'; this.layer.hidden = true;
+    this.viewport = viewport;
+    this.ready = ready;
+    this.layer.className = progress ? 'terminal-presentation' : 'dictation-presentation';
+    this.layer.hidden = true;
     this.snapshot.setAttribute('aria-hidden', 'true');
-    this.progress.className = 'terminal-loading-bar'; this.progress.role = 'progressbar';
+    this.progress.className = 'terminal-loading-bar';
+    this.progress.role = 'progressbar';
     this.progress.setAttribute('aria-label', 'Loading terminal');
     this.layer.append(this.snapshot);
     if (progress) this.layer.append(this.progress);
     viewport.parentElement!.append(this.layer);
   }
-  get pending() { return this.waiting; }
+  get pending() {
+    return this.waiting;
+  }
   freeze(progress = true) {
-    ++this.generation; this.waiting = true;
+    ++this.generation;
+    this.waiting = true;
     if (this.held || !holdPicture(this.viewport, this.layer, this.snapshot)) return;
     this.progress.hidden = !progress;
     this.held = true;
     this.viewport.setAttribute('aria-busy', 'true');
   }
   wait() {
-    ++this.generation; this.waiting = true;
-    this.layer.hidden = true; this.held = false;
+    ++this.generation;
+    this.waiting = true;
+    this.layer.hidden = true;
+    this.held = false;
     this.snapshot.width = this.snapshot.height = 0;
     this.viewport.setAttribute('aria-busy', 'true');
   }
   /** Revealed runs once the held picture is gone, so a host never shows the frame under a stale cover. */
   reveal(revealed?: () => void) {
-    if (!this.waiting) { revealed?.(); return; }
+    if (!this.waiting) {
+      revealed?.();
+      return;
+    }
     const generation = this.generation;
     // Terminal writes parse synchronously, but the renderer paints on a later frame.
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (generation !== this.generation) return;
-      if (this.waiting) {
-        this.layer.hidden = true; this.held = this.waiting = false;
-        this.snapshot.width = this.snapshot.height = 0;
-        this.viewport.setAttribute('aria-busy', 'false');
-        this.ready();
-      }
-      revealed?.();
-    }));
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (generation !== this.generation) return;
+        if (this.waiting) {
+          this.layer.hidden = true;
+          this.held = this.waiting = false;
+          this.snapshot.width = this.snapshot.height = 0;
+          this.viewport.setAttribute('aria-busy', 'false');
+          this.ready();
+        }
+        revealed?.();
+      }),
+    );
   }
 }
 
@@ -90,25 +119,46 @@ export class TerminalResizeCover {
   private viewport: HTMLElement;
   constructor(viewport: HTMLElement) {
     this.viewport = viewport;
-    this.layer.className = 'terminal-resize-cover'; this.layer.hidden = true;
+    this.layer.className = 'terminal-resize-cover';
+    this.layer.hidden = true;
     this.snapshot.setAttribute('aria-hidden', 'true');
-    this.layer.append(this.snapshot); viewport.parentElement!.append(this.layer);
+    this.layer.append(this.snapshot);
+    viewport.parentElement!.append(this.layer);
   }
-  get held() { return !this.layer.hidden; }
+  get held() {
+    return !this.layer.hidden;
+  }
   /** Fitted height is the viewport height that the canvas was last sized for. */
   hold(fittedHeight: number) {
-    const bounds = this.viewport.getBoundingClientRect(), parent = this.viewport.parentElement!.getBoundingClientRect();
+    const bounds = this.viewport.getBoundingClientRect(),
+      parent = this.viewport.parentElement!.getBoundingClientRect();
     if (this.held || !bounds.height) return;
     const source = copyPicture(this.viewport, this.snapshot);
     if (!source) return;
     ++this.generation;
-    Object.assign(this.layer.style, { top: bounds.top - parent.top + 'px', bottom: parent.bottom - bounds.bottom + 'px' });
-    Object.assign(this.snapshot.style, { left: source.left - parent.left + 'px', bottom: fittedHeight - (source.bottom - bounds.top) + 'px', width: source.width + 'px', height: source.height + 'px' });
+    Object.assign(this.layer.style, {
+      top: bounds.top - parent.top + 'px',
+      bottom: parent.bottom - bounds.bottom + 'px',
+    });
+    Object.assign(this.snapshot.style, {
+      left: source.left - parent.left + 'px',
+      bottom: fittedHeight - (source.bottom - bounds.top) + 'px',
+      width: source.width + 'px',
+      height: source.height + 'px',
+    });
     this.layer.hidden = false;
   }
   reveal() {
     const generation = this.generation;
-    requestAnimationFrame(() => requestAnimationFrame(() => { if (generation === this.generation) this.release(); }));
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (generation === this.generation) this.release();
+      }),
+    );
   }
-  release() { ++this.generation; this.layer.hidden = true; this.snapshot.width = this.snapshot.height = 0; }
+  release() {
+    ++this.generation;
+    this.layer.hidden = true;
+    this.snapshot.width = this.snapshot.height = 0;
+  }
 }

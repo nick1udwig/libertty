@@ -1,12 +1,15 @@
 //! herdr-core transport and workspace adapter for the shared Herdr interface.
 mod actions;
+mod hub;
 mod input;
 mod projection;
 mod terminal;
 use crate::herdr::{Metadata, Snapshot, Target};
-pub use actions::{action, options};
+pub use actions::options;
 use herdr_client_lib::{client::Client, sync::Session, transport::HcConfig};
+pub use hub::metadata;
 use libertty_engine::repair::shell_quote;
+use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 pub use terminal::terminal;
 use tokio_util::sync::CancellationToken;
@@ -81,59 +84,26 @@ async fn reconcile(session: &mut Session) -> Result<(), String> {
     }
     Ok(())
 }
-pub async fn snapshot(target: &Target) -> Result<Snapshot, String> {
-    let session = session(target).await?;
-    let mut snapshot = projection::project(&session)?;
-    projection::repositories(&session, &mut snapshot, &mut BTreeMap::new()).await;
-    Ok(snapshot)
-}
-async fn metadata_connection(
-    target: &Target,
-    send: tokio::sync::mpsc::Sender<Metadata>,
-    cancel: CancellationToken,
-) {
-    let work = async {
-        let mut session = session(target).await?;
-        let mut repositories = BTreeMap::new();
-        let mut previous = None;
-        let mut refresh = tokio::time::interval(Duration::from_secs(2));
-        refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            let mut snapshot = projection::project(&session)?;
-            projection::repositories(&session, &mut snapshot, &mut repositories).await;
-            if previous.as_ref() != Some(&snapshot) {
-                previous = Some(snapshot.clone());
-                if send
-                    .send(Metadata::Snapshot {
-                        snapshot: Arc::new(snapshot),
-                    })
-                    .await
-                    .is_err()
-                {
-                    return Ok(());
-                }
-            }
-            tokio::select! {
-                event = session.next() => { event.map_err(error)?; reconcile(&mut session).await?; }
-                _ = refresh.tick() => (),
-            }
-        }
-    };
-    tokio::select! {
-        _ = cancel.cancelled() => (),
-        result = work => if let Err(message) = result { let _ = send.send(Metadata::Error { message }).await; },
-    }
+pub async fn snapshot(target: &Target) -> Result<Arc<Snapshot>, String> {
+    Ok(hub::live(target).await?.snapshot.clone())
 }
 
-pub async fn metadata(
+pub(crate) async fn validate_terminal(
     target: &Target,
-    send: tokio::sync::mpsc::Sender<Metadata>,
-    cancel: CancellationToken,
-) {
-    while !cancel.is_cancelled() && !send.is_closed() {
-        metadata_connection(target, send.clone(), cancel.clone()).await;
-        tokio::select! { _ = cancel.cancelled() => break, _ = tokio::time::sleep(Duration::from_secs(2)) => () }
-    }
+    terminal: &crate::herdr::Terminal,
+) -> Result<(), String> {
+    snapshot(target)
+        .await?
+        .terminal(&terminal.terminal_id)
+        .filter(|t| t.pane_id == terminal.pane_id)
+        .map(|_| ())
+        .ok_or("This terminal ended or moved.".into())
+}
+/// Runs an action on its own session, then waits until the shared session includes its result.
+pub async fn action(target: &Target, input: crate::herdr::action::Action) -> Result<Value, String> {
+    let result = actions::action(target, input).await;
+    hub::refresh(target).await?;
+    result
 }
 
 pub(crate) fn shell(
@@ -145,10 +115,7 @@ pub(crate) fn shell(
     let foreground = record.foreground.as_ref()?;
     let pid = record.pid?;
     if foreground.pid != pid as i32
-        || !matches!(
-            foreground.name.as_str(),
-            "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh"
-        )
+        || !crate::herdr::is_shell(&foreground.name)
         || !foreground.cwd.starts_with('/')
     {
         return None;
@@ -170,27 +137,24 @@ pub(crate) async fn input_state(
     target: &Target,
     pane: &str,
 ) -> Result<(Option<crate::herdr::ShellInput>, String), String> {
-    let session = session(target).await?;
-    let snapshot = projection::project(&session)?;
-    let terminal = snapshot
+    let live = hub::live(target).await?;
+    let terminal = live
+        .snapshot
         .terminals
         .iter()
         .find(|t| t.pane_id == pane)
         .ok_or("This pane has closed.")?;
-    let record = projection::record(&session, &terminal.terminal_id)?;
-    let record = session
+    let record = live
         .client
-        .terminal_get(&record.address, DEADLINE)
+        .terminal_get(&live.record(&terminal.terminal_id)?.address, DEADLINE)
         .await
         .map_err(error)?;
     Ok((shell(&record), context(&record)))
 }
 pub(crate) async fn preview(target: &Target, terminal: &str) -> Result<String, String> {
-    let session = session(target).await?;
-    let record = projection::record(&session, terminal)?;
-    session
-        .client
-        .terminal_read(&record.address, 40, DEADLINE)
+    let live = hub::live(target).await?;
+    live.client
+        .terminal_read(&live.record(terminal)?.address, 40, DEADLINE)
         .await
         .map(|r| r.text)
         .map_err(error)

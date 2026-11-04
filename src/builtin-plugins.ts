@@ -12,7 +12,14 @@ import { terminalCanEvict } from './terminal-retention.ts';
 export interface BuiltinServices extends ReadingServices {
   active(tab: TerminalTab): boolean;
   host(id?: string): HostProfile | undefined;
-  api<T>(backend: BackendProfile, name: string, data?: unknown, session?: string, recoverAuth?: boolean, signal?: AbortSignal): Promise<T>;
+  api<T>(
+    backend: BackendProfile,
+    name: string,
+    data?: unknown,
+    session?: string,
+    recoverAuth?: boolean,
+    signal?: AbortSignal,
+  ): Promise<T>;
   connect(host: HostProfile, pluginId: string): Promise<void>;
   closeSession(tab: TerminalTab): Promise<void>;
   openReadingCapture(tab: TerminalTab, capture: string, name: string, exitCode?: number): void;
@@ -27,68 +34,215 @@ export interface BuiltinServices extends ReadingServices {
   toggleTerminalTabs(tab: TerminalTab): void;
   ready(tab: TerminalTab): void;
   attention(tab: TerminalTab, count: number): void;
-  notification(connection: string, event: Parameters<ConstructorParameters<typeof HerdrView>[0]['notification']>[0]): void;
+  notification(
+    connection: string,
+    event: Parameters<ConstructorParameters<typeof HerdrView>[0]['notification']>[0],
+  ): void;
   notificationDevice(backendId: string): string | undefined;
   watch(tab: TerminalTab): Promise<void>;
   unwatch(tab: TerminalTab): Promise<void>;
 }
 
 export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
-  const common = { version: BUILTIN_VERSION, available: (host: HostProfile) => host.kind !== 'herdr' };
+  const common = {
+    version: BUILTIN_VERSION,
+    available: (host: HostProfile) => host.kind !== 'herdr',
+  };
   return [
-    { ...common, id: 'terminal', name: 'Terminal', connectLabel: 'Connect new terminal', icon: '▤', iconHTML: terminalIcon, panelPrefix: 'frame-',
-      connect: host => s.connect(host, 'terminal'),
+    {
+      ...common,
+      id: 'terminal',
+      name: 'Terminal',
+      connectLabel: 'Connect new terminal',
+      icon: '▤',
+      iconHTML: terminalIcon,
+      panelPrefix: 'frame-',
+      connect: (host) => s.connect(host, 'terminal'),
       async mount(tab) {
-        const frame = document.createElement('iframe'); frame.title = tab.name + ' terminal'; frame.id = 'frame-' + tab.id;
-        frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write'; frame.src = s.terminalURL(s.backend(tab), tab.session); s.frame(tab, frame);
-        return { element: frame, setVisible(visible) { frame.hidden = !visible; frame.contentWindow?.postMessage({ type: 'tab-visibility', visible }, location.origin); },
-          focus() { frame.contentWindow?.postMessage({ type: 'focus-terminal' }, location.origin); },
-          applySettings() { frame.contentWindow?.postMessage({ type: 'settings-changed' }, location.origin); },
-          copySelection() { frame.contentWindow?.postMessage({ type: 'settings-action', action: 'copy-selection' }, location.origin); },
+        const frame = document.createElement('iframe');
+        frame.title = tab.name + ' terminal';
+        frame.id = 'frame-' + tab.id;
+        frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write';
+        frame.src = s.terminalURL(s.backend(tab), tab.session);
+        s.frame(tab, frame);
+        return {
+          element: frame,
+          setVisible(visible) {
+            frame.hidden = !visible;
+            frame.contentWindow?.postMessage({ type: 'tab-visibility', visible }, location.origin);
+          },
+          focus() {
+            frame.contentWindow?.postMessage({ type: 'focus-terminal' }, location.origin);
+          },
+          applySettings() {
+            frame.contentWindow?.postMessage({ type: 'settings-changed' }, location.origin);
+          },
+          copySelection() {
+            frame.contentWindow?.postMessage(
+              { type: 'settings-action', action: 'copy-selection' },
+              location.origin,
+            );
+          },
           canEvict: () => terminalCanEvict(frame),
-          dispose() { frame.remove(); s.frame(tab); } };
+          dispose() {
+            frame.remove();
+            s.frame(tab);
+          },
+        };
       },
-      async close(tab) { if (!confirm('Close ' + tab.name + '? Running programs in this terminal will stop.')) return false; await s.closeSession(tab); return true; },
-    },
-    { ...common, id: 'files', name: 'SFTP / Files', connectLabel: 'Connect SFTP / Files', icon: '', iconHTML: folderIcon, panelPrefix: 'files-', className: 'files-tab',
-      connect: host => s.connect(host, 'files'),
-      async mount(tab) {
-        const backend = s.backend(tab); await s.authenticate(backend);
-        if (!s.active(tab)) throw new Error('This tab has closed.');
-        const view = fileBrowser(fileClient(backend.url, tab.session, () => s.token(backend), () => s.authenticate(backend, true)), tab.directory || '.', directory => { tab.directory = directory; s.store(); });
-        view.element.id = 'files-' + tab.id;
-        return { ...view, setVisible(visible) { view.element.hidden = !visible; } };
+      async close(tab) {
+        if (!confirm('Close ' + tab.name + '? Running programs in this terminal will stop.'))
+          return false;
+        await s.closeSession(tab);
+        return true;
       },
-      async close(tab) { await s.closeSession(tab); return true; },
     },
-    ...['herdr', 'herdr-core'].map((id): TabPlugin => ({ version: BUILTIN_VERSION, id, name: id === 'herdr-core' ? 'Herdr Core' : 'Herdr', connectLabel: id === 'herdr-core' ? 'Connect Herdr Core' : 'Connect Herdr', icon: 'H', iconHTML: herdrIcon, panelPrefix: 'herdr-', className: 'herdr-tab', available: host => id === 'herdr' || host.kind !== 'herdr',
-      connect: host => s.connect(host, id),
+    {
+      ...common,
+      id: 'files',
+      name: 'SFTP / Files',
+      connectLabel: 'Connect SFTP / Files',
+      icon: '',
+      iconHTML: folderIcon,
+      panelPrefix: 'files-',
+      className: 'files-tab',
+      connect: (host) => s.connect(host, 'files'),
       async mount(tab) {
         const backend = s.backend(tab);
-        const { HerdrView } = await import('./herdr-view.ts');
+        await s.authenticate(backend);
         if (!s.active(tab)) throw new Error('This tab has closed.');
-        const session = herdrSession(tab.herdrSession), source = tab.herdrSource, sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
-        const core = id === 'herdr-core';
-        const connection = (core ? 'core:' : '') + backend.url + '#' + (source ? sourceHost || tab.hostId || source : '') + '#' + session;
-        const view = new HerdrView({ core, url: backend.url, session, source, token: () => s.token(backend), authenticate: () => s.authenticate(backend, true), reconnect: () => s.reconnectHerdr(tab), key: 'libertty.herdr.' + connection,
-          reading: (terminalId, request) => {
-            const source = { ...tab, herdrCore: core, readHerdrTerminal: terminalId };
-            if ('path' in request) s.openReading(source, request.path);
-            else s.openReadingCapture(source, request.capture, request.name, request.exitCode);
+        const view = fileBrowser(
+          fileClient(
+            backend.url,
+            tab.session,
+            () => s.token(backend),
+            () => s.authenticate(backend, true),
+          ),
+          tab.directory || '.',
+          (directory) => {
+            tab.directory = directory;
+            s.store();
           },
-          notificationDevice: () => s.notificationDevice(tab.backendId), toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
-          api: async <T>(name: string, data?: unknown, signal?: AbortSignal) => {
-            try { return await s.api<T>(backend, name + (name.includes('?') ? '&' : '?') + new URLSearchParams({ ...(core ? { herdrCore: '1' } : {}), herdrSession: session, ...(source ? { herdrSource: source } : {}) }), data, undefined, true, signal); }
-            catch (error: any) { if (!signal?.aborted && error.status === 404 && source && tab.herdrSource === source && !tab.ended) { tab.ended = true; s.store(); } throw error; }
+        );
+        view.element.id = 'files-' + tab.id;
+        return {
+          ...view,
+          setVisible(visible) {
+            view.element.hidden = !visible;
           },
-          changed: count => s.attention(tab, count), ready: () => s.ready(tab), notification: event => s.notification(connection, event), notice: s.notice, fail: s.fail, state: (key, state) => s.tabState(tab, key, state) });
-        view.element.id = 'herdr-' + tab.id; view.navigationElement.id = 'herdr-strip-' + tab.id; s.herdr(tab, view);
-        void s.watch(tab).then(() => view.updatePresence()).catch(s.fail);
-        return { element: view.element, setVisible: visible => view.setVisible(visible), setHeld: held => view.setHeld(held), applySettings: () => view.applySettings(), copySelection: () => view.copySelection(),
-          dispose() { view.dispose(); s.herdr(tab); } };
+        };
       },
-      async close(tab) { await s.unwatch(tab); if (tab.ownsSession) await s.closeSession(tab); return true; },
-    })),
+      async close(tab) {
+        await s.closeSession(tab);
+        return true;
+      },
+    },
+    ...['herdr', 'herdr-core'].map(
+      (id): TabPlugin => ({
+        version: BUILTIN_VERSION,
+        id,
+        name: id === 'herdr-core' ? 'Herdr Core' : 'Herdr',
+        connectLabel: id === 'herdr-core' ? 'Connect Herdr Core' : 'Connect Herdr',
+        icon: 'H',
+        iconHTML: herdrIcon,
+        panelPrefix: 'herdr-',
+        className: 'herdr-tab',
+        available: (host) => id === 'herdr' || host.kind !== 'herdr',
+        connect: (host) => s.connect(host, id),
+        async mount(tab) {
+          const backend = s.backend(tab);
+          const { HerdrView } = await import('./herdr-view.ts');
+          if (!s.active(tab)) throw new Error('This tab has closed.');
+          const session = herdrSession(tab.herdrSession),
+            source = tab.herdrSource,
+            sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
+          const core = id === 'herdr-core';
+          const connection =
+            (core ? 'core:' : '') +
+            backend.url +
+            '#' +
+            (source ? sourceHost || tab.hostId || source : '') +
+            '#' +
+            session;
+          const view = new HerdrView({
+            core,
+            url: backend.url,
+            session,
+            source,
+            token: () => s.token(backend),
+            authenticate: () => s.authenticate(backend, true),
+            reconnect: () => s.reconnectHerdr(tab),
+            key: 'libertty.herdr.' + connection,
+            reading: (terminalId, request) => {
+              const source = { ...tab, herdrCore: core, readHerdrTerminal: terminalId };
+              if ('path' in request) s.openReading(source, request.path);
+              else s.openReadingCapture(source, request.capture, request.name, request.exitCode);
+            },
+            notificationDevice: () => s.notificationDevice(tab.backendId),
+            toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
+            api: async <T>(name: string, data?: unknown, signal?: AbortSignal) => {
+              try {
+                return await s.api<T>(
+                  backend,
+                  name +
+                    (name.includes('?') ? '&' : '?') +
+                    new URLSearchParams({
+                      ...(core ? { herdrCore: '1' } : {}),
+                      herdrSession: session,
+                      ...(source ? { herdrSource: source } : {}),
+                    }),
+                  data,
+                  undefined,
+                  true,
+                  signal,
+                );
+              } catch (error: any) {
+                if (
+                  !signal?.aborted &&
+                  error.status === 404 &&
+                  source &&
+                  tab.herdrSource === source &&
+                  !tab.ended
+                ) {
+                  tab.ended = true;
+                  s.store();
+                }
+                throw error;
+              }
+            },
+            changed: (count) => s.attention(tab, count),
+            ready: () => s.ready(tab),
+            notification: (event) => s.notification(connection, event),
+            notice: s.notice,
+            fail: s.fail,
+            state: (key, state) => s.tabState(tab, key, state),
+          });
+          view.element.id = 'herdr-' + tab.id;
+          view.navigationElement.id = 'herdr-strip-' + tab.id;
+          s.herdr(tab, view);
+          void s
+            .watch(tab)
+            .then(() => view.updatePresence())
+            .catch(s.fail);
+          return {
+            element: view.element,
+            setVisible: (visible) => view.setVisible(visible),
+            setHeld: (held) => view.setHeld(held),
+            applySettings: () => view.applySettings(),
+            copySelection: () => view.copySelection(),
+            dispose() {
+              view.dispose();
+              s.herdr(tab);
+            },
+          };
+        },
+        async close(tab) {
+          await s.unwatch(tab);
+          if (tab.ownsSession) await s.closeSession(tab);
+          return true;
+        },
+      }),
+    ),
     readingPlugin(s),
   ];
 }

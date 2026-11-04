@@ -2,22 +2,19 @@ import { launchBrowser, freePort, delay, until as wait } from './support/browser
 import { installWireObserver } from './wire-observer.mjs';
 import { installBackgroundGrace } from './support/background-grace.mjs';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import pty from 'node-pty';
+import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
+import { herdrFixture } from './support/herdr-native.mjs';
 import { shellQuote } from '../src/shell-words.ts';
 
 const fixturePort3173 = await freePort();
 
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/libertty-herdr-app-scroll-');
-const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:' + fixturePort3173;
-const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
+const fixture = herdrFixture(dir), { target } = fixture, base = 'http://127.0.0.1:' + fixturePort3173;
 const state = async () => { try { return JSON.parse(await readFile(dir + '/state.json', 'utf8')); } catch { return {}; } };
 const wrappedURL = 'https://github.com/nick1udwig/libertty/pull/new/feat/links-work-across-linebreaks';
 const wrappedPrefix = 'remote:      ';
-let herdr, desktop, backend, browser;
+let browser;
 try {
   await mkdir(dir + '/config', { recursive: true });
   // A generic fullscreen TUI: its transcript lives in the application, while
@@ -62,16 +59,12 @@ try {
     draw(); process.on('SIGWINCH', () => setImmediate(draw));
     setInterval(() => { if (!normal) { tick++; process.stdout.write('\\x1b[1;1H' + title() + '\\x1b[' + (process.stdout.rows - 4) + ';' + caret() + 'H'); } }, 30);
   `);
-  herdr = spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server'], { cwd: dir, env, stdio: 'ignore' });
-  await wait(async () => { try { await herdrSnapshot(target); return true; } catch { return false; } }, 'isolated Herdr');
-  desktop = pty.spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', [], { cwd: dir, env, cols: 150, rows: 45, name: 'xterm-256color' }); desktop.onData(() => {});
+  await fixture.startHerdr();
   const created = await herdrRequest(target, 'workspace.create', { cwd: dir, label: 'App scroll fixture', focus: true });
   const terminal = (await herdrSnapshot(target)).terminals.find(t => t.workspaceId === created.workspace.workspace_id); assert.ok(terminal);
   await delay(400); await herdrRequest(target, 'pane.send_text', { pane_id: terminal.paneId, text: "printf 'SHELL HISTORY\\n%.0s' {1..160}\r" });
   await wait(async () => (await herdrRequest(target, 'pane.read', { pane_id: terminal.paneId, source: 'recent_unwrapped', lines: 1000, format: 'ansi' })).read.text.includes('SHELL HISTORY'), 'native shell history');
-  backend = spawn(new URL('../target/debug/libertty', import.meta.url).pathname, [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3173), LIBERTTY_BASE_PATH: '/', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base, LIBERTTY_DATA_DIR: dir + '/libertty', LIBERTTY_TOKEN: '', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: dir }, stdio: 'ignore' });
-  await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
-  const token = (await readFile(dir + '/libertty/pairing-token', 'utf8')).trim();
+  const token = await fixture.startBackend(fixturePort3173);
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, permissions: ['clipboard-read', 'clipboard-write'] });
   await installBackgroundGrace(context);
@@ -372,8 +365,5 @@ try {
   assert.deepEqual(errors, []);
   console.log('PASS: real Herdr live animation rendered ' + animation.paints + ' distinct updates in 1.5 s with history withheld; native tap/edit ordering, wide cells, rotation, mouse mode, reconnects, scrolling, hold/copy, links and fullscreen recovery passed.');
 } finally {
-  await browser?.close(); if (backend) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
-  const stopped = herdr && herdr.exitCode === null && herdr.signalCode === null ? once(herdr, 'exit') : null;
-  desktop?.kill(); await herdrRequest(target, 'server.stop').catch(() => {}); herdr?.kill(); await stopped;
-  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await browser?.close(); await fixture.stop();
 }

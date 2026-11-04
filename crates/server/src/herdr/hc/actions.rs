@@ -1,5 +1,5 @@
 use super::*;
-use crate::herdr_action::{Action, Direction};
+use crate::herdr::action::{Action, Direction};
 use herdr_client_lib::{
     commands::{Creation, Launch, Placement},
     document::{Axis, Document},
@@ -101,7 +101,7 @@ async fn kinds(client: &Client) -> Result<Vec<String>, String> {
 }
 pub async fn options(target: &Target) -> Result<Value, String> {
     Ok(
-        json!({"kinds":kinds(&connect(target).await?).await?,"actions":["list-worktrees","new-worktree","open-worktree","delete-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
+        json!({"kinds":kinds(&hub::live(target).await?.client).await?,"actions":crate::herdr::action::NAMES}),
     )
 }
 pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
@@ -282,9 +282,10 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
             if !kinds(&session.client).await?.contains(&kind) {
                 return Err("Choose a supported agent type.".into());
             }
-            if requested.as_ref().is_some_and(|s| {
-                !s.starts_with('/') || s.len() > 4096 || crate::protocol::controls(s)
-            }) {
+            if requested
+                .as_ref()
+                .is_some_and(|s| !crate::protocol::absolute_path(s))
+            {
                 return Err("Enter an absolute working directory.".into());
             }
             let mut launch = launch(requested.or(cwd));
@@ -305,132 +306,152 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
             return created(&session, &machine, &space_id, creation).await;
         }
         action => {
-            let git = Git {
-                client: session.client.clone(),
-                machine: machine.clone(),
-                deadline: DEADLINE,
+            return worktree(
+                &mut session,
+                &snapshot,
+                &document,
+                &machine,
+                &space_id,
+                cwd,
+                action,
+            )
+            .await;
+        }
+    }
+    Ok(json!({"ok":true}))
+}
+
+/// Lists, creates, opens or deletes a linked checkout of the space's repository.
+async fn worktree(
+    session: &mut Session,
+    snapshot: &Snapshot,
+    document: &Document,
+    machine: &str,
+    space_id: &str,
+    cwd: Option<String>,
+    action: Action,
+) -> Result<Value, String> {
+    let git = Git {
+        client: session.client.clone(),
+        machine: machine.to_owned(),
+        deadline: DEADLINE,
+    };
+    let cwd = match &action {
+        Action::ListWorktrees { terminal_id, .. }
+        | Action::NewWorktree { terminal_id, .. }
+        | Action::OpenWorktree { terminal_id, .. } => {
+            let workspace_id = projection::key(machine, space_id);
+            let terminal = match terminal_id {
+                Some(id) => snapshot.terminal(id),
+                None => snapshot.terminals.iter().find(|terminal| {
+                    terminal.workspace_id.as_deref() == Some(workspace_id.as_str())
+                }),
+            }
+            .filter(|terminal| terminal.workspace_id.as_deref() == Some(workspace_id.as_str()))
+            .ok_or("Choose a live terminal in this space.")?;
+            let record = projection::record(session, &terminal.terminal_id)?;
+            let record = session
+                .client
+                .terminal_get(&record.address, DEADLINE)
+                .await
+                .map_err(error)?;
+            if !record.is_live() {
+                return Err("This terminal has ended.".into());
+            }
+            record
+                .folder()
+                .ok_or("This terminal has no working directory.")?
+                .to_owned()
+        }
+        _ => cwd.ok_or("This space has no working directory.")?,
+    };
+    let checkouts = git.list(&cwd).await.map_err(error)?;
+    let root = &checkouts.first().ok_or("No repository found.")?.path;
+    match action {
+        Action::ListWorktrees { .. } => {
+            let worktrees: Vec<_> = checkouts.iter().map(|checkout| {
+                let open = document.value()["spaces"].as_array().into_iter().flatten().find(|s| s["folder"] == checkout.path).and_then(|s| s["id"].as_str()).map(|id| projection::key(machine, id));
+                json!({"path":checkout.path,"branch":checkout.branch,"label":checkout.branch.as_deref().unwrap_or(&checkout.path),"is_bare":checkout.bare,"is_prunable":checkout.prunable,"open_workspace_id":open})
+            }).collect();
+            return Ok(
+                json!({"source":{"repo_name":herdr_client_lib::model::folder_name(root,""),"repo_root":root},"worktrees":worktrees,"branches":git.branches(root).await.map_err(error)?,"directory":git.worktree_root(None).await.map_err(error)?}),
+            );
+        }
+        Action::NewWorktree { branch, .. } => {
+            let branch = crate::herdr::name(&branch)?;
+            let path = git.default_path(root, &branch).await.map_err(error)?;
+            let placement = placement(branch.clone());
+            let Placement::Space { id, .. } = &placement else {
+                unreachable!()
             };
-            let cwd = match &action {
-                Action::ListWorktrees { terminal_id, .. }
-                | Action::NewWorktree { terminal_id, .. }
-                | Action::OpenWorktree { terminal_id, .. } => {
-                    let workspace_id = projection::key(&machine, &space_id);
-                    let terminal = match terminal_id {
-                        Some(id) => snapshot.terminal(id),
-                        None => snapshot.terminals.iter().find(|terminal| {
-                            terminal.workspace_id.as_deref() == Some(workspace_id.as_str())
-                        }),
-                    }
-                    .filter(|terminal| {
-                        terminal.workspace_id.as_deref() == Some(workspace_id.as_str())
-                    })
-                    .ok_or("Choose a live terminal in this space.")?;
-                    let record = projection::record(&session, &terminal.terminal_id)?;
-                    let record = session
-                        .client
-                        .terminal_get(&record.address, DEADLINE)
-                        .await
-                        .map_err(error)?;
-                    if !record.is_live() {
-                        return Err("This terminal has ended.".into());
-                    }
-                    record
-                        .folder()
-                        .ok_or("This terminal has no working directory.")?
-                        .to_owned()
-                }
-                _ => cwd.ok_or("This space has no working directory.")?,
+            let id = id.clone();
+            let new_branch = !git.branches(root).await.map_err(error)?.contains(&branch);
+            let result = git
+                .create_space(
+                    session,
+                    CreatePlan {
+                        repository: root.clone(),
+                        path,
+                        branch,
+                        new_branch,
+                        placement,
+                        correlation: new_id(),
+                    },
+                )
+                .await
+                .map_err(error)?;
+            if result.git.code != Some(0) {
+                return Err(String::from_utf8_lossy(&result.git.stderr).into());
+            }
+            return created(session, machine, &id, result.workspace.map_err(error)?).await;
+        }
+        Action::OpenWorktree { path, .. } => {
+            if !checkouts
+                .iter()
+                .any(|c| c.path == path && !c.bare && !c.prunable)
+            {
+                return Err("This checkout is unavailable.".into());
+            }
+            if let Some(id) = document.value()["spaces"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|s| s["folder"] == path)
+                .and_then(|s| s["id"].as_str())
+            {
+                return Ok(json!({"workspaceId":projection::key(machine,id)}));
+            }
+            let placement = placement(String::new());
+            let Placement::Space { id, .. } = &placement else {
+                unreachable!()
             };
-            let checkouts = git.list(&cwd).await.map_err(error)?;
-            let root = &checkouts.first().ok_or("No repository found.")?.path;
-            match action {
-                Action::ListWorktrees { .. } => {
-                    let worktrees: Vec<_> = checkouts.iter().map(|checkout| {
-                        let open = document.value()["spaces"].as_array().into_iter().flatten().find(|s| s["folder"] == checkout.path).and_then(|s| s["id"].as_str()).map(|id| projection::key(&machine, id));
-                        json!({"path":checkout.path,"branch":checkout.branch,"label":checkout.branch.as_deref().unwrap_or(&checkout.path),"is_bare":checkout.bare,"is_prunable":checkout.prunable,"open_workspace_id":open})
-                    }).collect();
-                    return Ok(
-                        json!({"source":{"repo_name":herdr_client_lib::model::folder_name(root,""),"repo_root":root},"worktrees":worktrees,"branches":git.branches(root).await.map_err(error)?,"directory":git.worktree_root(None).await.map_err(error)?}),
-                    );
-                }
-                Action::NewWorktree { branch, .. } => {
-                    let branch = crate::herdr::name(&branch)?;
-                    let path = git.default_path(root, &branch).await.map_err(error)?;
-                    let placement = placement(branch.clone());
-                    let Placement::Space { id, .. } = &placement else {
-                        unreachable!()
-                    };
-                    let id = id.clone();
-                    let new_branch = !git.branches(root).await.map_err(error)?.contains(&branch);
-                    let result = git
-                        .create_space(
-                            &mut session,
-                            CreatePlan {
-                                repository: root.clone(),
-                                path,
-                                branch,
-                                new_branch,
-                                placement,
-                                correlation: new_id(),
-                            },
-                        )
-                        .await
-                        .map_err(error)?;
-                    if result.git.code != Some(0) {
-                        return Err(String::from_utf8_lossy(&result.git.stderr).into());
-                    }
-                    return created(&session, &machine, &id, result.workspace.map_err(error)?)
-                        .await;
-                }
-                Action::OpenWorktree { path, .. } => {
-                    if !checkouts
-                        .iter()
-                        .any(|c| c.path == path && !c.bare && !c.prunable)
-                    {
-                        return Err("This checkout is unavailable.".into());
-                    }
-                    if let Some(id) = document.value()["spaces"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .find(|s| s["folder"] == path)
-                        .and_then(|s| s["id"].as_str())
-                    {
-                        return Ok(json!({"workspaceId":projection::key(&machine,id)}));
-                    }
-                    let placement = placement(String::new());
-                    let Placement::Space { id, .. } = &placement else {
-                        unreachable!()
-                    };
-                    let id = id.clone();
-                    let result = git
-                        .open(&mut session, &path, placement, new_id())
-                        .await
-                        .map_err(error)?;
-                    return created(&session, &machine, &id, result).await;
-                }
-                Action::DeleteWorktree {
-                    path: confirmed,
-                    force,
-                    ..
-                } => {
-                    let path = git.toplevel(&cwd).await.map_err(error)?;
-                    if path == *root || confirmed.as_deref() != Some(&path) {
-                        return Err("The linked checkout changed; reopen its confirmation.".into());
-                    }
-                    let removal = git.assess_remove(root, &path).await.map_err(error)?;
-                    if !removal.allowed(force) {
-                        return Err("Checkout has local changes or unreferenced commits; --force is required for an assessed removal.".into());
-                    }
-                    close(&mut session, &machine, &space_id).await?;
-                    let output = git.remove(&removal, force).await.map_err(error)?;
-                    if output.code != Some(0) {
-                        return Err(String::from_utf8_lossy(&output.stderr).into());
-                    }
-                }
-                _ => unreachable!(),
+            let id = id.clone();
+            let result = git
+                .open(session, &path, placement, new_id())
+                .await
+                .map_err(error)?;
+            return created(session, machine, &id, result).await;
+        }
+        Action::DeleteWorktree {
+            path: confirmed,
+            force,
+            ..
+        } => {
+            let path = git.toplevel(&cwd).await.map_err(error)?;
+            if path == *root || confirmed.as_deref() != Some(&path) {
+                return Err("The linked checkout changed; reopen its confirmation.".into());
+            }
+            let removal = git.assess_remove(root, &path).await.map_err(error)?;
+            if !removal.allowed(force) {
+                return Err("Checkout has local changes or unreferenced commits; --force is required for an assessed removal.".into());
+            }
+            close(session, machine, space_id).await?;
+            let output = git.remove(&removal, force).await.map_err(error)?;
+            if output.code != Some(0) {
+                return Err(String::from_utf8_lossy(&output.stderr).into());
             }
         }
+        _ => unreachable!(),
     }
     Ok(json!({"ok":true}))
 }

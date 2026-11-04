@@ -1,4 +1,15 @@
-use crate::{reading, storage};
+pub mod action;
+mod cli;
+pub mod hc;
+pub mod metadata;
+pub mod poll;
+pub mod reading;
+pub mod redraw;
+mod snapshot;
+pub mod state;
+pub mod terminal_stream;
+pub mod view;
+use crate::storage;
 use libertty_engine::utf16_len;
 use libertty_engine::{repair::shell_quote, validation::Environment};
 use regex::Regex;
@@ -85,7 +96,7 @@ pub struct Target {
     pub env: Environment,
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
     pub repairs: RepairSessions,
-    pub shared: crate::herdr_metadata::Shared,
+    pub shared: crate::herdr::metadata::Shared,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ResourceKey {
@@ -161,6 +172,10 @@ impl RepairSessions {
         Ok(result)
     }
 }
+/// Whether a foreground process name is an interactive shell that accepts command alternatives.
+pub(crate) fn is_shell(name: &str) -> bool {
+    matches!(name, "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh")
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShellInput {
     pub pid: u64,
@@ -179,65 +194,32 @@ impl Target {
     }
     pub(crate) async fn validate_terminal(&self, terminal: &Terminal) -> Result<(), String> {
         if self.core {
-            return self
-                .snapshot()
-                .await?
-                .terminal(&terminal.terminal_id)
-                .filter(|t| t.pane_id == terminal.pane_id)
-                .map(|_| ())
-                .ok_or("This terminal ended or moved.".into());
+            hc::validate_terminal(self, terminal).await
+        } else {
+            cli::validate_terminal(self, terminal).await
         }
-        let response = self
-            .request("pane.get", json!({"pane_id":terminal.pane_id}))
-            .await?;
-        if response["pane"]["terminal_id"] != terminal.terminal_id {
-            return Err("This agent ended or moved. Reopen its tab. No input was sent.".into());
-        }
-        Ok(())
+    }
+    /// Confirms that `terminal` still occupies its pane while reading the pane's input state, in one round trip.
+    pub(crate) async fn checked_input_state(
+        &self,
+        terminal: &Terminal,
+    ) -> Result<(Option<ShellInput>, String), String> {
+        let (valid, state) = tokio::join!(
+            self.validate_terminal(terminal),
+            self.input_state(&terminal.pane_id)
+        );
+        valid?;
+        state
     }
     pub async fn shell_input(&self, pane: &str) -> Result<Option<ShellInput>, String> {
         self.input_state(pane).await.map(|(shell, _)| shell)
     }
     pub async fn input_state(&self, pane: &str) -> Result<(Option<ShellInput>, String), String> {
         if self.core {
-            return crate::herdr_core::input_state(self, pane).await;
+            hc::input_state(self, pane).await
+        } else {
+            cli::input_state(self, pane).await
         }
-        let response = self
-            .request("pane.process_info", json!({"pane_id":pane}))
-            .await?;
-        let info = &response["process_info"];
-        let context = info["shell_pid"]
-            .as_u64()
-            .filter(|pid| *pid > 0)
-            .zip(
-                info["foreground_process_group_id"]
-                    .as_u64()
-                    .filter(|pid| *pid > 0),
-            )
-            .map(|(shell, group)| format!("{shell}:{group}"))
-            .unwrap_or_default();
-        let shell = (|| {
-            let pid = info["shell_pid"].as_u64().filter(|pid| *pid > 0)?;
-            if info["foreground_process_group_id"].as_u64() != Some(pid) {
-                return None;
-            }
-            let process = info["foreground_processes"]
-                .as_array()
-                .and_then(|items| items.iter().find(|item| item["pid"] == pid));
-            let process = process?;
-            if !matches!(
-                process["name"].as_str(),
-                Some("bash" | "zsh" | "fish" | "sh" | "dash" | "ksh")
-            ) {
-                return None;
-            }
-            let cwd = process["cwd"].as_str().filter(|cwd| cwd.starts_with('/'))?;
-            Some(ShellInput {
-                pid,
-                cwd: cwd.into(),
-            })
-        })();
-        Ok((shell, context))
     }
     pub async fn suggest(
         &self,
@@ -250,10 +232,10 @@ impl Target {
         let pane = snapshot
             .terminal(terminal)
             .ok_or("This terminal has ended.")?;
-        self.validate_terminal(pane).await?;
         let shell = self
-            .shell_input(&pane.pane_id)
+            .checked_input_state(pane)
             .await?
+            .0
             .ok_or("Command alternatives require a shell prompt.")?;
         let mut env = self.env.clone();
         if self.remote.is_none()
@@ -360,407 +342,41 @@ impl Target {
     }
     pub async fn snapshot(&self) -> Result<Arc<Snapshot>, String> {
         if self.core {
-            return crate::herdr_core::snapshot(self).await.map(Arc::new);
+            hc::snapshot(self).await
+        } else {
+            cli::snapshot(self).await
         }
-        self.shared.resource(self)?.snapshot(self).await
     }
     pub async fn options(&self) -> Result<Value, String> {
         if self.core {
-            return crate::herdr_core::options(self).await;
+            hc::options(self).await
+        } else {
+            cli::options(self).await
         }
-        static KIND: LazyLock<Regex> =
-            LazyLock::new(|| Regex::new(r"^[a-z][a-z0-9_-]{0,63}$").unwrap());
-        let response = self.request("server.agent_manifests", json!({})).await?;
-        let mut kinds = Vec::<String>::new();
-        for manifest in array(&response, "manifests") {
-            if let Some(kind) = manifest["agent"].as_str().filter(|s| KIND.is_match(s))
-                && !kinds.iter().any(|s| s == kind)
-            {
-                kinds.push(kind.into());
-            }
-        }
-        Ok(
-            json!({"kinds":kinds,"actions":["list-worktrees","new-worktree","open-worktree","delete-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
-        )
     }
-    pub async fn action<M: TryInto<crate::herdr_action::Action>>(
+    pub async fn action<M: TryInto<crate::herdr::action::Action>>(
         &self,
         input: M,
     ) -> Result<Value, String>
     where
         M::Error: std::fmt::Display,
     {
-        use crate::herdr_action::Action;
+        use crate::herdr::action::Action;
         let input: Action = input
             .try_into()
             .map_err(|error| format!("Invalid Herdr action: {error}"))?;
         if self.core {
-            return crate::herdr_core::action(self, input).await;
-        }
-        // Directory choices and checkout confirmations must reflect current metadata.
-        let resource = self.shared.resource(self)?;
-        let snapshot = if matches!(
-            &input,
-            Action::DeleteWorktree { .. }
-                | Action::ListWorktrees { .. }
-                | Action::NewWorktree { .. }
-                | Action::OpenWorktree { .. }
-                | Action::CreateSpace { .. }
-                | Action::Create { .. }
-        ) {
-            resource.refresh_snapshot(self).await?
+            hc::action(self, input).await
         } else {
-            resource.snapshot(self).await?
-        };
-        let spaces = &snapshot.spaces;
-        let terminals = &snapshot.terminals;
-        let space = input
-            .workspace()
-            .and_then(|id| spaces.iter().find(|space| space.id == id));
-        match input {
-            Action::DeleteWorktree { path, force, .. } => {
-                let space = space.ok_or("This space has closed.")?;
-                if space.linked_worktree != Some(true) {
-                    return Err("Only a linked worktree checkout can be deleted.".into());
-                }
-                let checkout = space
-                    .checkout_path
-                    .as_deref()
-                    .filter(|p| !p.is_empty())
-                    .ok_or(
-                        "Herdr did not provide the checkout folder. Update Herdr on this host.",
-                    )?;
-                if path.as_deref() != Some(checkout) {
-                    return Err(
-                        "The checkout folder changed. Reopen the confirmation before deleting."
-                            .into(),
-                    );
-                }
-                self.space_request(
-                    "worktree.remove",
-                    json!({"workspace_id":space.id,"force":force,"trust_repository":false}),
-                )
-                .await
-            }
-            action @ (Action::ListWorktrees { .. }
-            | Action::NewWorktree { .. }
-            | Action::OpenWorktree { .. }) => {
-                let space = space.ok_or("This space has closed.")?;
-                if space.linked_worktree == Some(true) {
-                    return Err(
-                        "New and open worktree actions start from the repo parent space.".into(),
-                    );
-                }
-                let mut params = json!({"workspace_id":space.id,"trust_repository":false});
-                let mut listing = self.space_request("worktree.list", params.clone()).await?;
-                if !listing["worktrees"].is_array() || !listing["source"]["repo_name"].is_string() {
-                    return Err("This Herdr server does not provide worktree discovery. Update Herdr on this host.".into());
-                }
-                let method = match action {
-                    Action::ListWorktrees { .. } => {
-                        if let Some(root) = listing["source"]["repo_root"].as_str() {
-                            listing["branches"] =
-                                json!(self.branch_names(root).await.unwrap_or_default());
-                        }
-                        if let Some(directory) = snapshot.worktree_directory.as_ref() {
-                            listing["directory"] = json!(directory);
-                        }
-                        return Ok(listing);
-                    }
-                    Action::NewWorktree { branch, .. } => {
-                        params["branch"] = json!(name(&branch)?);
-                        params["base"] = json!("HEAD");
-                        "worktree.create"
-                    }
-                    Action::OpenWorktree { path, .. } => {
-                        if !array(&listing, "worktrees").iter().any(|entry| {
-                            entry["path"] == path
-                                && entry["is_bare"] != true
-                                && entry["is_prunable"] != true
-                        }) {
-                            return Err(
-                                "This worktree is no longer available. Reopen the worktree picker."
-                                    .into(),
-                            );
-                        }
-                        params["path"] = json!(path);
-                        "worktree.open"
-                    }
-                    _ => unreachable!(),
-                };
-                params["focus"] = json!(false);
-                let created = self.space_request(method, params).await?;
-                if !created["workspace"]["workspace_id"].is_string() {
-                    return Err("Herdr changed the worktree but did not return its identity. Refresh spaces before retrying.".into());
-                }
-                Ok(
-                    json!({"workspaceId":created["workspace"]["workspace_id"],"terminalId":created["root_pane"]["terminal_id"]}),
-                )
-            }
-            Action::Split {
-                terminal_id,
-                direction,
-                ..
-            } => {
-                let space = space.ok_or("This space has closed.")?;
-                let terminal = terminals
-                    .iter()
-                    .find(|t| {
-                        t.terminal_id == terminal_id
-                            && t.workspace_id.as_deref() == Some(space.id.as_str())
-                    })
-                    .ok_or("Choose a running terminal in this space.")?;
-                self.validate_terminal(terminal).await?;
-                let created = self.space_request("pane.split", json!({"workspace_id":space.id,"target_pane_id":terminal.pane_id,"direction":direction,"focus":false})).await?;
-                Ok(json!({"workspaceId":space.id,"terminalId":created["pane"]["terminal_id"]}))
-            }
-            Action::CreateSpace {
-                workspace_id,
-                terminal_id,
-            } => {
-                if workspace_id.is_some() && space.is_none() {
-                    return Err("This space has closed.".into());
-                }
-                let terminal = terminals.iter().find(|t| {
-                    Some(t.terminal_id.as_str()) == terminal_id.as_deref()
-                        && t.workspace_id.as_deref() == space.map(|space| space.id.as_str())
-                });
-                let cwd = terminal
-                    .map(|t| t.cwd.as_str())
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| space.map(|s| s.cwd.as_str()).filter(|s| !s.is_empty()));
-                let mut params = json!({"focus":false});
-                if let Some(space) = space {
-                    params["source_workspace_id"] = json!(space.id);
-                }
-                if let Some(cwd) = cwd {
-                    params["cwd"] = json!(cwd);
-                }
-                let created = self.request("workspace.create", params).await?;
-                if !created["workspace"]["workspace_id"].is_string() {
-                    return Err("Herdr created a space but did not return its identity.".into());
-                }
-                let mut result = json!({"workspaceId":created["workspace"]["workspace_id"]});
-                if let Some(id) = created["root_pane"].get("terminal_id") {
-                    result["terminalId"] = id.clone();
-                }
-                Ok(result)
-            }
-            Action::MoveSpace {
-                workspace_id,
-                before_workspace_id,
-            } => {
-                if space.is_none() {
-                    return Err("This space has closed.".into());
-                }
-                if let Some(before) = &before_workspace_id
-                    && (before == &workspace_id || !spaces.iter().any(|s| s.id == *before))
-                {
-                    return Err("Choose another existing space.".into());
-                }
-                let mut params = json!({"workspace_ids":[workspace_id]});
-                if let Some(before) = before_workspace_id {
-                    params["before_workspace_id"] = json!(before);
-                }
-                self.request("workspace.move_block", params).await
-            }
-            Action::Create {
-                name: label,
-                kind,
-                cwd,
-                ..
-            } => {
-                let label = name(&label)?;
-                if !array(&self.options().await?, "kinds").contains(&json!(kind)) {
-                    return Err("Choose a supported agent type.".into());
-                }
-                let space = space.ok_or("Choose an existing space.")?;
-                if cwd.as_ref().is_some_and(|s| {
-                    !s.starts_with('/') || utf16_len(s) > 4096 || crate::protocol::controls(s)
-                }) {
-                    return Err("Enter an absolute working directory.".into());
-                }
-                let mut params = json!({"workspace_id":space.id,"label":label,"focus":false});
-                if let Some(cwd) = cwd {
-                    params["cwd"] = json!(cwd);
-                }
-                let created = self.request("tab.create", params).await?;
-                let pane = &created["root_pane"];
-                if !pane["pane_id"].is_string() || !pane["terminal_id"].is_string() {
-                    return Err(
-                        "Herdr created a tab but did not return its terminal. Open it from spaces."
-                            .into(),
-                    );
-                }
-                let work = async {
-                    self.request("pane.rename", json!({"pane_id":pane["pane_id"],"label":label})).await?;
-                    self.request("agent.start", json!({"pane_id":pane["pane_id"],"name":format!("agent-{}",storage::random_hex(10)),"kind":kind,"args":[]})).await?;
-                    Ok::<_, String>(())
-                }.await;
-                let mut result = json!({"terminalId":pane["terminal_id"]});
-                if let Err(error) = work {
-                    result["error"] = json!(error);
-                }
-                Ok(result)
-            }
-            Action::RenameSpace { name: label, .. } => {
-                let space = space.ok_or("This space has closed.")?;
-                self.request(
-                    "workspace.rename",
-                    json!({"workspace_id":space.id,"label":name(&label)?}),
-                )
-                .await
-            }
-            Action::CloseSpace { .. } => {
-                let space = space.ok_or("This space has closed.")?;
-                self.request(
-                    "workspace.close",
-                    json!({"workspace_id":space.id,"close_group":false}),
-                )
-                .await
-            }
-            action @ (Action::Rename { .. } | Action::Close { .. }) => {
-                let id = match &action {
-                    Action::Rename { terminal_id, .. } | Action::Close { terminal_id } => {
-                        terminal_id
-                    }
-                    _ => unreachable!(),
-                };
-                let agent = terminals
-                    .iter()
-                    .find(|t| t.terminal_id == *id)
-                    .ok_or("This agent has ended.")?;
-                self.validate_terminal(agent).await?;
-                match action {
-                    Action::Rename { name: label, .. } => {
-                        self.request(
-                            "pane.rename",
-                            json!({"pane_id":agent.pane_id,"label":name(&label)?}),
-                        )
-                        .await
-                    }
-                    _ => {
-                        self.request("pane.close", json!({"pane_id":agent.pane_id}))
-                            .await
-                    }
-                }
-            }
+            cli::action(self, input).await
         }
-    }
-    async fn branch_names(&self, root: &str) -> Result<Vec<String>, String> {
-        let args: Vec<String> = vec![
-            "-C".into(),
-            root.into(),
-            "for-each-ref".into(),
-            "--sort=refname".into(),
-            "--format=%(refname:strip=2)".into(),
-            "refs/heads/".into(),
-        ];
-        let cancel = CancellationToken::new();
-        let output = if let Some(remote) = &self.remote {
-            let command = format!(
-                "git {}",
-                args.iter()
-                    .map(|arg| shell_quote(arg))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-            let result = remote.exec(&command, &cancel).await?;
-            if result.code != 0 {
-                return Err(result.stderr);
-            }
-            result.stdout
-        } else {
-            let options = crate::probes::ProbeOptions {
-                cwd: root.into(),
-                env: self.env.clone(),
-                timeout: Duration::from_secs(5),
-                max_buffer: 1024 * 1024,
-            };
-            let result = crate::probes::probe(
-                &crate::probes::ProbePool::default(),
-                "git",
-                &args,
-                &options,
-                &cancel,
-            )
-            .await?;
-            if !result.success {
-                return Err(String::from_utf8_lossy(&result.stderr).into());
-            }
-            String::from_utf8(result.stdout).map_err(|error| error.to_string())?
-        };
-        Ok(output
-            .lines()
-            .filter(|branch| name(branch).is_ok())
-            .map(str::to_owned)
-            .collect())
-    }
-    async fn space_request(&self, method: &str, params: Value) -> Result<Value, String> {
-        self.request(method, params).await.map_err(|error| {
-            if ["unknown method", "unknown action", "method not found", "unsupported"].iter().any(|reason| error.to_lowercase().contains(reason)) {
-                format!("This Herdr server does not support {method}. Update Herdr on this host. ({error})")
-            } else { error }
-        })
     }
     pub async fn ensure(&self, cwd: &str) -> Result<(), String> {
         if self.core {
-            return crate::herdr_core::connect(self).await.map(|_| ());
-        }
-        if self.request("session.snapshot", json!({})).await.is_ok() {
-            return Ok(());
-        }
-        if let Some(remote) = &self.remote {
-            let args = if self.session.is_empty() {
-                vec![self.binary.as_str(), "server"]
-            } else {
-                vec![self.binary.as_str(), "--session", &self.session, "server"]
-            };
-            let command = format!(
-                "cd {} && nohup env {} {} </dev/null >/dev/null 2>&1 &",
-                shell_quote(cwd),
-                self.assignments(false)?,
-                args.into_iter()
-                    .map(shell_quote)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            );
-            remote.exec(&command, &CancellationToken::new()).await?;
+            hc::snapshot(self).await.map(|_| ())
         } else {
-            let mut command = tokio::process::Command::new(&self.binary);
-            if !self.session.is_empty() {
-                command.args(["--session", &self.session]);
-            }
-            command
-                .arg("server")
-                .current_dir(cwd)
-                .env_clear()
-                .envs(&self.env)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            // A Herdr server outlives the shell that requested it.
-            #[cfg(unix)]
-            unsafe {
-                command.pre_exec(|| {
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-            let mut child = command.spawn().map_err(|e| e.to_string())?;
-            tokio::spawn(async move {
-                let _ = child.wait().await;
-            });
+            cli::ensure(self, cwd).await
         }
-        for _ in 0..20 {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            if self.request("session.snapshot", json!({})).await.is_ok() {
-                return Ok(());
-            }
-        }
-        Err("Herdr did not start. Run herdr server on this machine and try again.".into())
     }
     pub fn assignments(&self, terminal: bool) -> Result<String, String> {
         let mut env = self.env.clone();
@@ -817,17 +433,12 @@ impl Target {
     }
     pub async fn preview(&self, agent: &Terminal) -> String {
         if self.core {
-            return crate::herdr_core::preview(self, &agent.terminal_id)
+            hc::preview(self, &agent.terminal_id)
                 .await
-                .unwrap_or_default();
+                .unwrap_or_default()
+        } else {
+            cli::preview(self, agent).await
         }
-        let work = async {
-            let current = self.request("pane.get", json!({"pane_id":agent.pane_id})).await?;
-            if current["pane"]["terminal_id"] != agent.terminal_id { return Ok::<_, String>(String::new()); }
-            let response = self.request("pane.read", json!({"pane_id":agent.pane_id,"source":"recent_unwrapped","format":"ansi","lines":40,"strip_ansi":false})).await?;
-            Ok(response["read"]["text"].as_str().map(response_preview).unwrap_or_default())
-        }.await;
-        work.unwrap_or_default()
     }
 }
 
@@ -868,9 +479,6 @@ impl Lines {
         }
     }
 }
-fn array<'a>(object: &'a Value, field: &str) -> &'a [Value] {
-    object[field].as_array().map(Vec::as_slice).unwrap_or(&[])
-}
 pub(crate) fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
@@ -880,7 +488,7 @@ pub(crate) fn truthy(value: &Value) -> bool {
         _ => true,
     }
 }
-pub use crate::herdr_snapshot::{Snapshot, Space, Status, Terminal, normalize};
+pub use crate::herdr::snapshot::{Snapshot, Space, Status, Terminal, normalize};
 
 pub fn response_preview(screen: &str) -> String {
     static COMPOSER: LazyLock<Regex> =
@@ -895,7 +503,7 @@ pub fn response_preview(screen: &str) -> String {
     static PARAGRAPH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n\s*\n").unwrap());
     static SPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
     static BULLET: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[•●✦]\s*").unwrap());
-    let plain = reading::strip_vt(screen).replace('\r', "");
+    let plain = crate::reading::strip_vt(screen).replace('\r', "");
     let lines: Vec<_> = plain.split('\n').collect();
     let end = lines
         .iter()
@@ -949,42 +557,10 @@ pub async fn metadata(
     cancel: CancellationToken,
 ) {
     if target.core {
-        crate::herdr_core::metadata(&target, send, cancel).await;
-        return;
+        hc::metadata(&target, send, cancel).await
+    } else {
+        cli::metadata(target, send, cancel).await
     }
-    let resource = match target.shared.resource(&target) {
-        Ok(resource) => resource,
-        Err(message) => {
-            let _ = send.send(Metadata::Error { message }).await;
-            return;
-        }
-    };
-    let mut subscription = resource.subscribe(target);
-    loop {
-        let update = subscription.receive.borrow_and_update().clone();
-        if let Some(update) = update {
-            tokio::select! {
-                biased;
-                _ = cancel.cancelled() => break,
-                result = send.send(update) => if result.is_err() { break; }
-            }
-        }
-        tokio::select! {
-            biased;
-            _ = cancel.cancelled() => break,
-            result = subscription.receive.changed() => if result.is_err() { break; }
-        }
-    }
-}
-
-pub(crate) fn pane_key(snapshot: &Snapshot) -> Vec<String> {
-    let mut result: Vec<_> = snapshot
-        .agents
-        .iter()
-        .map(|agent| agent.pane_id.clone())
-        .collect();
-    result.sort();
-    result
 }
 
 #[cfg(test)]

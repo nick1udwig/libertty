@@ -1,18 +1,15 @@
 import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import assert from 'node:assert/strict';
 import { showTerminalTabs } from './support/workspace-navigation.mjs';
-import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
-import pty from 'node-pty';
+import { mkdtemp, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
+import { herdrFixture } from './support/herdr-native.mjs';
 import { shellQuote } from '../src/shell-words.ts';
 import { installWireObserver } from './wire-observer.mjs';
 
 const root = new URL('../', import.meta.url).pathname, dir = await mkdtemp('/tmp/libertty-herdr-flash-');
-const target = { session:'', socketPath:dir+'/herdr.sock' };
-const env = { ...process.env, HOME:dir, XDG_CONFIG_HOME:dir+'/config', XDG_DATA_HOME:dir+'/data', XDG_STATE_HOME:dir+'/state', HERDR_SOCKET_PATH:target.socketPath, HERDR_SESSION:'', HERDR_ENV:'', SHELL:'/bin/bash', TERM:'xterm-256color' };
-let herdr, desktop, backend, browser;
+const fixture = herdrFixture(dir), { target } = fixture;
+let browser;
 const errors=[];
 try {
   const port = await freePort();
@@ -24,9 +21,7 @@ try {
     const draw=()=>{ const cols=process.stdout.columns,rows=process.stdout.rows; writeFileSync('geometry-'+name+'.json',JSON.stringify({cols,rows})); process.stdout.write('\\x1b[2J\\x1b[H\\x1b[48;2;'+(cols<100?'0;180;0':'250;0;0')+'mFLASH_'+name+':'+(cols<100?'MOBILE':'DESKTOP')+'\\x1b[0m\\r\\n╭'+'─'.repeat(cols-2)+'╮\\r\\n│ '+cols+' columns × '+rows+' rows\\x1b[?25l'); };
     process.stdin.setRawMode(true);process.stdin.resume();draw();process.on('SIGWINCH',()=>setTimeout(draw,${Number(process.env.TEST_REDRAW_DELAY||0)}));setInterval(()=>{},10000);
   `);
-  herdr=spawn(process.env.HERDR_BINARY||'/usr/bin/herdr',['server'],{cwd:dir,env,stdio:'ignore'});
-  await wait(async()=>{try{await herdrSnapshot(target);return true;}catch{return false;}},'Herdr server');
-  desktop=pty.spawn(process.env.HERDR_BINARY||'/usr/bin/herdr',[],{cwd:dir,env,cols:150,rows:45,name:'xterm-256color'});desktop.onData(()=>{});
+  await fixture.startHerdr();
   const spaces=[];
   for(const name of ['ALPHA','BETA','GAMMA','DELTA','EPSILON','ZETA'].slice(0,Number(process.env.TEST_SPACES||2))) {
     const workspace=(await herdrRequest(target,'workspace.create',{cwd:dir,label:name,focus:false})).workspace.workspace_id;
@@ -35,10 +30,8 @@ try {
     await wait(async()=> (await herdrRequest(target,'pane.read',{pane_id:terminal.paneId,source:'recent_unwrapped',lines:1000,format:'ansi',strip_ansi:false})).read.text.includes('FLASH_'+name+':DESKTOP'),'desktop TUI '+name);
     spaces.push({name,workspace,terminal});
   }
-  backend=spawn(root+'target/debug/libertty',[],{cwd:root,env:{...env,NODE_ENV:'production',HOST:'127.0.0.1',PORT:String(port),LIBERTTY_ALLOWED_HOSTS:'127.0.0.1',LIBERTTY_ALLOWED_ORIGINS:base,LIBERTTY_DATA_DIR:dir+'/libertty',LIBERTTY_TOKEN:'',LIBERTTY_NO_RC:'1',LIBERTTY_CWD:dir},stdio:'ignore'});
-  await wait(async()=>{try{return(await fetch(base)).ok;}catch{return false;}},'backend');
+  const token = await fixture.startBackend(port);
   if(process.env.TEST_REDRAW_TRACE) console.log('Native revision probe:', await herdrRequest(target,'pane.copy_motion',{pane_id:spaces[0].terminal.paneId,motion:'line_end',cursor:{row:0,col:0}}).catch(error=>error.message));
-  const token=(await readFile(dir+'/libertty/pairing-token','utf8')).trim();
   browser=await launchBrowser({args:['--use-gl=angle','--use-angle=gl']});
   const context=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
   await installWireObserver(context);
@@ -163,8 +156,5 @@ try {
   for(const page of browser?.contexts()[0]?.pages()||[]) { console.error('Paints:',await page.evaluate(()=>({paints:window.__flashPaints,selected:document.querySelector('.herdr-agent-tab[aria-selected=true]')?.dataset.terminal,frames:[...document.querySelectorAll('.herdr-screen iframe')].map(frame=>({terminal:frame.dataset.terminal,class:frame.className,visibility:frame.style.visibility}))}))); for(const frame of page.frames()) console.error('Frame:',frame.url(),await frame.evaluate(()=>{const t=window.__terminal,b=t?.buffer.active;return{pending:document.querySelector('#terminal-viewport')?.className,parentClass:frameElement?.className,parentVisibility:frameElement&&getComputedStyle(frameElement).visibility,visible:frameElement?.checkVisibility({checkVisibilityCSS:true}),cols:t?.cols,rows:t?.rows,top:b?.viewportY,lines:b&&Array.from({length:8},(_,i)=>b.getLine(b.viewportY+i)?.translateToString(true)),frames:window.__frames,signals:window.__layoutSignals,body:document.querySelector('#notice-bubble')?.textContent};}).catch(()=>({}))); }
   throw error;
 }finally {
-  await browser?.close();if(backend){const exited=once(backend,'exit');backend.kill();await exited;}
-  const stopped=herdr&&herdr.exitCode===null&&herdr.signalCode===null?once(herdr,'exit'):null;
-  desktop?.kill();await herdrRequest(target,'server.stop').catch(()=>{});herdr?.kill();await stopped;
-  await rm(dir,{recursive:true,force:true,maxRetries:5,retryDelay:100});
+  await browser?.close();await fixture.stop();
 }

@@ -1,6 +1,6 @@
 use libertty_server::{
     herdr::Target,
-    herdr_terminal_stream::{Hub, Size},
+    herdr::terminal_stream::{Hub, Size},
 };
 use serde_json::{Value, json};
 use std::{os::unix::fs::PermissionsExt, time::Duration};

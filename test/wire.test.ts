@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
-import { decodeWire, encodeWire, encodeAudio, wireProtocols, BINARY_PROTOCOL, GZIP_PROTOCOL, GZIP_FAST_PROTOCOL, constrainedLink } from '../src/wire.ts';
+import { decodeWire, encodeWire, encodeAudio, wireProtocols, BINARY_PROTOCOL, constrainedLink } from '../src/wire.ts';
 const envelope = (kind: number, bytes: Uint8Array) => { const value = new Uint8Array(bytes.length + 4); value.set([84, 77, 1, kind]); value.set(bytes, 4); return value.buffer; };
 test('wire decoder preserves Unicode output through binary, gzip and JSON', async () => {
   const payload = new Uint8Array(8 + new TextEncoder().encode('こんにちは\x1b[0m\r\n').length);

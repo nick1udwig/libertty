@@ -1,5 +1,5 @@
 use crate::herdr_support as support;
-use libertty_server::herdr_poll::HistoryHub as Hub;
+use libertty_server::herdr::poll::HistoryHub as Hub;
 use std::time::Duration;
 
 #[tokio::test]
@@ -183,7 +183,7 @@ async fn viewers_of_one_pane_share_one_shell_check() {
     fixture
         .reading_shell
         .store(true, std::sync::atomic::Ordering::Relaxed);
-    let hub = libertty_server::herdr_poll::InputHub::default();
+    let hub = libertty_server::herdr::poll::InputHub::default();
     let mut first = hub
         .subscribe(fixture.target.clone(), "w1:p0".into())
         .unwrap();

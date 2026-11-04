@@ -1,4 +1,4 @@
-use crate::protocol::controls as control;
+use crate::protocol::{absolute_path, clean, controls as control};
 use base64::{
     Engine,
     engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig, general_purpose::STANDARD},
@@ -152,7 +152,7 @@ fn parse(record: &[&str]) -> Option<Event> {
         }
     } else if kind == "reading-file" && record.len() == 2 {
         let path = decode(record[1]);
-        if path.starts_with('/') && utf16_len(&path) <= 4096 && !control(&path) {
+        if absolute_path(&path) {
             return Some(Event::ReadingFile { path });
         }
     } else if kind == "reading-capture" && record.len() == 4 && capture_name(record[1], "read.") {
@@ -174,7 +174,7 @@ fn parse(record: &[&str]) -> Option<Event> {
         }
     } else if ["ssh", "herdr"].contains(&kind) && record.len() == 2 {
         let command = decode(record[1]);
-        if utf16_len(&command) <= crate::protocol::MAX_LINE && !control(&command) {
+        if clean(&command, crate::protocol::MAX_LINE) {
             return Some(if kind == "herdr" {
                 Event::Herdr { command }
             } else {
@@ -184,10 +184,7 @@ fn parse(record: &[&str]) -> Option<Event> {
     } else if kind == "input-line" && record.len() == 3 {
         let text = decode(record[2]);
         let prefix = decode(record[1]);
-        if utf16_len(&text) <= crate::protocol::MAX_TEXT
-            && text.starts_with(&prefix)
-            && !control(&text)
-        {
+        if clean(&text, crate::protocol::MAX_TEXT) && text.starts_with(&prefix) {
             return Some(Event::InputLine {
                 text,
                 cursor: utf16_len(&prefix),

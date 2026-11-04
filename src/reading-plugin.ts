@@ -12,16 +12,35 @@ export interface ReadingServices {
 }
 
 export function readingPlugin(s: ReadingServices): TabPlugin {
-  return { id: 'reading', version: BUILTIN_VERSION, name: 'Reading Mode', connectLabel: 'Look at', icon: '',
-    iconHTML: icon('<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/>', 17),
-    panelPrefix: 'reading-', available: () => false,
-    async connect() { throw new Error('Use a reading phrase in a terminal to open a file or command output.'); },
-    async mount(tab) { return mountReading(tab, s); },
+  return {
+    id: 'reading',
+    version: BUILTIN_VERSION,
+    name: 'Reading Mode',
+    connectLabel: 'Look at',
+    icon: '',
+    iconHTML: icon(
+      '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/>',
+      17,
+    ),
+    panelPrefix: 'reading-',
+    available: () => false,
+    async connect() {
+      throw new Error('Use a reading phrase in a terminal to open a file or command output.');
+    },
+    async mount(tab) {
+      return mountReading(tab, s);
+    },
     async close(tab) {
       if (tab.readCapture) {
-        const backend = s.backend(tab), url = readingURL(tab, backend, true);
-        url.searchParams.set('id', tab.readCapture); url.searchParams.set('session', tab.session);
-        void request(url, { method: 'DELETE', token: () => s.token(backend), recoverAuth: () => s.authenticate(backend, true) }).catch(() => {});
+        const backend = s.backend(tab),
+          url = readingURL(tab, backend, true);
+        url.searchParams.set('id', tab.readCapture);
+        url.searchParams.set('session', tab.session);
+        void request(url, {
+          method: 'DELETE',
+          token: () => s.token(backend),
+          recoverAuth: () => s.authenticate(backend, true),
+        }).catch(() => {});
       }
       return true;
     },
@@ -29,7 +48,11 @@ export function readingPlugin(s: ReadingServices): TabPlugin {
 }
 
 function readingURL(tab: TerminalTab, backend: BackendProfile, capture = false) {
-  const url = new URL((tab.readHerdrTerminal ? 'api/herdr/reading/' : 'api/reading/') + (capture ? 'capture' : 'file'), backend.url);
+  const url = new URL(
+    (tab.readHerdrTerminal ? 'api/herdr/reading/' : 'api/reading/') +
+      (capture ? 'capture' : 'file'),
+    backend.url,
+  );
   if (tab.readHerdrTerminal) {
     if (tab.herdrCore) url.searchParams.set('herdrCore', '1');
     url.searchParams.set('herdrSession', tab.herdrSession || '');
@@ -41,22 +64,45 @@ function readingURL(tab: TerminalTab, backend: BackendProfile, capture = false) 
 function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
   const path = tab.readPath;
   if (path === undefined) throw new Error('This reading tab has no file or command output.');
-  const backend = s.backend(tab), controller = new AbortController();
-  const element = document.createElement('div'); element.id = 'reading-' + tab.id;
-  let disposed = false, visible = false, current: ReadingView;
+  const backend = s.backend(tab),
+    controller = new AbortController();
+  const element = document.createElement('div');
+  element.id = 'reading-' + tab.id;
+  let disposed = false,
+    visible = false,
+    current: ReadingView;
   const message = (file: string, detail: string, hint?: string): ReadingView => {
     const element = readingMessage(file, detail, hint);
-    return { element, dispose() { element.remove(); } };
+    return {
+      element,
+      dispose() {
+        element.remove();
+      },
+    };
   };
   const display = (view: ReadingView) => {
-    if (disposed) { view.dispose(); return; }
-    current?.dispose(); current = view; view.element.hidden = !visible; element.replaceChildren(view.element);
+    if (disposed) {
+      view.dispose();
+      return;
+    }
+    current?.dispose();
+    current = view;
+    view.element.hidden = !visible;
+    element.replaceChildren(view.element);
   };
   const readFile = async (path: string, capture?: string) => {
     const url = readingURL(tab, backend, !!capture);
-    url.searchParams.set(capture ? 'id' : 'path', capture || path); url.searchParams.set('session', tab.session);
-    const response = await request(url, { signal: controller.signal, token: () => s.token(backend), recoverAuth: () => s.authenticate(backend, true) });
-    if (!response.ok) { const result = await response.json(); throw new Error(result.error || 'Could not open file.'); }
+    url.searchParams.set(capture ? 'id' : 'path', capture || path);
+    url.searchParams.set('session', tab.session);
+    const response = await request(url, {
+      signal: controller.signal,
+      token: () => s.token(backend),
+      recoverAuth: () => s.authenticate(backend, true),
+    });
+    if (!response.ok) {
+      const result = await response.json();
+      throw new Error(result.error || 'Could not open file.');
+    }
     return response.blob();
   };
   display(message(path, 'Opening file…'));
@@ -66,13 +112,42 @@ function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
       if (disposed) return;
       if (tab.readCapture && !blob.size) {
         const failed = typeof tab.readExitCode === 'number' && tab.readExitCode !== 0;
-        const detail = failed ? `Exited with status ${tab.readExitCode} without writing to standard output. Check the terminal for errors.`
-          : typeof tab.readExitCode === 'number' ? 'Finished successfully without writing to standard output.' : 'No standard output was captured.';
-        const hint = !failed && tab.name.trim() === 'git diff' ? 'git diff is silent when there are no unstaged changes. Try git status or git diff --cached.' : undefined;
+        const detail = failed
+          ? `Exited with status ${tab.readExitCode} without writing to standard output. Check the terminal for errors.`
+          : typeof tab.readExitCode === 'number'
+            ? 'Finished successfully without writing to standard output.'
+            : 'No standard output was captured.';
+        const hint =
+          !failed && tab.name.trim() === 'git diff'
+            ? 'git diff is silent when there are no unstaged changes. Try git status or git diff --cached.'
+            : undefined;
         display(message(tab.name, detail, hint));
-      } else display(readingView(tab.readCapture ? 'Command output' : path, blob, tab.readCapture ? undefined : { load: readFile, open: path => s.openReading(tab, path) }));
-    } catch (error: any) { if (!disposed) display(message(path, error.message || 'Could not open file.')); }
+      } else
+        display(
+          readingView(
+            tab.readCapture ? 'Command output' : path,
+            blob,
+            tab.readCapture
+              ? undefined
+              : { load: readFile, open: (path) => s.openReading(tab, path) },
+          ),
+        );
+    } catch (error: any) {
+      if (!disposed) display(message(path, error.message || 'Could not open file.'));
+    }
   })();
-  return { element, setVisible(value) { visible = value; element.hidden = !value; current.element.hidden = !value; },
-    dispose() { disposed = true; controller.abort(); current.dispose(); element.remove(); } };
+  return {
+    element,
+    setVisible(value) {
+      visible = value;
+      element.hidden = !value;
+      current.element.hidden = !value;
+    },
+    dispose() {
+      disposed = true;
+      controller.abort();
+      current.dispose();
+      element.remove();
+    },
+  };
 }

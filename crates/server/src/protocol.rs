@@ -228,7 +228,7 @@ pub enum ViewerMessage {
     },
     NotificationAck {
         device: String,
-        event: crate::herdr_state::Event,
+        event: crate::herdr::state::Event,
     },
 }
 pub mod requests;
@@ -244,6 +244,18 @@ pub fn unsigned(value: &Value) -> Option<u64> {
 }
 pub fn controls(text: &str) -> bool {
     text.chars().any(|c| c <= '\u{1f}' || c == '\u{7f}')
+}
+/// Text of at most `max` UTF-16 units without control characters.
+pub fn clean(text: &str, max: usize) -> bool {
+    utf16_len(text) <= max && !controls(text)
+}
+/// An absolute path that a shell can receive as one argument.
+pub fn absolute_path(path: &str) -> bool {
+    path.starts_with('/') && clean(path, 4096)
+}
+/// A terminal dimension that Herdr accepts.
+pub fn terminal_dimension(value: u16) -> bool {
+    (1..=1000).contains(&value)
 }
 fn bounded<'de, D: Deserializer<'de>, const N: usize, const CLEAN: bool>(
     d: D,

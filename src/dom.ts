@@ -1,4 +1,5 @@
-export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+export const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
+  document.getElementById(id) as T;
 export const input = (id: string) => $<HTMLInputElement>(id);
 export const select = (id: string) => $<HTMLSelectElement>(id);
 export const dialog = (id: string) => $<HTMLDialogElement>(id);

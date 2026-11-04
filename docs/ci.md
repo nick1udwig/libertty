@@ -96,7 +96,7 @@ Every repetition must pass, and a later pass does not clear an earlier failure.
 Reliability checks always disable retries.
 Set `BROWSER_REPEAT` to change the repeat count or `BROWSER_HARNESSES` to select comma-separated harness names when running `verify:browser` directly.
 Each harness has an eight-minute limit, configurable through `BROWSER_TIMEOUT_MS`, after which the runner terminates its process group and preserves its output.
-Use `npm run format:workspace` to format the workspace entry point and modules with the configured 100-column width, or `npm run check:workspace-format` to check them without editing.
+Use `npm run format` to format the frontend in `src/` with the configured 100-column width, or `npm run check:format` to check it without editing.
 `npm run verify:package -- release/libertty-vVERSION-PLATFORM.tar.gz` retains packaged browser coverage locally by running both smoke checks and the browser suite against the extracted archive.
 The deleted tests covered only the removed CI suite selector and build manifests, while useful package checksum, permission, metadata and companion checks remain in `test/package-release.test.mjs`.
 

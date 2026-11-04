@@ -4,8 +4,8 @@ mod input;
 use crate::protocol::{DictationSource, DictationTarget, MAX_TEXT, ServerMessage};
 use crate::{
     herdr::Target,
-    herdr_terminal_stream::{Hub, Size, Subscription},
-    protocol::{ClientMessage, controls},
+    herdr::terminal_stream::{Hub, Size, Subscription},
+    protocol::{ClientMessage, clean, terminal_dimension},
     session::Transport,
 };
 pub use input::{Ledger, Ledgers};
@@ -83,7 +83,7 @@ pub struct View {
     pending_input: mpsc::Sender<Input>,
     send: crate::viewer_queue::Sender,
     terminal: Subscription,
-    polls: crate::herdr_poll::Polls,
+    polls: crate::herdr::poll::Polls,
     active: tokio::sync::watch::Sender<bool>,
     geometry: Mutex<Geometry>,
     /// Advances with every layout change, so stale confirmations stop.
@@ -104,7 +104,7 @@ impl View {
         target: Target,
         agent: crate::herdr::Terminal,
         hub: &Hub,
-        polls: &crate::herdr_poll::Polls,
+        polls: &crate::herdr::poll::Polls,
         initial: Option<(Size, Option<u64>)>,
         viewer: Viewer,
     ) -> Result<Arc<Self>, String> {
@@ -460,7 +460,7 @@ impl View {
                 }
                 tokio::select! { biased; _=view.cancel.cancelled()=>return, _=layout.changed()=>return, _=&mut ready=>{} }
             }
-            let redrawn = tokio::select! { biased; _=layout.changed()=>false, result=crate::herdr_redraw::wait(&view.target, &view.agent.pane_id, before, &view.cancel)=>result };
+            let redrawn = tokio::select! { biased; _=layout.changed()=>false, result=crate::herdr::redraw::wait(&view.target, &view.agent.pane_id, before, &view.cancel)=>result };
             // Read the epoch before locking the geometry, so no path holds both.
             let current = *view.layout.borrow() == epoch;
             let confirmed = redrawn && current && {
@@ -786,7 +786,7 @@ impl View {
             let revision = match pending {
                 Some(_) => pending,
                 None => {
-                    crate::herdr_redraw::revision(&view.target, &view.agent.pane_id, &view.cancel)
+                    crate::herdr::redraw::revision(&view.target, &view.agent.pane_id, &view.cancel)
                         .await
                 }
             };
@@ -872,7 +872,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Resize { cols, rows, mobile } => {
-                if !(1..=1000).contains(&cols) || !(1..=1000).contains(&rows) {
+                if !terminal_dimension(cols) || !terminal_dimension(rows) {
                     return Err("Invalid terminal size".into());
                 }
                 let size = (mobile == Some(true)).then_some(Size { cols, rows });
@@ -910,10 +910,8 @@ impl View {
                 cols,
                 rows,
             } => {
-                if cols == 0
-                    || rows == 0
-                    || cols > 1000
-                    || rows > 1000
+                if !terminal_dimension(cols)
+                    || !terminal_dimension(rows)
                     || column >= cols
                     || row >= rows
                 {
@@ -962,7 +960,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Paste { text } => {
-                if text.is_empty() || utf16_len(&text) > MAX_TEXT || controls(&text) {
+                if text.is_empty() || !clean(&text, MAX_TEXT) {
                     return Err("Invalid paste".into());
                 }
                 self.inner.lock().unwrap().revision += 1;
@@ -975,10 +973,7 @@ impl View {
                 prompt,
                 revision,
             } => {
-                if text.is_empty()
-                    || utf16_len(&text) > libertty_engine::MAX_COMMAND
-                    || controls(&text)
-                {
+                if text.is_empty() || !clean(&text, libertty_engine::MAX_COMMAND) {
                     return Err("Invalid replacement".into());
                 }
                 let replacement = {
@@ -1011,8 +1006,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Command { command, id, .. } => {
-                if command.trim().is_empty() || utf16_len(&command) > MAX_TEXT || controls(&command)
-                {
+                if command.trim().is_empty() || !clean(&command, MAX_TEXT) {
                     return Err("Invalid command".into());
                 }
                 let replacement = {

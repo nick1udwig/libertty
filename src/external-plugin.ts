@@ -4,7 +4,9 @@ import type { PluginView, TabPlugin } from './plugins.ts';
 import { pluginRequest, type PluginPackage } from './plugin-package.ts';
 
 // The opaque frame receives only a private port, a display name and its own state.
-const sdk = `const mergeFileSnapshot = ${mergeFileSnapshot.toString()};` + String.raw`
+const sdk =
+  `const mergeFileSnapshot = ${mergeFileSnapshot.toString()};` +
+  String.raw`
 (() => {
   let port, next = 0, context, visible = false;
   const pending = new Map(), listeners = new Set(); let file;
@@ -43,36 +45,107 @@ export interface ExternalServices {
 }
 export function externalPlugin(pkg: PluginPackage, s: ExternalServices): TabPlugin {
   const m = pkg.manifest;
-  return { id: m.id, version: m.version, name: m.name, connectLabel: m.connectLabel, icon: m.icon || '◇', panelPrefix: 'plugin-', available: host => host.kind !== 'herdr',
-    connect: host => s.connect(host, pkg), close: async tab => { await s.close(tab); return true; }, mount: async tab => externalView(pkg, tab, s) };
+  return {
+    id: m.id,
+    version: m.version,
+    name: m.name,
+    connectLabel: m.connectLabel,
+    icon: m.icon || '◇',
+    panelPrefix: 'plugin-',
+    available: (host) => host.kind !== 'herdr',
+    connect: (host) => s.connect(host, pkg),
+    close: async (tab) => {
+      await s.close(tab);
+      return true;
+    },
+    mount: async (tab) => externalView(pkg, tab, s),
+  };
 }
 function externalView(pkg: PluginPackage, tab: TerminalTab, s: ExternalServices): PluginView {
-  const frame = document.createElement('iframe'); frame.id = 'plugin-' + tab.id; frame.title = pkg.manifest.name + ' · ' + tab.name;
-  frame.setAttribute('sandbox', 'allow-scripts'); frame.referrerPolicy = 'no-referrer';
-  const policy = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'";
-  frame.srcdoc = '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="' + policy + '"><script>' + sdk + '</script>' + pkg.view;
-  const channel = new MessageChannel(); let disposed = false, initialized = false, visible = false, active = 0;
-  let file: FileSnapshot | undefined; let reads: Promise<unknown> = Promise.resolve();
+  const frame = document.createElement('iframe');
+  frame.id = 'plugin-' + tab.id;
+  frame.title = pkg.manifest.name + ' · ' + tab.name;
+  frame.setAttribute('sandbox', 'allow-scripts');
+  frame.referrerPolicy = 'no-referrer';
+  const policy =
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-src 'none'";
+  frame.srcdoc =
+    '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="' +
+    policy +
+    '"><script>' +
+    sdk +
+    '</script>' +
+    pkg.view;
+  const channel = new MessageChannel();
+  let disposed = false,
+    initialized = false,
+    visible = false,
+    active = 0;
+  let file: FileSnapshot | undefined;
+  let reads: Promise<unknown> = Promise.resolve();
   channel.port1.onmessage = async ({ data }) => {
     if (disposed || !initialized || !data || !Number.isSafeInteger(data.id) || data.id < 1) return;
-    if (active >= 4) { channel.port1.postMessage({ id: data.id, error: 'Too many pending plugin requests.' }); return; }
+    if (active >= 4) {
+      channel.port1.postMessage({ id: data.id, error: 'Too many pending plugin requests.' });
+      return;
+    }
     active++;
     try {
       const read = () => {
-        const work = reads.then(async () => { const value = await s.read(tab); const packed = packFileSnapshot(file, value); file = value; return packed as FileSnapshot; });
-        reads = work.catch(() => {}); return work;
+        const work = reads.then(async () => {
+          const value = await s.read(tab);
+          const packed = packFileSnapshot(file, value);
+          file = value;
+          return packed as FileSnapshot;
+        });
+        reads = work.catch(() => {});
+        return work;
       };
-      const result = await pluginRequest(data.method, data.params, { read, save: state => { if (!disposed) { tab.pluginState = state; s.store(); } } });
+      const result = await pluginRequest(data.method, data.params, {
+        read,
+        save: (state) => {
+          if (!disposed) {
+            tab.pluginState = state;
+            s.store();
+          }
+        },
+      });
       if (!disposed) channel.port1.postMessage({ id: data.id, result });
-    } catch (error: any) { if (!disposed) channel.port1.postMessage({ id: data.id, error: error.message || 'Plugin request failed.' }); }
-    finally { active--; }
+    } catch (error: any) {
+      if (!disposed)
+        channel.port1.postMessage({
+          id: data.id,
+          error: error.message || 'Plugin request failed.',
+        });
+    } finally {
+      active--;
+    }
   };
   frame.onload = () => {
     // A plugin navigating its frame does not receive another capability port.
-    if (disposed || initialized) return; initialized = true;
-    frame.contentWindow?.postMessage({ type: 'libertty-plugin-init', context: { name: tab.name, state: tab.pluginState ?? null } }, '*', [channel.port2]);
+    if (disposed || initialized) return;
+    initialized = true;
+    frame.contentWindow?.postMessage(
+      { type: 'libertty-plugin-init', context: { name: tab.name, state: tab.pluginState ?? null } },
+      '*',
+      [channel.port2],
+    );
     channel.port1.postMessage({ type: 'visibility', visible });
   };
-  return { element: frame, setVisible(value) { frame.hidden = !value; if (visible === value) return; visible = value; if (initialized && !disposed) channel.port1.postMessage({ type: 'visibility', visible }); },
-    dispose() { disposed = true; frame.onload = null; channel.port1.close(); channel.port2.close(); frame.remove(); } };
+  return {
+    element: frame,
+    setVisible(value) {
+      frame.hidden = !value;
+      if (visible === value) return;
+      visible = value;
+      if (initialized && !disposed) channel.port1.postMessage({ type: 'visibility', visible });
+    },
+    dispose() {
+      disposed = true;
+      frame.onload = null;
+      channel.port1.close();
+      channel.port2.close();
+      frame.remove();
+    },
+  };
 }

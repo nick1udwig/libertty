@@ -28,9 +28,7 @@ impl Editable {
         record: &Terminal,
         text: &str,
     ) -> Result<(), String> {
-        if libertty_engine::utf16_len(text) > crate::protocol::MAX_TEXT
-            || crate::protocol::controls(text)
-        {
+        if !crate::protocol::clean(text, crate::protocol::MAX_TEXT) {
             return Err("Replacement contains invalid terminal input.".into());
         }
         let current = client
