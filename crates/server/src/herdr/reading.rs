@@ -1,6 +1,6 @@
 use crate::{herdr::Target, reading::MAX_READING_BYTES};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use libertty_engine::{repair::shell_quote, utf16_len};
+use libertty_engine::repair::shell_quote;
 use russh::ChannelMsg;
 use std::{sync::Arc, time::Duration};
 use tokio_util::sync::CancellationToken;
@@ -58,8 +58,7 @@ pub async fn open(
     cwd: &str,
     cancel: &CancellationToken,
 ) -> Result<Opened, String> {
-    if utf16_len(command) > crate::protocol::MAX_TEXT
-        || crate::protocol::controls(command)
+    if !crate::protocol::clean(command, crate::protocol::MAX_TEXT)
         || matches!(
             crate::alternatives::Intent::detect(command, &serde_json::Value::Null),
             crate::alternatives::Intent::Shell
@@ -150,13 +149,7 @@ pub async fn open(
     )
     .map_err(|_| "Invalid reading result.")?;
     match kind {
-        "file"
-            if name.starts_with('/')
-                && utf16_len(&name) <= 4096
-                && !crate::protocol::controls(&name) =>
-        {
-            Ok(Opened::File(name))
-        }
+        "file" if crate::protocol::absolute_path(&name) => Ok(Opened::File(name)),
         "capture" if stdout.len() >= end + 4 => {
             let trailer = stdout.len() - 3;
             let exit_code = std::str::from_utf8(&stdout[trailer..])

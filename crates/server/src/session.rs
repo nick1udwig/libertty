@@ -17,7 +17,7 @@ use crate::{
     input_controller::Line,
     markers::{Event, Markers},
     paste_mode::{PasteMode, bracketed},
-    protocol::{ClientMessage, controls as control},
+    protocol::ClientMessage,
     reading::{self, Captures},
     storage,
     transfers::Transfers,
@@ -1070,8 +1070,7 @@ impl Session {
             } => {
                 let accepted = same
                     && revision == inner.state.input_revision
-                    && utf16_len(&text) <= MAX_LINE
-                    && !control(&text)
+                    && crate::protocol::clean(&text, MAX_LINE)
                     && inner
                         .write(&format!("{CLEAR_LINE}{}", bracketed(&text)))
                         .is_ok();
@@ -1095,10 +1094,8 @@ impl Session {
                         inner.send(previous);
                         return;
                     }
-                    let allowed = same
-                        && !command.is_empty()
-                        && utf16_len(&command) <= MAX_LINE
-                        && !control(&command);
+                    let allowed =
+                        same && !command.is_empty() && crate::protocol::clean(&command, MAX_LINE);
                     let failure = if allowed {
                         inner
                             .write(&format!("{CLEAR_LINE}{}\r", bracketed(&command)))

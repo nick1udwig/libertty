@@ -39,10 +39,7 @@ pub(super) async fn input_state(
             .as_array()
             .and_then(|items| items.iter().find(|item| item["pid"] == pid));
         let process = process?;
-        if !matches!(
-            process["name"].as_str(),
-            Some("bash" | "zsh" | "fish" | "sh" | "dash" | "ksh")
-        ) {
+        if !process["name"].as_str().is_some_and(is_shell) {
             return None;
         }
         let cwd = process["cwd"].as_str().filter(|cwd| cwd.starts_with('/'))?;
@@ -321,9 +318,10 @@ pub(super) async fn action(target: &Target, input: Action) -> Result<Value, Stri
                 return Err("Choose a supported agent type.".into());
             }
             let space = space.ok_or("Choose an existing space.")?;
-            if cwd.as_ref().is_some_and(|s| {
-                !s.starts_with('/') || utf16_len(s) > 4096 || crate::protocol::controls(s)
-            }) {
+            if cwd
+                .as_ref()
+                .is_some_and(|s| !crate::protocol::absolute_path(s))
+            {
                 return Err("Enter an absolute working directory.".into());
             }
             let mut params = json!({"workspace_id":space.id,"label":label,"focus":false});

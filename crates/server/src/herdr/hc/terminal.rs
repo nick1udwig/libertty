@@ -419,14 +419,14 @@ pub async fn terminal(
                         ClientMessage::Ping { .. } => send(&mut socket, json!({"type":"pong"})).await?,
                         ClientMessage::Ack { seq } => { let bytes = credits.acknowledge(seq)?; if bytes > 0 { stream.consumed(bytes).await.map_err(error)?; } }
                         ClientMessage::HerdrActive { active: visible } => { active = visible; stream.focus(active).await.map_err(error)?; }
-                        ClientMessage::Resize { cols, rows, .. } if active && (1..=1000).contains(&cols) && (1..=1000).contains(&rows) => { parser.screen_mut().set_size(rows, cols); stream.resize(cols, rows).await.map_err(error)?; }
+                        ClientMessage::Resize { cols, rows, .. } if active && crate::protocol::terminal_dimension(cols) && crate::protocol::terminal_dimension(rows) => { parser.screen_mut().set_size(rows, cols); stream.resize(cols, rows).await.map_err(error)?; }
                         ClientMessage::Input { data, .. } if active => {
                             if matches!(data.as_str(), "\x1b[I" | "\x1b[O") { stream.focus(data == "\x1b[I").await.map_err(error)?; }
                             else { stream.input(data.into_bytes()).await.map_err(error)?; editable = None; revision += 1; }
                         }
                         ClientMessage::Paste { text } if active => { paste(&stream, &parser, &text).await?; editable = None; revision += 1; send(&mut socket, state(&current,revision,prompt)).await?; }
                         ClientMessage::Command { id: request, command, prompt: expected_prompt } if active => {
-                            if command.trim().is_empty() || libertty_engine::utf16_len(&command) > crate::protocol::MAX_TEXT || crate::protocol::controls(&command) { return Err("Invalid command.".into()); }
+                            if command.trim().is_empty() || !crate::protocol::clean(&command, crate::protocol::MAX_TEXT) { return Err("Invalid command.".into()); }
                             let result = async {
                                 if expected_prompt.is_some_and(|expected| expected != prompt) { return Err("The shell prompt changed.".into()); }
                                 if let Some(previous) = &editable { previous.replace(&client, &stream, &parser, &current, &command).await?; stream.input(b"\r".to_vec()).await.map_err(error) }

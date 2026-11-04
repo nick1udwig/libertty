@@ -115,10 +115,7 @@ pub(crate) fn shell(
     let foreground = record.foreground.as_ref()?;
     let pid = record.pid?;
     if foreground.pid != pid as i32
-        || !matches!(
-            foreground.name.as_str(),
-            "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh"
-        )
+        || !crate::herdr::is_shell(&foreground.name)
         || !foreground.cwd.starts_with('/')
     {
         return None;

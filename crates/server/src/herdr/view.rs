@@ -5,7 +5,7 @@ use crate::protocol::{DictationSource, DictationTarget, MAX_TEXT, ServerMessage}
 use crate::{
     herdr::Target,
     herdr::terminal_stream::{Hub, Size, Subscription},
-    protocol::{ClientMessage, controls},
+    protocol::{ClientMessage, clean, terminal_dimension},
     session::Transport,
 };
 pub use input::{Ledger, Ledgers};
@@ -872,7 +872,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Resize { cols, rows, mobile } => {
-                if !(1..=1000).contains(&cols) || !(1..=1000).contains(&rows) {
+                if !terminal_dimension(cols) || !terminal_dimension(rows) {
                     return Err("Invalid terminal size".into());
                 }
                 let size = (mobile == Some(true)).then_some(Size { cols, rows });
@@ -910,10 +910,8 @@ impl View {
                 cols,
                 rows,
             } => {
-                if cols == 0
-                    || rows == 0
-                    || cols > 1000
-                    || rows > 1000
+                if !terminal_dimension(cols)
+                    || !terminal_dimension(rows)
                     || column >= cols
                     || row >= rows
                 {
@@ -962,7 +960,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Paste { text } => {
-                if text.is_empty() || utf16_len(&text) > MAX_TEXT || controls(&text) {
+                if text.is_empty() || !clean(&text, MAX_TEXT) {
                     return Err("Invalid paste".into());
                 }
                 self.inner.lock().unwrap().revision += 1;
@@ -975,10 +973,7 @@ impl View {
                 prompt,
                 revision,
             } => {
-                if text.is_empty()
-                    || utf16_len(&text) > libertty_engine::MAX_COMMAND
-                    || controls(&text)
-                {
+                if text.is_empty() || !clean(&text, libertty_engine::MAX_COMMAND) {
                     return Err("Invalid replacement".into());
                 }
                 let replacement = {
@@ -1011,8 +1006,7 @@ impl View {
                 Ok(())
             }
             ClientMessage::Command { command, id, .. } => {
-                if command.trim().is_empty() || utf16_len(&command) > MAX_TEXT || controls(&command)
-                {
+                if command.trim().is_empty() || !clean(&command, MAX_TEXT) {
                     return Err("Invalid command".into());
                 }
                 let replacement = {

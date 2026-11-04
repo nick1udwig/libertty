@@ -282,9 +282,10 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
             if !kinds(&session.client).await?.contains(&kind) {
                 return Err("Choose a supported agent type.".into());
             }
-            if requested.as_ref().is_some_and(|s| {
-                !s.starts_with('/') || s.len() > 4096 || crate::protocol::controls(s)
-            }) {
+            if requested
+                .as_ref()
+                .is_some_and(|s| !crate::protocol::absolute_path(s))
+            {
                 return Err("Enter an absolute working directory.".into());
             }
             let mut launch = launch(requested.or(cwd));

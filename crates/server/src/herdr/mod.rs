@@ -172,6 +172,10 @@ impl RepairSessions {
         Ok(result)
     }
 }
+/// Whether a foreground process name is an interactive shell that accepts command alternatives.
+pub(crate) fn is_shell(name: &str) -> bool {
+    matches!(name, "bash" | "zsh" | "fish" | "sh" | "dash" | "ksh")
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct ShellInput {
     pub pid: u64,
