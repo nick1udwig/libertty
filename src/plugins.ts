@@ -2,10 +2,16 @@ import type { HostProfile, TerminalTab } from './connections.ts';
 
 export const BUILTIN_VERSION = '1';
 export const builtinIds = ['terminal', 'files', 'herdr', 'herdr-core', 'reading'] as const;
-export function isHerdrPlugin(id: string): boolean { return id === 'herdr' || id === 'herdr-core'; }
+export function isHerdrPlugin(id: string): boolean {
+  return id === 'herdr' || id === 'herdr-core';
+}
 /** Whether a tab shows a terminal pane with its shortcut controls. */
-export function showsTerminal(id: string): boolean { return id === 'terminal' || isHerdrPlugin(id); }
-export function tabPluginId(tab: TerminalTab): string { return tab.pluginId; }
+export function showsTerminal(id: string): boolean {
+  return id === 'terminal' || isHerdrPlugin(id);
+}
+export function tabPluginId(tab: TerminalTab): string {
+  return tab.pluginId;
+}
 export interface PluginView {
   element: HTMLElement;
   setVisible(visible: boolean): void;
@@ -39,18 +45,31 @@ export class PluginRegistry {
   register(plugin: TabPlugin) {
     const key = this.key(plugin.id, plugin.version);
     if (this.versions.has(key)) throw new Error('This plugin version is already installed.');
-    this.versions.set(key, plugin); this.current.set(plugin.id, plugin);
+    this.versions.set(key, plugin);
+    this.current.set(plugin.id, plugin);
   }
-  private key(id: string, version: string) { return JSON.stringify([id, version]); }
+  private key(id: string, version: string) {
+    return JSON.stringify([id, version]);
+  }
   get(id: string, version?: string): TabPlugin | undefined {
     if (this.disabled.has(id)) return;
     return version ? this.versions.get(this.key(id, version)) : this.current.get(id);
   }
-  forTab(tab: TerminalTab) { return this.get(tabPluginId(tab), tab.pluginVersion); }
-  actions(host: HostProfile) { return [...this.current.values()].filter(plugin => !this.disabled.has(plugin.id) && plugin.available(host)); }
-  enable(id: string, enabled: boolean) { if (enabled) this.disabled.delete(id); else this.disabled.add(id); }
+  forTab(tab: TerminalTab) {
+    return this.get(tabPluginId(tab), tab.pluginVersion);
+  }
+  actions(host: HostProfile) {
+    return [...this.current.values()].filter(
+      (plugin) => !this.disabled.has(plugin.id) && plugin.available(host),
+    );
+  }
+  enable(id: string, enabled: boolean) {
+    if (enabled) this.disabled.delete(id);
+    else this.disabled.add(id);
+  }
   remove(id: string) {
     for (const [key, plugin] of this.versions) if (plugin.id === id) this.versions.delete(key);
-    this.current.delete(id); this.disabled.delete(id);
+    this.current.delete(id);
+    this.disabled.delete(id);
   }
 }

@@ -17,13 +17,37 @@ import {
 export class Ghostty {
   readonly core: CoreRuntime;
   private defaults: CoreTerminalOptions;
-  constructor(core: CoreRuntime, defaults: CoreTerminalOptions = {}) { this.core = core; this.defaults = defaults; }
-  static async load(options?: CoreRuntimeOptions) { return new Ghostty(await createCoreRuntime(options)); }
-  createTerminal(cols: number, rows: number, options: CoreTerminalOptions & { scrollbackLimit?: number } = {}) {
-    return new GhosttyTerminal(this.core.createTerminal({ ...this.defaults, ...options, cols, rows, scrollbackLines: options.scrollbackLimit ?? options.scrollbackLines ?? this.defaults.scrollbackLines }), undefined, true);
+  constructor(core: CoreRuntime, defaults: CoreTerminalOptions = {}) {
+    this.core = core;
+    this.defaults = defaults;
   }
-  memoryUsage() { return terminalMemoryUsage(this.core); }
-  dispose() { this.core.dispose(); }
+  static async load(options?: CoreRuntimeOptions) {
+    return new Ghostty(await createCoreRuntime(options));
+  }
+  createTerminal(
+    cols: number,
+    rows: number,
+    options: CoreTerminalOptions & { scrollbackLimit?: number } = {},
+  ) {
+    return new GhosttyTerminal(
+      this.core.createTerminal({
+        ...this.defaults,
+        ...options,
+        cols,
+        rows,
+        scrollbackLines:
+          options.scrollbackLimit ?? options.scrollbackLines ?? this.defaults.scrollbackLines,
+      }),
+      undefined,
+      true,
+    );
+  }
+  memoryUsage() {
+    return terminalMemoryUsage(this.core);
+  }
+  dispose() {
+    this.core.dispose();
+  }
 }
 
 /** Rows decoded per read, small enough that a row entering during a scroll does not decode a long run of history. */
@@ -50,17 +74,34 @@ export class GhosttyTerminal {
     this.core = core;
     this.semantics = new TerminalSemantics(core);
     this.onWrite = onWrite;
-    if (collectResponses) this.input = core.on('input', event => { if (event.source === 'reply') this.replies.push(event.data.slice()); });
-    this.render = core.on('render', frame => {
+    if (collectResponses)
+      this.input = core.on('input', (event) => {
+        if (event.source === 'reply') this.replies.push(event.data.slice());
+      });
+    this.render = core.on('render', (frame) => {
       this.colors = frame.colors;
       this.theme = core.theme;
     });
   }
-  get cols() { return this.core.geometry.cols; }
-  get rows() { return this.core.geometry.rows; }
-  write(data: string | Uint8Array) { this.core.write(data); this.onWrite?.(); }
-  restore(snapshot: Uint8Array) { this.core.restore(snapshot); this.semantics.attach(); this.onWrite?.(); }
-  resize(cols: number, rows: number) { this.core.resize(cols, rows); this.onWrite?.(); }
+  get cols() {
+    return this.core.geometry.cols;
+  }
+  get rows() {
+    return this.core.geometry.rows;
+  }
+  write(data: string | Uint8Array) {
+    this.core.write(data);
+    this.onWrite?.();
+  }
+  restore(snapshot: Uint8Array) {
+    this.core.restore(snapshot);
+    this.semantics.attach();
+    this.onWrite?.();
+  }
+  resize(cols: number, rows: number) {
+    this.core.resize(cols, rows);
+    this.onWrite?.();
+  }
   update() {
     const state = this.core.bufferState();
     if (state.revision !== this.revision || this.bufferTheme !== this.core.theme) {
@@ -72,15 +113,23 @@ export class GhosttyTerminal {
     return state;
   }
   /** Changes with buffer content or theme, but not when only the viewport scrolls through this terminal. */
-  contentGeneration() { this.update(); return this.generation; }
-  getRevision() { return this.core.bufferState().revision; }
-  getScrollbackLength() { return this.core.bufferState().scrollbackRows; }
+  contentGeneration() {
+    this.update();
+    return this.generation;
+  }
+  getRevision() {
+    return this.core.bufferState().revision;
+  }
+  getScrollbackLength() {
+    return this.core.bufferState().scrollbackRows;
+  }
   getViewportY() {
     const state = this.core.bufferState();
     return state.scrollbackRows - state.viewportY;
   }
   setViewportY(offset: number) {
-    const state = this.update(), current = state.scrollbackRows - state.viewportY;
+    const state = this.update(),
+      current = state.scrollbackRows - state.viewportY;
     const target = Math.max(0, Math.min(state.scrollbackRows, offset));
     if (current !== target) {
       this.core.scrollLines(current - target);
@@ -88,20 +137,41 @@ export class GhosttyTerminal {
       this.revision = this.getRevision();
     }
   }
-  isAlternateScreen() { return this.core.bufferState().screen === 'alternate'; }
-  isMode(mode: number, ansi = false) { return this.core.isMode(mode, ansi); }
-  getMode(mode: number, ansi = false) { return this.isMode(mode, ansi); }
+  isAlternateScreen() {
+    return this.core.bufferState().screen === 'alternate';
+  }
+  isMode(mode: number, ansi = false) {
+    return this.core.isMode(mode, ansi);
+  }
+  getMode(mode: number, ansi = false) {
+    return this.isMode(mode, ansi);
+  }
   getCursor() {
     const state = this.core.bufferState();
     return { x: state.cursorX, y: state.cursorY, visible: this.core.isMode(25) };
   }
   getPalette() {
-    const { handle, host: { bindings } } = this.core as unknown as { handle: number; host: { bindings: CoreRuntime['bindings'] } };
-    const size = bindings.abi.size('GhosttyColorRgb'), palette = bindings.alloc(256 * size);
+    const {
+      handle,
+      host: { bindings },
+    } = this.core as unknown as { handle: number; host: { bindings: CoreRuntime['bindings'] } };
+    const size = bindings.abi.size('GhosttyColorRgb'),
+      palette = bindings.alloc(256 * size);
     try {
-      bindings.check(bindings.exports.ghostty_terminal_get(handle, bindings.abi.value('GhosttyTerminalData', 'COLOR_PALETTE'), palette.pointer), 'read terminal palette');
-      return Array.from({ length: 256 }, (_, index) => bindings.readColor(palette.pointer + index * size));
-    } finally { palette.free(); }
+      bindings.check(
+        bindings.exports.ghostty_terminal_get(
+          handle,
+          bindings.abi.value('GhosttyTerminalData', 'COLOR_PALETTE'),
+          palette.pointer,
+        ),
+        'read terminal palette',
+      );
+      return Array.from({ length: 256 }, (_, index) =>
+        bindings.readColor(palette.pointer + index * size),
+      );
+    } finally {
+      palette.free();
+    }
   }
   getColors() {
     if (!this.colors || this.theme !== this.core.theme) {
@@ -115,30 +185,52 @@ export class GhosttyTerminal {
     if (!Number.isInteger(index) || index < 0 || index >= state.totalRows) return;
     if (!this.bufferRows.has(index)) {
       const start = Math.floor(index / bufferChunk) * bufferChunk;
-      const rows = this.core.readBuffer({ start, end: Math.min(start + bufferChunk, state.totalRows) }).rows;
+      const rows = this.core.readBuffer({
+        start,
+        end: Math.min(start + bufferChunk, state.totalRows),
+      }).rows;
       // Map order is read order, so the oldest rows leave first and rows that a scroll still shows stay.
-      for (const line of this.bufferRows.keys()) { if (this.bufferRows.size + rows.length <= bufferCapacity) break; this.bufferRows.delete(line); }
+      for (const line of this.bufferRows.keys()) {
+        if (this.bufferRows.size + rows.length <= bufferCapacity) break;
+        this.bufferRows.delete(line);
+      }
       for (const row of rows) this.bufferRows.set(row.index, row);
     }
     return this.bufferRows.get(index);
   }
   getLine(row: number) {
-    return Number.isInteger(row) && row >= 0 && row < this.rows ? this.getBufferRow(this.getScrollbackLength() + row)?.cells : undefined;
+    return Number.isInteger(row) && row >= 0 && row < this.rows
+      ? this.getBufferRow(this.getScrollbackLength() + row)?.cells
+      : undefined;
   }
   getScrollbackLine(row: number) {
-    return Number.isInteger(row) && row >= 0 && row < this.getScrollbackLength() ? this.getBufferRow(row)?.cells : undefined;
+    return Number.isInteger(row) && row >= 0 && row < this.getScrollbackLength()
+      ? this.getBufferRow(row)?.cells
+      : undefined;
   }
   /** Projection and snapshots always read the active screen, independent of viewport scrolling. */
   getViewport() {
-    const history = this.getScrollbackLength(), cells: RenderCell[] = [];
-    for (let row = 0; row < this.rows; row++) cells.push(...this.getBufferRow(history + row)!.cells);
+    const history = this.getScrollbackLength(),
+      cells: RenderCell[] = [];
+    for (let row = 0; row < this.rows; row++)
+      cells.push(...this.getBufferRow(history + row)!.cells);
     return cells;
   }
-  getGraphemeString(row: number, col: number) { return this.getBufferRow(this.getScrollbackLength() + row)?.cells[col]?.text ?? ''; }
-  getScrollbackGraphemeString(row: number, col: number) { return this.getBufferRow(row)?.cells[col]?.text ?? ''; }
-  getHyperlinkUri(row: number, col: number) { return this.getBufferRow(this.getScrollbackLength() + row)?.cells[col]?.hyperlinkUri ?? null; }
-  getScrollbackHyperlinkUri(row: number, col: number) { return this.getBufferRow(row)?.cells[col]?.hyperlinkUri ?? null; }
-  readResponse() { return this.replies.shift(); }
+  getGraphemeString(row: number, col: number) {
+    return this.getBufferRow(this.getScrollbackLength() + row)?.cells[col]?.text ?? '';
+  }
+  getScrollbackGraphemeString(row: number, col: number) {
+    return this.getBufferRow(row)?.cells[col]?.text ?? '';
+  }
+  getHyperlinkUri(row: number, col: number) {
+    return this.getBufferRow(this.getScrollbackLength() + row)?.cells[col]?.hyperlinkUri ?? null;
+  }
+  getScrollbackHyperlinkUri(row: number, col: number) {
+    return this.getBufferRow(row)?.cells[col]?.hyperlinkUri ?? null;
+  }
+  readResponse() {
+    return this.replies.shift();
+  }
   free() {
     if (this.disposed) return;
     this.disposed = true;

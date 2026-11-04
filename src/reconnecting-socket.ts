@@ -1,8 +1,13 @@
 import { decodeWire } from './wire.ts';
-const minimumReply = 2000, maximumReply = 8000, activeDownlink = 1000;
-const activeHeartbeat = 2000, idleHeartbeat = 25000, activityWindow = 10000;
+const minimumReply = 2000,
+  maximumReply = 8000,
+  activeDownlink = 1000;
+const activeHeartbeat = 2000,
+  idleHeartbeat = 25000,
+  activityWindow = 10000;
 /** A clock time stays the same through a stall, so the label does not change every second. */
-export const stalledLabel = (lastContact: number) => 'Connection stalled · last contact ' + new Date(lastContact).toLocaleTimeString();
+export const stalledLabel = (lastContact: number) =>
+  'Connection stalled · last contact ' + new Date(lastContact).toLocaleTimeString();
 interface ReconnectingSocketOptions {
   prepare(signal: AbortSignal, token?: string): Promise<URL>;
   available(): boolean;
@@ -51,7 +56,9 @@ export class ReconnectingSocket {
   private expired = false;
   private options: ReconnectingSocketOptions;
 
-  constructor(options: ReconnectingSocketOptions) { this.options = options; }
+  constructor(options: ReconnectingSocketOptions) {
+    this.options = options;
+  }
 
   /** Explicit authorization may resume a locked or replaced terminal. */
   connect(token?: string, replace = false): Promise<void> {
@@ -68,7 +75,8 @@ export class ReconnectingSocket {
   suspend() {
     clearTimeout(this.retry);
     this.release();
-    this.retained?.close(); this.retained = undefined;
+    this.retained?.close();
+    this.retained = undefined;
     clearTimeout(this.heartbeat);
     this.stalled = false;
   }
@@ -76,47 +84,94 @@ export class ReconnectingSocket {
   /** User activity bypasses retry backoff without competing with a handshake. */
   activity() {
     this.lastActivity = Date.now();
-    if (!this.attempt && (this.stalled || this.socket?.readyState !== WebSocket.OPEN)) void this.resume(this.stalled);
+    if (!this.attempt && (this.stalled || this.socket?.readyState !== WebSocket.OPEN))
+      void this.resume(this.stalled);
     else this.armHeartbeat();
   }
 
   /** Acknowledged input proves that the return path worked without an extra probe. */
-  confirmed() { if (this.pingAt === undefined) { this.lastContact = Date.now(); this.armHeartbeat(); } }
+  confirmed() {
+    if (this.pingAt === undefined) {
+      this.lastContact = Date.now();
+      this.armHeartbeat();
+    }
+  }
 
   /** Defer optional work when measured latency or browser queues grow. */
   get backgroundDelay() {
-    return Math.min(10000, Math.max(1500, (this.rtt?.smoothed || 0) * 4, this.decodeLag * 4, (this.socket?.bufferedAmount || 0) > 16384 ? 5000 : 0));
+    return Math.min(
+      10000,
+      Math.max(
+        1500,
+        (this.rtt?.smoothed || 0) * 4,
+        this.decodeLag * 4,
+        (this.socket?.bufferedAmount || 0) > 16384 ? 5000 : 0,
+      ),
+    );
   }
-  get healthy() { return !this.stalled && this.established === this.socket && this.socket?.readyState === WebSocket.OPEN; }
+  get healthy() {
+    return (
+      !this.stalled &&
+      this.established === this.socket &&
+      this.socket?.readyState === WebSocket.OPEN
+    );
+  }
   /** Browser timers may have stopped while the app was hidden, even with an open socket. */
   foreground() {
     if (this.stopped) return;
-    this.offlineUntil = 0; this.delay = 1000; this.lastActivity = Date.now();
+    this.offlineUntil = 0;
+    this.delay = 1000;
+    this.lastActivity = Date.now();
     if (this.healthy) this.checkHeartbeat();
     else if (!this.attempt || Date.now() - this.attemptStarted >= 1000) void this.resume(true);
   }
   /** The page has stayed hidden past its background grace. */
-  get backgroundExpired() { return this.expired; }
+  get backgroundExpired() {
+    return this.expired;
+  }
 
   /** Suspend after the background grace and resume when the page is shown, restored or back online; the result stops following. */
   follow(background: BackgroundOptions) {
     const visibility = () => {
       clearTimeout(this.background);
       if (document.hidden) {
-        this.expired = false; background.hidden?.();
-        this.background = setTimeout(() => { this.expired = true; if (background.expired?.() !== false) this.suspend(); }, background.grace);
-      } else { this.expired = false; this.foreground(); background.shown?.(); }
+        this.expired = false;
+        background.hidden?.();
+        this.background = setTimeout(() => {
+          this.expired = true;
+          if (background.expired?.() !== false) this.suspend();
+        }, background.grace);
+      } else {
+        this.expired = false;
+        this.foreground();
+        background.shown?.();
+      }
     };
     // Every load fires pageshow, but only a page restored from the back-forward cache needs a fresh connection.
-    const restored = (event: PageTransitionEvent) => { if (event.persisted) visibility(); };
-    const online = () => { this.offlineUntil = 0; this.delay = 1000; this.lastActivity = Date.now(); void this.resume(true); };
-    const offline = () => { this.suspend(); this.offlineUntil = Date.now() + 10000; this.schedule(); };
-    document.addEventListener('visibilitychange', visibility); window.addEventListener('pageshow', restored);
-    window.addEventListener('online', online); window.addEventListener('offline', offline);
+    const restored = (event: PageTransitionEvent) => {
+      if (event.persisted) visibility();
+    };
+    const online = () => {
+      this.offlineUntil = 0;
+      this.delay = 1000;
+      this.lastActivity = Date.now();
+      void this.resume(true);
+    };
+    const offline = () => {
+      this.suspend();
+      this.offlineUntil = Date.now() + 10000;
+      this.schedule();
+    };
+    document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('pageshow', restored);
+    window.addEventListener('online', online);
+    window.addEventListener('offline', offline);
     return () => {
       clearTimeout(this.background);
-      document.removeEventListener('visibilitychange', visibility); window.removeEventListener('pageshow', restored);
-      window.removeEventListener('online', online); window.removeEventListener('offline', offline);
+      document.removeEventListener('visibilitychange', visibility);
+      window.removeEventListener('pageshow', restored);
+      window.removeEventListener('online', online);
+      window.removeEventListener('offline', offline);
     };
   }
 
@@ -127,24 +182,47 @@ export class ReconnectingSocket {
     clearTimeout(this.deadline);
     this.attempt = undefined;
     this.delay = 1000;
-    this.lastContact = Date.now(); this.pingAt = undefined; this.stalled = false;
+    this.lastContact = Date.now();
+    this.pingAt = undefined;
+    this.stalled = false;
     this.armHeartbeat();
   }
 
   private heartbeatInterval() {
-    return Date.now() - Math.max(this.lastActivity, this.lastMessage) < activityWindow ? activeHeartbeat : idleHeartbeat;
+    return Date.now() - Math.max(this.lastActivity, this.lastMessage) < activityWindow
+      ? activeHeartbeat
+      : idleHeartbeat;
   }
 
   private armHeartbeat() {
-    if (this.stopped || this.established !== this.socket || this.socket?.readyState !== WebSocket.OPEN) {
-      clearTimeout(this.heartbeat); this.heartbeat = undefined; return;
+    if (
+      this.stopped ||
+      this.established !== this.socket ||
+      this.socket?.readyState !== WebSocket.OPEN
+    ) {
+      clearTimeout(this.heartbeat);
+      this.heartbeat = undefined;
+      return;
     }
-    const wait = this.pingAt === undefined ? this.lastContact + this.heartbeatInterval() - Date.now()
-      : Math.min(1000, this.pingAt + this.replyDeadline() - Date.now());
+    const wait =
+      this.pingAt === undefined
+        ? this.lastContact + this.heartbeatInterval() - Date.now()
+        : Math.min(1000, this.pingAt + this.replyDeadline() - Date.now());
     const at = Date.now() + Math.max(1, wait);
-    if (this.heartbeat && (at === this.heartbeatAt || this.pingAt !== undefined && at >= this.heartbeatAt)) return;
-    clearTimeout(this.heartbeat); this.heartbeatAt = at;
-    this.heartbeat = setTimeout(() => { this.heartbeat = undefined; this.checkHeartbeat(); }, Math.max(1, wait));
+    if (
+      this.heartbeat &&
+      (at === this.heartbeatAt || (this.pingAt !== undefined && at >= this.heartbeatAt))
+    )
+      return;
+    clearTimeout(this.heartbeat);
+    this.heartbeatAt = at;
+    this.heartbeat = setTimeout(
+      () => {
+        this.heartbeat = undefined;
+        this.checkHeartbeat();
+      },
+      Math.max(1, wait),
+    );
   }
 
   /** Allow a reply the link's measured round trip, and the full maximum while output still arrives ahead of it. */
@@ -162,7 +240,8 @@ export class ReconnectingSocket {
       this.rtt.variance = 0.75 * this.rtt.variance + 0.25 * Math.abs(this.rtt.smoothed - sample);
       this.rtt.smoothed = 0.875 * this.rtt.smoothed + 0.125 * sample;
     }
-    this.lastContact = Date.now(); this.pingAt = undefined;
+    this.lastContact = Date.now();
+    this.pingAt = undefined;
     this.armHeartbeat();
   }
 
@@ -174,9 +253,18 @@ export class ReconnectingSocket {
         void this.begin(undefined, true);
       }
       this.options.stalled?.(this.lastContact);
-    } else if (this.socket?.readyState === WebSocket.OPEN && this.pingAt === undefined && Date.now() - this.lastContact >= this.heartbeatInterval()) {
+    } else if (
+      this.socket?.readyState === WebSocket.OPEN &&
+      this.pingAt === undefined &&
+      Date.now() - this.lastContact >= this.heartbeatInterval()
+    ) {
       this.pingAt = Date.now();
-      this.socket.send(JSON.stringify({ type: 'ping', ...(this.options.checkpoint?.() ? { checkpoint: true } : {}) }));
+      this.socket.send(
+        JSON.stringify({
+          type: 'ping',
+          ...(this.options.checkpoint?.() ? { checkpoint: true } : {}),
+        }),
+      );
       this.options.probe?.();
     }
     this.armHeartbeat();
@@ -194,7 +282,8 @@ export class ReconnectingSocket {
     attempt?.abort();
     // Detach before closing: a delayed close must not affect its replacement.
     if (retain && socket?.readyState === WebSocket.OPEN) {
-      this.retained?.close(); this.retained = socket;
+      this.retained?.close();
+      this.retained = socket;
     } else socket?.close();
     if (socket && !this.options.close(event)) this.stopped = true;
   }
@@ -202,41 +291,57 @@ export class ReconnectingSocket {
   private schedule() {
     clearTimeout(this.retry);
     if (this.stopped) {
-      this.retained?.close(); this.retained = undefined;
+      this.retained?.close();
+      this.retained = undefined;
       clearTimeout(this.heartbeat);
       return;
     }
     if (!this.options.available()) return;
-    this.retry = setTimeout(() => void this.begin(), Math.max(this.delay, this.offlineUntil - Date.now()));
+    this.retry = setTimeout(
+      () => void this.begin(),
+      Math.max(this.delay, this.offlineUntil - Date.now()),
+    );
     this.delay = Math.min(10000, this.delay * 1.5);
   }
 
   private async begin(token?: string, replace = false) {
     if (!this.options.available()) return;
-    if (Date.now() < this.offlineUntil) { this.schedule(); return; }
+    if (Date.now() < this.offlineUntil) {
+      this.schedule();
+      return;
+    }
     if (!replace && (this.attempt || this.socket?.readyState === WebSocket.OPEN)) return;
     clearTimeout(this.retry);
     this.release(undefined, replace);
     if (this.stopped) return;
     const attempt = new AbortController();
     this.attempt = attempt;
-    const started = this.attemptStarted = Date.now();
-    const progress = (idle = Math.min(15000, Math.max(8000, this.delay * 8, (this.rtt?.smoothed || 0) * 4))) => {
+    const started = (this.attemptStarted = Date.now());
+    const progress = (
+      idle = Math.min(15000, Math.max(8000, this.delay * 8, (this.rtt?.smoothed || 0) * 4)),
+    ) => {
       if (this.attempt !== attempt) return;
       clearTimeout(this.deadline);
-      this.deadline = setTimeout(() => {
-        if (this.attempt !== attempt) return;
-        this.release();
-        if (!this.options.error(new Error('Terminal connection timed out.'), token)) this.stopped = true;
-        this.schedule();
-      }, Math.max(1, Math.min(idle, 45000 - (Date.now() - started))));
+      this.deadline = setTimeout(
+        () => {
+          if (this.attempt !== attempt) return;
+          this.release();
+          if (!this.options.error(new Error('Terminal connection timed out.'), token))
+            this.stopped = true;
+          this.schedule();
+        },
+        Math.max(1, Math.min(idle, 45000 - (Date.now() - started))),
+      );
     };
     // Authorization has its own budget, followed by an idle deadline for each transport phase.
     progress(15000);
     try {
       const url = await this.options.prepare(attempt.signal, token);
       if (this.attempt !== attempt) return;
-      if (!this.options.available()) { this.release(); return; }
+      if (!this.options.available()) {
+        this.release();
+        return;
+      }
       progress();
       const socket = new WebSocket(url, this.options.protocols?.() || []);
       socket.binaryType = 'arraybuffer';
@@ -244,30 +349,49 @@ export class ReconnectingSocket {
       this.socket = socket;
       socket.onopen = () => {
         if (this.socket !== socket) return;
-        this.retained?.close(); this.retained = undefined;
-        progress(); this.options.open();
+        this.retained?.close();
+        this.retained = undefined;
+        progress();
+        this.options.open();
       };
-      socket.onmessage = event => {
+      socket.onmessage = (event) => {
         const receivedAt = Date.now();
         if (this.socket !== socket) return;
         const deliver = (value: unknown) => {
           if (this.socket !== socket) return;
           this.decodeLag = this.decodeLag * 0.75 + (Date.now() - receivedAt) * 0.25;
-          if (value === '{"type":"pong"}' || typeof value === 'object' && value !== null && 'type' in value && value.type === 'pong') {
+          if (
+            value === '{"type":"pong"}' ||
+            (typeof value === 'object' &&
+              value !== null &&
+              'type' in value &&
+              value.type === 'pong')
+          ) {
             if (this.pingAt !== undefined) this.replied();
             return;
           }
-          progress(); this.lastMessage = Date.now();
+          progress();
+          this.lastMessage = Date.now();
           this.options.message(new MessageEvent('message', { data: value }));
           this.armHeartbeat();
         };
-        if (!socket.protocol?.startsWith('libertty.')) { deliver(event.data); return; }
-        decoded = decoded.then(async () => {
-          const value = await decodeWire(event.data);
-          deliver(value);
-        }).catch(error => { if (this.socket === socket) { this.options.error(error, token); socket.close(4002, 'Invalid transport message'); } });
+        if (!socket.protocol?.startsWith('libertty.')) {
+          deliver(event.data);
+          return;
+        }
+        decoded = decoded
+          .then(async () => {
+            const value = await decodeWire(event.data);
+            deliver(value);
+          })
+          .catch((error) => {
+            if (this.socket === socket) {
+              this.options.error(error, token);
+              socket.close(4002, 'Invalid transport message');
+            }
+          });
       };
-      socket.onclose = event => {
+      socket.onclose = (event) => {
         if (this.socket !== socket) return;
         this.release(event);
         this.schedule();

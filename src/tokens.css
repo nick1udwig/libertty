@@ -1,90 +1,289 @@
 /* Shared design tokens for the workspace shell and the terminal document. */
-@font-face{font-family:"JetBrains Mono";src:url("./fonts/JetBrainsMono-Regular.woff2") format("woff2");font-style:normal;font-weight:400;font-display:swap}
-:root{
-  color-scheme:dark;font-synthesis:none;-webkit-tap-highlight-color:transparent;
-  --bg:#0b0f0d;--surface:#121815;--raised:#1a211d;--overlay:#1e2622;--hover:#242e29;--press:#2b3630;
-  --line:#242d28;--line-strong:#34403a;
-  --text:#e4ebe6;--text-2:#b4c0b9;--muted:#8a9790;--faint:#717e77;
-  --accent:#a8f0a0;--accent-hover:#c2f6bb;--accent-ink:#0f220e;--accent-soft:#a8f0a01c;--accent-line:#a8f0a06b;
-  --info:#8fd3e0;--warn:#e8c27a;--danger:#f09a9a;--danger-soft:#f09a9a1a;
-  --font-ui:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-  --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
-  --r-sm:6px;--r-md:10px;--r-lg:14px;
-  --shadow-pop:0 12px 32px #00000080;--shadow-sheet:0 24px 80px #000000b0;
-  --scrim:#030504b8;
-  --selection:#a8f0a040;--scroll-thumb:#8a979066;--warn-line:#e8c27a55;--info-soft:#8fd3e01f;--info-selected:#8fd3e014;--info-line:#8fd3e066;
-  --glass:#0b0f0dcc;--glass-strong:#0b0f0deb;--glass-surface:#121815cc;--glass-overlay:#1e2622eb;
-  --term-fg:#dfe7e1;--term-cursor:#a8f0a0;--selected-ring:0px;
-  font-family:var(--font-ui);color:var(--text);background:var(--bg);
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  font-synthesis: none;
+  -webkit-tap-highlight-color: transparent;
+  --bg: #0b0f0d;
+  --surface: #121815;
+  --raised: #1a211d;
+  --overlay: #1e2622;
+  --hover: #242e29;
+  --press: #2b3630;
+  --line: #242d28;
+  --line-strong: #34403a;
+  --text: #e4ebe6;
+  --text-2: #b4c0b9;
+  --muted: #8a9790;
+  --faint: #717e77;
+  --accent: #a8f0a0;
+  --accent-hover: #c2f6bb;
+  --accent-ink: #0f220e;
+  --accent-soft: #a8f0a01c;
+  --accent-line: #a8f0a06b;
+  --info: #8fd3e0;
+  --warn: #e8c27a;
+  --danger: #f09a9a;
+  --danger-soft: #f09a9a1a;
+  --font-ui: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --shadow-pop: 0 12px 32px #00000080;
+  --shadow-sheet: 0 24px 80px #000000b0;
+  --scrim: #030504b8;
+  --selection: #a8f0a040;
+  --scroll-thumb: #8a979066;
+  --warn-line: #e8c27a55;
+  --info-soft: #8fd3e01f;
+  --info-selected: #8fd3e014;
+  --info-line: #8fd3e066;
+  --glass: #0b0f0dcc;
+  --glass-strong: #0b0f0deb;
+  --glass-surface: #121815cc;
+  --glass-overlay: #1e2622eb;
+  --term-fg: #dfe7e1;
+  --term-cursor: #a8f0a0;
+  --selected-ring: 0px;
+  font-family: var(--font-ui);
+  color: var(--text);
+  background: var(--bg);
 }
 /* Paper is a light, high-contrast theme for reflective grayscale panels and amber backlights. */
-:root[data-theme=paper]{
-  color-scheme:light;
-  --bg:#fbfaf6;--surface:#efede6;--raised:#e2ded4;--overlay:#ffffff;--hover:#d8d3c7;--press:#ccc6b8;
-  --line:#c8c3b6;--line-strong:#8c8679;
-  --text:#141414;--text-2:#2e2e2e;--muted:#4f4f4f;--faint:#666666;
-  --accent:#1e5f2d;--accent-hover:#164a22;--accent-ink:#ffffff;--accent-soft:#dce8da;--accent-line:#1e5f2d;
-  --info:#1d4f7c;--warn:#7a4f00;--danger:#a3161c;--danger-soft:#f3dcdc;
-  --shadow-pop:0 6px 18px #0000002e;--shadow-sheet:0 16px 48px #00000040;
-  --scrim:#1414148c;
-  --selection:#c9d9c6;--scroll-thumb:#8c8679;--warn-line:#7a4f00;--info-soft:#dbe5ee;--info-selected:#e6edf3;--info-line:#1d4f7c;
-  --glass:#fbfaf6f2;--glass-strong:#fbfaf6f5;--glass-surface:#efede6f2;--glass-overlay:#fffffff5;
-  --term-fg:#141414;--term-cursor:#1e5f2d;--selected-ring:1px;
+:root[data-theme='paper'] {
+  color-scheme: light;
+  --bg: #fbfaf6;
+  --surface: #efede6;
+  --raised: #e2ded4;
+  --overlay: #ffffff;
+  --hover: #d8d3c7;
+  --press: #ccc6b8;
+  --line: #c8c3b6;
+  --line-strong: #8c8679;
+  --text: #141414;
+  --text-2: #2e2e2e;
+  --muted: #4f4f4f;
+  --faint: #666666;
+  --accent: #1e5f2d;
+  --accent-hover: #164a22;
+  --accent-ink: #ffffff;
+  --accent-soft: #dce8da;
+  --accent-line: #1e5f2d;
+  --info: #1d4f7c;
+  --warn: #7a4f00;
+  --danger: #a3161c;
+  --danger-soft: #f3dcdc;
+  --shadow-pop: 0 6px 18px #0000002e;
+  --shadow-sheet: 0 16px 48px #00000040;
+  --scrim: #1414148c;
+  --selection: #c9d9c6;
+  --scroll-thumb: #8c8679;
+  --warn-line: #7a4f00;
+  --info-soft: #dbe5ee;
+  --info-selected: #e6edf3;
+  --info-line: #1d4f7c;
+  --glass: #fbfaf6f2;
+  --glass-strong: #fbfaf6f5;
+  --glass-surface: #efede6f2;
+  --glass-overlay: #fffffff5;
+  --term-fg: #141414;
+  --term-cursor: #1e5f2d;
+  --selected-ring: 1px;
 }
 /* Ink is a true-black theme with strong borders and an accent that stands apart from the text. */
-:root[data-theme=ink]{
-  --bg:#000000;--surface:#141414;--raised:#232323;--overlay:#1a1a1a;--hover:#2e2e2e;--press:#3a3a3a;
-  --line:#3a3a3a;--line-strong:#6b6b6b;
-  --text:#f2f2f2;--text-2:#d0d0d0;--muted:#a6a6a6;--faint:#8c8c8c;
-  --accent:#8ee69a;--accent-hover:#b0f0b8;--accent-ink:#000000;--accent-soft:#1c3320;--accent-line:#8ee69a;
-  --info:#9cc8ff;--warn:#ffd27a;--danger:#ff9a9a;--danger-soft:#3a1a1a;
-  --scrim:#000000c8;
-  --selection:#2f4a33;--scroll-thumb:#8c8c8c;--warn-line:#ffd27a;--info-soft:#1a2a3d;--info-selected:#142233;--info-line:#9cc8ff;
-  --glass:#000000e6;--glass-strong:#000000f0;--glass-surface:#141414e6;--glass-overlay:#1a1a1af0;
-  --term-fg:#f2f2f2;--term-cursor:#8ee69a;--selected-ring:1px;
+:root[data-theme='ink'] {
+  --bg: #000000;
+  --surface: #141414;
+  --raised: #232323;
+  --overlay: #1a1a1a;
+  --hover: #2e2e2e;
+  --press: #3a3a3a;
+  --line: #3a3a3a;
+  --line-strong: #6b6b6b;
+  --text: #f2f2f2;
+  --text-2: #d0d0d0;
+  --muted: #a6a6a6;
+  --faint: #8c8c8c;
+  --accent: #8ee69a;
+  --accent-hover: #b0f0b8;
+  --accent-ink: #000000;
+  --accent-soft: #1c3320;
+  --accent-line: #8ee69a;
+  --info: #9cc8ff;
+  --warn: #ffd27a;
+  --danger: #ff9a9a;
+  --danger-soft: #3a1a1a;
+  --scrim: #000000c8;
+  --selection: #2f4a33;
+  --scroll-thumb: #8c8c8c;
+  --warn-line: #ffd27a;
+  --info-soft: #1a2a3d;
+  --info-selected: #142233;
+  --info-line: #9cc8ff;
+  --glass: #000000e6;
+  --glass-strong: #000000f0;
+  --glass-surface: #141414e6;
+  --glass-overlay: #1a1a1af0;
+  --term-fg: #f2f2f2;
+  --term-cursor: #8ee69a;
+  --selected-ring: 1px;
 }
 /* 1776 is a navy theme with star-white text and a red accent, and its danger red is a softer pink so it stays apart from the accent. */
-:root[data-theme="1776"]{
-  --bg:#0b1430;--surface:#101b3b;--raised:#182651;--overlay:#15224a;--hover:#1f2f5f;--press:#273a6e;
-  --line:#213160;--line-strong:#3a4f88;
-  --text:#f5f7fc;--text-2:#c8d0e6;--muted:#98a5c8;--faint:#7f8db3;
-  --accent:#ff4f64;--accent-hover:#ff7183;--accent-ink:#0b1430;--accent-soft:#ff4f641f;--accent-line:#ff4f6680;
-  --info:#8ab4ff;--warn:#f3c45a;--danger:#ff8f8f;--danger-soft:#ff8f8f1f;
-  --scrim:#050a18b8;
-  --selection:#2a3f7a;--scroll-thumb:#98a5c866;--warn-line:#f3c45a55;--info-soft:#8ab4ff1f;--info-selected:#8ab4ff14;--info-line:#8ab4ff66;
-  --glass:#0b1430cc;--glass-strong:#0b1430eb;--glass-surface:#101b3bcc;--glass-overlay:#15224aeb;
-  --term-fg:#e9edf7;--term-cursor:#ff4f64;--selected-ring:0px;
+:root[data-theme='1776'] {
+  --bg: #0b1430;
+  --surface: #101b3b;
+  --raised: #182651;
+  --overlay: #15224a;
+  --hover: #1f2f5f;
+  --press: #273a6e;
+  --line: #213160;
+  --line-strong: #3a4f88;
+  --text: #f5f7fc;
+  --text-2: #c8d0e6;
+  --muted: #98a5c8;
+  --faint: #7f8db3;
+  --accent: #ff4f64;
+  --accent-hover: #ff7183;
+  --accent-ink: #0b1430;
+  --accent-soft: #ff4f641f;
+  --accent-line: #ff4f6680;
+  --info: #8ab4ff;
+  --warn: #f3c45a;
+  --danger: #ff8f8f;
+  --danger-soft: #ff8f8f1f;
+  --scrim: #050a18b8;
+  --selection: #2a3f7a;
+  --scroll-thumb: #98a5c866;
+  --warn-line: #f3c45a55;
+  --info-soft: #8ab4ff1f;
+  --info-selected: #8ab4ff14;
+  --info-line: #8ab4ff66;
+  --glass: #0b1430cc;
+  --glass-strong: #0b1430eb;
+  --glass-surface: #101b3bcc;
+  --glass-overlay: #15224aeb;
+  --term-fg: #e9edf7;
+  --term-cursor: #ff4f64;
+  --selected-ring: 0px;
 }
 /* Flag is a light theme with Old Glory Blue text, pale blue bars and an Old Glory Red accent. */
-:root[data-theme=flag]{
-  color-scheme:light;
-  --bg:#fcfdff;--surface:#e3eaf6;--raised:#ffffff;--overlay:#ffffff;--hover:#d5dff0;--press:#c6d3ea;
-  --line:#c3d0e6;--line-strong:#7f93bb;
-  --text:#0a2550;--text-2:#23406f;--muted:#475b82;--faint:#53668b;
-  --accent:#b31942;--accent-hover:#8f1435;--accent-ink:#ffffff;--accent-soft:#f7dfe5;--accent-line:#b31942;
-  --info:#1f5fbf;--warn:#7a5200;--danger:#a3122a;--danger-soft:#f6dde1;
-  --shadow-pop:0 6px 18px #0a25502e;--shadow-sheet:0 16px 48px #0a255040;
-  --scrim:#0a25508c;
-  --selection:#d6e2f6;--scroll-thumb:#7f93bb;--warn-line:#7a5200;--info-soft:#d6e2f6;--info-selected:#e8eef9;--info-line:#1f5fbf;
-  --glass:#fcfdfff2;--glass-strong:#fcfdfff5;--glass-surface:#e3eaf6f2;--glass-overlay:#fffffff5;
-  --term-fg:#0a2550;--term-cursor:#b31942;--selected-ring:1px;
+:root[data-theme='flag'] {
+  color-scheme: light;
+  --bg: #fcfdff;
+  --surface: #e3eaf6;
+  --raised: #ffffff;
+  --overlay: #ffffff;
+  --hover: #d5dff0;
+  --press: #c6d3ea;
+  --line: #c3d0e6;
+  --line-strong: #7f93bb;
+  --text: #0a2550;
+  --text-2: #23406f;
+  --muted: #475b82;
+  --faint: #53668b;
+  --accent: #b31942;
+  --accent-hover: #8f1435;
+  --accent-ink: #ffffff;
+  --accent-soft: #f7dfe5;
+  --accent-line: #b31942;
+  --info: #1f5fbf;
+  --warn: #7a5200;
+  --danger: #a3122a;
+  --danger-soft: #f6dde1;
+  --shadow-pop: 0 6px 18px #0a25502e;
+  --shadow-sheet: 0 16px 48px #0a255040;
+  --scrim: #0a25508c;
+  --selection: #d6e2f6;
+  --scroll-thumb: #7f93bb;
+  --warn-line: #7a5200;
+  --info-soft: #d6e2f6;
+  --info-selected: #e8eef9;
+  --info-line: #1f5fbf;
+  --glass: #fcfdfff2;
+  --glass-strong: #fcfdfff5;
+  --glass-surface: #e3eaf6f2;
+  --glass-overlay: #fffffff5;
+  --term-fg: #0a2550;
+  --term-cursor: #b31942;
+  --selected-ring: 1px;
 }
-::selection{background:var(--selection)}
+::selection {
+  background: var(--selection);
+}
 
 /* Shortcut keys look identical in the terminal dock and the workspace bar. */
-.key-bar{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;min-width:0}
-.key-bar::-webkit-scrollbar{display:none}
-.key-controls{display:flex;gap:6px}
-.key-controls[hidden]{display:none}
-.key-controls>.key-bar{flex:1}
-.key-bar button,.terminal-enter{flex:0 0 auto;min-width:44px;min-height:36px;border:1px solid var(--line-strong);border-radius:var(--r-sm);background:var(--raised);color:var(--text-2);font:12px var(--font-mono);padding:0 11px;white-space:nowrap}
-.terminal-enter{color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft);touch-action:manipulation}
-.terminal-enter:active{background:var(--press)}
-.terminal-enter:disabled{opacity:.45}
-.key-bar button:hover{background:var(--hover);color:var(--text)}
-.key-bar button:active{background:var(--press)}
-.key-bar button[aria-pressed=true]{border-color:var(--accent-line);box-shadow:inset 0 0 0 var(--selected-ring) var(--accent-line);background:var(--accent-soft);color:var(--accent)}
-.key-bar button.command-shortcut{color:var(--accent)}
+.key-bar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+}
+.key-bar::-webkit-scrollbar {
+  display: none;
+}
+.key-controls {
+  display: flex;
+  gap: 6px;
+}
+.key-controls[hidden] {
+  display: none;
+}
+.key-controls > .key-bar {
+  flex: 1;
+}
+.key-bar button,
+.terminal-enter {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--raised);
+  color: var(--text-2);
+  font: 12px var(--font-mono);
+  padding: 0 11px;
+  white-space: nowrap;
+}
+.terminal-enter {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  touch-action: manipulation;
+}
+.terminal-enter:active {
+  background: var(--press);
+}
+.terminal-enter:disabled {
+  opacity: 0.45;
+}
+.key-bar button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.key-bar button:active {
+  background: var(--press);
+}
+.key-bar button[aria-pressed='true'] {
+  border-color: var(--accent-line);
+  box-shadow: inset 0 0 0 var(--selected-ring) var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.key-bar button.command-shortcut {
+  color: var(--accent);
+}
 
 /* Shared spinners are the only perpetual motion, and they mean real waiting. */
-@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
