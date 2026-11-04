@@ -1,8 +1,8 @@
 use crate::herdr_support as support;
 use libertty_server::{
-    herdr_poll,
-    herdr_terminal_stream::{Hub, Size},
-    herdr_view::{Ledgers, View, Viewer},
+    herdr,
+    herdr::terminal_stream::{Hub, Size},
+    herdr::view::{Ledgers, View, Viewer},
     session::Transport,
     viewer_queue,
 };
@@ -34,7 +34,7 @@ async fn a_closed_terminal_controller_ends_quietly_before_history_detects_the_cl
         target,
         terminal,
         &Hub::default(),
-        &herdr_poll::Polls::default(),
+        &herdr::poll::Polls::default(),
         Some((Size { cols: 40, rows: 30 }, None)),
         Viewer {
             send,
@@ -87,7 +87,7 @@ async fn history_errors_reconcile_closed_moved_and_replaced_panes_before_reporti
             target,
             terminal,
             &Hub::default(),
-            &herdr_poll::Polls::default(),
+            &herdr::poll::Polls::default(),
             None,
             Viewer {
                 send,
@@ -168,7 +168,7 @@ async fn rapid_input_and_commands_reach_herdr_in_receive_order() {
     let fixture = support::Fixture::new().await;
     let mut target = fixture.target.clone();
     target.binary = "/bin/false".into();
-    let history = herdr_poll::Polls::default();
+    let history = herdr::poll::Polls::default();
     let frames = Hub::default();
     let (send, mut receive, _) = viewer_queue::channel();
     let cancel = CancellationToken::new();
@@ -298,7 +298,7 @@ async fn typing_reuses_pane_validation_until_herdr_reports_a_change() {
             .unwrap()
             .clone(),
         &Hub::default(),
-        &herdr_poll::Polls::default(),
+        &herdr::poll::Polls::default(),
         None,
         Viewer {
             send,
@@ -380,7 +380,7 @@ async fn numbered_keys_reach_herdr_once_across_connections_of_one_browser_termin
         .clone();
     let (hub, history, ledgers) = (
         Hub::default(),
-        herdr_poll::Polls::default(),
+        herdr::poll::Polls::default(),
         Ledgers::default(),
     );
     let mut connections = Vec::new();
@@ -473,7 +473,7 @@ async fn layout_waits_for_pty_output_and_parked_views_keep_geometry_without_upda
             .into_owned(),
     );
     fixture.content_revision.store(8, Ordering::Relaxed);
-    let history = herdr_poll::Polls::default();
+    let history = herdr::poll::Polls::default();
     let frames = Hub::default();
     let (send, mut receive, _) = viewer_queue::channel();
     let cancel = CancellationToken::new();

@@ -228,7 +228,7 @@ pub enum ViewerMessage {
     },
     NotificationAck {
         device: String,
-        event: crate::herdr_state::Event,
+        event: crate::herdr::state::Event,
     },
 }
 pub mod requests;

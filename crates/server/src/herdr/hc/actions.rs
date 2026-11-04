@@ -1,5 +1,5 @@
 use super::*;
-use crate::herdr_action::{Action, Direction};
+use crate::herdr::action::{Action, Direction};
 use herdr_client_lib::{
     commands::{Creation, Launch, Placement},
     document::{Axis, Document},
@@ -101,7 +101,7 @@ async fn kinds(client: &Client) -> Result<Vec<String>, String> {
 }
 pub async fn options(target: &Target) -> Result<Value, String> {
     Ok(
-        json!({"kinds":kinds(&hub::live(target).await?.client).await?,"actions":["list-worktrees","new-worktree","open-worktree","delete-worktree","split","create-space","move-space","create","rename-space","close-space","rename","close"]}),
+        json!({"kinds":kinds(&hub::live(target).await?.client).await?,"actions":crate::herdr::action::NAMES}),
     )
 }
 pub async fn action(target: &Target, action: Action) -> Result<Value, String> {

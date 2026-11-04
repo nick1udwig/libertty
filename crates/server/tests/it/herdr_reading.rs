@@ -1,5 +1,5 @@
 use crate::herdr_support as support;
-use libertty_server::herdr_reading::{Opened, open};
+use libertty_server::herdr::reading::{Opened, open};
 use std::sync::atomic::Ordering;
 use tokio_util::sync::CancellationToken;
 

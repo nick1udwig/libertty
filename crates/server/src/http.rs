@@ -3,7 +3,7 @@ mod idempotency;
 mod routes;
 mod socket;
 use crate::{
-    assets, dictation, files, herdr, herdr_terminal_stream, herdr_view,
+    assets, dictation, files, herdr,
     host::HostServices,
     notifications,
     pairing::{Pairings, pairing_token, token_matches},
@@ -150,7 +150,7 @@ struct Ticket {
     until: Instant,
 }
 struct HerdrTicket {
-    size: Option<herdr_terminal_stream::Size>,
+    size: Option<herdr::terminal_stream::Size>,
     owner: String,
     session: String,
     source: String,
@@ -205,11 +205,11 @@ pub struct App {
     herdr_connections: Mutex<HashMap<String, (SessionKey, CancellationToken)>>,
     herdr_capacity: Arc<tokio::sync::Semaphore>,
     ssh_probes: tokio::sync::Semaphore,
-    herdr_terminals: herdr_terminal_stream::Hub,
-    herdr_inputs: herdr_view::Ledgers,
+    herdr_terminals: herdr::terminal_stream::Hub,
+    herdr_inputs: herdr::view::Ledgers,
     replies: idempotency::Replies,
     uploads: crate::uploads::Uploads,
-    herdr_polls: crate::herdr_poll::Polls,
+    herdr_polls: crate::herdr::poll::Polls,
     notifications: Arc<notifications::Notifications>,
     services: HostServices,
     commands: Vec<String>,
@@ -337,11 +337,11 @@ impl App {
             herdr_connections: Mutex::new(HashMap::new()),
             herdr_capacity: Arc::new(tokio::sync::Semaphore::new(64)),
             ssh_probes: tokio::sync::Semaphore::new(4),
-            herdr_terminals: herdr_terminal_stream::Hub::default(),
+            herdr_terminals: herdr::terminal_stream::Hub::default(),
             herdr_inputs: Default::default(),
             replies: Default::default(),
             uploads: Default::default(),
-            herdr_polls: crate::herdr_poll::Polls::default(),
+            herdr_polls: crate::herdr::poll::Polls::default(),
             notifications,
             services,
             commands,
@@ -1007,7 +1007,7 @@ async fn herdr_socket_session(
     ticket: HerdrTicket,
     cancel: CancellationToken,
     id: &str,
-    ledger: Option<(Arc<herdr_view::Ledger>, bool)>,
+    ledger: Option<(Arc<herdr::view::Ledger>, bool)>,
 ) {
     let _source = if ticket.source.is_empty() {
         None
@@ -1030,7 +1030,7 @@ async fn herdr_socket_session(
     ])
     .to_string();
     if ticket.target.core && !ticket.terminal.is_empty() {
-        crate::herdr_core::terminal(
+        crate::herdr::hc::terminal(
             socket,
             &ticket.target,
             &ticket.terminal,
@@ -1083,17 +1083,17 @@ async fn herdr_socket_session(
             return;
         };
         let revision = if ticket.size.is_some() {
-            crate::herdr_redraw::revision(&ticket.target, &agent.pane_id, &cancel).await
+            crate::herdr::redraw::revision(&ticket.target, &agent.pane_id, &cancel).await
         } else {
             None
         };
-        match herdr_view::View::open(
+        match herdr::view::View::open(
             ticket.target,
             agent,
             &app.herdr_terminals,
             &app.herdr_polls,
             ticket.size.map(|size| (size, revision)),
-            herdr_view::Viewer {
+            herdr::view::Viewer {
                 send,
                 cancel: cancel.clone(),
                 ledger,

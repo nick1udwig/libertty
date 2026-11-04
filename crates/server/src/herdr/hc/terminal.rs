@@ -259,7 +259,7 @@ pub async fn terminal(
     mut socket: WebSocket,
     target: &Target,
     id: &str,
-    size: Option<crate::herdr_terminal_stream::Size>,
+    size: Option<crate::herdr::terminal_stream::Size>,
     recording_scope: &str,
     cancel: CancellationToken,
 ) {
@@ -268,7 +268,7 @@ pub async fn terminal(
         let record = live.record(id)?.clone();
         drop(live);
         let client = connect(target).await?;
-        let size = size.unwrap_or(crate::herdr_terminal_stream::Size {
+        let size = size.unwrap_or(crate::herdr::terminal_stream::Size {
             cols: record.cols.max(1),
             rows: record.rows.max(1),
         });

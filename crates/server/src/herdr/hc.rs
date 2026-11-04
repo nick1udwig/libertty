@@ -88,8 +88,19 @@ pub async fn snapshot(target: &Target) -> Result<Arc<Snapshot>, String> {
     Ok(hub::live(target).await?.snapshot.clone())
 }
 
+pub(crate) async fn validate_terminal(
+    target: &Target,
+    terminal: &crate::herdr::Terminal,
+) -> Result<(), String> {
+    snapshot(target)
+        .await?
+        .terminal(&terminal.terminal_id)
+        .filter(|t| t.pane_id == terminal.pane_id)
+        .map(|_| ())
+        .ok_or("This terminal ended or moved.".into())
+}
 /// Runs an action on its own session, then waits until the shared session includes its result.
-pub async fn action(target: &Target, input: crate::herdr_action::Action) -> Result<Value, String> {
+pub async fn action(target: &Target, input: crate::herdr::action::Action) -> Result<Value, String> {
     let result = actions::action(target, input).await;
     hub::refresh(target).await?;
     result

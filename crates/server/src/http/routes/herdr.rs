@@ -184,7 +184,7 @@ pub(super) async fn api_herdr_action(
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Failure> {
     let target = ctx.target;
-    let input: crate::herdr_action::Action = typed_body(&mut req, 65536).await?;
+    let input: crate::herdr::action::Action = typed_body(&mut req, 65536).await?;
     return ok(target.action(input).await.map_err(fail)?);
 }
 
@@ -212,7 +212,7 @@ pub(super) async fn api_herdr_ticket(
     };
     let size = if (input.mobile || target.core) && !terminal.is_empty() {
         let dimension = |value: Option<u16>| value.filter(|value| (1..=1000).contains(value));
-        Some(herdr_terminal_stream::Size {
+        Some(herdr::terminal_stream::Size {
             cols: dimension(input.cols).ok_or_else(|| fail("Invalid terminal size."))?,
             rows: dimension(input.rows).ok_or_else(|| fail("Invalid terminal size."))?,
         })
@@ -263,7 +263,7 @@ pub(super) async fn api_herdr_reading(
     let cancel = CancelOnDrop(CancellationToken::new());
     let opened = tokio::time::timeout(
         Duration::from_secs(30),
-        crate::herdr_reading::open(
+        crate::herdr::reading::open(
             &ctx.target,
             &input.terminal_id,
             &input.command,
@@ -276,8 +276,8 @@ pub(super) async fn api_herdr_reading(
     .map_err(|_| fail("Reading command timed out."))?
     .map_err(fail)?;
     match opened {
-        crate::herdr_reading::Opened::File(path) => ok(json!({"path":path})),
-        crate::herdr_reading::Opened::Capture {
+        crate::herdr::reading::Opened::File(path) => ok(json!({"path":path})),
+        crate::herdr::reading::Opened::Capture {
             name,
             data,
             exit_code,

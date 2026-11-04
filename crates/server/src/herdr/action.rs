@@ -91,3 +91,18 @@ impl TryFrom<&serde_json::Value> for Action {
         Self::deserialize(value)
     }
 }
+/// Every action name, as both backends advertise them.
+pub const NAMES: [&str; 12] = [
+    "list-worktrees",
+    "new-worktree",
+    "open-worktree",
+    "delete-worktree",
+    "split",
+    "create-space",
+    "move-space",
+    "create",
+    "rename-space",
+    "close-space",
+    "rename",
+    "close",
+];

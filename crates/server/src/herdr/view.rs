@@ -4,7 +4,7 @@ mod input;
 use crate::protocol::{DictationSource, DictationTarget, MAX_TEXT, ServerMessage};
 use crate::{
     herdr::Target,
-    herdr_terminal_stream::{Hub, Size, Subscription},
+    herdr::terminal_stream::{Hub, Size, Subscription},
     protocol::{ClientMessage, controls},
     session::Transport,
 };
@@ -83,7 +83,7 @@ pub struct View {
     pending_input: mpsc::Sender<Input>,
     send: crate::viewer_queue::Sender,
     terminal: Subscription,
-    polls: crate::herdr_poll::Polls,
+    polls: crate::herdr::poll::Polls,
     active: tokio::sync::watch::Sender<bool>,
     geometry: Mutex<Geometry>,
     /// Advances with every layout change, so stale confirmations stop.
@@ -104,7 +104,7 @@ impl View {
         target: Target,
         agent: crate::herdr::Terminal,
         hub: &Hub,
-        polls: &crate::herdr_poll::Polls,
+        polls: &crate::herdr::poll::Polls,
         initial: Option<(Size, Option<u64>)>,
         viewer: Viewer,
     ) -> Result<Arc<Self>, String> {
@@ -460,7 +460,7 @@ impl View {
                 }
                 tokio::select! { biased; _=view.cancel.cancelled()=>return, _=layout.changed()=>return, _=&mut ready=>{} }
             }
-            let redrawn = tokio::select! { biased; _=layout.changed()=>false, result=crate::herdr_redraw::wait(&view.target, &view.agent.pane_id, before, &view.cancel)=>result };
+            let redrawn = tokio::select! { biased; _=layout.changed()=>false, result=crate::herdr::redraw::wait(&view.target, &view.agent.pane_id, before, &view.cancel)=>result };
             // Read the epoch before locking the geometry, so no path holds both.
             let current = *view.layout.borrow() == epoch;
             let confirmed = redrawn && current && {
@@ -786,7 +786,7 @@ impl View {
             let revision = match pending {
                 Some(_) => pending,
                 None => {
-                    crate::herdr_redraw::revision(&view.target, &view.agent.pane_id, &view.cancel)
+                    crate::herdr::redraw::revision(&view.target, &view.agent.pane_id, &view.cancel)
                         .await
                 }
             };
