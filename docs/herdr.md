@@ -254,8 +254,14 @@ Output credit returns after the browser acknowledges processed output.
 A hidden pane releases focus and detaches; its programs remain in core.
 Reopening a pane restores core's current screen and available history.
 Core supplies raw output, so the legacy Herdr rendered-frame and mobile redraw-barrier protocols do not apply.
+Taps on the live Core terminal grid send left-button presses and releases through the existing input stream.
+The terminal's mouse modes select the encoding, and taps on local history or retained output send no application clicks.
+Hold-to-copy stays local, and disconnected clicks are never queued for replay.
+Core panes use the ordinary terminal's touch scrolling path, including swipe momentum, application wheel input, and scrolling at the edge of a held selection.
+Apps without mouse reporting receive the same arrow-key fallback, while local terminal history keeps its own scrolling.
 Shell alternatives replace only the latest dictated text after checking the foreground process and screen.
 
 Run `npm run build` and `npm run test:herdr-core` with `hc`, Chromium, and OpenSSH installed.
 The integration harness uses temporary core, SSH, and browser state.
 It checks shared edits, worktrees, streaming, dictation alternatives, repair cancellation, reader isolation, connection ownership, detach, mobile rendering, and reload.
+Run `node test/herdr-core-touch-browser.mjs` after building to check native taps, swipes, held selection scrolling, typing order, mouse modes, hold-to-copy, reconnects, resizing, and local history in an isolated Core terminal.

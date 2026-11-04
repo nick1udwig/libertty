@@ -2,6 +2,7 @@ import { createTerminal, type GespenstTerminal } from '@gespenst/core';
 import type {
   CoreRuntime,
   CoreTerminal,
+  InputSource,
   RenderColor,
   RenderFrame,
   RenderRow,
@@ -109,7 +110,7 @@ export class Terminal {
   private focusHandler?: () => void;
   private automaticFocusHandler?: () => void;
   private copyHandler?: (text: string) => void;
-  private listeners = new Map<string, Set<(value: any) => void>>();
+  private listeners = new Map<string, Set<(value: any, source?: InputSource) => void>>();
   private lastCursor = '';
   private lastScroll = 0;
   readonly renderer = {
@@ -313,7 +314,9 @@ export class Terminal {
       this.requestRender();
     };
     view.focus = () => this.requestAutomaticFocus();
-    view.on('input', (event) => this.emit('data', new TextDecoder().decode(event.data)));
+    view.on('input', (event) =>
+      this.emit('data', new TextDecoder().decode(event.data), event.source),
+    );
     view.on('resize', () => this.emit('resize', { cols: this.cols, rows: this.rows }));
     view.on('selectionChange', () => {
       this.selectionChanged = true;
@@ -627,6 +630,29 @@ export class Terminal {
   scrollToTop() {
     this.scrollToLine(this.wasmTerm?.getScrollbackLength() ?? 0);
   }
+  click(column: number, row: number) {
+    const terminal = this.wasmTerm;
+    if (
+      !terminal ||
+      this.getViewportY() > 0 ||
+      !Number.isInteger(column) ||
+      !Number.isInteger(row) ||
+      column < 0 ||
+      column >= this.cols ||
+      row < 0 ||
+      row >= this.rows ||
+      ![9, 1000, 1002, 1003].some((mode) => terminal.getMode(mode))
+    )
+      return;
+    const geometry = terminal.core.geometry,
+      point = {
+        button: 'left' as const,
+        x: (column + 0.5) * geometry.cellWidthPx,
+        y: (row + 0.5) * geometry.cellHeightPx,
+      };
+    this.view?.sendPointer({ ...point, action: 'press' });
+    this.view?.sendPointer({ ...point, action: 'release' });
+  }
   scrollToLine(offset: number) {
     const target = Math.max(0, Math.min(this.wasmTerm?.getScrollbackLength() ?? 0, offset));
     if (target === this.getViewportY()) return;
@@ -654,10 +680,10 @@ export class Terminal {
   loadAddon(addon: FitAddon) {
     addon.activate(this);
   }
-  private emit(name: string, value?: unknown) {
-    for (const callback of this.listeners.get(name) ?? []) callback(value);
+  private emit(name: string, value?: unknown, source?: InputSource) {
+    for (const callback of this.listeners.get(name) ?? []) callback(value, source);
   }
-  private on(name: string, callback: (value: any) => void) {
+  private on(name: string, callback: (value: any, source?: InputSource) => void) {
     let listeners = this.listeners.get(name);
     if (!listeners) this.listeners.set(name, (listeners = new Set()));
     listeners.add(callback);
@@ -667,7 +693,7 @@ export class Terminal {
       },
     };
   }
-  onData(callback: (data: string) => void) {
+  onData(callback: (data: string, source?: InputSource) => void) {
     return this.on('data', callback);
   }
   onResize(callback: (size: { cols: number; rows: number }) => void) {

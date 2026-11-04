@@ -805,8 +805,23 @@ function viewport() {
 window.visualViewport?.addEventListener('resize', viewport);
 window.addEventListener('resize', viewport);
 viewport();
-function rawInput(data: string) {
+function rawInput(data: string, source?: string) {
   terminalActivity();
+  if (herdrCore && source === 'mouse') {
+    if (
+      presentation.pending ||
+      herdrLayout.pending ||
+      capturedConnection ||
+      !herdrReady ||
+      !tabVisible ||
+      document.hidden ||
+      transport.socket?.readyState !== WebSocket.OPEN ||
+      !replayState
+    )
+      return;
+    if (send({ type: 'input', data })) state.inputRevision++;
+    return;
+  }
   if (['\x1b[I', '\x1b[O'].includes(data)) {
     if (!presentation.pending) send({ type: 'input', data });
     return;
@@ -1142,7 +1157,7 @@ const gestures = new TerminalGestures(term, {
       !cachePainted &&
       ((term.buffer.active.length <= term.rows &&
         ((mobileTerminal() && !herdrParked && state.terminalScroll === true) ||
-          (!herdrTerminal && !!term.wasmTerm?.isAlternateScreen()))) ||
+          ((!herdrTerminal || herdrCore) && !!term.wasmTerm?.isAlternateScreen()))) ||
         (disconnected() && term.getViewportY() >= term.buffer.active.length - term.rows)),
     move: (lines, x, y) => {
       if (lines > 0 && term.buffer.active.length > term.rows) {
@@ -1171,7 +1186,7 @@ const gestures = new TerminalGestures(term, {
         0,
         Math.min(term.rows - 1, Math.floor(((y - bounds.top) * term.rows) / bounds.height)),
       );
-      if (herdrTerminal)
+      if (herdrTerminal && !herdrCore)
         send({ type: 'terminal-scroll', lines: Math.max(-100, Math.min(100, lines)), column, row });
       else {
         const terminal = term.wasmTerm!,
@@ -1191,7 +1206,7 @@ const gestures = new TerminalGestures(term, {
                   Math.min(255, column + 33),
                   Math.min(255, row + 33),
                 );
-        rawInput(data.repeat(Math.min(100, Math.abs(lines))));
+        rawInput(data.repeat(Math.min(100, Math.abs(lines))), 'mouse');
       }
     },
   },
@@ -1204,7 +1219,7 @@ const gestures = new TerminalGestures(term, {
     }
     if (
       !herdrReady ||
-      !mobileTerminal() ||
+      (!herdrCore && !mobileTerminal()) ||
       herdrLayout.pending ||
       herdrParked ||
       !tabVisible ||
@@ -1214,6 +1229,10 @@ const gestures = new TerminalGestures(term, {
     const bounds = term.screen!.getBoundingClientRect();
     const column = Math.floor(((x - bounds.left) * term.cols) / bounds.width),
       row = Math.floor(((y - bounds.top) * term.rows) / bounds.height);
+    if (herdrCore) {
+      term.click(column, row);
+      return;
+    }
     const cell = projection?.nativeCell(column, row);
     if (cell && send({ type: 'terminal-click', ...cell, cols: term.cols, rows: term.rows }))
       state.inputRevision++;
