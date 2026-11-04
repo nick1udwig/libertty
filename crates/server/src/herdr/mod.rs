@@ -199,6 +199,18 @@ impl Target {
             cli::validate_terminal(self, terminal).await
         }
     }
+    /// Confirms that `terminal` still occupies its pane while reading the pane's input state, in one round trip.
+    pub(crate) async fn checked_input_state(
+        &self,
+        terminal: &Terminal,
+    ) -> Result<(Option<ShellInput>, String), String> {
+        let (valid, state) = tokio::join!(
+            self.validate_terminal(terminal),
+            self.input_state(&terminal.pane_id)
+        );
+        valid?;
+        state
+    }
     pub async fn shell_input(&self, pane: &str) -> Result<Option<ShellInput>, String> {
         self.input_state(pane).await.map(|(shell, _)| shell)
     }
@@ -220,10 +232,10 @@ impl Target {
         let pane = snapshot
             .terminal(terminal)
             .ok_or("This terminal has ended.")?;
-        self.validate_terminal(pane).await?;
         let shell = self
-            .shell_input(&pane.pane_id)
+            .checked_input_state(pane)
             .await?
+            .0
             .ok_or("Command alternatives require a shell prompt.")?;
         let mut env = self.env.clone();
         if self.remote.is_none()

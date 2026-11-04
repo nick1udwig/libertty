@@ -70,8 +70,7 @@ pub async fn open(
     let pane = snapshot
         .terminal(terminal)
         .ok_or("This terminal has ended.")?;
-    target.validate_terminal(pane).await?;
-    let (shell, current) = target.input_state(&pane.pane_id).await?;
+    let (shell, current) = target.checked_input_state(pane).await?;
     let shell = shell.ok_or("Return to the Herdr shell prompt before opening the reader.")?;
     if current != context || shell.cwd != cwd {
         return Err("The Herdr shell changed. Try opening the reader again.".into());
