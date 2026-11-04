@@ -4,7 +4,7 @@ use herdr_client_lib::{client::Stream, protocol::Terminal};
 pub(super) struct Editable {
     pub text: String,
     context: String,
-    screen: Option<(String, (u16, u16))>,
+    screen: Option<(Vec<String>, (u16, u16))>,
 }
 impl Editable {
     pub fn new(text: String, record: &Terminal) -> Self {
@@ -15,10 +15,22 @@ impl Editable {
         }
     }
     pub fn observe(&mut self, parser: &vt100::Parser) {
-        let text = parser.screen().contents();
-        if self.screen.is_none() && text.contains(&self.text) {
-            self.screen = Some((text, parser.screen().cursor_position()));
+        let screen = parser.screen();
+        let (row, col) = screen.cursor_position();
+        let before = screen.contents_between(0, 0, row, col);
+        if self.screen.is_none() && before.ends_with(&self.text) {
+            self.screen = Some(Self::picture(parser));
         }
+    }
+    pub fn observed(&self) -> bool {
+        self.screen.is_some()
+    }
+    fn picture(parser: &vt100::Parser) -> (Vec<String>, (u16, u16)) {
+        let screen = parser.screen();
+        (
+            screen.rows(0, screen.size().1).collect(),
+            screen.cursor_position(),
+        )
     }
     pub async fn replace(
         &self,
@@ -37,11 +49,7 @@ impl Editable {
             .map_err(error)?;
         if shell(&current).is_none()
             || context(&current) != self.context
-            || self.screen.as_ref()
-                != Some(&(
-                    parser.screen().contents(),
-                    parser.screen().cursor_position(),
-                ))
+            || self.screen.as_ref() != Some(&Self::picture(parser))
         {
             return Err("Shell input changed; no replacement was sent.".into());
         }
@@ -54,6 +62,7 @@ impl Editable {
         Ok(())
     }
 }
+
 pub(super) struct Prepared {
     pub prompt: u64,
     pub revision: u64,
@@ -119,4 +128,41 @@ pub(super) fn prepare(
             .await;
     });
     Pending { id, cancel }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrapped_dictation_survives_duplicate_resize_but_rejects_edits() {
+        let mut parser = vt100::Parser::new(5, 12, 0);
+        let mut input = Editable::new("echo wrapped text".into(), &Terminal::default());
+        parser.process(b"> echo wrapped text");
+        input.observe(&parser);
+        assert!(input.observed());
+        let before = input.screen.clone();
+        parser.screen_mut().set_size(5, 12);
+        assert_eq!(before, Some(Editable::picture(&parser)));
+        parser.process(b"X");
+        assert_ne!(before, Some(Editable::picture(&parser)));
+    }
+
+    #[test]
+    fn observation_waits_for_the_transcript_at_the_cursor() {
+        let mut parser = vt100::Parser::new(5, 40, 0);
+        let mut input = Editable::new("echo repeated  ".into(), &Terminal::default());
+        parser.process(b"> echo repeated  \r\n> ");
+        input.observe(&parser);
+        assert!(!input.observed(), "History cannot stand in for new input");
+        parser.process(b"echo repe");
+        input.observe(&parser);
+        assert!(!input.observed());
+        parser.process(b"ated  ");
+        input.observe(&parser);
+        assert!(input.observed());
+        let before = input.screen.clone();
+        parser.process(b"\x1b[D");
+        assert_ne!(before, Some(Editable::picture(&parser)));
+    }
 }

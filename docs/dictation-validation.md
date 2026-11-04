@@ -22,6 +22,11 @@ Headless Chromium uses fake microphone audio and an isolated Voxtype-compatible 
 The Herdr regression checks that the outer page owns the wake lock and that hiding the page preserves the recording pane and its audio transport.
 These checks verify application lifecycle behavior, not real operating-system screen locking or speech recognition quality.
 
+Run `npm run test:herdr-core-dictation` with `hc` installed to check microphone and clipboard alternatives in an isolated Herdr Core session.
+This regression covers wrapped transcripts, trailing spaces, delayed shell echo and the original transcript choice.
+The ordinary terminal and legacy Herdr browser suites also check clipboard dictation.
+Single-line clipboard text at a shell prompt uses command alternatives; multiline pastes and foreground programs retain terminal paste behavior.
+
 ## Real-device results
 
 No physical phone or mobile browser session was available in this development environment on 2026-10-12, so no real-device locked-screen capture result is claimed.

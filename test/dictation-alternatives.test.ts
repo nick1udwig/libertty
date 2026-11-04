@@ -78,3 +78,35 @@ test('backend program dictation leaves the applied transcript alone and never re
   assert.deepEqual(f.input, []); assert.deepEqual(f.executed, []);
   assert.equal(f.inline.line.known, false); assert.equal(f.inline.literal, '');
 });
+
+test('failed backend repairs leave the original choice available without duplicating input', () => {
+  const f = fixture();
+  f.inline.backendLoading('echo original');
+  f.inline.backendResult({ ...repaired('echo original', 'echo original'), accepted: false, error: 'Input snapshot unavailable.' });
+  assert.equal(f.inline.literal, 'echo original');
+  assert.equal(f.inline.selected, 'echo original');
+  assert.equal(f.inline.loading, false);
+  assert.equal(f.inline.open, true);
+  assert.deepEqual(f.replacements, []);
+  assert.deepEqual(f.input, []);
+  f.inline.clear();
+  f.inline.backendResult({ ...repaired('echo original', 'echo original'), accepted: false, error: 'Terminal input changed.' });
+  assert.equal(f.inline.literal, '', 'A rejected stale repair cannot restore cleared alternatives');
+  f.line.reset('echo  tail'); f.line.cursor = 5;
+  f.inline.backendLoading('voice');
+  f.inline.backendResult({ ...repaired('echo voice tail', 'echo voice tail'), accepted: false, error: 'Repair timed out.' });
+  assert.equal(f.line.cursor, 10, 'A failed repair keeps the insertion point before the suffix');
+});
+
+test('a failed backend snapshot cannot offer a partial transcript as the entire command', () => {
+  const f = fixture();
+  f.line.known = false;
+  f.inline.backendLoading('voice');
+  f.inline.backendResult({ ...repaired('', ''), accepted: false, error: 'Input snapshot unavailable.' });
+  assert.equal(f.inline.literal, '');
+  f.inline.backendLoading('voice');
+  f.inline.backendResult({ ...repaired('echo prefix voice tail', 'echo prefix voice tail'), accepted: false, error: 'Repair timed out.' });
+  assert.equal(f.inline.literal, 'echo prefix voice tail');
+  assert.equal(f.inline.selected, 'echo prefix voice tail');
+  assert.equal(f.line.known, false, 'The next edit must recover the authoritative cursor');
+});
