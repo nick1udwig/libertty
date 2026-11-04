@@ -273,6 +273,7 @@ struct Pane<'a> {
     revision: u64,
     editable: Option<super::input::Editable>,
     repair: Option<super::input::Pending>,
+    applying: Option<(super::input::Prepared, tokio::time::Instant)>,
     prepared: mpsc::Sender<super::input::Prepared>,
     recording: Arc<Recording>,
     active: bool,
@@ -367,7 +368,31 @@ impl Pane<'_> {
         }
         Ok(())
     }
-    async fn prepared(&mut self, mut prepared: super::input::Prepared) -> Result<(), String> {
+    async fn prepared(&mut self, prepared: super::input::Prepared) -> Result<(), String> {
+        if let Some((previous, _)) = self.applying.take() {
+            self.complete_prepared(previous).await?;
+        }
+        if !prepared.cancel.is_cancelled()
+            && prepared.prompt == self.prompt
+            && prepared.revision == self.revision
+            && prepared.reply.error.is_none()
+            && self
+                .editable
+                .as_ref()
+                .is_some_and(|input| !input.observed())
+        {
+            self.applying = Some((
+                prepared,
+                tokio::time::Instant::now() + Duration::from_secs(2),
+            ));
+            return Ok(());
+        }
+        self.complete_prepared(prepared).await
+    }
+    async fn complete_prepared(
+        &mut self,
+        mut prepared: super::input::Prepared,
+    ) -> Result<(), String> {
         if prepared.cancel.is_cancelled()
             || prepared.prompt != self.prompt
             || prepared.revision != self.revision
@@ -431,6 +456,11 @@ impl Pane<'_> {
         if let Some(editable) = &mut self.editable {
             editable.observe(&self.parser);
         }
+        if self.editable.as_ref().is_some_and(|input| input.observed())
+            && let Some((prepared, _)) = self.applying.take()
+        {
+            self.complete_prepared(prepared).await?;
+        }
         let text = self.decoder.push(&bytes);
         let seq = self.credits.sent(bytes.len() as u32);
         self.send(json!({"type":"output","seq":seq,"data":text}))
@@ -486,7 +516,9 @@ impl Pane<'_> {
                     && crate::protocol::terminal_dimension(cols)
                     && crate::protocol::terminal_dimension(rows) =>
             {
-                self.parser.screen_mut().set_size(rows, cols);
+                if self.parser.screen().size() != (rows, cols) {
+                    self.parser.screen_mut().set_size(rows, cols);
+                }
                 self.stream.resize(cols, rows).await.map_err(error)?;
             }
             ClientMessage::Input { data, .. } if active => {
@@ -705,6 +737,7 @@ pub async fn terminal(
             revision: 0,
             editable: None,
             repair: None,
+            applying: None,
             prepared,
             recording: Arc::new(Recording {
                 input: Mutex::new(Default::default()),
@@ -736,7 +769,16 @@ pub async fn terminal(
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
         let mut facts = tokio::time::interval(Duration::from_millis(500));
         loop {
+            let apply_deadline = pane
+                .applying
+                .as_ref()
+                .map(|(_, deadline)| *deadline)
+                .unwrap_or_else(tokio::time::Instant::now);
             let open = tokio::select! {
+                _ = tokio::time::sleep_until(apply_deadline), if pane.applying.is_some() => {
+                    let (prepared, _) = pane.applying.take().unwrap();
+                    pane.complete_prepared(prepared).await.map(|()| true)?
+                }
                 _ = facts.tick(), if pane.active => pane.facts().await.map(|()| true)?,
                 _ = heartbeat.tick() => {
                     if pane.last_contact.elapsed() > Duration::from_secs(45) {

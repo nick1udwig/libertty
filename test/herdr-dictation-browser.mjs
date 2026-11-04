@@ -80,6 +80,12 @@ try {
   await page.locator('.alternative-choice.selected .choice-command').filter({ hasText: /^cd \.\.$/ }).waitFor({ state: 'visible' });
   await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+a'); await page.keyboard.press('Control+k');
   await page.locator('#terminal textarea').evaluate(element => {
+    const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', 'C D ..');
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+  });
+  await page.locator('.alternative-choice.selected .choice-command').filter({ hasText: /^cd \.\.$/ }).waitFor({ state: 'visible' });
+  await page.locator('#terminal textarea').focus(); await page.keyboard.press('Control+a'); await page.keyboard.press('Control+k');
+  await page.locator('#terminal textarea').evaluate(element => {
     element.dispatchEvent(new CompositionEvent('compositionstart', { data: '', bubbles: true }));
     for (const data of ['C', 'C D ..']) element.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertCompositionText', data, bubbles: true, cancelable: true, isComposing: true }));
     element.dispatchEvent(new CompositionEvent('compositionend', { data: 'C D ..', bubbles: true }));

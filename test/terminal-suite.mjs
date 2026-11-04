@@ -280,6 +280,30 @@ try {
     await verifyHistoryStorage(browser);
     await page.setViewportSize({ width: 390, height: 844 });
     await mkdir(path.join(root, '.test-artifacts'), { recursive: true });
+    // Desktop dictation tools commonly deliver their transcript through the clipboard.
+    assert.equal(await page.locator('#terminal textarea').evaluate(el => {
+      let intercepted;
+      el.addEventListener('paste', event => { intercepted = event.defaultPrevented; event.preventDefault(); event.stopImmediatePropagation(); }, { capture: true, once: true });
+      const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', 'echo first\necho second');
+      el.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+      return intercepted;
+    }), false, 'Multiline clipboard input remains a terminal paste');
+    for (const prefix of ['', 'echo prefix  tail']) {
+      await focusTerminal(page);
+      if (prefix) {
+        await page.keyboard.type(prefix);
+        await page.keyboard.press('Control+a');
+        for (let i = 0; i < 'echo prefix '.length; i++) await page.keyboard.press('ArrowRight');
+      }
+      await page.locator('#terminal textarea').evaluate(el => {
+        const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', 'C D subfolder');
+        el.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+      });
+      const selected = prefix ? 'echo prefix C D subfolder tail' : 'cd subfolder';
+      await page.waitForFunction(text => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === text, selected);
+      assert.ok(await page.locator('.literal-choice').textContent().then(text => text.includes(prefix ? 'echo prefix C D subfolder tail' : 'C D subfolder')));
+      await page.keyboard.press('Control+a'); await page.keyboard.press('Control+k');
+    }
     await command(page, 'python3 hello_world.py --myarg food');
     await page.locator('#menu-button').click();
     await page.locator('#auto-alternatives').uncheck();

@@ -129,8 +129,18 @@ export class InlineSuggestions {
       this.term.paste(text);
       this.armInput();
     };
-    // Browsers expose dictation as replacement text, multi-character insertText, or
-    // committed composition. Clipboard paste is deliberately left to the terminal.
+    // Single-line clipboard text can come from an external dictation tool.
+    container.addEventListener(
+      'paste',
+      (event) => {
+        const text = event.clipboardData?.getData('text/plain');
+        if (!eligible() || !text || /[\x00-\x1f\x7f]/.test(text)) return;
+        stop(event);
+        void this.nativeDictation(text, false);
+      },
+      true,
+    );
+    // Browsers also expose dictation as replacement text or committed composition.
     container.addEventListener(
       'beforeinput',
       (event) => {
@@ -462,7 +472,17 @@ export class InlineSuggestions {
   }
   backendResult(result: RepairResult) {
     if (!result.accepted) {
-      this.clear();
+      if (result.error && this.literal && (this.line.known || result.original)) {
+        if (result.original) this.literal = result.original;
+        if (this.line.text !== this.literal) this.line.known = false;
+        this.selected = this.literal;
+        this.choices = [];
+        this.transcribing = this.loading = false;
+        this.open = this.autoOpen;
+        this.status.textContent = 'Alternatives unavailable. Original text kept.';
+        this.pendingPresentation?.reveal();
+        this.render();
+      } else this.clear();
       return;
     }
     this.literal = result.original;
