@@ -1100,6 +1100,411 @@ fn push<'a>(
     new.literal_rest |= value == "--";
     next.push(new);
 }
+#[derive(Clone, Copy)]
+struct Context<'c, 'a> {
+    words: &'c [Token],
+    catalog: &'c Catalog,
+    script_flags: Option<&'a [Flag]>,
+    metadata: &'a CommandMetadata,
+}
+/// Extends one partial repair by the next word, adding each plausible continuation to `next`.
+fn advance<'a>(state: &State<'a>, ctx: Context<'_, 'a>, next: &mut Vec<State<'a>>) {
+    let Context {
+        words,
+        script_flags,
+        metadata,
+        ..
+    } = ctx;
+    if state.index >= words.len() {
+        next.push(state.clone());
+        return;
+    }
+    let word = &words[state.index];
+    if active_value(state, word, ctx, next) {
+        return;
+    }
+    if word.quoted || state.value_next || state.literal_rest {
+        push(
+            next,
+            state,
+            word.value.clone(),
+            Push {
+                quoted: word.quoted,
+                ..Default::default()
+            },
+            script_flags,
+            metadata,
+        );
+        return;
+    }
+    if subcommand(state, word, ctx, next) {
+        return;
+    }
+    if test!(r###"^[-‐-―−]"###, &word.value) {
+        return dashed(state, word, ctx, next);
+    }
+    operand(state, word, ctx, next);
+}
+/// Continues a flag that still expects values, returning true when the word must be one.
+fn active_value<'a>(
+    state: &State<'a>,
+    word: &Token,
+    ctx: Context<'_, 'a>,
+    next: &mut Vec<State<'a>>,
+) -> bool {
+    let Context {
+        words,
+        catalog,
+        script_flags,
+        metadata,
+    } = ctx;
+    if let Some(flag) = &state.active_value {
+        let boundary = !word.quoted && option_arity(&word.value, state.flags).is_some();
+        if !boundary {
+            if !word.quoted
+                && let Some(schema) = &flag.value
+            {
+                let choices: &[String] = match schema.kind {
+                    ValueKind::Choice => schema.choices.as_deref().unwrap_or_default(),
+                    ValueKind::Path | ValueKind::Directory | ValueKind::InputFile => &catalog.paths,
+                    _ => &[],
+                };
+                for matched in argument_matches(words, state.index, choices) {
+                    let spoken = words[state.index..state.index + matched.consumed]
+                        .iter()
+                        .map(|w| w.value.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    push(
+                        next,
+                        state,
+                        matched.value.clone(),
+                        Push {
+                            consumed: matched.consumed,
+                            confidence: Some(
+                                matched.score - matched.consumed.saturating_sub(1) as f64 * 8.0,
+                            ),
+                            score: if matched.value == spoken {
+                                0.0
+                            } else {
+                                12.0 + matched.score / 10.0
+                            },
+                            change: (matched.value != spoken).then(|| {
+                                if schema.kind == ValueKind::Choice {
+                                    Change::Completion(matched.value.clone())
+                                } else {
+                                    Change::File(matched.value.clone())
+                                }
+                            }),
+                            value: true,
+                            ..Default::default()
+                        },
+                        script_flags,
+                        metadata,
+                    );
+                }
+            }
+            push(
+                next,
+                state,
+                word.value.clone(),
+                Push {
+                    quoted: word.quoted,
+                    value: true,
+                    ..Default::default()
+                },
+                script_flags,
+                metadata,
+            );
+        }
+        if state.value_next {
+            return true;
+        }
+    }
+    false
+}
+/// Matches the word against subcommands of the current scope, returning true when one consumed it.
+fn subcommand<'a>(
+    state: &State<'a>,
+    word: &Token,
+    ctx: Context<'_, 'a>,
+    next: &mut Vec<State<'a>>,
+) -> bool {
+    let Context {
+        words,
+        script_flags,
+        metadata,
+        ..
+    } = ctx;
+    let subs = subcommands_ref(&state.scope, metadata);
+    if !subs.is_empty() {
+        let exact = subs
+            .iter()
+            .find(|sub| sub.to_lowercase() == word.value.to_lowercase());
+        let choices = exact.map_or_else(
+            || matches(words, state.index, subs, 3, false),
+            |sub| {
+                vec![Match {
+                    value: sub.clone(),
+                    consumed: 1,
+                    score: 100.0,
+                }]
+            },
+        );
+        for sub in choices {
+            let change = (sub.value != word.value).then(|| Change::Subcommand(sub.value.clone()));
+            push(
+                next,
+                state,
+                sub.value,
+                Push {
+                    consumed: sub.consumed,
+                    confidence: Some(sub.score - sub.consumed.saturating_sub(1) as f64 * 8.0),
+                    score: if sub.score >= 94.0 { 40.0 } else { 24.0 },
+                    change,
+                    subcommand: true,
+                    ..Default::default()
+                },
+                script_flags,
+                metadata,
+            );
+        }
+        if !test!(r###"^[-‐-―−]"###, &word.value) {
+            return true;
+        }
+    }
+    false
+}
+/// Repairs a word that starts with a dash into the closest flags.
+fn dashed<'a>(state: &State<'a>, word: &Token, ctx: Context<'_, 'a>, next: &mut Vec<State<'a>>) {
+    let Context {
+        words,
+        script_flags,
+        metadata,
+        ..
+    } = ctx;
+    if word.value == "--" {
+        push(
+            next,
+            state,
+            "--".into(),
+            Push::default(),
+            script_flags,
+            metadata,
+        );
+        return;
+    }
+    let mut option = replace!(r###"[‐-―−]"###, &word.value, "-");
+    let mut consumed = 1;
+    if option == "-"
+        && words.get(state.index + 1).is_some_and(|word| {
+            !word.quoted && test!(r###"^[a-zA-Z][a-zA-Z0-9_-]*$"###, &word.value)
+        })
+    {
+        option.push_str(&words[state.index + 1].value);
+        consumed = 2;
+    }
+    let mut alternatives = Vec::new();
+    if option_arity(&option, state.flags).is_some() {
+        alternatives.push(option.clone());
+    }
+    let (name, suffix) = option
+        .split_once('=')
+        .map_or((option.as_str(), String::new()), |(name, value)| {
+            (name, format!("={value}"))
+        });
+    for flag in state.flags {
+        if flag.name.to_lowercase() == name.to_lowercase() {
+            let value = format!("{}{suffix}", flag.name);
+            if !alternatives.contains(&value) {
+                alternatives.push(value);
+            }
+        }
+    }
+    for value in alternatives {
+        let Some(takes_value) = option_arity(&value, state.flags) else {
+            continue;
+        };
+        let flag_name = value.split('=').next().unwrap();
+        let preferred_case = state.fold_flags && flag_name == flag_name.to_lowercase();
+        let score = if !state.fold_flags && value == option {
+            24.0
+        } else if preferred_case {
+            12.0
+        } else if value == option {
+            10.0
+        } else {
+            8.0
+        };
+        let change = (value != word.value || consumed > 1).then(|| Change::Flag(value.clone()));
+        push(
+            next,
+            state,
+            value.clone(),
+            Push {
+                consumed,
+                confidence: Some(if value == word.value { 100.0 } else { 98.0 }),
+                score,
+                change,
+                flag: Some(Flag {
+                    name: value.clone(),
+                    takes_value,
+                    optional_value: None,
+                    value: state
+                        .flags
+                        .iter()
+                        .find(|flag| flag.name == flag_name)
+                        .and_then(|flag| flag.value.clone()),
+                }),
+                ..Default::default()
+            },
+            script_flags,
+            metadata,
+        );
+    }
+}
+/// Repairs a plain word into files, spoken flags, known values or itself.
+fn operand<'a>(state: &State<'a>, word: &Token, ctx: Context<'_, 'a>, next: &mut Vec<State<'a>>) {
+    let Context {
+        words,
+        catalog,
+        script_flags,
+        metadata,
+    } = ctx;
+    let exact_path = catalog.paths.contains(&word.value) && test!(r###"[./_-]"###, &word.value);
+    let file_matches = if !is_path_position(&state.args.values()) {
+        vec![]
+    } else if exact_path {
+        vec![Match {
+            value: word.value.clone(),
+            consumed: 1,
+            score: 100.0,
+        }]
+    } else {
+        indexed_matches(
+            words,
+            state.index,
+            &catalog.paths,
+            6,
+            true,
+            Some(&catalog.paths),
+        )
+    };
+    for file in &file_matches {
+        let spoken = words[state.index..state.index + file.consumed]
+            .iter()
+            .map(|word| word.value.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        push(
+            next,
+            state,
+            file.value.clone(),
+            Push {
+                consumed: file.consumed,
+                confidence: Some(file.score - file.consumed.saturating_sub(1) as f64 * 8.0),
+                score: file.score / 10.0,
+                change: (file.value != spoken).then(|| Change::File(file.value.clone())),
+                ..Default::default()
+            },
+            script_flags,
+            metadata,
+        );
+    }
+    let mut matched_flag = false;
+    for n in 1..=5.min(words.len() - state.index) {
+        let span = &words[state.index..state.index + n];
+        if span
+            .iter()
+            .any(|word| word.quoted || word.value.starts_with('-'))
+        {
+            break;
+        }
+        let spoken = replace!(
+            r###"(?i)^(?:dash[ -]*|hyphen[ -]*|hep[ -]*)+"###,
+            &span
+                .iter()
+                .map(|word| word.value.as_str())
+                .collect::<Vec<_>>()
+                .join(" "),
+            "",
+        );
+        for flag in state.flags {
+            if !key(&spoken).is_empty() && key(&spoken) == key(&flag.name) {
+                matched_flag = true;
+                push(
+                    next,
+                    state,
+                    flag.name.clone(),
+                    Push {
+                        consumed: n,
+                        confidence: Some(94.0),
+                        score: 14.0 + n as f64,
+                        change: Some(Change::Flag(flag.name.clone())),
+                        flag: Some(flag.clone()),
+                        ..Default::default()
+                    },
+                    script_flags,
+                    metadata,
+                );
+            }
+        }
+    }
+    // Values are keyed by the JSON argument vector, so it is built only when one could match.
+    if !matched_flag
+        && let Some(values) = metadata
+            .argument_values
+            .as_ref()
+            .filter(|values| !values.is_empty())
+            .and_then(|values| values.get(&serde_json::to_string(&state.args.values()).unwrap()))
+    {
+        for matched in argument_matches(words, state.index, values) {
+            let spoken = words[state.index..state.index + matched.consumed]
+                .iter()
+                .map(|word| word.value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let changed = matched.value != spoken;
+            let change = changed.then(|| Change::Completion(matched.value.clone()));
+            push(
+                next,
+                state,
+                matched.value,
+                Push {
+                    consumed: matched.consumed,
+                    confidence: Some(
+                        matched.score - matched.consumed.saturating_sub(1) as f64 * 8.0,
+                    ),
+                    score: if changed {
+                        20.0 + matched.score / 10.0
+                    } else {
+                        0.0
+                    },
+                    change,
+                    ..Default::default()
+                },
+                script_flags,
+                metadata,
+            );
+        }
+    }
+    if !matched_flag || !file_matches.is_empty() {
+        push(
+            next,
+            state,
+            word.value.clone(),
+            Push {
+                unresolved: !["echo", "printf"].contains(&state.args.first().as_str())
+                    && !file_matches
+                        .iter()
+                        .any(|matched| matched.consumed == 1 && matched.value == word.value),
+                ..Default::default()
+            },
+            script_flags,
+            metadata,
+        );
+    }
+}
 fn repair_one(
     input: &str,
     catalog: &Catalog,
@@ -1177,350 +1582,16 @@ fn repair_one(
         }
         let mut next = Vec::new();
         for state in &states {
-            if state.index >= words.len() {
-                next.push(state.clone());
-                continue;
-            }
-            let word = &words[state.index];
-            if let Some(flag) = &state.active_value {
-                let boundary = !word.quoted && option_arity(&word.value, state.flags).is_some();
-                if !boundary {
-                    if !word.quoted
-                        && let Some(schema) = &flag.value
-                    {
-                        let choices: &[String] = match schema.kind {
-                            ValueKind::Choice => schema.choices.as_deref().unwrap_or_default(),
-                            ValueKind::Path | ValueKind::Directory | ValueKind::InputFile => {
-                                &catalog.paths
-                            }
-                            _ => &[],
-                        };
-                        for matched in argument_matches(&words, state.index, choices) {
-                            let spoken = words[state.index..state.index + matched.consumed]
-                                .iter()
-                                .map(|w| w.value.as_str())
-                                .collect::<Vec<_>>()
-                                .join(" ");
-                            push(
-                                &mut next,
-                                state,
-                                matched.value.clone(),
-                                Push {
-                                    consumed: matched.consumed,
-                                    confidence: Some(
-                                        matched.score
-                                            - matched.consumed.saturating_sub(1) as f64 * 8.0,
-                                    ),
-                                    score: if matched.value == spoken {
-                                        0.0
-                                    } else {
-                                        12.0 + matched.score / 10.0
-                                    },
-                                    change: (matched.value != spoken).then(|| {
-                                        if schema.kind == ValueKind::Choice {
-                                            Change::Completion(matched.value.clone())
-                                        } else {
-                                            Change::File(matched.value.clone())
-                                        }
-                                    }),
-                                    value: true,
-                                    ..Default::default()
-                                },
-                                script_flags,
-                                metadata,
-                            );
-                        }
-                    }
-                    push(
-                        &mut next,
-                        state,
-                        word.value.clone(),
-                        Push {
-                            quoted: word.quoted,
-                            value: true,
-                            ..Default::default()
-                        },
-                        script_flags,
-                        metadata,
-                    );
-                }
-                if state.value_next {
-                    continue;
-                }
-            }
-            if word.quoted || state.value_next || state.literal_rest {
-                push(
-                    &mut next,
-                    state,
-                    word.value.clone(),
-                    Push {
-                        quoted: word.quoted,
-                        ..Default::default()
-                    },
+            advance(
+                state,
+                Context {
+                    words: &words,
+                    catalog,
                     script_flags,
                     metadata,
-                );
-                continue;
-            }
-            let subs = subcommands_ref(&state.scope, metadata);
-            if !subs.is_empty() {
-                let exact = subs
-                    .iter()
-                    .find(|sub| sub.to_lowercase() == word.value.to_lowercase());
-                let choices = exact.map_or_else(
-                    || matches(&words, state.index, subs, 3, false),
-                    |sub| {
-                        vec![Match {
-                            value: sub.clone(),
-                            consumed: 1,
-                            score: 100.0,
-                        }]
-                    },
-                );
-                for sub in choices {
-                    let change =
-                        (sub.value != word.value).then(|| Change::Subcommand(sub.value.clone()));
-                    push(
-                        &mut next,
-                        state,
-                        sub.value,
-                        Push {
-                            consumed: sub.consumed,
-                            confidence: Some(
-                                sub.score - sub.consumed.saturating_sub(1) as f64 * 8.0,
-                            ),
-                            score: if sub.score >= 94.0 { 40.0 } else { 24.0 },
-                            change,
-                            subcommand: true,
-                            ..Default::default()
-                        },
-                        script_flags,
-                        metadata,
-                    );
-                }
-                if !test!(r###"^[-‐-―−]"###, &word.value) {
-                    continue;
-                }
-            }
-            if test!(r###"^[-‐-―−]"###, &word.value) {
-                if word.value == "--" {
-                    push(
-                        &mut next,
-                        state,
-                        "--".into(),
-                        Push::default(),
-                        script_flags,
-                        metadata,
-                    );
-                    continue;
-                }
-                let mut option = replace!(r###"[‐-―−]"###, &word.value, "-");
-                let mut consumed = 1;
-                if option == "-"
-                    && words.get(state.index + 1).is_some_and(|word| {
-                        !word.quoted && test!(r###"^[a-zA-Z][a-zA-Z0-9_-]*$"###, &word.value)
-                    })
-                {
-                    option.push_str(&words[state.index + 1].value);
-                    consumed = 2;
-                }
-                let mut alternatives = Vec::new();
-                if option_arity(&option, state.flags).is_some() {
-                    alternatives.push(option.clone());
-                }
-                let (name, suffix) = option
-                    .split_once('=')
-                    .map_or((option.as_str(), String::new()), |(name, value)| {
-                        (name, format!("={value}"))
-                    });
-                for flag in state.flags {
-                    if flag.name.to_lowercase() == name.to_lowercase() {
-                        let value = format!("{}{suffix}", flag.name);
-                        if !alternatives.contains(&value) {
-                            alternatives.push(value);
-                        }
-                    }
-                }
-                for value in alternatives {
-                    let Some(takes_value) = option_arity(&value, state.flags) else {
-                        continue;
-                    };
-                    let flag_name = value.split('=').next().unwrap();
-                    let preferred_case = state.fold_flags && flag_name == flag_name.to_lowercase();
-                    let score = if !state.fold_flags && value == option {
-                        24.0
-                    } else if preferred_case {
-                        12.0
-                    } else if value == option {
-                        10.0
-                    } else {
-                        8.0
-                    };
-                    let change =
-                        (value != word.value || consumed > 1).then(|| Change::Flag(value.clone()));
-                    push(
-                        &mut next,
-                        state,
-                        value.clone(),
-                        Push {
-                            consumed,
-                            confidence: Some(if value == word.value { 100.0 } else { 98.0 }),
-                            score,
-                            change,
-                            flag: Some(Flag {
-                                name: value.clone(),
-                                takes_value,
-                                optional_value: None,
-                                value: state
-                                    .flags
-                                    .iter()
-                                    .find(|flag| flag.name == flag_name)
-                                    .and_then(|flag| flag.value.clone()),
-                            }),
-                            ..Default::default()
-                        },
-                        script_flags,
-                        metadata,
-                    );
-                }
-                continue;
-            }
-            let exact_path =
-                catalog.paths.contains(&word.value) && test!(r###"[./_-]"###, &word.value);
-            let file_matches = if !is_path_position(&state.args.values()) {
-                vec![]
-            } else if exact_path {
-                vec![Match {
-                    value: word.value.clone(),
-                    consumed: 1,
-                    score: 100.0,
-                }]
-            } else {
-                indexed_matches(
-                    &words,
-                    state.index,
-                    &catalog.paths,
-                    6,
-                    true,
-                    Some(&catalog.paths),
-                )
-            };
-            for file in &file_matches {
-                let spoken = words[state.index..state.index + file.consumed]
-                    .iter()
-                    .map(|word| word.value.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                push(
-                    &mut next,
-                    state,
-                    file.value.clone(),
-                    Push {
-                        consumed: file.consumed,
-                        confidence: Some(file.score - file.consumed.saturating_sub(1) as f64 * 8.0),
-                        score: file.score / 10.0,
-                        change: (file.value != spoken).then(|| Change::File(file.value.clone())),
-                        ..Default::default()
-                    },
-                    script_flags,
-                    metadata,
-                );
-            }
-            let mut matched_flag = false;
-            for n in 1..=5.min(words.len() - state.index) {
-                let span = &words[state.index..state.index + n];
-                if span
-                    .iter()
-                    .any(|word| word.quoted || word.value.starts_with('-'))
-                {
-                    break;
-                }
-                let spoken = replace!(
-                    r###"(?i)^(?:dash[ -]*|hyphen[ -]*|hep[ -]*)+"###,
-                    &span
-                        .iter()
-                        .map(|word| word.value.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    "",
-                );
-                for flag in state.flags {
-                    if !key(&spoken).is_empty() && key(&spoken) == key(&flag.name) {
-                        matched_flag = true;
-                        push(
-                            &mut next,
-                            state,
-                            flag.name.clone(),
-                            Push {
-                                consumed: n,
-                                confidence: Some(94.0),
-                                score: 14.0 + n as f64,
-                                change: Some(Change::Flag(flag.name.clone())),
-                                flag: Some(flag.clone()),
-                                ..Default::default()
-                            },
-                            script_flags,
-                            metadata,
-                        );
-                    }
-                }
-            }
-            // Values are keyed by the JSON argument vector, so it is built only when one could match.
-            if !matched_flag
-                && let Some(values) = metadata
-                    .argument_values
-                    .as_ref()
-                    .filter(|values| !values.is_empty())
-                    .and_then(|values| {
-                        values.get(&serde_json::to_string(&state.args.values()).unwrap())
-                    })
-            {
-                for matched in argument_matches(&words, state.index, values) {
-                    let spoken = words[state.index..state.index + matched.consumed]
-                        .iter()
-                        .map(|word| word.value.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    let changed = matched.value != spoken;
-                    let change = changed.then(|| Change::Completion(matched.value.clone()));
-                    push(
-                        &mut next,
-                        state,
-                        matched.value,
-                        Push {
-                            consumed: matched.consumed,
-                            confidence: Some(
-                                matched.score - matched.consumed.saturating_sub(1) as f64 * 8.0,
-                            ),
-                            score: if changed {
-                                20.0 + matched.score / 10.0
-                            } else {
-                                0.0
-                            },
-                            change,
-                            ..Default::default()
-                        },
-                        script_flags,
-                        metadata,
-                    );
-                }
-            }
-            if !matched_flag || !file_matches.is_empty() {
-                push(
-                    &mut next,
-                    state,
-                    word.value.clone(),
-                    Push {
-                        unresolved: !["echo", "printf"].contains(&state.args.first().as_str())
-                            && !file_matches.iter().any(|matched| {
-                                matched.consumed == 1 && matched.value == word.value
-                            }),
-                        ..Default::default()
-                    },
-                    script_flags,
-                    metadata,
-                );
-            }
+                },
+                &mut next,
+            );
         }
         next.sort_by(|a, b| b.score.total_cmp(&a.score));
         next.truncate(16);
