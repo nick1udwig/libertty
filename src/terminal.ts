@@ -241,8 +241,15 @@ function captureTranscript() {
   clearTimeout(transcriptTimer); transcriptTimer = undefined;
   if (observeTerminal()) cacheTimer ??= setTimeout(saveTranscript, 2000);
 }
+// Herdr Core usually replays live output soon after a pane is chosen, so retained output shows only when that replay is slow.
+const coreRetainedDelay = 150;
+let presentedAt = 0, cachedRenderedTimer: ReturnType<typeof setTimeout> | undefined;
 function notifyCachedRendered() {
-  if (herdrTerminal && cachePainted && herdrPresentation && tabVisible && !herdrParked) notify('terminal-rendered', { presentation: herdrPresentation, cols: term.cols, rows: term.rows });
+  clearTimeout(cachedRenderedTimer);
+  if (!herdrTerminal || !cachePainted || !herdrPresentation || !tabVisible || herdrParked) return;
+  const delay = herdrCore ? presentedAt + coreRetainedDelay - performance.now() : 0;
+  if (delay > 0) cachedRenderedTimer = setTimeout(notifyCachedRendered, delay);
+  else notify('terminal-rendered', { presentation: herdrPresentation, cols: term.cols, rows: term.rows });
 }
 /** Show retained output with the live renderer; the next live paint or replay replaces it. */
 function paintCache(position: number, native?: NativeTerminalSnapshot) {
@@ -680,9 +687,8 @@ function notifyHerdrRendered(presentationId = herdrPresentation) {
     clearTimeout(herdrHandoffTimer);
     if (herdrHandoffUntil > Date.now() && !projection?.hasHistory) { herdrHandoffTimer = setTimeout(() => notifyHerdrRendered(presentationId), herdrHandoffUntil - Date.now()); return; }
     herdrHandoffUntil = 0;
-    presentation.reveal(); synchronizeInput();
+    presentation.reveal(() => notify('terminal-rendered', { presentation: presentationId, cols:term.cols, rows:term.rows })); synchronizeInput();
     if (resizeCover.held && resizeTarget === term.cols + 'x' + term.rows) { clearTimeout(resizeCoverTimer); resizeCover.reveal(); }
-    notify('terminal-rendered', { presentation: presentationId, cols:term.cols, rows:term.rows });
   }
 }
 function notifyHerdrSizing() {
@@ -982,7 +988,7 @@ if (embedded) {
     if (event.data?.type === 'herdr-present' && herdrTerminal && typeof event.data.presentation === 'string') {
       discardHerdrFrames(); rendering.activity(); frameScheduler.activity();
       releaseResizeCover(); hold();
-      herdrPresentation = event.data.presentation; herdrLayout.cancel();
+      herdrPresentation = event.data.presentation; presentedAt = performance.now(); herdrLayout.cancel();
       notifyHerdrSizing(); notifyCachedRendered();
       return;
     }
