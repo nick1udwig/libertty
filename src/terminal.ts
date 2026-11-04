@@ -1,7 +1,7 @@
 import { captureNativeSnapshot, restoreNativeSnapshot, type NativeTerminalSnapshot } from './terminal-native-snapshot.ts';
 import { requestJSON } from './api.ts';
 import { saved } from './persistence.ts';
-import { wireProtocols, encodeWire, encodeAudio, constrainedLink } from './wire.ts';
+import { wireProtocols, encodeWire, encodeAudio } from './wire.ts';
 import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
 import { imagePicker, uploadImage } from './image-upload.ts';

@@ -110,8 +110,7 @@ const connections = createWorkspaceConnections({
   show,
   browserVault,
 });
-const { capturedSSH, capturedHerdr, openHost, routes, configureConnection, reconnectHerdr } =
-  connections;
+const { capturedHerdr, openHost, routes, configureConnection, reconnectHerdr } = connections;
 
 const herdrNotifications = new HerdrNotifications(
   <T>(id: string, name: string, data?: unknown) => api<T>(backendFor(id), name, data),
@@ -479,7 +478,7 @@ async function consumePendingReading() {
       !validSession(request.session)
     )
       return;
-    const { backend, source } = await pendingSource(request.backendUrl, request.session);
+    const { source } = await pendingSource(request.backendUrl, request.session);
     const readingSource =
       typeof request.herdrTerminal === 'string' &&
       request.herdrTerminal.length <= 512 &&

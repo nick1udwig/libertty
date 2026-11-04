@@ -38,8 +38,6 @@ function row(cells: readonly RenderCell[], columns: number, palette: readonly Re
 
 type Snapshot = { text: string; picture: TerminalPicture };
 const snapshots = new WeakMap<object, { revision: number; limit: number; columns: number; rows: number; foreground: number; value: Snapshot }>();
-export function invalidateSnapshot(term: Terminal) { if (term.wasmTerm) snapshots.delete(term.wasmTerm); }
-
 /** Styled rows that repaint through the same renderer; each row starts from default attributes. */
 export function terminalSnapshot(term: Terminal, limit = 5000) {
   const terminal = term.wasmTerm!, columns = terminal.cols, rows = terminal.rows;
