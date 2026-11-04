@@ -1,6 +1,7 @@
 import type { Terminal } from './terminal-adapter.ts';
 import { OutputScheduler } from './output-scheduler.ts';
 import { isPreservingScrollback } from './terminal-viewport.ts';
+import { SynchronizedOutput } from './synchronized-output.ts';
 
 /** Paint changed terminal content once, then let the browser sleep. */
 export class TerminalRendering {
@@ -11,6 +12,7 @@ export class TerminalRendering {
   private events = new AbortController();
   private term: Terminal;
   private cursorVisible = true;
+  private synchronized = new SynchronizedOutput();
   constructor(term: Terminal) {
     this.term = term;
     this.scheduler = new OutputScheduler(() => this.paint(), () => !this.disposed && this.visible && !document.hidden);
@@ -44,6 +46,8 @@ export class TerminalRendering {
   private paint() {
     if (this.disposed || !this.visible || document.hidden) return;
     const term = this.term;
+    // Gespenst keeps its render pending while this paint waits, so the next write cannot request another one; each frame checks again instead.
+    if (this.synchronized.hold(!!term.wasmTerm?.getMode(2026))) { this.scheduler.request(); return; }
     const cursor = term.wasmTerm!.getCursor();
     const blinking = this.scheduler.interactive && term.options.cursorBlink && cursor.visible && term.getViewportY() === 0 && document.hasFocus() && term.element!.contains(document.activeElement);
     if (!blinking) this.cursorVisible = true;

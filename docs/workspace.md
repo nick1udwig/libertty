@@ -315,6 +315,11 @@ Retained output also keeps its own cursor until that replacement.
 The replacement shows no connection state or progress indicator.
 Retained output appears at once, and the connection state appears only while the browser is offline or a connection attempt fails.
 A Herdr Core pane shows retained output only when its live replay has not painted within 150 milliseconds of selection, so a fast replay replaces the previous pane directly.
+The server sends a Herdr Core pane's first paint as one replay message.
+Herdr Core gives a pane without viewers its headless size, so attaching usually resizes the pane and its program redraws.
+When attaching resizes a pane whose shell is not at its prompt, the replay also includes the program's redraw, for at most 1.5 seconds after attaching.
+A program that marks the redraw with synchronized output ends it at the closing marker, and Claude Code and Codex both do.
+Another program ends its redraw once it is quiet for 10 milliseconds, and a program silent for 50 milliseconds after the paint does not redraw.
 During use, retained output takes over a scroll only after the connection drops or stalls, when the live terminal has no more local rows to show.
 A remote scroll on a slow but working connection waits for the application instead.
 Retained output scrolls and selects like live output and marks gaps with an ellipsis.
@@ -368,6 +373,8 @@ Snapshots and projections read native cells without a legacy cell conversion.
 Styled transcripts retain underline variants and colors, overlines, explicit backgrounds, and OSC 8 links.
 Snapshot caches follow the core state revision so writes and cursor changes are visible before the next paint.
 Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
+Gespenst parses synchronized output (DEC mode 2026) but paints during it, so Libertty's scheduler skips paints while a program's synchronized update is open.
+An update split across socket messages therefore paints once it closes, and an update that never closes paints after one second.
 Reconnect and resize covers combine the background and text canvases.
 The visible window is one row taller than the grid and holds the line above the viewport in its first row.
 Partial-row scrolling moves the canvases with a CSS transform inside the clipped `.terminal-screen` element, so only a changed row, output or a resize paints.
