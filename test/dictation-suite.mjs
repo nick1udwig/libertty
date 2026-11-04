@@ -42,7 +42,7 @@ trust_level = "trusted"
 }
 if (scenario !== 'availability') await writeFile(path.join(fixture, 'token'), 'secret'.repeat(8), { mode: 0o600 });
 const daemon = new WebSocketServer({ host: '127.0.0.1', port: 0 }); await once(daemon, 'listening');
-let audioBytes = 0, capabilities = true, recordingSocket;
+let audioBytes = 0, capabilities = true, recordingSocket, transcript = 'Get in it.';
 async function waitForAudioAfter(previous) {
   for (const deadline = Date.now() + 5000; Date.now() < deadline;) {
     if (audioBytes > previous) return;
@@ -52,6 +52,7 @@ async function waitForAudioAfter(previous) {
 }
 const voice = resumableVoxtype(daemon, {
   token: 'secret'.repeat(8), available: () => capabilities,
+  transcript: () => transcript,
   onAudio: bytes => audioBytes += bytes, onRecording: socket => recordingSocket = socket,
   checkPacket: async packet => { const info = await getPacketInfo(packet, { sampleRate: 16000 }); assert.equal(info.channels, 1); assert.equal(info.durationMs, 20); },
 });
@@ -310,6 +311,20 @@ try {
     await page.waitForFunction(() => window.__out.includes('Initialized empty Git repository'));
     assert.equal(await keyboardOpen(), false, 'Sending an alternate must leave the keyboard closed');
     assert.equal(await access(path.join(fixture, '.git')).then(() => true, () => false), true);
+    await waitForShell(page);
+    for (const text of ['echo ' + 'wrapped words '.repeat(8).trim(), 'echo trailing spaces  ']) {
+      transcript = text;
+      await page.evaluate(() => window.__messages = []);
+      await mic.press('Enter');
+      await page.waitForFunction(() => window.__messages.some(m => m.type === 'dictation' && m.state === 'ready'));
+      await page.waitForTimeout(250);
+      await mic.press('Enter');
+      await page.waitForFunction(() => window.__messages.some(m => m.type === 'repair-result' && m.accepted));
+      await page.locator('.alternative-choice.selected').waitFor({ state: 'visible' });
+      assert.equal(await page.locator('.literal-choice .choice-command').textContent(), text);
+      await terminalInput.focus(); await page.keyboard.press('Control+a'); await page.keyboard.press('Control+k');
+    }
+    transcript = 'Get in it.';
     const beforePermission = voice.currentId;
     await page.evaluate(() => { window.__holdPermission = true; window.__messages = []; });
     await mic.press('Enter'); await page.waitForFunction(() => window.__permissionWaiting);
@@ -452,6 +467,11 @@ try {
       await nativeDictation('Native words.', mode === 'plain' ? 'insertText' : 'insertFromDictation');
       await page.waitForFunction(() => window.__sent.some(m => m.type === 'input' && m.data.includes('Native words.')));
       assert.equal(await readFile(path.join(fixture, 'program-input'), 'utf8'), wrap('Get in it.') + wrap('Native words.'));
+      await terminalInput.evaluate(element => {
+        const clipboardData = new DataTransfer(); clipboardData.setData('text/plain', 'Clipboard words.');
+        element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+      });
+      await until(async () => (await readFile(path.join(fixture, 'program-input'), 'utf8')) === wrap('Get in it.') + wrap('Native words.') + wrap('Clipboard words.'), 'literal clipboard input in foreground programs');
       assert.equal(repairRequests.length, 0);
       if (mode === 'plain') {
         // Leaving the program while transcription is pending must not paste into Bash.
