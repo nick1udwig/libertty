@@ -1,18 +1,17 @@
 import { assertPaneStack, assertPaneTitleRoom } from './support/herdr-tree.mjs';
 import { launchBrowser, freePort, delay, until as wait } from './support/browser.mjs';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { spawn, execFileSync } from 'node:child_process';
+import { access, mkdtemp, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import pty from 'node-pty';
 import { herdrRequest, herdrSnapshot } from './support/herdr.ts';
+import { herdrFixture } from './support/herdr-native.mjs';
 
 const fixturePort3174 = await freePort();
 
 const root = new URL('../', import.meta.url).pathname, dir = await realpath(await mkdtemp('/tmp/libertty-herdr-spaces-'));
-const target = { session: '', socketPath: dir + '/herdr.sock' }, base = 'http://127.0.0.1:' + fixturePort3174;
-const env = { ...process.env, HOME: dir, XDG_CONFIG_HOME: dir + '/config', XDG_DATA_HOME: dir + '/data', XDG_STATE_HOME: dir + '/state', HERDR_SOCKET_PATH: target.socketPath, HERDR_SESSION: '', HERDR_ENV: '', SHELL: '/bin/bash', TERM: 'xterm-256color' };
-let herdr, desktop, backend, browser;
+const fixture = herdrFixture(dir), { target } = fixture, base = 'http://127.0.0.1:' + fixturePort3174;
+let browser;
 try {
   await mkdir(dir + '/alpha', { recursive: true }); await mkdir(dir + '/beta project');
   execFileSync('git', ['init', '-b', 'main', dir + '/alpha'], { stdio: 'ignore' });
@@ -25,18 +24,14 @@ try {
   execFileSync('git', ['-C', dir + '/alpha', 'switch', 'main'], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir + '/alpha', 'branch', 'review/other'], { stdio: 'ignore' });
   execFileSync('git', ['-C', dir + '/alpha', 'worktree', 'add', '-b', 'existing-review', dir + '/existing-review'], { stdio: 'ignore' });
-  herdr = spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', ['server'], { cwd: dir, env, stdio: 'ignore' });
-  await wait(async () => { try { await herdrSnapshot(target); return true; } catch { return false; } }, 'isolated Herdr');
-  desktop = pty.spawn(process.env.HERDR_BINARY || '/usr/bin/herdr', [], { cwd: dir, env, cols: 150, rows: 45, name: 'xterm-256color' }); desktop.onData(() => {});
+  await fixture.startHerdr();
   await wait(async () => (await herdrSnapshot(target)).spaces.length > 0, 'desktop startup workspace');
   const startupSpaces = (await herdrSnapshot(target)).spaces;
   const alpha = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/alpha', label: 'Alpha', focus: false })).workspace.workspace_id;
   const beta = (await herdrRequest(target, 'workspace.create', { cwd: dir + '/beta project', label: 'Beta', focus: false })).workspace.workspace_id;
   // The desktop can create its initial workspace before either fixture request.
   for (const space of startupSpaces) await herdrRequest(target, 'workspace.close', { workspace_id: space.id, close_group: false });
-  backend = spawn(process.env.TEST_EXECUTABLE || root + 'target/debug/libertty', [], { cwd: root, env: { ...env, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: String(fixturePort3174), LIBERTTY_BASE_PATH: '/', LIBERTTY_ALLOWED_HOSTS: '127.0.0.1', LIBERTTY_ALLOWED_ORIGINS: base, LIBERTTY_DATA_DIR: dir + '/libertty', LIBERTTY_TOKEN: '', LIBERTTY_NO_RC: '1', LIBERTTY_CWD: dir }, stdio: 'ignore' });
-  await wait(async () => { try { return (await fetch(base)).ok; } catch { return false; } }, 'isolated backend');
-  const token = (await readFile(dir + '/libertty/pairing-token', 'utf8')).trim();
+  const token = await fixture.startBackend(fixturePort3174, process.env.TEST_EXECUTABLE || undefined);
   browser = await launchBrowser({ args: ['--use-gl=angle', '--use-angle=gl'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   await context.addInitScript(() => {
@@ -653,8 +648,5 @@ try {
 } catch (error) {
   await browser?.contexts()[0]?.pages()[0]?.screenshot({ path: '/tmp/libertty-herdr-spaces-failure.png' }).catch(() => {}); throw error;
 } finally {
-  await browser?.close(); if (backend) { const exited = once(backend, 'exit'); backend.kill(); await exited; }
-  const stopped = herdr && herdr.exitCode === null && herdr.signalCode === null ? once(herdr, 'exit') : null;
-  desktop?.kill(); await herdrRequest(target, 'server.stop').catch(() => {}); herdr?.kill(); await stopped;
-  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await browser?.close(); await fixture.stop();
 }
