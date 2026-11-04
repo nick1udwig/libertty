@@ -33,8 +33,8 @@ import { OutputScheduler } from './output-scheduler.ts';
 import { mergeHerdrFrames, type HerdrFrameMessage } from './terminal-frame-batch.ts';
 import { DictationControl } from './dictation.ts';
 import { InlineSuggestions } from './inline-suggestions.ts';
-import { shortcutEditor } from './shortcut-editor.ts';
-import { defaults, keySequence, validateShortcuts, type Shortcut } from './shortcuts.ts';
+import { ShortcutBar } from './shortcut-bar.ts';
+import { defaults, validateShortcuts } from './shortcuts.ts';
 import { readingPhrases, readingRequest, readingPipeline, type ReadingOpen } from './reading-request.ts';
 import { remoteActions, type NoticeKind, type Notify, type RemoteNotice } from './notice-model.ts';
 import { NoticeCenter } from './notices.ts';
@@ -93,17 +93,15 @@ let inputSeq = 0, numberedInput = false;
 let confirmedInput = 0;
 let disconnectedContext: InputContext | undefined;
 let connectionEpoch = 0, synchronizedConnection = false;
-let shortcuts: Shortcut[] = structuredClone(defaults);
-try {
-  const stored = localStorage.getItem('libertty.shortcuts');
-  if (stored) shortcuts = validateShortcuts(JSON.parse(stored));
-} catch { /* Use defaults when storage is unavailable or stale. */ }
+const shortcutBar = new ShortcutBar({
+  container: $('shortcut-buttons'), execute, input: rawInput, focus: () => term.focus(), attachImages: () => images.click(),
+  save: value => persist('shortcuts', value), changed: updateRun, published: () => publishShortcuts(),
+});
 function persist(key: string, value: unknown) {
   try { localStorage.setItem('libertty.' + key, JSON.stringify(value)); } catch { toast('Browser storage is unavailable. ' +
     'Settings will last for this page only.', 'warning'); }
 }
 const transfersSeen = new Set<string>();
-let ctrl = false;
 let shortcutState = '';
 let uploadingImage = false;
 let dictationWaiting = false;
@@ -154,7 +152,7 @@ function updateRun() {
 }
 function publishShortcuts(available = (state.ready || herdrReady) && !state.exited && transport.socket?.readyState === WebSocket.OPEN && !pendingCommand && !presentation.pending) {
   if (!embedded) return;
-  const snapshot = { shortcuts, ctrl, available, imageAvailable: canUploadImage(), returnAvailable: canSendReturn() }, serialized = JSON.stringify(snapshot);
+  const snapshot = { shortcuts: shortcutBar.shortcuts, ctrl: shortcutBar.ctrl, available, imageAvailable: canUploadImage(), returnAvailable: canSendReturn() }, serialized = JSON.stringify(snapshot);
   if (serialized === shortcutState) return;
   shortcutState = serialized; notify('terminal-shortcuts', snapshot);
 }
@@ -470,7 +468,7 @@ function rawInput(data: string) {
   terminalActivity();
   if (['\x1b[I', '\x1b[O'].includes(data)) { if (!presentation.pending) send({ type: 'input', data }); return; }
   if (capturedConnection) { toast('Finish opening the connection first.', 'warning'); return; }
-  if (ctrl) { if (/^[a-zA-Z]$/.test(data)) data = String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64); setCtrl(false); }
+  data = shortcutBar.modify(data);
   if (presentation.pending || herdrTerminal && (!herdrReady || herdrLayout.pending) || transport.socket?.readyState !== WebSocket.OPEN || !replayState) {
     const context = unsentInput.context || disconnectedContext || inputContext();
     if (!unsentInput.add(data, context)) toast('Input could not be queued for this terminal.');
@@ -526,7 +524,6 @@ function showReading(request: { path: string } | { capture: string; name: string
   location.assign(workspace.href);
 }
 term.onData(rawInput);
-function setCtrl(value: boolean) { ctrl = value; for (const button of document.querySelectorAll('[data-modifier]')) button.setAttribute('aria-pressed', String(value)); publishShortcuts(); }
 function canUploadImage() { return !presentation.pending && !uploadingImage && !capturedConnection && !state.exited && (!herdrTerminal || herdrReady) && transport.socket?.readyState === WebSocket.OPEN; }
 function canSendReturn() { return !dictationWaiting && !pendingCommand && !presentation.pending && !capturedConnection && !state.exited && (!herdrTerminal || herdrReady) && transport.socket?.readyState === WebSocket.OPEN; }
 function sendReturn() { if (canSendReturn()) rawInput('\r'); }
@@ -551,27 +548,8 @@ async function attachImages(files: File[]) {
   } catch (error: any) { toast(abort.signal.aborted ? 'The terminal disconnected. Attach the image again after reconnecting.' : error.message); }
   finally { abort.abort(); uploadingImage = false; updateRun(); }
 }
-function renderShortcuts() {
-  $('shortcut-buttons').replaceChildren();
-  for (const shortcut of shortcuts) {
-    const button = document.createElement('button');
-    button.textContent = shortcut.label; button.title = shortcut.value;
-    button.classList.toggle('command-shortcut', shortcut.kind === 'command');
-    if (shortcut.kind === 'keys' && shortcut.value === 'Ctrl') { button.dataset.modifier = ''; button.setAttribute('aria-pressed', String(ctrl)); }
-    button.addEventListener('pointerdown', e => e.preventDefault());
-    button.onclick = () => {
-      if (shortcut.kind === 'command') { execute(shortcut.value); return; }
-      if (shortcut.value === 'Ctrl') { setCtrl(!ctrl); term.focus(); return; }
-      rawInput(keySequence(shortcut.value)); term.focus();
-    };
-    $('shortcut-buttons').append(button);
-  }
-  const image = document.createElement('button'); image.type = 'button'; image.className = 'image-upload'; image.textContent = 'Image'; image.setAttribute('aria-label', 'Attach images'); image.onclick = () => images.click(); $('shortcut-buttons').append(image);
-  updateRun();
-}
-const prepareEditor = shortcutEditor(() => shortcuts, value => { shortcuts = value; persist('shortcuts', shortcuts); setCtrl(false); renderShortcuts(); }, () => $<HTMLDialogElement>('shortcuts-dialog').close());
-$('customize-shortcuts').onclick = () => { $<HTMLDialogElement>('options-dialog').close(); prepareEditor(); $<HTMLDialogElement>('shortcuts-dialog').showModal(); };
-renderShortcuts();
+$('customize-shortcuts').onclick = () => { $<HTMLDialogElement>('options-dialog').close(); shortcutBar.edit(); $<HTMLDialogElement>('shortcuts-dialog').showModal(); };
+shortcutBar.render();
 function applySettings() {
   fullWidthLayout = saved<string>('herdrLayout', '') === 'full-width';
   try {
@@ -581,8 +559,7 @@ function applySettings() {
     for (const [id, value] of [['auto-alternatives', localStorage.getItem('libertty.autoAlternatives') !== 'false' && localStorage.getItem('libertty.justRun') !== 'true'], ['tap-alternate-send', localStorage.getItem('libertty.tapAlternateSend') !== 'false']] as const) {
       const setting = $<HTMLInputElement>(id); if (setting.checked !== value) { setting.checked = value; setting.dispatchEvent(new Event('change')); }
     }
-    const next = validateShortcuts(JSON.parse(localStorage.getItem('libertty.shortcuts') || JSON.stringify(defaults)));
-    if (JSON.stringify(next) !== JSON.stringify(shortcuts)) { shortcuts = next; setCtrl(false); renderShortcuts(); }
+    shortcutBar.replace(validateShortcuts(JSON.parse(localStorage.getItem('libertty.shortcuts') || JSON.stringify(defaults))));
     inline.setReadingPhrases(saved<unknown>('readingPhrases', null));
     sizeTerminal();
   } catch { /* Keep valid settings if stored data is unavailable or malformed. */ }
@@ -980,8 +957,7 @@ if (embedded) {
     if (event.source !== parent || event.origin !== location.origin) return;
     if (event.data?.type === 'shortcut-host') { document.documentElement.classList.add('hosted-shortcuts'); shortcutState = ''; publishShortcuts(); sizeTerminal(); }
     if (event.data?.type === 'terminal-shortcut' && tabVisible && !herdrParked) {
-      const index = event.data.index, shortcut = shortcuts[index];
-      if (Number.isInteger(index) && shortcut && shortcut.kind === event.data.kind && shortcut.value === event.data.value) $('shortcut-buttons').querySelectorAll<HTMLButtonElement>('button')[index]?.click();
+      shortcutBar.press(event.data.index, event.data.kind, event.data.value);
     }
     if (event.data?.type === 'terminal-return' && tabVisible && !herdrParked) sendReturn();
     if (event.data?.type === 'terminal-images' && tabVisible && !herdrParked && Array.isArray(event.data.files) && event.data.files.every((file: unknown) => file instanceof File)) void attachImages(event.data.files);
