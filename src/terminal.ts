@@ -805,8 +805,23 @@ function viewport() {
 window.visualViewport?.addEventListener('resize', viewport);
 window.addEventListener('resize', viewport);
 viewport();
-function rawInput(data: string) {
+function rawInput(data: string, source?: string) {
   terminalActivity();
+  if (herdrCore && source === 'mouse') {
+    if (
+      presentation.pending ||
+      herdrLayout.pending ||
+      capturedConnection ||
+      !herdrReady ||
+      !tabVisible ||
+      document.hidden ||
+      transport.socket?.readyState !== WebSocket.OPEN ||
+      !replayState
+    )
+      return;
+    if (send({ type: 'input', data })) state.inputRevision++;
+    return;
+  }
   if (['\x1b[I', '\x1b[O'].includes(data)) {
     if (!presentation.pending) send({ type: 'input', data });
     return;
@@ -1204,7 +1219,7 @@ const gestures = new TerminalGestures(term, {
     }
     if (
       !herdrReady ||
-      !mobileTerminal() ||
+      (!herdrCore && !mobileTerminal()) ||
       herdrLayout.pending ||
       herdrParked ||
       !tabVisible ||
@@ -1214,6 +1229,10 @@ const gestures = new TerminalGestures(term, {
     const bounds = term.screen!.getBoundingClientRect();
     const column = Math.floor(((x - bounds.left) * term.cols) / bounds.width),
       row = Math.floor(((y - bounds.top) * term.rows) / bounds.height);
+    if (herdrCore) {
+      term.click(column, row);
+      return;
+    }
     const cell = projection?.nativeCell(column, row);
     if (cell && send({ type: 'terminal-click', ...cell, cols: term.cols, rows: term.rows }))
       state.inputRevision++;
