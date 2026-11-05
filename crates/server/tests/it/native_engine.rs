@@ -1400,3 +1400,55 @@ async fn borrowed_command_checks_keep_private_helpers_explicit_and_public_functi
         assert_eq!(actual, json!(expected));
     }
 }
+
+#[tokio::test]
+async fn dictated_editor_paths_follow_real_directory_names_and_file_case() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().to_str().unwrap();
+    std::fs::create_dir_all(root.path().join("git/libertty")).unwrap();
+    std::fs::write(root.path().join("git/libertty/README.md"), "readme").unwrap();
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(home, &["micro", "nano"]),
+        BTreeMap::from([
+            ("HOME".into(), home.into()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    for (input, expected) in [
+        (
+            "Micro tilde slash git slash liberty slash readme dot md",
+            "micro ~/git/libertty/README.md",
+        ),
+        (
+            "micro ~/git/liberty/readme.md",
+            "micro ~/git/libertty/README.md",
+        ),
+        (
+            "nano ~/git/libertty/readme.md",
+            "nano ~/git/libertty/README.md",
+        ),
+    ] {
+        let result = engine
+            .suggest(input, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result[0].command, expected, "{input}: {result:?}");
+        assert!(
+            result
+                .iter()
+                .filter(|candidate| !candidate.is_literal())
+                .all(|candidate| candidate.command == expected),
+            "{result:?}"
+        );
+    }
+    let input = "micro ~/git/libertty/no-such-file.zzz";
+    let result = engine
+        .suggest(input, &host, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(result.iter().all(Candidate::is_literal), "{result:?}");
+}

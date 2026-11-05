@@ -1,6 +1,6 @@
 use crate::{
     arguments::{ParsedCommand, option_binding},
-    command_policy::{child_scope, flags_for, input_file_command, option_arity, script_operand},
+    command_policy::{child_scope, flags_for, option_arity, script_operand},
     host::Host,
     path_repair::{ExpectedType, PathInput, path_input, resolve_path},
     shell_structure::word_spans,
@@ -112,7 +112,11 @@ pub async fn repair_input_file(
         return Ok(None);
     };
     let command = expanded[spans[0].clone()].to_lowercase();
-    if !input_file_command(&command) || !catalog.commands.contains(&command) {
+    if !matches!(
+        crate::command_profiles::profile(&command).repair_kind,
+        Some(ValueKind::Path | ValueKind::InputFile)
+    ) || !catalog.commands.contains(&command)
+    {
         return Ok(None);
     }
     let flags = flags_for(&command, metadata);

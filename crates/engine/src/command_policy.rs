@@ -91,7 +91,7 @@ pub fn input_file_command(command: &str) -> bool {
     matches!(
         profile(command).repair_kind,
         Some(ValueKind::Path | ValueKind::InputFile)
-    )
+    ) && !editor_command(command)
 }
 pub fn editor_command(command: &str) -> bool {
     profile(command)

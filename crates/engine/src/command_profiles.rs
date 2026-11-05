@@ -111,6 +111,7 @@ static PROFILES: &[(&[&str], CommandProfile)] = &[
                 check: OperandCheck::Repaired,
                 ..PATHS
             }),
+            repair_kind: Some(ValueKind::Path),
             ..DEFAULT
         },
     ),
