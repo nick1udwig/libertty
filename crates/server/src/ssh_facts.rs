@@ -13,10 +13,7 @@ use libertty_engine::{
     host::{FactValue, HostOperation},
     path,
     repair::shell_quote,
-    types::{
-        Catalog, CommandMetadata, DirectoryEntry, DirectoryLookup, DirectorySnapshot, FileInfo,
-        Help,
-    },
+    types::{Catalog, CommandMetadata, DirectoryEntry, DirectorySnapshot, FileInfo, Help},
     validation::Environment,
 };
 use russh_sftp::{client::RawSftpSession, protocol::StatusCode};
@@ -226,19 +223,7 @@ impl SSHHost {
             HostOperation::Entries { path, limit } => Ok(FactValue::Entries(
                 self.snapshot(path, *limit, cancel).await?.entries,
             )),
-            HostOperation::Lookup { path: file } => Ok(FactValue::Lookup(Arc::new(
-                if let Some(info) = self.stat(file, false, cancel).await? {
-                    DirectoryLookup {
-                        info: Some(info),
-                        listing: None,
-                    }
-                } else {
-                    DirectoryLookup {
-                        info: None,
-                        listing: Some(self.snapshot(&path::dirname(file), 10000, cancel).await?),
-                    }
-                },
-            ))),
+            HostOperation::Lookup { .. } => unreachable!("Lookups are handled by NativeHost"),
             HostOperation::Syntax { command } => Ok(FactValue::Syntax(
                 self.syntax_many(&[(&catalog.cwd, command)], cancel)
                     .await?

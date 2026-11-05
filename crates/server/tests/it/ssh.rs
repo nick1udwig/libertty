@@ -103,6 +103,91 @@ async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
     fixture.stop().await;
 }
 
+#[tokio::test]
+async fn repair_listings_share_ssh_reads_but_verify_against_fresh_snapshots() {
+    use libertty_engine::{
+        host::{FactValue, HostOperation},
+        types::Catalog,
+    };
+    let fixture = Fixture::start().await;
+    let remote = fixture.connect(false).await;
+    let directory = format!("{}/listing", fixture.home());
+    tokio::fs::create_dir(&directory).await.unwrap();
+    tokio::fs::write(format!("{directory}/alpha"), "a")
+        .await
+        .unwrap();
+    tokio::fs::write(format!("{directory}/beta"), "b")
+        .await
+        .unwrap();
+    let services = HostServices::new();
+    let mut host = NativeHost::new(
+        services.clone(),
+        Catalog {
+            cwd: directory.clone(),
+            ..Default::default()
+        },
+        std::collections::BTreeMap::new(),
+        libertty_server::help::HelpProvider::new(services.pool.clone()),
+    );
+    host.remote = Some(remote.clone());
+    host.verify_listings();
+    let cancel = CancellationToken::new();
+    let mut operations: Vec<_> = (0..8)
+        .map(|i| HostOperation::Lookup {
+            path: format!("{directory}/missing-{i}"),
+        })
+        .collect();
+    operations.push(HostOperation::Entries {
+        path: directory.clone(),
+        limit: 10000,
+    });
+    let results = host.engine_operations(&operations, &cancel).await;
+    let FactValue::Entries(entries) = results.last().unwrap().as_ref().unwrap() else {
+        panic!("Expected directory entries");
+    };
+    assert_eq!(entries.len(), 2);
+    for result in &results[..8] {
+        let FactValue::Lookup(lookup) = result.as_ref().unwrap() else {
+            panic!("Expected a missing path lookup");
+        };
+        assert!(lookup.info.is_none());
+        let listing = lookup.listing.as_ref().unwrap();
+        assert!(listing.complete);
+        assert!(
+            entries.shares_storage(&listing.entries),
+            "Lookups must share one snapshot"
+        );
+    }
+    let limited = host.snapshot(&directory, 1, &cancel).await.unwrap();
+    assert_eq!(limited.entries.len(), 1);
+    assert!(!entries.shares_storage(&limited.entries));
+    assert!(host.listings_unchanged(&cancel).await.unwrap());
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert!(host.snapshot(&directory, 10000, &cancelled).await.is_err());
+    let cached = host.snapshot(&directory, 10000, &cancel).await.unwrap();
+    assert!(entries.shares_storage(&cached.entries));
+    tokio::fs::write(format!("{directory}/gamma"), "c")
+        .await
+        .unwrap();
+    assert!(!host.listings_unchanged(&cancel).await.unwrap());
+    assert!(!host.listings_unchanged(&cancel).await.unwrap());
+    assert_eq!(
+        host.snapshot(&directory, 10000, &cancel)
+            .await
+            .unwrap()
+            .entries
+            .len(),
+        2
+    );
+    host.verify_listings();
+    let fresh = host.snapshot(&directory, 10000, &cancel).await.unwrap();
+    assert_eq!(fresh.entries.len(), 3);
+    assert!(!entries.shares_storage(&fresh.entries));
+    remote.dispose().await;
+    fixture.stop().await;
+}
+
 async fn probe_sshd(socket: tokio::net::TcpSocket, address: SocketAddr) -> std::io::Result<()> {
     // A loopback socket can connect to itself while sshd has not bound its port.
     if socket.local_addr()? == address {

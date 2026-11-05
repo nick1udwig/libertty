@@ -3,10 +3,10 @@ use crate::{
     completion::{CompletionProvider, completion_timeout},
     directories::Directories,
     help::HelpProvider,
-    probes::{ABORTED, ProbePool},
+    probes::{ABORTED, ProbePool, SharedTask},
     syntax::Syntax,
 };
-use libertty_engine::types::Catalog;
+use libertty_engine::types::{Catalog, DirectoryLookup, DirectorySnapshot};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 use tokio_util::sync::CancellationToken;
@@ -38,6 +38,8 @@ impl HostServices {
     }
 }
 type ListingVersions = Arc<std::sync::Mutex<BTreeMap<(String, usize), String>>>;
+type RequestListings =
+    Arc<std::sync::Mutex<BTreeMap<(String, usize), SharedTask<DirectorySnapshot>>>>;
 #[derive(Clone)]
 pub struct NativeHost {
     pub services: HostServices,
@@ -46,10 +48,17 @@ pub struct NativeHost {
     pub environment: Arc<BTreeMap<String, String>>,
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
     verification: Option<ListingVersions>,
+    remote_listings: Option<RequestListings>,
 }
 impl NativeHost {
+    pub(crate) fn request_scope(&self) -> Self {
+        let mut host = self.clone();
+        host.remote_listings = self.remote.as_ref().map(|_| Default::default());
+        host
+    }
     pub fn verify_listings(&mut self) {
         self.verification = Some(Default::default());
+        self.remote_listings = self.remote.as_ref().map(|_| Default::default());
     }
     fn remember_listing(
         &self,
@@ -72,7 +81,7 @@ impl NativeHost {
             .unwrap_or_default();
         let checked = futures::future::join_all(versions.into_iter().map(
             |((path, limit), version)| async move {
-                Ok(self.snapshot(&path, limit, cancel).await?.version == version)
+                Ok(self.fresh_snapshot(&path, limit, cancel).await?.version == version)
             },
         ))
         .await;
@@ -233,7 +242,7 @@ impl NativeHost {
             Arc::make_mut(&mut scoped.environment).insert("PWD".into(), cwd.clone());
             return Box::pin(scoped.engine_operation(operation, cancel)).await;
         }
-        if self.verification.is_some()
+        if (self.verification.is_some() || self.remote_listings.is_some())
             && let HostOperation::Entries { path, limit } = operation
         {
             let listing = self.snapshot(path, *limit, cancel).await?;
@@ -241,9 +250,22 @@ impl NativeHost {
             return Ok(FactValue::Entries(listing.entries));
         }
         if let Some(remote) = &self.remote {
-            let result = remote
-                .engine_operation(operation, &self.catalog, &self.environment, cancel)
-                .await?;
+            let result = if let HostOperation::Lookup { path } = operation {
+                let info = remote.stat(path, false, cancel).await?;
+                let listing = if info.is_none() {
+                    Some(
+                        self.snapshot(&libertty_engine::path::dirname(path), 10000, cancel)
+                            .await?,
+                    )
+                } else {
+                    None
+                };
+                FactValue::Lookup(Arc::new(DirectoryLookup { info, listing }))
+            } else {
+                remote
+                    .engine_operation(operation, &self.catalog, &self.environment, cancel)
+                    .await?
+            };
             self.remember_lookup(operation, &result);
             return Ok(result);
         }
@@ -330,6 +352,7 @@ impl NativeHost {
             help,
             remote: None,
             verification: None,
+            remote_listings: None,
         }
     }
     pub async fn fact(
@@ -345,6 +368,39 @@ impl NativeHost {
         limit: usize,
         cancel: &CancellationToken,
     ) -> Result<libertty_engine::types::DirectorySnapshot, String> {
+        if cancel.is_cancelled() {
+            return Err(ABORTED.into());
+        }
+        if let (Some(remote), Some(listings)) = (&self.remote, &self.remote_listings) {
+            let key = (directory.to_owned(), limit);
+            let task = {
+                let mut listings = listings.lock().unwrap();
+                listings.retain(|_, task| task.reusable());
+                if let Some(task) = listings.get(&key) {
+                    task.clone()
+                } else {
+                    if listings.len() >= 64 {
+                        listings.pop_first();
+                    }
+                    let remote = remote.clone();
+                    let directory = directory.to_owned();
+                    let task = SharedTask::new(move |cancel| {
+                        Box::pin(async move { remote.snapshot(&directory, limit, &cancel).await })
+                    });
+                    listings.insert(key, task.clone());
+                    task
+                }
+            };
+            return task.wait(cancel).await;
+        }
+        self.fresh_snapshot(directory, limit, cancel).await
+    }
+    async fn fresh_snapshot(
+        &self,
+        directory: &str,
+        limit: usize,
+        cancel: &CancellationToken,
+    ) -> Result<DirectorySnapshot, String> {
         if let Some(remote) = &self.remote {
             remote.snapshot(directory, limit, cancel).await
         } else {
