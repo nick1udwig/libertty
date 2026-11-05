@@ -1,12 +1,8 @@
+import { decodeBackend, decodeHost, decodeTab, uniqueRecords } from './workspace-decode.ts';
 import type { HttpEndpoint, HttpInput, HttpOutput } from './http-contract.ts';
-import {
-  backendURL,
-  type BackendProfile,
-  type HostProfile,
-  type TerminalTab,
-} from './connections.ts';
+import { type BackendProfile, type HostProfile, type TerminalTab } from './connections.ts';
 import type { Fail, Notify } from './notice-model.ts';
-import { saved, validSession } from './persistence.ts';
+import { saved } from './persistence.ts';
 
 export interface WorkspaceState {
   backends: BackendProfile[];
@@ -47,43 +43,17 @@ export interface WorkspaceServices {
   fail: Fail;
 }
 export function loadWorkspace(primary: BackendProfile): WorkspaceState {
-  let backends: BackendProfile[] = saved<BackendProfile[]>('backends', []).filter((b) => {
-    try {
-      return (
-        b &&
-        typeof b.id === 'string' &&
-        b.id !== 'primary' &&
-        typeof b.name === 'string' &&
-        backendURL(b.url) === b.url
-      );
-    } catch {
-      return false;
-    }
-  });
-  backends.unshift(primary);
-  let hosts: HostProfile[] = saved<HostProfile[]>('hosts', [
-    { id: 'local', name: 'This machine', kind: 'http', backendId: 'primary' },
-  ]).filter(
-    (h) =>
-      h &&
-      typeof h.id === 'string' &&
-      typeof h.name === 'string' &&
-      ['http', 'ssh', 'herdr'].includes(h.kind) &&
-      backends.some((b) => b.id === h.backendId),
+  const backends = [primary, ...uniqueRecords(saved<unknown[]>('backends', []), decodeBackend)];
+  const ids = new Set(backends.map((backend) => backend.id));
+  const hosts = uniqueRecords(
+    saved<unknown[]>('hosts', [
+      { id: 'local', name: 'This machine', kind: 'http', backendId: 'primary' },
+    ]),
+    (value) => decodeHost(value, ids),
   );
-  let tabs: TerminalTab[] = saved<TerminalTab[]>('tabs', []).filter(
-    (t) =>
-      t &&
-      typeof t.id === 'string' &&
-      typeof t.name === 'string' &&
-      typeof t.pluginId === 'string' &&
-      !!t.pluginId &&
-      typeof t.pluginVersion === 'string' &&
-      !!t.pluginVersion &&
-      backends.some((b) => b.id === t.backendId) &&
-      validSession(t.session),
-  );
-  let active = saved<string>('activeTab', '') || tabs[0]?.id || '';
+  const tabs = uniqueRecords(saved<unknown[]>('tabs', []), (value) => decodeTab(value, ids));
+  const selected = saved<string>('activeTab', '');
+  const active = tabs.some((tab) => tab.id === selected) ? selected : tabs[0]?.id || '';
   return { backends, hosts, tabs, active };
 }
 export function saveWorkspace(workspace: WorkspaceState, notice: WorkspaceServices['notice']) {

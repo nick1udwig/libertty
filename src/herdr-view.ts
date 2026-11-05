@@ -1,3 +1,4 @@
+import { decodePreferences, type Preferences } from './herdr-preferences.ts';
 import type { WorkspaceMessage } from './frame-protocol.ts';
 import { node } from './dom.ts';
 import { icon } from './icons.ts';
@@ -73,17 +74,6 @@ interface Host {
   toggleTerminalTabs?(): void;
   notificationDevice?(): string | undefined;
 }
-interface Preferences {
-  order: string[];
-  spaceOrder?: string[];
-  spaceGroups?: string[][];
-  collapsedGroups?: string[];
-  collapsedLanes?: HerdrLane[];
-  spaceTerminals?: Record<string, string>;
-  repoSpaces?: Record<string, string>;
-  selected?: string;
-  state?: ReturnType<HerdrState['checkpoint']>;
-}
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
   private strip = node('div', 'herdr-agent-strip');
@@ -154,30 +144,13 @@ export class HerdrView {
       closing: this.closing,
       terminalName: (id) => this.terminals.find((agent) => agent.terminalId === id)?.name,
     });
+    let preferences: unknown;
     try {
-      this.preferences = JSON.parse(localStorage.getItem(host.key) || 'null') || { order: [] };
+      preferences = JSON.parse(localStorage.getItem(host.key) || 'null');
     } catch {
-      this.preferences = { order: [] };
+      preferences = undefined;
     }
-    if (!Array.isArray(this.preferences.order)) this.preferences = { order: [] };
-    this.preferences.order = this.preferences.order.filter((id) => typeof id === 'string');
-    this.preferences.spaceOrder = (this.preferences.spaceOrder || []).filter(
-      (id) => typeof id === 'string',
-    );
-    this.preferences.spaceTerminals ||= {};
-    this.preferences.repoSpaces ||= {};
-    this.preferences.spaceGroups = Array.isArray(this.preferences.spaceGroups)
-      ? this.preferences.spaceGroups
-      : [];
-    this.preferences.collapsedGroups = Array.isArray(this.preferences.collapsedGroups)
-      ? this.preferences.collapsedGroups
-      : [];
-    // Idle lanes start folded so the strip opens on agents that need attention.
-    this.preferences.collapsedLanes = Array.isArray(this.preferences.collapsedLanes)
-      ? this.preferences.collapsedLanes.filter((lane) => lane in herdrLaneNames)
-      : ['idle'];
-    delete (this.preferences as any).hidden;
-    delete (this.preferences as any).hiddenSpaces;
+    this.preferences = decodePreferences(preferences);
     this.tracker = new HerdrState(this.preferences.state);
     this.selected = this.preferences.selected || '';
     let stored: unknown;
