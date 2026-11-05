@@ -26,6 +26,7 @@ Tools can request suggestions through `/api/suggest`.
 Native suggestions and prewarming use typed calls and results without JSON catalog or candidate conversions.
 The WASM adapter retains the existing JSON protocol.
 Native help, script and completion adapters retain probe-pool capacity and cancellation.
+Local and SSH completion probes use the same shell functions as the reusable worker, with explicit entrypoints and per-request subshell isolation.
 Help, syntax and script-description caches reuse pending work and successful results, including valid negatives, but retry failed or abandoned work.
 Cancelling one subscriber does not evict work still used by another subscriber.
 Each repair shares up to 64 SSH directory snapshots by path and entry limit, including pending reads for separate missing-path lookups.

@@ -1,6 +1,6 @@
 {
   "crates/server/assets/bashrc.sh": "d8d88877e88412ff1021133a94e3b28c34836c8757f47f3d0a2007190f4b5c7a",
-  "crates/server/assets/completion.sh": "bc958ba1ca3e7b0833b8e1c8346656988004478dad8fa2021230ea984dc21ab1",
+  "crates/server/assets/completion.sh": "ace1f64039109f7d0e2b76039952e70a277b3c29c4916a3ebd1e6137c886fedb",
   "crates/server/assets/completion-snapshot.sh": "af1541a7e1a0e77ffbcd66c6cb470feeedc5800cc3757e7ea26e49c1eba9bafa",
   "crates/server/assets/describe.py": "7457c261cbe93bfbec6501526b53002371142c4ed18a18332abdad328eb535af",
   "crates/server/assets/pairing.html": "4228d35dd05f36c4659ee4f44484dbda98c20c43d13d4eaf6adbae813205ee67"

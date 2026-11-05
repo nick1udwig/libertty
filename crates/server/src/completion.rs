@@ -19,7 +19,11 @@ use tokio::{
     sync::Mutex,
 };
 use tokio_util::sync::CancellationToken;
-pub const COMPLETION_SCRIPT: &str = include_str!("../assets/completion.sh");
+const COMPLETION_FUNCTIONS: &str = include_str!("../assets/completion.sh");
+pub const COMPLETION_SCRIPT: &str = concat!(
+    include_str!("../assets/completion.sh"),
+    "\nlibertty_completion_run single '' \"$@\""
+);
 pub const COMPLETION_SNAPSHOT: &str = include_str!("../assets/completion-snapshot.sh");
 
 pub(crate) fn completion_timeout(milliseconds: f64) -> Result<Duration, String> {
@@ -126,30 +130,11 @@ impl CompletionWorker {
         env: &BTreeMap<String, String>,
         framework: Option<Framework>,
     ) -> Result<Self, String> {
-        let script = {
-            // Only the worker protocol needs to omit empty records.
-            let mut body = COMPLETION_SCRIPT.replace(
-                r#"if ((${#COMPREPLY[@]})); then builtin printf '%s\0' "${COMPREPLY[@]:0:1000}" >&3; fi"#,
-                r#"for libertty_completion_value in "${COMPREPLY[@]:0:1000}"; do
-  [[ -n "$libertty_completion_value" ]] && builtin printf '%s\0' "$libertty_completion_value" >&3
-done"#);
-            let setup = if let Some((file, _)) = &framework {
-                let start = body
-                    .find("  if [[ -n \"$LIBERTTY_COMPLETIONS_FILE\"")
-                    .expect("completion source block");
-                let end = body[start..]
-                    .find("  COMP_LINE=")
-                    .expect("completion arguments")
-                    + start;
-                body.replace_range(start..end, "");
-                format!("source {} >/dev/null 2>&1\n", shell_quote(file))
-            } else {
-                String::new()
-            };
-            format!(
-                "{setup}while IFS= read -r -d '' libertty_count; do\n[[ $libertty_count =~ ^[0-9]+$ ]] && ((libertty_count >= 3 && libertty_count <= 65)) || exit 1\nlibertty_words=()\nfor ((libertty_i=0; libertty_i<libertty_count; libertty_i++)); do IFS= read -r -d '' libertty_word || exit 1; libertty_words+=(\"$libertty_word\"); done\n( set -- \"${{libertty_words[@]}}\"\n{body}\n) < /dev/null\nbuiltin printf '\\0'\ndone"
-            )
-        };
+        let prepared = framework.as_ref().map_or("", |(file, _)| file.as_str());
+        let script = format!(
+            "{COMPLETION_FUNCTIONS}\nlibertty_completion_worker {}",
+            shell_quote(prepared)
+        );
         let mut child = Command::new(&bash)
             .args([
                 "--noprofile",

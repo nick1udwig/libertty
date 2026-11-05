@@ -239,3 +239,56 @@ async fn completion_failures_remain_distinct_from_successful_empty_results() {
             .is_empty()
     );
 }
+
+#[tokio::test]
+async fn completion_entrypoints_preserve_declared_state_and_empty_request_boundaries() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().to_str().unwrap();
+    let definitions = root.path().join("completion");
+    std::fs::write(
+        &definitions,
+        r#"
+declare -A values=([chosen]="space ' 雪")
+_t() {
+  if [[ $2 == empty ]]; then COMPREPLY=('')
+  else COMPREPLY=('' "${values[chosen]}" "$2")
+  fi
+  values[chosen]=dirty
+}
+complete -F _t tool
+"#,
+    )
+    .unwrap();
+    let env = BTreeMap::from([
+        ("PATH".into(), "/usr/bin:/bin".into()),
+        (
+            "LIBERTTY_COMPLETIONS_FILE".into(),
+            definitions.to_string_lossy().into_owned(),
+        ),
+    ]);
+    let pool = ProbePool::default();
+    let provider = CompletionProvider::default();
+    let cancel = CancellationToken::new();
+    for current in ["empty", "quote ' and 雪", "empty", "next"] {
+        let words = vec!["tool".into(), current.into()];
+        let expected = if current == "empty" {
+            vec![]
+        } else {
+            vec!["space ' 雪", current]
+        };
+        assert_eq!(
+            shell_complete(&pool, &words, cwd, &env, &cancel)
+                .await
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            provider
+                .complete(&pool, &words, cwd, &env, &cancel)
+                .await
+                .unwrap(),
+            expected
+        );
+    }
+    assert_eq!(provider.worker_starts(), 1);
+}
