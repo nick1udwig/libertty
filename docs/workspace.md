@@ -8,6 +8,8 @@ The workspace is terminal-first, with saved direct and SSH hosts, backend select
 `workspace-storage.ts` validates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
 These modules share one live workspace state so replacing saved hosts, backends or tabs is visible to pending actions.
 Each terminal uses a same-origin `terminal.html` frame running the existing renderer and input pipeline.
+`suggestion-input.ts` captures clipboard and IME events, `inline-suggestions.ts` owns the repair lifecycle, and `suggestion-view.ts` renders command choices.
+The repair lifecycle uses explicit idle, transcribing, repairing and ready phases while menu visibility and suspension remain independent.
 The workspace caches four recently used renderers across ordinary terminal and Herdr tabs and restores evicted views through session replay.
 Views with unacknowledged input, retained recordings or pending browser operations remain mounted while that work is pending.
 Aware clients request input checkpoints with existing heartbeats, retaining newer keys until the backend confirms them.

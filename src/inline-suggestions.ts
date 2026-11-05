@@ -1,5 +1,5 @@
-import { icon as svgIcon, uploadIcon, downloadIcon } from './icons.ts';
-import { transferAction, downloadPipeline } from './transfer-command.ts';
+import { SuggestionView } from './suggestion-view.ts';
+import { SuggestionInput } from './suggestion-input.ts';
 import type { Terminal } from './terminal-adapter.ts';
 import type { ShellState, RepairIntent, RepairResult } from './protocol.ts';
 import { InputLine } from './input-line.ts';
@@ -8,7 +8,6 @@ import { TerminalPresentation } from './terminal-presentation.ts';
 import { cursorSteps } from './touch-cursor.ts';
 import {
   defaultReadingPhrases,
-  readingPath,
   readingPhrases,
   readingPipeline,
   readingRequest,
@@ -35,8 +34,13 @@ export class InlineSuggestions {
   private prefix = '';
   private suffix = '';
   private speech = '';
-  private loading = false;
-  private transcribing = false;
+  private phase: 'idle' | 'transcribing' | 'repairing' | 'ready' = 'idle';
+  private get loading() {
+    return this.phase === 'repairing';
+  }
+  private get transcribing() {
+    return this.phase === 'transcribing';
+  }
   private pendingPresentation?: TerminalPresentation;
   private pendingCursor?: { x: number; row: number };
   private literalReplacement?: Promise<boolean>;
@@ -47,26 +51,35 @@ export class InlineSuggestions {
   private open = false;
   private autoOpen = true;
   private tapToSend = true;
-  private composing = false;
-  private compositionText = '';
-  private compositionSent = '';
-  private compositionTyped = false;
-  private compositionBulk = false;
-  private compositionLine?: { text: string; cursor: number; known: boolean };
-  private lastDelete?: { data: string; at: number };
-  private lastCommit = { text: '', at: 0 };
+  private capture: SuggestionInput;
   private positionFrame = 0;
-  private screen?: HTMLElement;
-  private pane?: HTMLElement;
-  private toggle = document.getElementById('alternatives-toggle')! as HTMLButtonElement;
-  private menu = document.getElementById('alternatives-menu')!;
-  private items = document.getElementById('alternative-items')!;
+  private view: SuggestionView;
   private status = document.getElementById('suggestion-status')!;
   private term: Terminal;
   private host: Host;
   constructor(term: Terminal, host: Host) {
     this.term = term;
     this.host = host;
+    this.view = new SuggestionView(
+      term,
+      () => ({
+        literal: this.literal,
+        loading: this.loading,
+        transcribing: this.transcribing,
+        open: this.open,
+        choices: this.choices,
+        reading: this.reading,
+        phrases: this.phrases,
+        selected: this.selected,
+        pendingPresentation: this.pendingPresentation,
+        pendingCursor: this.pendingCursor,
+      }),
+      {
+        state: () => host.state(),
+        refresh: () => this.refresh(),
+        choose: (text) => this.choose(text),
+      },
+    );
     this.pendingPresentation = new TerminalPresentation(
       document.getElementById('terminal-viewport')!,
       () => {
@@ -104,11 +117,14 @@ export class InlineSuggestions {
       } catch {}
     };
     document.addEventListener('pointerdown', (event) => {
-      if (!this.menu.contains(event.target as Node) && !this.toggle.contains(event.target as Node))
+      if (
+        !this.view.menu.contains(event.target as Node) &&
+        !this.view.toggle.contains(event.target as Node)
+      )
         this.collapse();
     });
-    this.toggle.addEventListener('pointerdown', (e) => e.preventDefault());
-    this.toggle.onclick = () => {
+    this.view.toggle.addEventListener('pointerdown', (e) => e.preventDefault());
+    this.view.toggle.onclick = () => {
       this.open = !this.open;
       this.render();
     };
@@ -117,204 +133,19 @@ export class InlineSuggestions {
     const container = document.getElementById('terminal')!;
     const resize = new ResizeObserver(() => this.refresh());
     resize.observe(container);
-    resize.observe(this.menu);
+    resize.observe(this.view.menu);
     window.visualViewport?.addEventListener('resize', () => this.refresh());
-    const stop = (event: Event) => {
-      if (event.cancelable) event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-    const eligible = () => !this.flushing && host.state().ready && !host.state().exited;
-    const pasteLiteral = (text: string) => {
-      this.clear();
-      this.term.paste(text);
-      this.armInput();
-    };
-    // Single-line clipboard text can come from an external dictation tool.
-    container.addEventListener(
-      'paste',
-      (event) => {
-        const text = event.clipboardData?.getData('text/plain');
-        if (!eligible() || !text || /[\x00-\x1f\x7f]/.test(text)) return;
-        stop(event);
-        void this.nativeDictation(text, false);
-      },
-      true,
-    );
-    // Browsers also expose dictation as replacement text or committed composition.
-    container.addEventListener(
-      'beforeinput',
-      (event) => {
-        const e = event as InputEvent;
-        if (/^deleteContent(?:Backward|Forward)$/.test(e.inputType)) {
-          stop(e);
-          this.composing = false;
-          this.compositionText = '';
-          this.compositionSent = '';
-          const data = e.inputType === 'deleteContentBackward' ? '\x7f' : '\x1b[3~';
-          const duplicate =
-            this.lastDelete?.data === data && performance.now() - this.lastDelete.at < 120;
-          this.lastDelete = undefined;
-          if (!duplicate) host.raw(data);
-          this.armInput();
-          return;
-        }
-        if (this.composing) {
-          if (
-            e.data &&
-            ['insertFromDictation', 'insertReplacementText'].includes(e.inputType) &&
-            !/[\x00-\x1f\x7f]/.test(e.data)
-          ) {
-            stop(e);
-            this.composing = false;
-            if (this.compositionTyped) {
-              this.updateComposition(e.data);
-              if (this.compositionLine?.known) {
-                this.line.reset(this.compositionLine.text);
-                this.line.cursor = this.compositionLine.cursor;
-              }
-            }
-            this.lastCommit = { text: e.data, at: performance.now() };
-            if (eligible()) void this.nativeDictation(e.data, false, this.compositionTyped);
-            else if (!this.compositionTyped) pasteLiteral(e.data);
-            this.armInput();
-            return;
-          }
-          if (e.inputType === 'insertCompositionText' && e.data !== null)
-            this.updateComposition(e.data);
-          stop(e);
-          return;
-        }
-        if (
-          e.data &&
-          this.lastCommit.text === e.data &&
-          performance.now() - this.lastCommit.at < 120
-        ) {
-          this.lastCommit.text = '';
-          stop(e);
-          return;
-        }
-        if (!e.data || /[\x00-\x1f\x7f]/.test(e.data)) return;
-        if (
-          ['insertFromDictation', 'insertReplacementText'].includes(e.inputType) ||
-          (e.inputType === 'insertText' && e.data.length > 1)
-        ) {
-          stop(e);
-          if (eligible())
-            void this.nativeDictation(e.data, e.inputType === 'insertReplacementText');
-          else pasteLiteral(e.data);
-        }
-      },
-      true,
-    );
-    container.addEventListener(
-      'compositionstart',
-      (e) => {
-        this.composing = true;
-        this.compositionText = '';
-        this.compositionSent = '';
-        this.compositionTyped = false;
-        this.compositionBulk = false;
-        this.compositionLine = {
-          text: this.line.text,
-          cursor: this.line.cursor,
-          known: this.line.known,
-        };
-        stop(e);
-      },
-      true,
-    );
-    container.addEventListener(
-      'compositionupdate',
-      (event) => {
-        if (this.composing) {
-          this.updateComposition((event as CompositionEvent).data);
-          stop(event);
-        }
-      },
-      true,
-    );
-    container.addEventListener(
-      'compositionend',
-      (event) => {
-        if (!this.composing) return;
-        const e = event as CompositionEvent;
-        stop(e);
-        this.composing = false;
-        this.armInput();
-        if (this.compositionTyped) {
-          this.updateComposition(e.data);
-          this.lastCommit = { text: e.data, at: performance.now() };
-          if (this.compositionBulk && eligible() && e.data && !/[\x00-\x1f\x7f]/.test(e.data)) {
-            if (this.compositionLine?.known) {
-              this.line.reset(this.compositionLine.text);
-              this.line.cursor = this.compositionLine.cursor;
-            }
-            void this.nativeDictation(e.data, false, true);
-          }
-          return;
-        }
-        if (!e.data) return;
-        this.lastCommit = { text: e.data, at: performance.now() };
-        if (eligible() && !/[\x00-\x1f\x7f]/.test(e.data)) void this.nativeDictation(e.data, false);
-        else pasteLiteral(e.data);
-      },
-      true,
-    );
-    container.addEventListener(
-      'keydown',
-      (e) => {
-        this.lastDelete = undefined;
-        if (
-          !e.isComposing &&
-          e.keyCode !== 229 &&
-          !e.ctrlKey &&
-          !e.altKey &&
-          !e.metaKey &&
-          ['Backspace', 'Delete'].includes(e.key)
-        ) {
-          stop(e);
-          this.composing = false;
-          this.compositionText = '';
-          this.compositionSent = '';
-          const data = e.key === 'Backspace' ? '\x7f' : '\x1b[3~';
-          host.raw(data);
-          this.lastDelete = { data, at: performance.now() };
-          this.armInput();
-          return;
-        }
-        if (this.composing && (e.isComposing || e.keyCode === 229)) e.stopImmediatePropagation();
-        else this.lastCommit.text = '';
-      },
-      true,
-    );
-    container.addEventListener('input', () => this.armInput());
-    term.textarea?.addEventListener('focus', () => this.armInput());
-    this.armInput();
+    this.capture = new SuggestionInput(term, {
+      line: this.line,
+      state: () => host.state(),
+      flushing: () => !!this.flushing,
+      clear: () => this.clear(),
+      raw: (data) => host.raw(data),
+      dictate: (text, replacement, applied) => this.nativeDictation(text, replacement, applied),
+    });
   }
   private armInput() {
-    if (this.composing || !this.term.textarea) return;
-    // Android may suppress Backspace at the beginning of an empty textarea.
-    // Bash owns the real text; this invisible buffer only gives the IME room to delete.
-    this.term.textarea.value = '\u200b';
-    this.term.textarea.setSelectionRange(1, 1);
-  }
-  private updateComposition(text: string) {
-    // Mobile keyboards often compose a word one letter at a time. Stream those
-    // edits immediately; only a bulk commit is a possible dictation transcript.
-    if (!this.compositionText && Array.from(text).length <= 1) this.compositionTyped = true;
-    if (Array.from(text).length - Array.from(this.compositionText).length > 1)
-      this.compositionBulk = true;
-    if (this.compositionTyped) {
-      const before = Array.from(this.compositionSent),
-        after = Array.from(text);
-      let shared = 0;
-      while (shared < before.length && before[shared] === after[shared]) shared++;
-      for (let i = shared; i < before.length; i++) this.host.raw('\x7f');
-      const inserted = after.slice(shared).join('');
-      if (inserted) this.host.raw(inserted);
-      this.compositionSent = text;
-    }
-    this.compositionText = text;
+    this.capture.armInput();
   }
   private collapse() {
     if (this.open) {
@@ -366,11 +197,11 @@ export class InlineSuggestions {
   dictationPending(pending: boolean) {
     if (pending) {
       this.clear(true);
-      this.transcribing = true;
+      this.phase = 'transcribing';
       this.holdInput();
       this.status.textContent = 'Transcribing';
     } else {
-      this.transcribing = false;
+      if (this.transcribing) this.phase = this.literal ? 'ready' : 'idle';
       if (!this.loading) this.pendingPresentation?.reveal();
     }
     this.render();
@@ -464,8 +295,7 @@ export class InlineSuggestions {
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true),
       pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
     this.reading = pipeline?.command || reading?.path;
-    this.transcribing = false;
-    this.loading = true;
+    this.phase = 'repairing';
     this.open = this.autoOpen;
     this.status.textContent = 'Finding alternatives';
     this.render();
@@ -477,7 +307,7 @@ export class InlineSuggestions {
         if (this.line.text !== this.literal) this.line.known = false;
         this.selected = this.literal;
         this.choices = [];
-        this.transcribing = this.loading = false;
+        this.phase = 'ready';
         this.open = this.autoOpen;
         this.status.textContent = 'Alternatives unavailable. Original text kept.';
         this.pendingPresentation?.reveal();
@@ -498,8 +328,7 @@ export class InlineSuggestions {
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true),
       pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
     this.reading = pipeline?.command || reading?.path;
-    this.transcribing = false;
-    this.loading = false;
+    this.phase = this.literal ? 'ready' : 'idle';
     this.open = this.autoOpen;
     this.status.textContent = 'Alternatives ready';
     this.pendingPresentation?.reveal();
@@ -516,7 +345,7 @@ export class InlineSuggestions {
     ++this.generation;
     this.controller?.abort();
     this.controller = undefined;
-    this.loading = false;
+    this.phase = this.literal ? 'ready' : 'idle';
     this.render();
   }
   refresh() {
@@ -532,7 +361,7 @@ export class InlineSuggestions {
       this.line.cursor === this.line.text.length &&
       !this.loading &&
       !this.transcribing &&
-      !this.composing &&
+      !this.capture.composing &&
       !this.flushing
     );
   }
@@ -608,8 +437,7 @@ export class InlineSuggestions {
     this.reading = undefined;
     this.suspendedRevision = undefined;
     this.retryOnResume = false;
-    this.transcribing = false;
-    this.loading = false;
+    this.phase = this.literal ? 'ready' : 'idle';
     this.open = false;
     if (!keepPresentation) this.pendingPresentation?.reveal();
     if (this.positionFrame) cancelAnimationFrame(this.positionFrame);
@@ -624,7 +452,7 @@ export class InlineSuggestions {
       !this.line.known ||
       !this.host.state().ready ||
       this.loading ||
-      this.composing ||
+      this.capture.composing ||
       buffer.type !== 'normal' ||
       this.term.getViewportY() > 0
     )
@@ -669,7 +497,7 @@ export class InlineSuggestions {
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true);
     const pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
     this.reading = pipeline?.command || reading?.path;
-    this.loading = true;
+    this.phase = 'repairing';
     this.open = this.autoOpen;
     this.choices = [];
     this.selected = this.literal;
@@ -705,7 +533,7 @@ export class InlineSuggestions {
         return;
       }
       if (request !== this.generation) return;
-      this.loading = false;
+      this.phase = this.literal ? 'ready' : 'idle';
       this.open = true;
       this.pendingPresentation?.reveal();
       this.status.textContent = 'Alternatives unavailable. Original text kept.';
@@ -729,7 +557,7 @@ export class InlineSuggestions {
     }
     const request = ++this.generation;
     this.controller?.abort();
-    this.loading = false;
+    this.phase = this.literal ? 'ready' : 'idle';
     this.collapse();
     this.line.reset(text);
     if ((await this.host.replace(text)) && request === this.generation) {
@@ -744,126 +572,9 @@ export class InlineSuggestions {
   }
   private render() {
     this.armInput();
-    const busy = this.loading || this.transcribing || !!this.pendingPresentation?.pending;
-    const state = this.host.state(),
-      available = state.ready || (busy && state.inputTarget === 'program');
-    const visible = (!!this.literal || this.transcribing) && available && !state.exited;
-    this.toggle.hidden = !visible;
-    this.menu.hidden = !visible || !this.open || busy;
-    this.toggle.classList.toggle('loading', busy);
-    this.toggle.disabled = busy;
-    this.toggle.setAttribute('aria-expanded', String(this.open && !busy));
-    this.toggle.setAttribute(
-      'aria-label',
-      busy
-        ? this.transcribing
-          ? 'Transcribing'
-          : 'Finding alternatives'
-        : this.open
-          ? 'Hide alternatives'
-          : 'Show alternatives',
-    );
-    this.menu.setAttribute('aria-busy', String(busy));
-    this.items.replaceChildren();
-    if (!busy) {
-      this.choices.forEach((text, index) => this.addChoice(text, index, false));
-    }
-    if (this.literal && !busy) this.addChoice(this.literal, this.choices.length, true);
-    this.refresh();
-  }
-  private addChoice(text: string, index: number, literal: boolean) {
-    const button = document.createElement('button');
-    button.className = 'alternative-choice';
-    button.type = 'button';
-    const pipeline = this.reading ? readingPipeline(text, this.phrases, true) : undefined;
-    const reading = pipeline
-      ? pipeline.command + ' output'
-      : this.reading
-        ? readingPath(text, this.phrases)
-        : undefined;
-    button.classList.toggle('reading-choice', !!reading);
-    button.classList.toggle('literal-choice', literal);
-    button.classList.toggle(
-      'selected',
-      text === this.selected && (!literal || !this.choices.includes(text)),
-    );
-    button.setAttribute('aria-pressed', String(button.classList.contains('selected')));
-    button.title = text;
-    const icon = document.createElement('span');
-    icon.className = 'choice-icon';
-    icon.setAttribute('aria-hidden', 'true');
-    const transfer = transferAction(text) || (downloadPipeline(text) ? 'download' : undefined);
-    if (transfer) icon.innerHTML = transfer === 'upload' ? uploadIcon : downloadIcon;
-    else if (reading)
-      icon.innerHTML = svgIcon(
-        '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/>',
-        16,
-      );
-    else if (literal)
-      icon.innerHTML =
-        '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M20 3H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3v3l5-3h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z"/></svg>';
-    else icon.textContent = '›_';
-    const label = document.createElement('span');
-    label.className = 'choice-command';
-    label.textContent = reading ? 'Read ' + reading : text;
-    const number = document.createElement('span');
-    number.className = 'choice-number';
-    number.textContent = String(index + 1);
-    number.setAttribute('aria-hidden', 'true');
-    button.append(icon, label, number);
-    button.addEventListener('pointerdown', (e) => e.preventDefault());
-    button.onclick = () => void this.choose(text);
-    this.items.append(button);
+    this.view.render();
   }
   private position() {
-    if (!this.literal && !this.transcribing) return;
-    if (!this.screen?.isConnected) {
-      this.screen = this.term.screen;
-      this.pane = this.screen?.closest<HTMLElement>('.terminal-pane') || undefined;
-    }
-    if (!this.screen || !this.pane) return;
-    const bounds = this.screen.getBoundingClientRect(),
-      pane = this.pane.getBoundingClientRect();
-    const buffer = this.term.buffer.active;
-    const row = this.pendingCursor?.row ?? buffer.baseY + buffer.cursorY - buffer.viewportY;
-    if (row < 0 || row >= this.term.rows || this.term.getViewportY() > 0) {
-      this.toggle.hidden = true;
-      this.menu.hidden = true;
-      return;
-    }
-    // Read geometry before writes. The menu observer schedules a follow-up if its
-    // width or height changes, without forcing another layout in this frame.
-    const menuHeight = this.menu.offsetHeight;
-    const cellWidth = bounds.width / this.term.cols,
-      cellHeight = bounds.height / this.term.rows;
-    const x =
-      bounds.left -
-      pane.left +
-      (this.pendingCursor ? this.pendingCursor.x : buffer.cursorX + 1) * cellWidth;
-    const y = bounds.top - pane.top + row * cellHeight;
-    const left = Math.max(4, Math.min(pane.width - 36, x));
-    const menuWidth = Math.min(330, pane.width - 16);
-    const menuLeft = Math.max(8, Math.min(pane.width - menuWidth - 8, left - 12));
-    const below = pane.height - y - cellHeight - 12;
-    const above = y - 12;
-    const upward = below < 210 && above > below;
-    const available = Math.max(44, upward ? above : below);
-    const busy = this.loading || this.transcribing || !!this.pendingPresentation?.pending;
-    const state = this.host.state(),
-      inputAvailable = !state.exited && (state.ready || (busy && state.inputTarget === 'program'));
-    this.toggle.hidden = !inputAvailable;
-    this.menu.hidden = !state.ready || !this.open || busy;
-    this.toggle.style.left = `${left}px`;
-    this.toggle.style.top = `${Math.max(0, y - 8)}px`;
-    this.menu.style.width = `${menuWidth}px`;
-    this.menu.style.left = `${menuLeft}px`;
-    this.menu.style.maxHeight = `${available}px`;
-    this.items.style.maxHeight = `${Math.max(30, available - 14)}px`;
-    this.menu.style.top = `${upward ? Math.max(4, y - Math.min(menuHeight, available) - 10) : y + cellHeight + 10}px`;
-    this.menu.classList.toggle('above', upward);
-    this.menu.style.setProperty(
-      '--pointer-x',
-      `${Math.min(menuWidth - 18, Math.max(18, left - menuLeft + 12))}px`,
-    );
+    this.view.position();
   }
 }
