@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { getEventListeners } from 'node:events';
 import { request, requestJSON, requestTimeout } from '../src/api.ts';
 
 test('requests share headers, recover one rejected credential and preserve caller cancellation', async t => {
@@ -69,4 +70,29 @@ test('reads and keyed changes retry lost connections, while uploads and exhauste
   });
   await assert.rejects(requestJSON(new URL('https://backend/api/files/action'), { action: 'delete' }, { timeout: 20 }), { name: 'TimeoutError' });
   assert.equal(calls, 2, 'A timed-out change may still be running, so it is retried only once');
+});
+
+test('successful API retries release caller abort listeners', async t => {
+  const controller = new AbortController();
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    if (++calls === 1) throw new TypeError('Temporary outage');
+    return Response.json({ ok: true });
+  });
+  assert.equal((await request('https://backend/api/files/list', { signal: controller.signal, timeout: 0 })).status, 200);
+  assert.equal(calls, 2);
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+  controller.abort();
+});
+
+test('cancellation while discarding a retryable response prevents the next attempt', async t => {
+  const controller = new AbortController(), reason = new Error('Cancelled during response cleanup');
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return new Response(new ReadableStream({ cancel() { controller.abort(reason); } }), { status: 503 });
+  });
+  await assert.rejects(request('https://backend/api/files/list', { signal: controller.signal, timeout: 0 }), error => error === reason);
+  assert.equal(calls, 1);
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
 });

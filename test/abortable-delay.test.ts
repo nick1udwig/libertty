@@ -18,3 +18,8 @@ test('cancellation before and during a delay rejects and releases listeners', as
   await assert.rejects(abortableDelay(60000, controller.signal), error => error === reason);
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
 });
+
+test('delays without a cancellation signal still complete', async () => {
+  await abortableDelay(1);
+  await abortableDelay(1, null);
+});

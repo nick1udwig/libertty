@@ -1,3 +1,4 @@
+import { abortableDelay } from './abortable-delay.ts';
 import { constrainedLink } from './wire.ts';
 
 export interface RequestOptions extends RequestInit {
@@ -19,19 +20,6 @@ export function requestTimeout(url: URL, data?: unknown): number {
 }
 const attempts = 3,
   retriedStatus = [502, 503, 504];
-function pause(ms: number, signal?: AbortSignal | null) {
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        reject(signal.reason);
-      },
-      { once: true },
-    );
-  });
-}
 /** Changes with a JSON body carry a key, so the backend replays an earlier attempt's reply instead of repeating it. */
 function idempotencyKey(init: RequestInit) {
   const method = (init.method || 'GET').toUpperCase();
@@ -75,7 +63,7 @@ export async function request(url: URL | string, options: RequestOptions = {}): 
         if (!retried || attempt === attempts || (expired && timedOut)) throw error;
         timedOut ||= expired;
       }
-      await pause(500 * 2 ** (attempt - 1), init.signal);
+      await abortableDelay(500 * 2 ** (attempt - 1), init.signal);
     }
   };
   const rejected = currentToken();
