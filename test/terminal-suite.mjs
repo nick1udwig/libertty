@@ -567,6 +567,11 @@ try {
       assert.equal((await readFile(path.join(fixture, '.git', 'HEAD'), 'utf8')).trim(), 'ref: refs/heads/feat/elixir-worker');
       before = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, before);
     }
+    await command(page, 'git branch feat/elegance-6; git branch master');
+    await dictate(page, 'Git push dash u origin master feet slash elegance dash six');
+    await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'git push -u origin master feat/elegance-6');
+    assert.ok((await page.locator('.alternative-choice .choice-command').allTextContents()).includes('Git push dash u origin master feet slash elegance dash six'));
+    before = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, before);
     await command(page, "orchard() { printf ran > completion-executed; }; _orchard_complete() { COMPREPLY=(release/east-zone release/west-zone); }; complete -F _orchard_complete orchard");
     await dictate(page, 'orchard deploy release slash east dash zone');
     await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'orchard deploy release/east-zone');
