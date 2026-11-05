@@ -1,4 +1,3 @@
-import { isHerdrPlugin } from './plugins.ts';
 import { BrowserVault } from './browser-vault.ts';
 import {
   type BackendProfile,
@@ -11,6 +10,7 @@ import {
 import { $, dialog, input, select } from './dom.ts';
 import { herdrSession } from './herdr-protocol.ts';
 import { validPath } from './persistence.ts';
+import type { ConnectionInput } from './plugin-connection.ts';
 import { type PluginPackage } from './plugin-package.ts';
 import { PluginRegistry, tabPluginId } from './plugins.ts';
 import type { WorkspacePage, WorkspaceServices, WorkspaceState } from './workspace-storage.ts';
@@ -275,11 +275,9 @@ export function createWorkspaceConnections(options: Options) {
   let selectedRoute: { backend: BackendProfile; keyId?: string; compression?: boolean } | undefined,
     routeGeneration = 0;
   const openingHosts = new Map<string, Promise<void>>();
-  interface ConnectionRequest {
+  interface ConnectionRequest extends ConnectionInput {
     pluginId: string;
     pluginVersion?: string;
-    readPath?: string;
-    herdrSession?: string;
     herdrTab?: TerminalTab;
     herdrHost?: HostProfile;
   }
@@ -290,19 +288,18 @@ export function createWorkspaceConnections(options: Options) {
     pluginId: string,
     pkg?: PluginPackage,
   ): Promise<void> {
-    if ((!isHerdrPlugin(pluginId) && !pkg) || host.kind === 'herdr')
-      return openHost(host, true, { pluginId });
-    pendingConnection = { host, request: { pluginId, pluginVersion: pkg?.manifest.version } };
-    $('plugin-connect-title').textContent = pkg
-      ? pkg.manifest.connectLabel
-      : pluginId === 'herdr-core'
-        ? 'Connect Herdr Core'
-        : 'Connect Herdr';
+    const plugin = plugins.get(pluginId, pkg?.manifest.version);
+    if (!plugin?.connection) throw new Error('This plugin cannot open a connection.');
+    const request = { pluginId, pluginVersion: plugin.version };
+    const fields = plugin.connection.fields;
+    if (!fields || host.kind === 'herdr') return openHost(host, true, request);
+    pendingConnection = { host, request };
+    $('plugin-connect-title').textContent = plugin.connectLabel;
     $('plugin-connect-host').textContent = host.name;
-    $('plugin-read-fields').hidden = !pkg;
-    input('plugin-read-path').required = !!pkg;
+    $('plugin-read-fields').hidden = fields !== 'file';
+    input('plugin-read-path').required = fields === 'file';
     input('plugin-read-path').value = '';
-    $('plugin-herdr-fields').hidden = !isHerdrPlugin(pluginId);
+    $('plugin-herdr-fields').hidden = fields !== 'herdr';
     input('plugin-herdr-session').value = host.herdrSession || '';
     $('plugin-connect-error').textContent = '';
     dialog('plugin-connect-dialog').showModal();
@@ -313,7 +310,7 @@ export function createWorkspaceConnections(options: Options) {
     if (!pendingConnection) return;
     const { host, request } = pendingConnection;
     try {
-      if (isHerdrPlugin(request.pluginId))
+      if (connectionPlugin(request).connection.fields === 'herdr')
         request.herdrSession = herdrSession(input('plugin-herdr-session').value);
       else {
         const path = input('plugin-read-path').value.trim();
@@ -338,8 +335,7 @@ export function createWorkspaceConnections(options: Options) {
           open.find((tab) => tab.id === workspace.active) ||
           open.sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))[0];
       if (existing) {
-        if (isHerdrPlugin(request.pluginId)) await resumeHerdr(existing);
-        else activate(existing.id);
+        await resumeTab(existing);
         return;
       }
     }
@@ -354,59 +350,39 @@ export function createWorkspaceConnections(options: Options) {
     session: string,
     request: ConnectionRequest,
   ) {
-    if (request.pluginId === 'terminal' || request.pluginId === 'files') {
-      await addTerminal(
+    try {
+      const plugin = connectionPlugin(request);
+      const details = await plugin.connection.prepare({
+        host,
         backend,
         session,
-        host.name,
-        host.id,
-        undefined,
-        request.pluginId === 'files',
-      );
-      return;
-    }
-    try {
-      const target = isHerdrPlugin(request.pluginId)
-        ? await endpoint(backend, 'api/herdr/connect', {
-            source: session,
-            session: request.herdrSession || '',
-            core: request.pluginId === 'herdr-core',
-          })
-        : undefined;
-      const read = request.readPath
-        ? await api<{ path: string }>(
-            backend,
-            'api/plugins/read?' + new URLSearchParams({ path: request.readPath, session }),
-          )
-        : undefined;
-      const plugin = plugins.get(request.pluginId, request.pluginVersion);
-      if (!plugin) throw new Error('This plugin is no longer available.');
+        input: request,
+        api,
+        endpoint,
+        addTerminal,
+      });
+      if (!details) return;
       const tab: TerminalTab = {
         id: request.herdrTab?.id || crypto.randomUUID(),
         pluginId: plugin.id,
         pluginVersion: plugin.version,
         pluginState: null,
-        readPath: read?.path,
         ownsSession: true,
         session,
         backendId: backend.id,
         hostId: host.id,
-        name:
-          plugin.name +
-          ' · ' +
-          host.name +
-          (target?.herdrSession ? ' · ' + target.herdrSession : ''),
+        name: plugin.name + ' · ' + host.name,
         lastUsed: Date.now(),
-        ...(target ? { herdrSession: target.herdrSession, herdrSource: target.herdrSource } : {}),
+        ...details,
       };
       if (request.herdrTab && !workspace.tabs.includes(request.herdrTab)) {
         await endpoint(backend, 'api/sessions/close', {}, session);
         return;
       }
-      if (target && request.herdrHost) {
+      if (request.herdrHost) {
         const saved = request.herdrHost;
         saved.backendId = backend.id;
-        saved.herdrSource = target.herdrSource;
+        saved.herdrSource = details.herdrSource;
         tab.hostId = saved.id;
         tab.name = saved.name;
       }
@@ -426,6 +402,16 @@ export function createWorkspaceConnections(options: Options) {
       await endpoint(backend, 'api/sessions/close', {}, session).catch(() => {});
       throw error;
     }
+  }
+  function connectionPlugin(request: ConnectionRequest) {
+    const plugin = plugins.get(request.pluginId, request.pluginVersion);
+    if (!plugin?.connection) throw new Error('This plugin cannot open a connection.');
+    return { ...plugin, connection: plugin.connection };
+  }
+  async function resumeTab(tab: TerminalTab) {
+    const plugin = plugins.forTab(tab);
+    if (plugin?.resume) await plugin.resume(tab);
+    else activate(tab.id);
   }
   async function resumeHerdr(tab: TerminalTab) {
     const backend = backendFor(tab.backendId);
@@ -489,6 +475,7 @@ export function createWorkspaceConnections(options: Options) {
       await endpoint(backendFor(tab.backendId), 'api/sessions/close', {}, tab.session);
     await connectHost(source, {
       pluginId: tab.pluginId,
+      pluginVersion: tab.pluginVersion,
       herdrSession: tab.herdrSession,
       herdrTab: tab,
       ...(host.kind === 'herdr' ? { herdrHost: host } : {}),
@@ -507,7 +494,7 @@ export function createWorkspaceConnections(options: Options) {
           tab.herdrSource === host.herdrSource,
       );
       if (existing) {
-        await resumeHerdr(existing);
+        await resumeTab(existing);
         return;
       }
       const tab: TerminalTab = {
@@ -518,6 +505,7 @@ export function createWorkspaceConnections(options: Options) {
         hostId: host.id,
         pluginId: 'herdr',
         pluginVersion: '1',
+        ownsSession: false,
         herdrSession: host.herdrSession,
         herdrSource: host.herdrSource,
         lastUsed: Date.now(),
@@ -529,22 +517,23 @@ export function createWorkspaceConnections(options: Options) {
       await mount(tab);
       return;
     }
-    if (isHerdrPlugin(request.pluginId) && !request.herdrTab) {
+    const plugin = connectionPlugin(request);
+    if (plugin.connection.matches && !request.herdrTab) {
       const existing = workspace.tabs.find(
         (tab) =>
           tabPluginId(tab) === request.pluginId &&
           tab.hostId === host.id &&
-          (tab.herdrSession || '') === (request.herdrSession || ''),
+          plugin.connection.matches!(tab, request),
       );
       if (existing) {
-        await resumeHerdr(existing);
+        await resumeTab(existing);
         return;
       }
     }
     if (host.kind === 'http') {
       const result = await endpoint(backend, 'api/sessions', {
         name: host.name,
-        files: request.pluginId !== 'terminal',
+        files: connectionPlugin(request).connection.session === 'files',
       });
       await finishConnection(host, backend, result.id, request);
       return;
@@ -736,7 +725,7 @@ export function createWorkspaceConnections(options: Options) {
         endpoint(route.backend, 'api/sessions', {
           name: host.name,
           ssh,
-          files: request.pluginId !== 'terminal',
+          files: connectionPlugin(request).connection.session === 'files',
         });
       let result;
       try {
@@ -803,6 +792,7 @@ export function createWorkspaceConnections(options: Options) {
     routes,
     configureConnection,
     reconnectHerdr,
+    resumeHerdr,
     cancelReconnect,
   };
 }

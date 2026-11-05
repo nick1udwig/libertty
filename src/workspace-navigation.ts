@@ -1,6 +1,5 @@
 import { terminalMessage, sendToTerminal } from './frame-protocol.ts';
 import { terminalRenderers } from './renderer-cache.ts';
-import { isHerdrPlugin } from './plugins.ts';
 import { closeIcon } from './icons.ts';
 import { type BackendProfile, type HostProfile, type TerminalTab } from './connections.ts';
 import { $, button, input, select } from './dom.ts';
@@ -703,11 +702,7 @@ export function createWorkspaceNavigation(options: Options) {
     const plugin = plugins.forTab(tab);
     if (plugin) {
       if (!(await plugin.close(tab))) return;
-    } else if (
-      tab.ownsSession ??
-      !(isHerdrPlugin(tabPluginId(tab)) || tabPluginId(tab) === 'reading')
-    )
-      await closeTabSession(tab);
+    } else if (tab.ownsSession) await closeTabSession(tab);
     const wasActive = workspace.active === tab.id;
     cancelReconnect(tab.id);
     unmount(tab);

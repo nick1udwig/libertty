@@ -127,6 +127,10 @@ Removing a plugin removes all installed versions of its ID.
 Clearing browser storage loses packages, profiles and tab references.
 
 Built-ins and external packages implement the registry's `TabPlugin` contract in [`src/plugins.ts`](../src/plugins.ts): connection availability and action, metadata, mounting and closing.
+Trusted connection hooks select the transport, configure existing dialog fields, prepare tab data and match existing connections.
+The optional resume hook restores a selected tab through its pinned plugin version.
+The workspace owns authentication and transport cleanup, and persisted `ownsSession` controls cleanup even when a plugin is unavailable.
+External packages always use the host's selected-file connection adapter and cannot supply trusted connection hooks.
 Mounted views supply `setVisible` and `dispose`, with optional focus, settings and selection methods.
 Built-ins keep their existing trusted views and terminal frames.
 The workspace performs common mounting, restoration, switching and disposal.

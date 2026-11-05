@@ -159,6 +159,7 @@ for (const plugin of builtinPlugins({
   connect: (host, id) => configureConnection(host, id),
   closeSession: closeTabSession,
   reconnectHerdr,
+  resumeHerdr: connections.resumeHerdr,
   store,
   notice,
   fail,

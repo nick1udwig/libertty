@@ -1,4 +1,5 @@
 import type { HostProfile, TerminalTab } from './connections.ts';
+import type { PluginConnection } from './plugin-connection.ts';
 
 export const BUILTIN_VERSION = '1';
 export const builtinIds = ['terminal', 'files', 'herdr', 'herdr-core', 'reading'] as const;
@@ -47,6 +48,8 @@ export interface TabPlugin {
   panelPrefix: string;
   className?: string;
   capabilities?: PluginCapabilities;
+  connection?: PluginConnection;
+  resume?(tab: TerminalTab): Promise<void>;
   available(host: HostProfile): boolean;
   connect(host: HostProfile): Promise<void>;
   mount(tab: TerminalTab): Promise<PluginView>;

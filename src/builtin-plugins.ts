@@ -9,6 +9,7 @@ import type { HerdrView } from './herdr-view.ts';
 import { BUILTIN_VERSION, type TabPlugin } from './plugins.ts';
 import { readingPlugin, type ReadingServices } from './reading-plugin.ts';
 import { terminalCanEvict } from './terminal-retention.ts';
+import { herdrConnection, terminalConnection } from './plugin-connection.ts';
 
 export interface BuiltinServices extends ReadingServices {
   active(tab: TerminalTab): boolean;
@@ -25,6 +26,7 @@ export interface BuiltinServices extends ReadingServices {
   closeSession(tab: TerminalTab): Promise<void>;
   openReadingCapture(tab: TerminalTab, capture: string, name: string, exitCode?: number): void;
   reconnectHerdr(tab: TerminalTab): Promise<void>;
+  resumeHerdr(tab: TerminalTab): Promise<void>;
   store(): void;
   notice: Notify;
   fail: Fail;
@@ -53,6 +55,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     {
       ...common,
       id: 'terminal',
+      connection: terminalConnection(),
       capabilities: { terminal: true },
       name: 'Terminal',
       connectLabel: 'Connect new terminal',
@@ -103,6 +106,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     {
       ...common,
       id: 'files',
+      connection: terminalConnection(true),
       name: 'SFTP / Files',
       connectLabel: 'Connect SFTP / Files',
       icon: '',
@@ -144,6 +148,8 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       (id): TabPlugin => ({
         version: BUILTIN_VERSION,
         id,
+        connection: herdrConnection(id === 'herdr-core'),
+        resume: s.resumeHerdr,
         name: id === 'herdr-core' ? 'Herdr Core' : 'Herdr',
         connectLabel: id === 'herdr-core' ? 'Connect Herdr Core' : 'Connect Herdr',
         icon: 'H',
