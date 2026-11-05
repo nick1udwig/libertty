@@ -1,3 +1,4 @@
+import type { HttpAPI } from './http-contract.ts';
 import { decodePreferences, type Preferences } from './herdr-preferences.ts';
 import type { WorkspaceMessage } from './frame-protocol.ts';
 import { node } from './dom.ts';
@@ -12,7 +13,6 @@ import {
   herdrURL,
   type HerdrAgent,
   type HerdrMessage,
-  type HerdrSnapshot,
   type HerdrStatus,
   type HerdrSpace,
 } from './herdr-protocol.ts';
@@ -61,7 +61,7 @@ interface Host {
   key: string;
   token(): string | undefined;
   authenticate(): Promise<void>;
-  api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
+  api: HttpAPI;
   changed(attention: number): void;
   notification(event: HerdrNotification): void;
   notice: Notify;
@@ -386,7 +386,7 @@ export class HerdrView {
         (!document.hidden || !this.transport.backgroundExpired),
       protocols: wireProtocols,
       prepare: async (signal) => {
-        const { ticket } = await this.host.api<{ ticket: string }>('api/herdr/ticket', {}, signal);
+        const { ticket } = await this.host.api('api/herdr/ticket', {}, signal);
         signal.throwIfAborted();
         const url = this.endpoint('herdr/ws');
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1187,16 +1187,13 @@ export class HerdrView {
     const terminal = this.terminalsById.get(this.selected);
     const space = this.spaces.find((space) => space.id === terminal?.workspaceId) || this.spaces[0];
     try {
-      const result = await this.host.api<{ workspaceId: string; terminalId?: string }>(
-        'api/herdr/action',
-        {
-          action: 'create-space',
-          ...(space ? { workspaceId: space.id } : {}),
-          ...(terminal ? { terminalId: terminal.terminalId } : {}),
-        },
-      );
+      const result = await this.host.api('api/herdr/action', {
+        action: 'create-space',
+        ...(space ? { workspaceId: space.id } : {}),
+        ...(terminal ? { terminalId: terminal.terminalId } : {}),
+      });
       if (this.disposed) return;
-      const snapshot = await this.host.api<HerdrSnapshot>('api/herdr/snapshot');
+      const snapshot = await this.host.api('api/herdr/snapshot', undefined);
       try {
         localStorage.setItem('libertty.herdrStrip', JSON.stringify('spaces'));
       } catch {
@@ -1515,9 +1512,9 @@ export class HerdrView {
       save.disabled = input.disabled = true;
       try {
         await this.host.api('api/herdr/action', {
-          action: item.space ? 'rename-space' : 'rename',
-          terminalId: item.terminalId,
-          workspaceId: item.space?.id,
+          ...(item.space
+            ? { action: 'rename-space', workspaceId: item.space.id }
+            : { action: 'rename', terminalId: item.terminalId }),
           name: herdrName(input.value),
         });
         this.renaming = false;
@@ -1555,7 +1552,7 @@ export class HerdrView {
     }
   }
   private async refreshSnapshot(created?: Created) {
-    const snapshot = await this.host.api<HerdrSnapshot>('api/herdr/snapshot');
+    const snapshot = await this.host.api('api/herdr/snapshot', undefined);
     if (this.disposed) return;
     if (created)
       this.selected =

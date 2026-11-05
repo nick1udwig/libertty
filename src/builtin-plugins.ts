@@ -1,3 +1,4 @@
+import type { HttpEndpoint, HttpInput, HttpOutput } from './http-contract.ts';
 import { sendToTerminal } from './frame-protocol.ts';
 import type { BackendProfile, HostProfile, TerminalTab } from './connections.ts';
 import { folderIcon, terminalIcon, herdrIcon } from './icons.ts';
@@ -194,9 +195,13 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
             },
             notificationDevice: () => s.notificationDevice(tab.backendId),
             toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
-            api: async <T>(name: string, data?: unknown, signal?: AbortSignal) => {
+            api: async <K extends HttpEndpoint, I extends HttpInput<K>>(
+              name: K,
+              data: I,
+              signal?: AbortSignal,
+            ) => {
               try {
-                return await s.api<T>(
+                return await s.api<HttpOutput<K, I>>(
                   backend,
                   name +
                     (name.includes('?') ? '&' : '?') +

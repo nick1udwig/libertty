@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "HerdrAction", optional_fields))]
 #[serde(
     tag = "action",
     rename_all = "kebab-case",
@@ -11,6 +12,7 @@ pub enum Action {
         workspace_id: String,
         path: Option<String>,
         #[serde(default)]
+        #[cfg_attr(test, ts(as = "Option<bool>", optional))]
         force: bool,
     },
     ListWorktrees {
@@ -62,6 +64,7 @@ pub enum Action {
     },
 }
 #[derive(Deserialize, serde::Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "HerdrDirection"))]
 #[serde(rename_all = "lowercase")]
 pub enum Direction {
     Right,

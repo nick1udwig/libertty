@@ -14,7 +14,6 @@ export interface RequestOptions extends RequestInit {
 }
 export function requestTimeout(url: URL, data?: unknown): number {
   const endpoint = url.pathname.slice(url.pathname.lastIndexOf('/api/') + 1) as HttpEndpoint;
-  if (Object.hasOwn(endpointTimeouts, endpoint)) return endpointTimeouts[endpoint];
   if (
     url.pathname.endsWith('/api/herdr/action') &&
     ['list-worktrees', 'new-worktree', 'open-worktree', 'delete-worktree'].includes(
@@ -22,6 +21,7 @@ export function requestTimeout(url: URL, data?: unknown): number {
     )
   )
     return 135000;
+  if (Object.hasOwn(endpointTimeouts, endpoint)) return endpointTimeouts[endpoint];
   if (/\/api\/(sessions|ssh\/captured|herdr\/connect|herdr\/captured)$/.test(url.pathname))
     return 25000;
   return 12000;
@@ -122,14 +122,14 @@ export async function requestJSON<T>(
   );
 }
 
-export function requestEndpoint<K extends HttpEndpoint>(
+export function requestEndpoint<K extends HttpEndpoint, I extends HttpInput<K>>(
   base: string | URL,
   endpoint: K,
-  data: HttpInput<K>,
+  data: I,
   options: RequestOptions = {},
-): Promise<HttpOutput<K>> {
-  return requestJSON<HttpOutput<K>>(new URL(endpoint, base), data, {
+): Promise<HttpOutput<K, I>> {
+  return requestJSON<HttpOutput<K, I>>(new URL(endpoint, base), data, {
     ...options,
-    timeout: options.timeout ?? endpointTimeouts[endpoint],
+    timeout: options.timeout ?? requestTimeout(new URL(endpoint, base), data),
   });
 }

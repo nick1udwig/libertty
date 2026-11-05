@@ -52,14 +52,37 @@ export type FileEntry = { name: string, directory: boolean, symlink: boolean, si
 
 export type FileListing = { path: string, parent: string, entries: Array<FileEntry>, truncated: boolean, };
 
+export type HerdrAction = { "action": "delete-worktree", workspaceId: string, path?: string, force?: boolean, }
+  | { "action": "list-worktrees", workspaceId: string, terminalId?: string, }
+  | { "action": "new-worktree", workspaceId: string, terminalId?: string, branch: string, }
+  | { "action": "open-worktree", workspaceId: string, terminalId?: string, path: string, }
+  | { "action": "split", workspaceId: string, terminalId: string, direction: HerdrDirection, }
+  | { "action": "create-space", workspaceId?: string, terminalId?: string, }
+  | { "action": "move-space", workspaceId: string, beforeWorkspaceId?: string, }
+  | { "action": "create", workspaceId: string, name: string, kind: string, cwd?: string, }
+  | { "action": "rename-space", workspaceId: string, name: string, }
+  | { "action": "close-space", workspaceId: string, }
+  | { "action": "rename", terminalId: string, name: string, }
+  | { "action": "close", terminalId: string, };
+
+export type HerdrActionError = { error: string, code: HerdrActionErrorCode, };
+
+export type HerdrActionErrorCode = "failed" | "force_required";
+
 export type HerdrAgent = { terminalId: string, paneId: string, workspaceId?: string, tabId?: string, workspace: string, name: string, label?: string, kind: string, status: HerdrStatus, sequence: number, completion?: number, cwd: string, };
 
 export type HerdrConnect = { core?: boolean, source?: string, session?: string, };
+
+export type HerdrCreated = { workspaceId?: string, terminalId?: string, error?: string, };
+
+export type HerdrDirection = "right" | "down";
 
 export type HerdrFrame = { /** Viewers receive only acknowledged frames. */ seq: number, width: number, height: number, full: boolean, /** Raw ANSI bytes, decoded once from Herdr and base64-encoded only for JSON clients. */ bytes: string, };
 
 export type HerdrMessage = { "type": "snapshot", snapshot: HerdrSnapshot, }
   | { "type": "error", message: string, };
+
+export type HerdrRepository = { repo_name: string, repo_root: string, };
 
 export type HerdrSnapshot = { agents: Array<HerdrAgent>, terminals: Array<HerdrAgent>, spaces: Array<HerdrSpace>, worktreeDirectory?: string, version?: string, protocol?: number, };
 
@@ -68,6 +91,10 @@ export type HerdrSpace = { id: string, name: string, terminalIds: Array<string>,
 export type HerdrStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
 export type HerdrTicket = { mobile?: boolean, cols?: number, rows?: number, };
+
+export type HerdrWorktree = { path: string, label: string, is_bare: boolean, is_prunable: boolean, branch?: string, open_workspace_id?: string, };
+
+export type HerdrWorktrees = { source: HerdrRepository, worktrees: Array<HerdrWorktree>, directory?: string, branches?: Array<string>, };
 
 export type HttpError = { error: string, };
 

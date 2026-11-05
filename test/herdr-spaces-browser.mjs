@@ -520,7 +520,7 @@ try {
   await deleteFromTree(worktreeSpace);
   const denyDelete = async route => {
     if (route.request().postDataJSON()?.action !== 'delete-worktree') return route.continue();
-    return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Permission denied while deleting checkout.' }) });
+    return route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: 'Permission denied; --force cannot bypass access checks.', code: 'failed' }) });
   };
   await page.route('**/api/herdr/action*', denyDelete);
   await deletion.getByRole('button', { name: 'Delete worktree checkout', exact: true }).click();

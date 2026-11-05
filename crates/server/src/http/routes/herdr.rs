@@ -188,7 +188,33 @@ pub(super) async fn api_herdr_action(
 ) -> Result<Response<Body>, Failure> {
     let target = ctx.target;
     let input: crate::herdr::action::Action = typed_body(&mut req, 65536).await?;
-    return ok(target.action(input).await.map_err(fail)?);
+    use crate::herdr::action::Action;
+    let listing = matches!(input, Action::ListWorktrees { .. });
+    let creation = matches!(
+        input,
+        Action::NewWorktree { .. }
+            | Action::OpenWorktree { .. }
+            | Action::Split { .. }
+            | Action::CreateSpace { .. }
+            | Action::Create { .. }
+    );
+    let result = match target.action(input).await {
+        Ok(result) => result,
+        Err(error) => return Ok(json_response(StatusCode::BAD_REQUEST, error)),
+    };
+    if listing {
+        ok(
+            serde_json::from_value::<crate::protocol::http::HerdrWorktrees>(result)
+                .map_err(|e| fail(format!("Invalid Herdr worktree response: {e}")))?,
+        )
+    } else if creation {
+        ok(
+            serde_json::from_value::<crate::protocol::http::HerdrCreated>(result)
+                .map_err(|e| fail(format!("Invalid Herdr creation response: {e}")))?,
+        )
+    } else {
+        ok(crate::protocol::http::Success { ok: true })
+    }
 }
 
 pub(super) async fn api_herdr_ticket(

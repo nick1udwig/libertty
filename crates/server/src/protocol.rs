@@ -592,6 +592,10 @@ mod tests {
         super::http::Success::export_all(&config).unwrap();
         super::http::HttpError::export_all(&config).unwrap();
         super::http::ConnectedHerdr::export_all(&config).unwrap();
+        crate::herdr::action::Action::export_all(&config).unwrap();
+        super::http::HerdrCreated::export_all(&config).unwrap();
+        super::http::HerdrWorktrees::export_all(&config).unwrap();
+        super::http::HerdrActionError::export_all(&config).unwrap();
         libertty_engine::types::Catalog::export_all(&config).unwrap();
         let mut files: Vec<_> = std::fs::read_dir(directory.path())
             .unwrap()
