@@ -1,11 +1,11 @@
 use crate::test;
 use crate::{
-    command_policy::{child_scope, flags_for, is_path_position, option_arity, subcommands_for},
+    arguments::{ParsedCommand, option_binding},
+    command_policy::{child_scope, flags_for, is_path_position, subcommands_for},
     host::{self, Host},
     repair::{argument_matches, key, repair_candidates as repair, tokens},
     types::{Candidate, Catalog, CommandMetadata, Flag},
     util::utf16_len,
-    validation::simple_words,
 };
 use std::collections::BTreeMap;
 
@@ -24,16 +24,28 @@ fn operand_position(args: &[String], metadata: &CommandMetadata) -> bool {
             continue;
         }
         if !literal && word.starts_with('-') {
-            let Some(takes) = option_arity(word, &flags_for(&scope, metadata)) else {
+            let flags = flags_for(&scope, metadata);
+            let Some(binding) = option_binding(word, &flags) else {
                 return false;
             };
-            if takes {
-                i += 1;
-                if i >= args.len() {
-                    return false;
+            let (minimum, maximum) = binding.following_bounds();
+            let mut count = 0;
+            while maximum.is_none_or(|maximum| count < maximum) {
+                let Some(value) = args.get(i + 1) else { break };
+                if value == "--" || option_binding(value, &flags).is_some() {
+                    break;
                 }
+                count += 1;
+                i += 1;
             }
-            if takes && ["-e", "--regexp", "-f", "--file"].contains(&word.as_str()) {
+            if count < minimum {
+                return false;
+            }
+            if (count > 0 || binding.attached.is_some())
+                && binding.descriptor.is_some_and(|flag| {
+                    ["-e", "--regexp", "-f", "--file"].contains(&flag.name.as_str())
+                })
+            {
                 supplied_text = true;
             }
         } else if let Some(child) = (!literal)
@@ -59,7 +71,7 @@ pub async fn complete_arguments(
     host: &dyn Host,
     script_flags: Option<&[Flag]>,
 ) -> Result<Vec<Candidate>, String> {
-    if !host.supports_completion() || simple_words(input).is_none() {
+    if !host.supports_completion() || ParsedCommand::parse(input).is_none() {
         return Ok(vec![]);
     }
     let words = tokens(input);
@@ -94,8 +106,14 @@ pub async fn complete_arguments(
                 .filter(|c| !c.is_literal())
                 .take(2)
             {
-                let Some(args) = simple_words(&candidate.command)
-                    .map(|ws| ws.into_iter().map(|w| w.value).collect::<Vec<_>>())
+                let Some(args) = ParsedCommand::parse(&candidate.command)
+                    .map(|parsed| {
+                        parsed
+                            .words
+                            .into_iter()
+                            .map(|w| w.value)
+                            .collect::<Vec<_>>()
+                    })
                     .filter(|args| !args.is_empty())
                 else {
                     continue;

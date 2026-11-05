@@ -15,24 +15,16 @@ pub fn tokens(input: &str) -> SharedList<Token> {
     memo(&TOKENS, input, 0, || parsed_tokens(input))
 }
 fn parsed_tokens(input: &str) -> SharedList<Token> {
-    if let Some(spans) = crate::shell_structure::word_spans(input) {
-        let parsed: Option<Vec<_>> = spans
-            .iter()
-            .map(|span| {
-                let text = &input[span.clone()];
-                let words = crate::validation::simple_words(text)?;
-                if words.len() != 1 {
-                    return None;
-                }
-                Some(Token {
-                    value: words[0].value.clone(),
-                    quoted: text.starts_with(['\'', '"']),
-                })
+    if let Some(parsed) = crate::arguments::ParsedCommand::parse(input) {
+        return parsed
+            .words
+            .into_iter()
+            .zip(parsed.spans)
+            .map(|(word, span)| Token {
+                value: word.value,
+                quoted: input[span].starts_with(['\'', '"']),
             })
             .collect();
-        if let Some(parsed) = parsed {
-            return parsed.into();
-        }
     }
     quoted_words(input)
         .into_iter()

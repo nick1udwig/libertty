@@ -49,24 +49,9 @@ pub fn child_scope(scope: &str, word: &str, metadata: &CommandMetadata) -> Optio
         .then(|| format!("{scope} {word}"))
 }
 pub fn option_arity(value: &str, flags: &[Flag]) -> Option<bool> {
-    let (name, attached) = value
-        .split_once('=')
-        .map_or((value, false), |(name, _)| (name, true));
-    if let Some(flag) = flags.iter().find(|flag| flag.name == name) {
-        return Some(!attached && flag.takes_value);
-    }
-    if !value.starts_with('-') || value.starts_with("--") || value.chars().count() < 3 || attached {
-        return None;
-    }
-    let chars: Vec<_> = value.chars().skip(1).collect();
-    for (index, ch) in chars.iter().enumerate() {
-        let flag = flags.iter().find(|flag| flag.name == format!("-{ch}"))?;
-        if flag.takes_value {
-            return Some(index == chars.len() - 1);
-        }
-    }
-    Some(false)
+    crate::arguments::option_binding(value, flags).map(|binding| binding.takes_value)
 }
+
 pub fn script_command(command: &str) -> bool {
     ["python", "python3", "node", "ruby", "bash", "sh"].contains(&command)
 }

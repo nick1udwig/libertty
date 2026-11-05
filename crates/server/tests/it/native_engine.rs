@@ -284,6 +284,7 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
     std::fs::create_dir(root.path().join("docs")).unwrap();
     std::fs::write(root.path().join("docs/My Notes.txt"), "notes").unwrap();
     std::fs::write(root.path().join("SKILL.md"), "skill").unwrap();
+    std::fs::write(root.path().join("docs/config.txt"), "config").unwrap();
     std::fs::write(root.path().join("tool.py"), "import argparse\nfrom pathlib import Path\np=argparse.ArgumentParser()\np.add_argument('--config', type=Path)\np.add_argument('--mode', choices=['east-zone','west-zone'])\np.add_argument('--pair', nargs=2)\np.add_argument('--tag', nargs='+')\np.add_argument('--force', action='store_true')\nsubs=p.add_subparsers()\nchild=subs.add_parser('child')\nchild.add_argument('--child-only')\n").unwrap();
     let services = HostServices::new();
     let host = NativeHost::new(
@@ -333,6 +334,18 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
         (
             "python3 tool.py config dcos slash My Notes dot txt force",
             "python3 tool.py --config 'docs/My Notes.txt' --force",
+        ),
+        (
+            "python3 tool.py --config='docs/My Notes.txt' --force",
+            "python3 tool.py '--config=docs/My Notes.txt' --force",
+        ),
+        (
+            "python3 tool.py --config=dcos/config.txt --force",
+            "python3 tool.py --config=docs/config.txt --force",
+        ),
+        (
+            "python3 tool.py --pair=one two --force",
+            "python3 tool.py --pair=one two --force",
         ),
         (
             "python3 tool.py mode east zone force",

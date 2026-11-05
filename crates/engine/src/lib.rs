@@ -1,4 +1,5 @@
 pub mod alternatives;
+mod arguments;
 pub mod command_policy;
 pub mod command_speech;
 pub mod completion;

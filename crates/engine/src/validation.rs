@@ -142,9 +142,10 @@ async fn policy_plain(
         script_flags,
         opaque,
     } = scope;
-    let Some(words) = simple_words(&candidate.command) else {
+    let Some(parsed) = crate::arguments::ParsedCommand::parse(&candidate.command) else {
         return Ok(false);
     };
+    let words = parsed.words;
     let Some(first) = words.first() else {
         return Ok(false);
     };
@@ -177,30 +178,23 @@ async fn policy_plain(
             continue;
         }
         if !literal && test!(r###"^-."###, arg) {
-            let Some(takes) = option_arity(arg, &flags) else {
+            let Some(binding) = crate::arguments::option_binding(arg, &flags) else {
                 return Ok(false);
             };
-            if let Some((name, _)) = arg.split_once('=')
-                && flags.iter().any(|flag| {
-                    flag.name == name && !flag.takes_value && flag.optional_value != Some(true)
-                })
+            let descriptor = binding.descriptor;
+            if binding.attached.is_some()
+                && descriptor
+                    .is_some_and(|flag| !flag.takes_value && flag.optional_value != Some(true))
             {
                 return Ok(false);
             }
-            let descriptor = flags
-                .iter()
-                .find(|flag| flag.name == arg.split('=').next().unwrap());
-            let (mut minimum, mut maximum) = descriptor
-                .map(Flag::value_bounds)
-                .unwrap_or((usize::from(takes), Some(usize::from(takes))));
+            let (minimum, maximum) = binding.following_bounds();
             let mut supplied = Vec::new();
-            if let Some((_, value)) = arg.split_once('=') {
+            if let Some(value) = binding.attached {
                 supplied.push(Word {
                     value: value.into(),
                     home: false,
                 });
-                minimum = minimum.saturating_sub(1);
-                maximum = maximum.map(|n| n.saturating_sub(1));
             }
             let mut count = 0;
             while maximum.is_none_or(|maximum| count < maximum) && index < words.len() {
