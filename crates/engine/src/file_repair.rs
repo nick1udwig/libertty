@@ -1,6 +1,6 @@
 use crate::{
-    arguments::{ParsedCommand, option_binding},
-    command_policy::{child_scope, flags_for, option_arity, script_operand},
+    arguments::{Argument, ArgumentCursor, ParsedCommand},
+    command_policy::{flags_for, option_arity, script_operand},
     host::Host,
     path_repair::{ExpectedType, PathInput, path_input, resolve_path},
     shell_structure::word_spans,
@@ -228,22 +228,20 @@ pub async fn repair_option_paths(
             continue;
         }
         let script = script_operand(&words.iter().map(|w| &w.value).collect::<Vec<_>>());
-        let mut scope = words[0].value.clone();
-        let mut flags = flags_for(&scope, metadata);
-        let mut index = 1;
-        while index < words.len() {
-            if script.is_some_and(|script| index > script)
-                && let Some(script_flags) = script_flags
-            {
-                flags = script_flags.to_vec();
+        let mut cursor =
+            ArgumentCursor::new(words.iter().map(|word| word.value.as_str()), metadata);
+        loop {
+            if script.is_some_and(|script| cursor.index > script) {
+                cursor.flags = script_flags;
             }
-            let word = &words[index];
-            if word.value == "--" {
+            let Some(argument) = cursor.next() else { break };
+            if matches!(argument, Argument::Delimiter) {
                 break;
             }
-            let binding = option_binding(&word.value, &flags);
-            if let Some(flag) = binding.as_ref().and_then(|binding| binding.descriptor) {
-                let attached = binding.as_ref().and_then(|binding| binding.attached);
+            if let Argument::Option { index, binding, .. } = argument
+                && let Some(flag) = binding.descriptor
+            {
+                let attached = binding.attached;
                 let value_index = if attached.is_some() { index } else { index + 1 };
                 if let Some(schema) = &flag.value
                     && flag.value_bounds() == (1, Some(1))
@@ -337,17 +335,6 @@ pub async fn repair_option_paths(
                     }
                     break;
                 }
-                index += if option_arity(&word.value, &flags) == Some(true) {
-                    2
-                } else {
-                    1
-                };
-            } else {
-                if let Some(child) = child_scope(&scope, &word.value, metadata) {
-                    scope = child;
-                    flags = flags_for(&scope, metadata);
-                }
-                index += 1;
             }
         }
     }

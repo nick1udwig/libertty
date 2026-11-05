@@ -1,6 +1,6 @@
 use crate::test;
 use crate::{
-    arguments::{ParsedCommand, option_binding},
+    arguments::{Argument, ArgumentCursor, ParsedCommand},
     command_policy::{child_scope, flags_for, is_path_position, subcommands_for},
     host::{self, Host},
     repair::{argument_matches, key, repair_candidates as repair, tokens},
@@ -13,55 +13,41 @@ fn operand_position(args: &[String], metadata: &CommandMetadata) -> bool {
     if is_path_position(args) || ["echo", "printf"].contains(&args[0].as_str()) {
         return false;
     }
-    let mut scope = args[0].clone();
-    let mut literal = false;
-    let (mut operands, mut supplied_text, mut i) = (0, false, 1);
-    while i < args.len() {
-        let word = &args[i];
-        if !literal && word == "--" {
-            literal = true;
-            i += 1;
-            continue;
-        }
-        if !literal && word.starts_with('-') {
-            let flags = flags_for(&scope, metadata);
-            let Some(binding) = option_binding(word, &flags) else {
-                return false;
-            };
-            let (minimum, maximum) = binding.following_bounds();
-            let mut count = 0;
-            while maximum.is_none_or(|maximum| count < maximum) {
-                let Some(value) = args.get(i + 1) else { break };
-                if value == "--" || option_binding(value, &flags).is_some() {
-                    break;
+    let mut cursor = ArgumentCursor::new(args.iter().map(String::as_str), metadata);
+    let (mut operands, mut supplied_text) = (0, false);
+    while let Some(argument) = cursor.next() {
+        match argument {
+            Argument::Option {
+                binding,
+                following,
+                complete,
+                ..
+            } => {
+                if !complete {
+                    return false;
                 }
-                count += 1;
-                i += 1;
+                if (!following.is_empty() || binding.attached.is_some())
+                    && binding.descriptor.is_some_and(|flag| {
+                        ["-e", "--regexp", "-f", "--file"].contains(&flag.name.as_str())
+                    })
+                {
+                    supplied_text = true;
+                }
             }
-            if count < minimum {
-                return false;
+            Argument::UnknownOption => return false,
+            Argument::Operand(index) => {
+                if !cursor.literal && args[index] == "-" {
+                    return false;
+                }
+                operands += 1;
             }
-            if (count > 0 || binding.attached.is_some())
-                && binding.descriptor.is_some_and(|flag| {
-                    ["-e", "--regexp", "-f", "--file"].contains(&flag.name.as_str())
-                })
-            {
-                supplied_text = true;
-            }
-        } else if let Some(child) = (!literal)
-            .then(|| child_scope(&scope, word, metadata))
-            .flatten()
-        {
-            scope = child;
-        } else {
-            operands += 1;
+            Argument::Delimiter | Argument::Subcommand => {}
         }
-        i += 1;
     }
     if ["grep", "rg", "sed", "awk"].contains(&args[0].as_str()) && operands == 0 && !supplied_text {
         return false;
     }
-    literal || subcommands_for(&scope, metadata).is_empty()
+    cursor.literal || subcommands_for(&cursor.scope, metadata).is_empty()
 }
 
 pub async fn complete_arguments(
