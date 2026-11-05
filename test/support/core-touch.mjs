@@ -149,8 +149,13 @@ export async function exerciseCoreTouch(page, frame, root) {
   await ready();
   await tap(4);
   await expectClick(4, 4);
+  const previousColumns = await frame.evaluate(() => window.__testTerminal.cols);
   await page.setViewportSize({ width: 430, height: 700 });
-  await until(async () => (await state()).cols === await frame.evaluate(() => window.__testTerminal.cols), 'Core touch grid resizes');
+  await until(async () => {
+    const { cols, rows } = await frame.evaluate(() => ({ cols: window.__testTerminal.cols, rows: window.__testTerminal.rows }));
+    const current = await state();
+    return cols !== previousColumns && current.cols === cols && current.rows === rows;
+  }, 'Core touch grid resizes');
   await ready();
   await tap(9);
   await expectClick(6, 9);

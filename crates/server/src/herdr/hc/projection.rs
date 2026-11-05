@@ -146,11 +146,14 @@ pub(super) struct Repository {
     name: String,
     checkout: String,
 }
-pub(super) async fn repositories(
+pub(super) type Repositories = BTreeMap<(String, String), (std::time::Instant, Option<Repository>)>;
+
+pub(super) fn repositories(
     session: &Session,
     snapshot: &mut Snapshot,
-    cache: &mut BTreeMap<(String, String), (std::time::Instant, Option<Repository>)>,
-) {
+    cache: &Repositories,
+) -> Vec<(String, String)> {
+    let mut requests = std::collections::BTreeSet::new();
     for space in &mut snapshot.spaces {
         let Ok((machine, id)) = split(&space.id) else {
             continue;
@@ -180,39 +183,9 @@ pub(super) async fn repositories(
         let now = std::time::Instant::now();
         if !cache
             .get(&cache_key)
-            .is_some_and(|(checked, _)| now.duration_since(*checked) < Duration::from_secs(2))
+            .is_some_and(|(checked, _)| now.duration_since(*checked) < Duration::from_secs(5))
         {
-            let git = Git {
-                client: session.client.clone(),
-                machine: machine.clone(),
-                deadline: DEADLINE,
-            };
-            let found = async {
-                let path = git.toplevel(cwd).await.ok()?;
-                let checkouts = git.list(&path).await.ok()?;
-                let root = checkouts.first()?.path.clone();
-                let name = model::folder_name(&root, "");
-                let checkout = checkouts.iter().find(|c| c.path == path)?;
-                let checkout = checkout.branch.clone().unwrap_or_else(|| {
-                    if checkout.head.is_empty() {
-                        model::folder_name(&path, "")
-                    } else {
-                        format!("detached {}", &checkout.head[..checkout.head.len().min(7)])
-                    }
-                });
-                Some(Repository {
-                    checkout,
-                    linked: path != root,
-                    root,
-                    path,
-                    name,
-                })
-            }
-            .await;
-            if cache.len() >= 256 {
-                cache.clear();
-            }
-            cache.insert(cache_key.clone(), (now, found));
+            requests.insert(cache_key.clone());
         }
         if let Some(repo) = cache.get(&cache_key).and_then(|(_, value)| value.as_ref()) {
             if !named {
@@ -224,4 +197,59 @@ pub(super) async fn repositories(
             space.linked_worktree = Some(repo.linked);
         }
     }
+    requests.into_iter().collect()
+}
+
+pub(super) async fn refresh_repositories(
+    client: Client,
+    mut cache: Repositories,
+    requests: Vec<(String, String)>,
+) -> Repositories {
+    let mut listings = BTreeMap::new();
+    for (machine, cwd) in requests {
+        let git = Git {
+            client: client.clone(),
+            machine: machine.clone(),
+            deadline: DEADLINE,
+        };
+        let found = async {
+            let path = git.toplevel(&cwd).await.ok()?;
+            let list_key = (machine.clone(), path.clone());
+            if !listings.contains_key(&list_key) {
+                let checkouts = Arc::new(git.list(&path).await.ok()?);
+                for checkout in checkouts.iter() {
+                    listings.insert((machine.clone(), checkout.path.clone()), checkouts.clone());
+                }
+            }
+            let checkouts = listings.get(&list_key)?;
+            let root = checkouts.first()?.path.clone();
+            let entry = checkouts.iter().find(|c| c.path == path)?;
+            let checkout = entry.branch.clone().unwrap_or_else(|| {
+                if entry.head.is_empty() {
+                    model::folder_name(&path, "")
+                } else {
+                    format!("detached {}", &entry.head[..entry.head.len().min(7)])
+                }
+            });
+            Some(Repository {
+                checkout,
+                linked: path != root,
+                name: model::folder_name(&root, ""),
+                root,
+                path,
+            })
+        }
+        .await;
+        if cache.len() >= 256
+            && !cache.contains_key(&(machine.clone(), cwd.clone()))
+            && let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, (checked, _))| checked)
+                .map(|(key, _)| key.clone())
+        {
+            cache.remove(&oldest);
+        }
+        cache.insert((machine, cwd), (std::time::Instant::now(), found));
+    }
+    cache
 }

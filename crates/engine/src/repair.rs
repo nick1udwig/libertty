@@ -167,9 +167,17 @@ pub fn key(value: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
     for word in text.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
         let word = match word {
-            "three" => "3",
+            "zero" => "0",
+            "one" => "1",
             "two" => "2",
-            "dot" | "dash" | "hyphen" | "underscore" => "",
+            "three" => "3",
+            "four" => "4",
+            "five" => "5",
+            "six" => "6",
+            "seven" => "7",
+            "eight" => "8",
+            "nine" => "9",
+            "dot" | "dash" | "hyphen" | "underscore" | "slash" => "",
             "pie" => "py",
             word => word,
         };
@@ -784,6 +792,39 @@ pub(crate) fn argument_matches(words: &[Token], start: usize, values: &[String])
     found.truncate(4);
     found
 }
+#[cfg(test)]
+mod spoken_argument_tests {
+    use super::*;
+
+    #[test]
+    fn completion_names_match_spoken_separators_and_each_digit() {
+        for (digit, name) in [
+            "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let exact = format!("release/east-{digit}");
+            let values = vec![exact.clone(), "release/west-5".into()];
+            let words = tokens(&format!("release slash east dash {name}"));
+            let found = argument_matches(&words, 0, &values);
+            assert_eq!(found[0].value, exact);
+            assert_eq!(found[0].consumed, words.len());
+        }
+    }
+
+    #[test]
+    fn exact_names_and_quotes_take_priority_over_spoken_normalization() {
+        let values = vec!["release/six".into(), "release/6".into()];
+        let found = argument_matches(&tokens("release/six"), 0, &values);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].value, "release/six");
+        assert!(argument_matches(&tokens("'release slash six'"), 0, &values).is_empty());
+        assert!(argument_matches(&tokens("unrelated slash nine"), 0, &values).is_empty());
+        assert_ne!(key("release for"), key("release/4"));
+    }
+}
+
 pub fn repair(
     input: &str,
     catalog: &Catalog,

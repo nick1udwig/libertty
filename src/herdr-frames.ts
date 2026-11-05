@@ -1,3 +1,4 @@
+import { terminalRenderers } from './renderer-cache.ts';
 import { node } from './dom.ts';
 import { readingOpen, type ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
@@ -71,6 +72,15 @@ export class HerdrFrames {
     spinner.setAttribute('aria-hidden', 'true');
     this.loading.append(spinner, this.loadingLabel);
   }
+  private removeFrame(frame: HTMLIFrameElement) {
+    terminalRenderers.release(frame);
+    frame.remove();
+    const id = frame.dataset.terminal!;
+    if (this.entries.get(id)?.frame === frame) this.entries.delete(id);
+    if (this.frame === frame) this.frame = undefined;
+    if (this.displayed === frame) this.displayed = undefined;
+    this.resizing.get(frame)?.();
+  }
   /** Handle a message from one of these iframes, ignoring every other window. */
   message(event: MessageEvent) {
     if (event.origin !== location.origin) return;
@@ -138,6 +148,7 @@ export class HerdrFrames {
       this.host.reading(entry.frame.dataset.terminal!, event.data);
     if (event.data.type === 'terminal-ended') this.host.ended();
     if (event.data.type === 'terminal-locked') entry.locked = true;
+    terminalRenderers.trim();
     if (active && event.data.type === 'terminal-locked')
       void this.host
         .authenticate()
@@ -178,7 +189,7 @@ export class HerdrFrames {
     const id = frame.dataset.terminal!,
       entry = this.entries.get(id);
     if (!entry || entry.frame !== frame) {
-      frame.remove();
+      this.removeFrame(frame);
       return;
     }
     frame.inert = true;
@@ -191,8 +202,7 @@ export class HerdrFrames {
       frame.style.visibility = keepVisible ? '' : 'hidden';
       frame.contentWindow?.postMessage({ type: 'herdr-park', parked: true }, location.origin);
     } else {
-      frame.remove();
-      this.entries.delete(id);
+      this.removeFrame(frame);
     }
   }
   /** Let a frame cover its picture before its size changes, so neither its stale canvas nor its local reflow paints. */
@@ -227,15 +237,11 @@ export class HerdrFrames {
           agent.paneId === this.displayed!.dataset.pane,
       )
     ) {
-      this.displayed.remove();
-      this.displayed = undefined;
+      this.removeFrame(this.displayed);
     }
     for (const [id, entry] of this.entries) {
       if (!terminals.some((agent) => agent.terminalId === id && agent.paneId === entry.pane)) {
-        entry.frame.remove();
-        this.entries.delete(id);
-        if (this.frame === entry.frame) this.frame = undefined;
-        if (this.displayed === entry.frame) this.displayed = undefined;
+        this.removeFrame(entry.frame);
       }
     }
     if (verified)
@@ -249,14 +255,16 @@ export class HerdrFrames {
           );
       }
     if (!selected) {
-      this.displayed?.remove();
-      for (const entry of this.entries.values()) entry.frame.remove();
+      if (this.displayed) this.removeFrame(this.displayed);
+      for (const entry of this.entries.values()) this.removeFrame(entry.frame);
       this.entries.clear();
       this.frame = this.displayed = undefined;
       this.rendered = false;
       this.setLoading(false);
       return;
     }
+    if (this.host.visible() && this.frame?.dataset.terminal === selected)
+      terminalRenderers.touch(this.frame);
     const agent = terminals.find((agent) => agent.terminalId === selected);
     if (
       !agent ||
@@ -332,7 +340,15 @@ export class HerdrFrames {
       this.entries.set(selected, entry);
       this.screen.append(frame);
       this.prepare(entry);
+      terminalRenderers.retain(frame, {
+        canEvict: () =>
+          !(this.host.visible() && (frame === this.frame || frame === this.displayed)) &&
+          terminalCanEvict(frame),
+        dispose: () => this.removeFrame(frame),
+      });
     }
+    if (this.frame) terminalRenderers.touch(this.frame);
+    terminalRenderers.trim();
     while (this.entries.size > 2) {
       const candidate = [...this.entries].find(
         ([, entry]) =>
@@ -341,9 +357,7 @@ export class HerdrFrames {
           terminalCanEvict(entry.frame),
       );
       if (!candidate) break;
-      const [id, entry] = candidate;
-      entry.frame.remove();
-      this.entries.delete(id);
+      this.removeFrame(candidate[1].frame);
     }
   }
   /** Park every frame except the selected one when the view hides. */
@@ -352,8 +366,7 @@ export class HerdrFrames {
       this.displayed &&
       ![...this.entries.values()].some((entry) => entry.frame === this.displayed)
     ) {
-      this.displayed.remove();
-      this.displayed = undefined;
+      this.removeFrame(this.displayed);
     }
     this.setLoading(false);
     for (const entry of [...this.entries.values()]) {
@@ -373,8 +386,8 @@ export class HerdrFrames {
   }
   dispose() {
     this.disposed = true;
-    this.displayed?.remove();
-    for (const entry of this.entries.values()) entry.frame.remove();
+    if (this.displayed) this.removeFrame(this.displayed);
+    for (const entry of this.entries.values()) this.removeFrame(entry.frame);
     this.entries.clear();
   }
 }

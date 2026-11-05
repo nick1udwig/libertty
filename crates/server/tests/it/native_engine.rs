@@ -1155,6 +1155,59 @@ async fn native_completion_and_suggestions_preserve_ambiguity_quotes_and_operand
 }
 
 #[tokio::test]
+async fn spoken_completion_names_include_separators_digits_and_prior_operands() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    let definitions = dir.path().join("completions");
+    std::fs::write(&definitions, "_names(){ COMPREPLY=($(compgen -W 'origin master feat/elegance-6 release/west-9 release/west-4' -- \"${COMP_WORDS[COMP_CWORD]}\")); }; complete -F _names git orchard\n").unwrap();
+    executable(
+        &dir.path().join("orchard"),
+        "#!/bin/sh\nprintf 'usage: orchard [NAME]\\n'\n",
+    );
+    let services = HostServices::new();
+    let help = HelpProvider::new(services.pool.clone());
+    let host = NativeHost::new(
+        services,
+        catalog(cwd, &["git", "orchard"]),
+        BTreeMap::from([
+            ("PATH".into(), format!("{cwd}:/usr/bin:/bin")),
+            ("HOME".into(), cwd.into()),
+            (
+                "LIBERTTY_COMPLETIONS_FILE".into(),
+                definitions.to_string_lossy().into_owned(),
+            ),
+        ]),
+        help.clone(),
+    );
+    let engine = NativeEngine::new().unwrap();
+    let cancel = CancellationToken::new();
+    for (input, expected) in [
+        (
+            "Git push dash u origin master feet slash elegance dash six",
+            "git push -u origin master feat/elegance-6",
+        ),
+        (
+            "git push dash u origin feet slash elegance dash six",
+            "git push -u origin feat/elegance-6",
+        ),
+        (
+            "orchard release slash west dash nine",
+            "orchard release/west-9",
+        ),
+        (
+            "orchard release slash west dash four",
+            "orchard release/west-4",
+        ),
+    ] {
+        let result = engine.suggest(input, &host, &cancel).await.unwrap();
+        assert_eq!(result[0].command, expected, "{input}: {result:?}");
+        assert_eq!(result.last().unwrap().command, input);
+        assert_eq!(result.last().unwrap().literal, Some(true));
+    }
+    help.dispose();
+}
+
+#[tokio::test]
 async fn cancelled_native_discovery_does_not_poison_later_work() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path().to_str().unwrap();

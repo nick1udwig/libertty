@@ -1,14 +1,17 @@
 use super::*;
+use crate::{http::socket, session::Transport};
 use crate::{
-    protocol::{ClientMessage, DictationState, DictationTarget, ServerMessage},
+    protocol::{
+        ClientMessage, DictationSource, DictationState, DictationTarget, EngineMode, ServerMessage,
+    },
     wire,
 };
-use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use axum::extract::ws::WebSocket;
 use herdr_client_lib::{
     client::{Stream, StreamEvent},
     protocol::AttachParams,
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{collections::VecDeque, sync::Mutex};
 use tokio::sync::{mpsc, oneshot};
 
@@ -72,25 +75,6 @@ impl Drop for Recording {
             recording.suspend();
         }
     }
-}
-async fn send(socket: &mut WebSocket, value: Value) -> Result<(), String> {
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        socket.send(if socket.protocol().is_some() {
-            Message::Binary(
-                wire::encode_json(
-                    &value,
-                    wire::Mode::protocol(socket.protocol().and_then(|p| p.to_str().ok())),
-                )
-                .into(),
-            )
-        } else {
-            Message::Text(value.to_string().into())
-        }),
-    )
-    .await
-    .map_err(error)?
-    .map_err(error)
 }
 #[derive(Default)]
 struct Decoder(Vec<u8>);
@@ -240,9 +224,30 @@ async fn first_paint(
     }
     Ok(paint)
 }
-fn state(record: &herdr_client_lib::protocol::Terminal, revision: u64, prompt: u64) -> Value {
+fn state(
+    record: &herdr_client_lib::protocol::Terminal,
+    revision: u64,
+    prompt: u64,
+) -> ServerMessage {
     let ready = shell(record).is_some();
-    json!({"type":"state","state":{"cwd":record.folder().unwrap_or_default(),"inputRevision":revision,"inputContext":context(record),"promptRevision":0,"ready":ready,"prompt":prompt,"exited":false,"inputTarget":if ready {"shell"} else {"program"},"terminalScroll":false}})
+    ServerMessage::State {
+        state: crate::session::ShellState {
+            cwd: record.folder().unwrap_or_default().into(),
+            input_revision: revision,
+            input_context: Some(context(record)),
+            prompt_revision: 0,
+            ready,
+            prompt,
+            exited: false,
+            exit_code: None,
+            input_target: Some(if ready {
+                DictationTarget::Shell
+            } else {
+                DictationTarget::Program
+            }),
+            terminal_scroll: Some(false),
+        },
+    }
 }
 async fn paste(stream: &Stream, parser: &vt100::Parser, text: &str) -> Result<(), String> {
     if text.contains('\x1b') || text.contains('\0') {
@@ -258,7 +263,7 @@ async fn paste(stream: &Stream, parser: &vt100::Parser, text: &str) -> Result<()
 const ENDED: &str = "Herdr terminal ended";
 /// One browser connection to an attached Herdr Core terminal, and the input state it guards.
 struct Pane<'a> {
-    socket: &'a mut WebSocket,
+    send: crate::viewer_queue::Sender,
     target: &'a Target,
     id: &'a str,
     recording_scope: &'a str,
@@ -277,24 +282,20 @@ struct Pane<'a> {
     prepared: mpsc::Sender<super::input::Prepared>,
     recording: Arc<Recording>,
     active: bool,
-    last_contact: tokio::time::Instant,
 }
 impl Pane<'_> {
-    async fn send(&mut self, value: Value) -> Result<(), String> {
-        send(self.socket, value).await
+    async fn send(&mut self, message: ServerMessage) -> Result<(), String> {
+        self.send
+            .send(Transport::Server(message))
+            .then_some(())
+            .ok_or_else(|| "Browser output queue closed.".into())
     }
     async fn send_state(&mut self) -> Result<(), String> {
         self.send(state(&self.current, self.revision, self.prompt))
             .await
     }
     async fn close(&mut self) {
-        let _ = self
-            .socket
-            .send(Message::Close(Some(CloseFrame {
-                code: 1000,
-                reason: ENDED.into(),
-            })))
-            .await;
+        self.send.send(Transport::Close(1000, ENDED.into()));
     }
     async fn replace(&mut self, text: &str) -> Result<(), String> {
         self.editable
@@ -344,12 +345,7 @@ impl Pane<'_> {
         };
         self.start_repair(request, true);
     }
-    async fn facts(&mut self) -> Result<(), String> {
-        let next = self
-            .client
-            .terminal_get(&self.current.address, DEADLINE)
-            .await
-            .map_err(error)?;
+    async fn facts(&mut self, next: herdr_client_lib::protocol::Terminal) -> Result<(), String> {
         if next.identity != self.current.identity || !next.is_live() {
             return Err("The terminal ended or was replaced.".into());
         }
@@ -413,8 +409,7 @@ impl Pane<'_> {
             }
         }
         prepared.reply.revision = self.revision;
-        self.send(ServerMessage::RepairResult(prepared.reply).value())
-            .await
+        self.send(ServerMessage::RepairResult(prepared.reply)).await
     }
     async fn dictated(&mut self, text: Dictated) -> Result<(), String> {
         let current = self.active
@@ -436,8 +431,15 @@ impl Pane<'_> {
             if shell {
                 self.dictated_text(text.text.clone(), false);
             }
-            self.send(json!({"type":"pasted","text":text.text,"replace":false,"source":"dictation","prompt":self.prompt,"revision":self.revision,"repairing":shell}))
-                .await?;
+            self.send(ServerMessage::Pasted {
+                text: text.text.clone(),
+                replace: false,
+                source: Some(DictationSource::Dictation),
+                prompt: self.prompt,
+                revision: self.revision,
+                repairing: Some(shell),
+            })
+            .await?;
             self.send_state().await?;
             if shell {
                 self.repair_dictation(text.text, &text.phrases);
@@ -463,33 +465,23 @@ impl Pane<'_> {
         }
         let text = self.decoder.push(&bytes);
         let seq = self.credits.sent(bytes.len() as u32);
-        self.send(json!({"type":"output","seq":seq,"data":text}))
-            .await?;
+        self.send(ServerMessage::Output {
+            seq,
+            data: text.into(),
+        })
+        .await?;
         Ok(true)
     }
     /// Handles one browser frame, returning false once the browser leaves.
-    async fn input(&mut self, input: Option<Result<Message, axum::Error>>) -> Result<bool, String> {
-        let Some(Ok(input)) = input else {
-            return Ok(false);
-        };
-        self.last_contact = tokio::time::Instant::now();
+    async fn input(&mut self, input: wire::Incoming) -> Result<bool, String> {
         let message = match input {
-            Message::Text(text) => serde_json::from_str::<ClientMessage>(&text).map_err(error)?,
-            Message::Binary(bytes) => match wire::decode(&bytes).map_err(error)? {
-                wire::Incoming::Message(message) => message,
-                wire::Incoming::Audio(audio) => {
-                    if let Some((_, recording)) = &self.recording.input.lock().unwrap().dictation {
-                        recording.audio(audio);
-                    }
-                    return Ok(true);
+            wire::Incoming::Message(message) => message,
+            wire::Incoming::Audio(audio) => {
+                if let Some((_, recording)) = &self.recording.input.lock().unwrap().dictation {
+                    recording.audio(audio);
                 }
-            },
-            Message::Ping(data) => {
-                self.socket.send(Message::Pong(data)).await.map_err(error)?;
                 return Ok(true);
             }
-            Message::Pong(_) => return Ok(true),
-            Message::Close(_) => return Ok(false),
         };
         if message.edits_input() {
             self.cancel_repair();
@@ -500,7 +492,7 @@ impl Pane<'_> {
     async fn message(&mut self, message: ClientMessage) -> Result<(), String> {
         let active = self.active;
         match message {
-            ClientMessage::Ping { .. } => self.send(json!({"type":"pong"})).await?,
+            ClientMessage::Ping { .. } => self.send(ServerMessage::Pong).await?,
             ClientMessage::Ack { seq } => {
                 let bytes = self.credits.acknowledge(seq)?;
                 if bytes > 0 {
@@ -563,8 +555,12 @@ impl Pane<'_> {
                     self.revision += 1;
                     self.editable = None;
                 }
-                self.send(json!({"type":"result","id":id,"accepted":result.is_ok(),"message":result.err()}))
-                    .await?;
+                self.send(ServerMessage::Result {
+                    id,
+                    accepted: result.is_ok(),
+                    message: result.err(),
+                })
+                .await?;
                 self.send_state().await?;
             }
             ClientMessage::Dictation(request) if active => {
@@ -616,8 +612,12 @@ impl Pane<'_> {
                     self.revision += 1;
                     self.dictated_text(text, false);
                 }
-                self.send(json!({"type":"edit-result","id":id,"accepted":result.is_ok(),"revision":self.revision}))
-                    .await?;
+                self.send(ServerMessage::EditResult {
+                    id,
+                    accepted: result.is_ok(),
+                    revision: self.revision,
+                })
+                .await?;
             }
             ClientMessage::Repair(request)
                 if active && request.prompt == self.prompt && request.revision == self.revision =>
@@ -632,8 +632,7 @@ impl Pane<'_> {
                     self.revision,
                     false,
                 );
-                self.send(ServerMessage::RepairResult(reply).value())
-                    .await?;
+                self.send(ServerMessage::RepairResult(reply)).await?;
             }
             ClientMessage::RepairCancel { id } => {
                 if self.repair.as_ref().is_some_and(|pending| pending.id == id) {
@@ -662,19 +661,31 @@ impl Pane<'_> {
                     paste(&self.stream, &self.parser, &text).await
                 };
                 if let Err(message) = result {
-                    self.send(json!({"type":"reading-error","message":message}))
-                        .await?;
+                    self.send(ServerMessage::ReadingError { message }).await?;
                 } else {
                     self.revision += 1;
                     self.dictated_text(text.clone(), applied);
-                    self.send(json!({"type":"pasted","text":text,"replace":false,"source":"dictation","prompt":self.prompt,"revision":self.revision,"repairing":true}))
-                        .await?;
+                    self.send(ServerMessage::Pasted {
+                        text: text.clone(),
+                        replace: false,
+                        source: Some(DictationSource::Dictation),
+                        prompt: self.prompt,
+                        revision: self.revision,
+                        repairing: Some(true),
+                    })
+                    .await?;
                     self.repair_dictation(text, &reading_phrases);
                 }
             }
             ClientMessage::InputLine { id, .. } => {
-                self.send(json!({"type":"input-line","id":id,"prompt":self.prompt,"revision":self.revision}))
-                    .await?;
+                self.send(ServerMessage::InputLine {
+                    id,
+                    prompt: self.prompt,
+                    revision: self.revision,
+                    text: None,
+                    cursor: None,
+                })
+                .await?;
             }
             _ => (),
         }
@@ -682,13 +693,22 @@ impl Pane<'_> {
     }
 }
 pub async fn terminal(
-    mut socket: WebSocket,
+    socket: WebSocket,
     target: &Target,
     id: &str,
     size: Option<crate::herdr::terminal_stream::Size>,
     recording_scope: &str,
     cancel: CancellationToken,
 ) {
+    let (send, output, slow) = crate::viewer_queue::channel();
+    let (input, mut inputs) = mpsc::channel(32);
+    let pump = socket::pump(
+        socket,
+        socket::Input::Core(&input),
+        socket::Output::Herdr(output),
+        socket::Policy::core(cancel.clone(), slow),
+    );
+    tokio::pin!(pump);
     let work = async {
         let live = hub::live(target).await?;
         let record = live.record(id)?.clone();
@@ -722,7 +742,7 @@ pub async fn terminal(
         let (replies, mut receive) = mpsc::channel(32);
         let (dictated, mut texts) = mpsc::channel(4);
         let mut pane = Pane {
-            socket: &mut socket,
+            send: send.clone(),
             target,
             id,
             recording_scope,
@@ -745,7 +765,6 @@ pub async fn terminal(
                 dictated,
             }),
             active: true,
-            last_contact: tokio::time::Instant::now(),
         };
         pane.parser.process(&paint.bytes);
         // The paint is already credited, so its acknowledgement releases nothing.
@@ -754,20 +773,35 @@ pub async fn terminal(
         } else {
             pane.credits.sent(0)
         };
-        pane.send(json!({"type":"hello","engine":"server","reset":true,"truncated":false,"firstSeq":1,"lastSeq":replay,"streamId":id}))
-            .await?;
+        pane.send(ServerMessage::Hello {
+            engine: EngineMode::Server,
+            reset: true,
+            truncated: false,
+            first_seq: 1,
+            last_seq: replay,
+            stream_id: id.into(),
+        })
+        .await?;
         pane.send_state().await?;
         if replay > 0 {
             let data = pane.decoder.push(&paint.bytes);
-            pane.send(json!({"type":"output","seq":replay,"data":data}))
-                .await?;
+            pane.send(ServerMessage::Output {
+                seq: replay,
+                data: data.into(),
+            })
+            .await?;
         }
         if paint.ended {
             pane.close().await;
             return Ok(());
         }
-        let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
-        let mut facts = tokio::time::interval(Duration::from_millis(500));
+        let client = pane.client.clone();
+        let address = pane.current.address.clone();
+        let refresh = || async {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            client.terminal_get(&address, DEADLINE).await.map_err(error)
+        };
+        let mut facts = Box::pin(refresh());
         loop {
             let apply_deadline = pane
                 .applying
@@ -779,37 +813,37 @@ pub async fn terminal(
                     let (prepared, _) = pane.applying.take().unwrap();
                     pane.complete_prepared(prepared).await.map(|()| true)?
                 }
-                _ = facts.tick(), if pane.active => pane.facts().await.map(|()| true)?,
-                _ = heartbeat.tick() => {
-                    if pane.last_contact.elapsed() > Duration::from_secs(45) {
-                        return Err("Browser connection timed out.".into());
-                    }
+                next = &mut facts, if pane.active => {
+                    pane.facts(next?).await?;
+                    facts.set(refresh());
                     true
                 }
                 Some(prepared) = preparations.recv() => pane.prepared(prepared).await.map(|()| true)?,
-                Some(reply) = receive.recv() => pane.send(reply.value()).await.map(|()| true)?,
+                Some(reply) = receive.recv() => pane.send(reply).await.map(|()| true)?,
                 Some(text) = texts.recv() => pane.dictated(text).await.map(|()| true)?,
                 output = pane.stream.next() => pane.output(output.map_err(error)?).await?,
-                input = pane.socket.recv() => pane.input(input).await?,
+                input = inputs.recv() => match input { Some(input) => pane.input(input).await?, None => false },
             };
             if !open {
                 return Ok(());
             }
         }
     };
-    let result: Result<(), String> =
-        tokio::select! { _ = cancel.cancelled() => return, result = work => result };
-    cancel.cancel();
-    if let Err(message) = result {
-        eprintln!("Herdr Core terminal connection ended: {message}");
-        let _ = socket
-            .send(Message::Close(Some(CloseFrame {
-                code: 1011,
-                reason: "Herdr Core connection ended".into(),
-            })))
-            .await;
+    let result: Option<Result<(), String>> = tokio::select! {
+        _ = cancel.cancelled() => None,
+        _ = &mut pump => None,
+        result = work => Some(result),
+    };
+    if let Some(result) = result {
+        if let Err(message) = result {
+            eprintln!("Herdr Core terminal connection ended: {message}");
+            send.send(Transport::Close(1011, "Herdr Core connection ended".into()));
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(1), pump).await;
     }
+    cancel.cancel();
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

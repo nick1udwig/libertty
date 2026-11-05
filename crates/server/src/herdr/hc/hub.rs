@@ -27,8 +27,7 @@ impl Live {
     }
 }
 type State = Option<Result<Arc<Live>, String>>;
-type Repositories =
-    BTreeMap<(String, String), (std::time::Instant, Option<projection::Repository>)>;
+use projection::Repositories;
 struct Hub {
     state: watch::Receiver<State>,
     refresh: Arc<Notify>,
@@ -178,12 +177,25 @@ async fn serve(
     generation: &mut u64,
 ) -> Result<Infallible, String> {
     let mut session = session(target).await?;
+    let mut initial = projection::project(&session)?;
+    let requests = projection::repositories(&session, &mut initial, repositories);
+    *repositories =
+        projection::refresh_repositories(session.client.clone(), repositories.clone(), requests)
+            .await;
     *generation += 1;
+    let mut checking: Option<futures::future::BoxFuture<'static, Repositories>> = None;
     let mut tick = tokio::time::interval(Duration::from_secs(2));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     loop {
         let mut snapshot = projection::project(&session)?;
-        projection::repositories(&session, &mut snapshot, repositories).await;
+        let requests = projection::repositories(&session, &mut snapshot, repositories);
+        if checking.is_none() && !requests.is_empty() {
+            checking = Some(Box::pin(projection::refresh_repositories(
+                session.client.clone(),
+                repositories.clone(),
+                requests,
+            )));
+        }
         let records = session
             .terminals
             .iter()
@@ -197,10 +209,19 @@ async fn serve(
         }))));
         tokio::select! {
             event = session.next() => { event.map_err(error)?; reconcile(&mut session).await?; }
+            result = async { checking.as_mut().unwrap().await }, if checking.is_some() => {
+                *repositories = result;
+                checking = None;
+            }
             _ = tick.tick() => (),
             _ = refresh.notified() => {
                 session.reconnect(session.client.clone()).await.map_err(error)?;
                 reconcile(&mut session).await?;
+                checking = None;
+                repositories.clear();
+                let mut snapshot = projection::project(&session)?;
+                let requests = projection::repositories(&session, &mut snapshot, repositories);
+                *repositories = projection::refresh_repositories(session.client.clone(), repositories.clone(), requests).await;
                 *generation += 1;
             }
         }

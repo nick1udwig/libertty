@@ -1,3 +1,4 @@
+import { terminalRenderers } from './renderer-cache.ts';
 import { isHerdrPlugin, showsTerminal } from './plugins.ts';
 import { closeIcon } from './icons.ts';
 import { type BackendProfile, type HostProfile, type TerminalTab } from './connections.ts';
@@ -362,6 +363,9 @@ export function createWorkspaceNavigation(options: Options) {
     updateTerminalLoading();
     renderWorkspaceShortcuts();
     presentStates();
+    const activeFrame = frames.get(workspace.active);
+    if (activeFrame) terminalRenderers.touch(activeFrame);
+    terminalRenderers.trim();
   }
   function updateWorkspaceNavigation() {
     if (drawerDrag && (page !== 'terminal' || drawerDrag.view !== herdrViews.get(workspace.active)))
@@ -577,6 +581,8 @@ export function createWorkspaceNavigation(options: Options) {
     addReading(source, { name, readPath: name, readCapture: capture, readExitCode: exitCode });
   }
   function unmount(tab: TerminalTab) {
+    const frame = frames.get(tab.id);
+    if (frame) terminalRenderers.release(frame);
     mountGeneration.set(tab.id, (mountGeneration.get(tab.id) || 0) + 1);
     mounting.delete(tab.id);
     pluginViews.get(tab.id)?.dispose();
@@ -630,17 +636,13 @@ export function createWorkspaceNavigation(options: Options) {
       pluginViews.set(tab.id, view);
       $('terminal-stack').append(view.element);
       renderTabs();
-      const cached = workspace.tabs
-        .filter((item) => tabPluginId(item) === 'terminal' && pluginViews.has(item.id))
-        .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
-      for (const item of cached.slice(4)) {
-        if (
-          item.id !== workspace.active &&
-          item.id !== presentedTab &&
-          pluginViews.get(item.id)?.canEvict?.() !== false
-        )
-          unmount(item);
-      }
+      const frame = frames.get(tab.id);
+      if (tabPluginId(tab) === 'terminal' && frame)
+        terminalRenderers.retain(frame, {
+          canEvict: () =>
+            tab.id !== workspace.active && tab.id !== presentedTab && view.canEvict?.() !== false,
+          dispose: () => unmount(tab),
+        });
     })();
     mounting.set(tab.id, work);
     try {

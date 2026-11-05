@@ -15,7 +15,8 @@ pub(super) async fn upgrade(req: Request<Body>) -> Result<WebSocketUpgrade, Fail
         .max_frame_size(128 * 1024))
 }
 
-pub(super) enum Input<'a> {
+pub(crate) enum Input<'a> {
+    Core(&'a mpsc::Sender<wire::Incoming>),
     Native {
         session: &'a Arc<Session>,
         attachment: u64,
@@ -53,12 +54,16 @@ impl Input<'_> {
                         attachment,
                     } => session.checkpoint(*attachment),
                     Self::Herdr(view) => view.checkpoint(),
-                    Self::Metadata { .. } => {}
+                    Self::Metadata { .. } | Self::Core(_) => {}
                 }
             }
             return Ok(true);
         }
         match self {
+            Self::Core(send) => send
+                .try_send(wire::Incoming::Message(message))
+                .map(|_| false)
+                .map_err(|_| "Terminal input queue is full"),
             Self::Native {
                 session,
                 attachment,
@@ -105,8 +110,13 @@ impl Input<'_> {
             serde_json::from_str::<ClientMessage>(text).map_err(|_| self.invalid_text())?;
         self.message(message, pressure)
     }
-    fn audio(&self, bytes: Vec<u8>) {
+    fn audio(&self, bytes: Vec<u8>) -> Result<(), &'static str> {
         match self {
+            Self::Core(send) => {
+                return send
+                    .try_send(wire::Incoming::Audio(bytes))
+                    .map_err(|_| "Terminal input queue is full");
+            }
             Self::Native {
                 session,
                 attachment,
@@ -114,6 +124,7 @@ impl Input<'_> {
             Self::Herdr(view) => view.audio(bytes),
             Self::Metadata { .. } => {}
         }
+        Ok(())
     }
     fn binary(&self, bytes: &[u8], pressure: &mut Pressure) -> Result<bool, &'static str> {
         if matches!(self, Self::Metadata { .. }) {
@@ -121,7 +132,7 @@ impl Input<'_> {
         }
         match wire::decode(bytes).map_err(|_| "Invalid wire message")? {
             wire::Incoming::Audio(audio) => {
-                self.audio(audio);
+                self.audio(audio)?;
                 Ok(false)
             }
             wire::Incoming::Message(message) => self.message(message, pressure),
@@ -129,7 +140,7 @@ impl Input<'_> {
     }
 }
 
-pub(super) enum Output {
+pub(crate) enum Output {
     Native(mpsc::UnboundedReceiver<Transport>),
     Herdr(mpsc::Receiver<crate::viewer_queue::Item>),
 }
@@ -160,13 +171,21 @@ impl Output {
     }
 }
 
-pub(super) struct Policy {
+pub(crate) struct Policy {
     cancel: CancellationToken,
     slow: CancellationToken,
     heartbeat: Option<Duration>,
     send_timeout: Option<Duration>,
+    legacy_text: bool,
 }
 impl Policy {
+    pub fn core(cancel: CancellationToken, slow: CancellationToken) -> Self {
+        Self {
+            legacy_text: true,
+            send_timeout: Some(Duration::from_secs(10)),
+            ..Self::herdr(cancel, slow, true)
+        }
+    }
     /// A vanished viewer must not hold the shell's output window closed.
     pub fn native() -> Self {
         static HEARTBEAT: std::sync::LazyLock<Duration> = std::sync::LazyLock::new(|| {
@@ -185,6 +204,7 @@ impl Policy {
             slow: CancellationToken::new(),
             heartbeat: Some(*HEARTBEAT),
             send_timeout: Some(Duration::from_secs(20)),
+            legacy_text: false,
         }
     }
     pub fn herdr(cancel: CancellationToken, slow: CancellationToken, heartbeat: bool) -> Self {
@@ -193,6 +213,7 @@ impl Policy {
             slow,
             heartbeat: heartbeat.then_some(Duration::from_secs(30)),
             send_timeout: Some(Duration::from_secs(5)),
+            legacy_text: false,
         }
     }
 }
@@ -217,7 +238,10 @@ async fn close(sender: &mut Sender, code: u16, reason: &str, deadline: Option<Du
     )
     .await;
 }
-fn encode(message: &Transport, mode: wire::Mode) -> Message {
+fn encode(message: &Transport, mode: wire::Mode, legacy_text: bool) -> Message {
+    if legacy_text {
+        return Message::Text(message.value().expect("logical message").to_string().into());
+    }
     Message::Binary(
         match message {
             Transport::Server(message) => wire::encode_server(message, mode),
@@ -228,7 +252,8 @@ fn encode(message: &Transport, mode: wire::Mode) -> Message {
     )
 }
 
-pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output, policy: Policy) {
+pub(crate) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output, policy: Policy) {
+    let legacy_text = policy.legacy_text && socket.protocol().is_none();
     let mode = wire::Mode::protocol(
         socket
             .protocol()
@@ -251,7 +276,7 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                         if let Transport::Close(code, reason) = message { return Some((*code, reason.clone())); }
                         let started = std::time::Instant::now();
                         let selected = pressure.lock().unwrap().mode(mode, output.queued(), started);
-                        let encoded = encode(message, selected);
+                        let encoded = encode(message, selected, legacy_text);
                         // Acknowledgements can arrive while the writer is flushing.
                         if mode == wire::Mode::GzipFast { pressure.lock().unwrap().sent(message.sequence(), started, started); }
                         // The item retains its byte reservation through the complete send.
@@ -289,7 +314,7 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
                             Message::Close(_) => return None,
                         };
                         match result {
-                            Ok(true) => Some(encode(&Transport::Server(ServerMessage::Pong), mode)),
+                            Ok(true) => Some(encode(&Transport::Server(ServerMessage::Pong), mode, legacy_text)),
                             Ok(false) => None,
                             Err(reason) => return Some((1008, reason.into())),
                         }
@@ -312,5 +337,61 @@ pub(super) async fn pump(socket: WebSocket, input: Input<'_>, mut output: Output
     };
     if let Some((code, reason)) = reason {
         close(&mut sender, code, &reason, Some(Duration::from_secs(1))).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn core_input_is_bounded_without_blocking_heartbeat_replies() {
+        let (send, mut receive) = mpsc::channel(1);
+        let input = Input::Core(&send);
+        let mut pressure = Pressure::default();
+        assert!(
+            !input
+                .message(
+                    ClientMessage::Input {
+                        data: "界".into(),
+                        seq: None
+                    },
+                    &mut pressure
+                )
+                .unwrap()
+        );
+        assert!(input.audio(vec![1, 2]).is_err());
+        assert!(
+            input
+                .message(ClientMessage::Ping { checkpoint: false }, &mut pressure)
+                .unwrap()
+        );
+        assert!(
+            matches!(receive.try_recv().unwrap(), wire::Incoming::Message(ClientMessage::Input { data, .. }) if data == "界")
+        );
+        input.audio(vec![1, 2]).unwrap();
+        assert!(
+            matches!(receive.try_recv().unwrap(), wire::Incoming::Audio(bytes) if bytes == [1, 2])
+        );
+    }
+
+    #[test]
+    fn typed_output_uses_compact_frames_and_preserves_legacy_core_json() {
+        let message = Transport::Server(ServerMessage::Output {
+            seq: 7,
+            data: "\x1b[32m界\r\n".into(),
+        });
+        let Message::Binary(bytes) = encode(&message, wire::Mode::Binary, false) else {
+            panic!("Expected binary output");
+        };
+        assert_eq!(bytes[3], 1);
+        assert_eq!(&bytes[12..], "\x1b[32m界\r\n".as_bytes());
+        let Message::Text(text) = encode(&message, wire::Mode::Binary, true) else {
+            panic!("Expected legacy JSON");
+        };
+        assert_eq!(
+            serde_json::from_str::<Value>(&text).unwrap(),
+            message.value().unwrap()
+        );
     }
 }
