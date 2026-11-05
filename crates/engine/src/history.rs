@@ -46,27 +46,21 @@ fn cached_history_index(
         if !seen.insert(line) {
             continue;
         }
-        let reused = previous
-            .as_ref()
-            .and_then(|index| index.entries.get(line))
-            .cloned();
-        let Some(words) = reused
-            .as_ref()
-            .map(|entry| entry.words.clone())
-            .or_else(|| simple_words(line))
-            .filter(|words| {
+        let entry = if let Some(entry) = previous.as_ref().and_then(|index| index.entries.get(line))
+        {
+            entry.clone()
+        } else {
+            let Some(words) = simple_words(line).filter(|words| {
                 !words.is_empty() && !["echo", "printf"].contains(&words[0].value.as_str())
-            })
-        else {
-            continue;
-        };
-        let length = word_length(line);
-        let entry = reused.unwrap_or_else(|| {
+            }) else {
+                continue;
+            };
             Arc::new(Entry {
                 line: line.clone(),
                 words,
             })
-        });
+        };
+        let length = word_length(line);
         index.lengths.entry(length).or_default().push(entry.clone());
         index.entries.insert(line.clone(), entry);
     }
