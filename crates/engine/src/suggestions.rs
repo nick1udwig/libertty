@@ -24,6 +24,25 @@ use crate::{regex, test};
 use futures::future::{LocalBoxFuture, join_all};
 use std::cell::RefCell;
 
+async fn check_syntax(
+    candidates: Vec<Candidate>,
+    host: &dyn Host,
+) -> Result<Vec<Candidate>, String> {
+    let results = join_all(
+        candidates
+            .iter()
+            .map(|candidate| host::syntax(host, &candidate.command)),
+    )
+    .await;
+    let mut valid = Vec::new();
+    for (candidate, result) in candidates.into_iter().zip(results) {
+        if result? {
+            valid.push(candidate);
+        }
+    }
+    Ok(valid)
+}
+
 fn covered(candidate: &Candidate, metadata: &CommandMetadata) -> bool {
     let Some(words) = simple_words(&candidate.command).filter(|words| !words.is_empty()) else {
         return false;
@@ -389,13 +408,14 @@ fn suggest_text<'a>(
                 next.truncate(COMPOUND_FRONTIER);
                 combined = next;
             }
-            let mut valid = Vec::new();
-            for (candidate, _) in combined {
-                if host::syntax(host, &candidate.command).await? {
-                    valid.push(candidate);
-                }
-            }
-            return Ok(valid);
+            return check_syntax(
+                combined
+                    .into_iter()
+                    .map(|(candidate, _)| candidate)
+                    .collect(),
+                host,
+            )
+            .await;
         }
         let metadata = discovery.cached(catalog, env, host.now_ms());
         if let Some(offset) = crate::shell_structure::nested_command(input, &metadata) {
@@ -407,14 +427,15 @@ fn suggest_text<'a>(
             {
                 let nested =
                     suggest(&input[offset..], catalog, env, discovery, host, stage).await?;
-                let mut result = Vec::new();
-                for mut candidate in nested.into_iter().filter(|c| !c.is_literal()) {
-                    candidate.command = format!("{prefix}{}", candidate.command);
-                    if host::syntax(host, &candidate.command).await? {
-                        result.push(candidate);
-                    }
-                }
-                return Ok(result);
+                let candidates = nested
+                    .into_iter()
+                    .filter(|c| !c.is_literal())
+                    .map(|mut candidate| {
+                        candidate.command = format!("{prefix}{}", candidate.command);
+                        candidate
+                    })
+                    .collect();
+                return check_syntax(candidates, host).await;
             }
         }
         if let Some(protected) = crate::shell_structure::protect(input) {
@@ -701,17 +722,18 @@ async fn suggest_one(
     let catalog = nearby_file_paths(input, &catalog, host, &metadata).await;
     let catalog = referenced_paths(input, &catalog, env, host).await?;
     let repairs = repair(input, &catalog, script_flags.as_deref(), &metadata);
-    let path_values = repair_option_paths(
-        input,
-        &catalog,
-        home,
-        host,
-        &metadata,
-        script_flags.as_deref(),
-    )
-    .await?;
-    let completed =
-        complete_arguments(input, &catalog, &metadata, host, script_flags.as_deref()).await?;
+    let (path_values, completed) = futures::join!(
+        repair_option_paths(
+            input,
+            &catalog,
+            home,
+            host,
+            &metadata,
+            script_flags.as_deref()
+        ),
+        complete_arguments(input, &catalog, &metadata, host, script_flags.as_deref())
+    );
+    let (path_values, completed) = (path_values?, completed?);
     let mut candidates = check(
         input,
         completed

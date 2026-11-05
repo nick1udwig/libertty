@@ -7,6 +7,7 @@ The library has no filesystem, subprocess, browser, network or terminal effects.
 `arguments.rs` shares plain argument values, source spans and option bindings across repair, completion and validation.
 `command_profiles.rs` defines built-in operand schemas, path repair, wrapper handling and directory changes in one registry.
 Add command aliases or operand policies there so these stages stay consistent.
+Independent option-path repair and argument completion share a host-fact round, as do final syntax checks for compound and wrapped choices.
 The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.
 Historical TypeScript revisions remain in Git for benchmark comparisons.
 
