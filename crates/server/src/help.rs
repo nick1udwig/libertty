@@ -1,13 +1,13 @@
+use crate::probe_policy::{self, BUILTINS, valid_name};
 use crate::{
     directories::executable,
     probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe},
     shell::local_bash,
 };
 use libertty_engine::{
-    command_policy::subcommands_for,
     help::{apply_manual, needs_manual, parse_help},
     path,
-    types::{Catalog, CommandMetadata, Help},
+    types::{Catalog, Help},
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -20,10 +20,6 @@ use std::{
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-const BUILTINS: &[&str] = &[
-    "cd", "echo", "printf", "export", "alias", "history", "source", "jobs", "fg", "bg", "type",
-    "read", "pwd", "set", "unset", "umask", "ulimit", "pushd", "popd",
-];
 #[derive(Default)]
 pub(crate) struct HelpCache(VecDeque<(String, Instant, SharedTask<Help>)>);
 impl HelpCache {
@@ -174,25 +170,7 @@ impl HelpProvider {
             .read_verified_route(command, &[], catalog, env, cancel)
             .await?;
         for i in 0..route.len() {
-            let scope = std::iter::once(command)
-                .chain(route[..i].iter().map(String::as_str))
-                .collect::<Vec<_>>()
-                .join(" ");
-            let allowed = if command == "git" && i == 0 {
-                parent
-                    .safe_subcommands
-                    .clone()
-                    .unwrap_or_else(|| subcommands_for("git", &CommandMetadata::default()))
-            } else if let Some(probes) = &parent.probe_subcommands {
-                probes.clone()
-            } else {
-                parent
-                    .subcommands
-                    .iter()
-                    .cloned()
-                    .chain(subcommands_for(&scope, &CommandMetadata::default()))
-                    .collect()
-            };
+            let allowed = probe_policy::help_children(command, &route[..i], &parent);
             if !allowed.contains(&route[i]) {
                 return Err("Unverified help route.".into());
             }
@@ -261,52 +239,13 @@ impl HelpProvider {
         env: &BTreeMap<String, String>,
         cancel: &CancellationToken,
     ) -> Result<Help, String> {
-        let mut safe_env = env.clone();
-        safe_env.extend(
-            [
-                ("BASH_ENV", "/dev/null"),
-                ("ENV", "/dev/null"),
-                ("NO_COLOR", "1"),
-                ("PAGER", "cat"),
-                ("GIT_PAGER", "cat"),
-                ("TERM", "dumb"),
-                ("LC_ALL", "C"),
-            ]
-            .into_iter()
-            .map(|(k, v)| (k.into(), v.into())),
-        );
         let mut options = ProbeOptions {
             cwd: catalog.cwd.clone(),
-            env: safe_env,
+            env: probe_policy::help_environment(env.clone()),
             timeout: Duration::from_millis(1500),
             max_buffer: 128 * 1024,
         };
-        let args: Vec<String> = if BUILTINS.contains(&command) {
-            [
-                "--noprofile",
-                "--norc",
-                "-c",
-                "builtin help \"$1\"",
-                "libertty-help",
-                command,
-            ]
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
-        } else {
-            route
-                .iter()
-                .cloned()
-                .chain(std::iter::once(
-                    if command == "git" && !route.is_empty() {
-                        "-h"
-                    } else {
-                        "--help"
-                    }
-                    .into(),
-                ))
-                .collect()
-        };
+        let args = probe_policy::help_args(command, route);
         let result = probe(&self.pool, executable, &args, &options, cancel).await;
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
@@ -324,23 +263,12 @@ impl HelpProvider {
         if needs_manual(command, route, &text, &found) {
             let manual_options = ProbeOptions {
                 cwd: catalog.cwd.clone(),
-                env: [
-                    ("PATH", "/usr/bin:/bin"),
-                    (
-                        "HOME",
-                        env.get("HOME")
-                            .map(String::as_str)
-                            .filter(|v| !v.is_empty())
-                            .unwrap_or(&catalog.cwd),
-                    ),
-                    ("MANWIDTH", "100"),
-                    ("MANPAGER", "cat"),
-                    ("MANOPT", ""),
-                    ("LC_ALL", "C"),
-                ]
-                .into_iter()
-                .map(|(k, v)| (k.into(), v.into()))
-                .collect(),
+                env: probe_policy::manual_environment(
+                    env.get("HOME")
+                        .map(String::as_str)
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or(&catalog.cwd),
+                ),
                 timeout: Duration::from_millis(3500),
                 max_buffer: 512 * 1024,
             };
@@ -435,12 +363,6 @@ impl HelpProvider {
         }
         Ok(found)
     }
-}
-fn valid_name(name: &str) -> bool {
-    name.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_-".contains(c))
 }
 
 #[cfg(test)]

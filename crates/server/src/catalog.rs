@@ -2,7 +2,7 @@ use crate::{
     directories::executable,
     probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe},
 };
-use libertty_engine::{path, repair::tokens, types::Flag};
+use libertty_engine::types::Flag;
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
@@ -82,18 +82,9 @@ impl CatalogHost {
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }
-        let words = tokens(command);
-        let script = libertty_engine::command_policy::script_operand(
-            &words.iter().map(|w| &w.value).collect::<Vec<_>>(),
-        );
-        if !words
-            .first()
-            .is_some_and(|w| ["python", "python3"].contains(&w.value.as_str()))
-            || !script.is_some_and(|index| words[index].value.ends_with(".py"))
-        {
+        let Some(file) = crate::probe_policy::python_script(command, cwd) else {
             return Ok(None);
-        }
-        let file = path::resolve(&[cwd, &words[script.unwrap()].value]);
+        };
         let info = tokio::fs::metadata(&file).await.ok();
         if cancel.is_cancelled() {
             return Err(ABORTED.into());

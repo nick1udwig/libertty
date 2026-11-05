@@ -24,6 +24,7 @@ Tools can request suggestions through `/api/suggest`.
 Native suggestions and prewarming use typed calls and results without JSON catalog or candidate conversions.
 The WASM adapter retains the existing JSON protocol.
 Native help, script and completion adapters retain probe-pool capacity and cancellation.
+`probe_policy.rs` shares help-route verification, help arguments, probe environments and Python script selection between local and SSH adapters.
 `src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
 Each prepared choice includes its backend action, so selection keeps its reading or shell meaning if browser preferences change.
 Browser and native reading recognition share contract fixtures, normalize phrases, and prefer the longest matching phrase.

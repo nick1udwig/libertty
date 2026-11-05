@@ -1,3 +1,4 @@
+use crate::probe_policy::{self, valid_name};
 use crate::{
     completion::{
         COMPLETION_SCRIPT, completion_args, completion_timeout, completion_values,
@@ -11,7 +12,7 @@ use libertty_engine::{
     help::{apply_manual, needs_manual, parse_help},
     host::{FactValue, HostOperation},
     path,
-    repair::{shell_quote, tokens},
+    repair::shell_quote,
     types::{
         Catalog, CommandMetadata, DirectoryEntry, DirectoryLookup, DirectorySnapshot, FileInfo,
         Help,
@@ -301,17 +302,9 @@ impl SSHHost {
                     .await?,
             ))),
             HostOperation::Describe { command } => {
-                let args = tokens(command);
-                let script = libertty_engine::command_policy::script_operand(
-                    &args.iter().map(|w| &w.value).collect::<Vec<_>>(),
-                );
-                if args.len() < 2
-                    || !["python", "python3"].contains(&args[0].value.as_str())
-                    || !script.is_some_and(|index| args[index].value.ends_with(".py"))
-                {
+                let Some(file) = probe_policy::python_script(command, &catalog.cwd) else {
                     return Ok(FactValue::Describe(Arc::new(None)));
-                }
-                let file = path::resolve(&[&catalog.cwd, &args[script.unwrap()].value]);
+                };
                 if !bounded(cancel, async {
                     Ok(self
                         .files
@@ -362,17 +355,7 @@ impl SSHHost {
         }
         let mut parent = self.cached_help(command, &[], catalog, env, cancel).await?;
         for i in 0..route.len() {
-            let allowed = if command == "git" && i == 0 {
-                parent
-                    .safe_subcommands
-                    .clone()
-                    .unwrap_or_else(|| subcommands_for("git", &CommandMetadata::default()))
-            } else {
-                parent
-                    .probe_subcommands
-                    .clone()
-                    .unwrap_or_else(|| parent.subcommands.clone())
-            };
+            let allowed = probe_policy::help_children(command, &route[..i], &parent);
             if !allowed.contains(&route[i]) {
                 return Err("Unverified help route.".into());
             }
@@ -436,14 +419,14 @@ impl SSHHost {
         env: &Environment,
         cancel: &CancellationToken,
     ) -> Result<Help, String> {
-        let args = std::iter::once(command)
-            .chain(route.iter().map(String::as_str))
-            .chain(std::iter::once(if command == "git" && !route.is_empty() {
-                "-h"
-            } else {
-                "--help"
-            }))
-            .map(shell_quote)
+        let executable = if probe_policy::BUILTINS.contains(&command) {
+            "bash"
+        } else {
+            command
+        };
+        let args = std::iter::once(executable.to_owned())
+            .chain(probe_policy::help_args(command, route))
+            .map(|arg| shell_quote(&arg))
             .collect::<Vec<_>>()
             .join(" ");
         let home = env
@@ -455,11 +438,42 @@ impl SSHHost {
             .map(String::as_str)
             .filter(|s| !s.is_empty())
             .unwrap_or("/usr/bin:/bin");
-        let output = self.exec(&format!("cd {} && env -i HOME={} PATH={} BASH_ENV=/dev/null ENV=/dev/null PAGER=cat GIT_PAGER=cat TERM=dumb LC_ALL=C {args}",shell_quote(&catalog.cwd),shell_quote(home),shell_quote(path)),cancel).await?;
+        let environment = probe_policy::help_environment(std::collections::BTreeMap::from([
+            ("HOME".into(), home.clone()),
+            ("PATH".into(), path.into()),
+        ]));
+        let assignments = environment
+            .iter()
+            .map(|(key, value)| format!("{key}={}", shell_quote(value)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let output = self
+            .exec(
+                &format!(
+                    "cd {} && env -i {assignments} {args}",
+                    shell_quote(&catalog.cwd)
+                ),
+                cancel,
+            )
+            .await?;
         let text = format!("{}\n{}", output.stdout, output.stderr);
         let mut help = parse_help(command, route, &text);
         if needs_manual(command, route, &text, &help) {
-            let manual = self.exec(&format!("cd {} && env -i PATH=/usr/bin:/bin HOME={} MANWIDTH=100 MANPAGER=cat MANOPT= LC_ALL=C /usr/bin/man -P cat -- {}",shell_quote(&catalog.cwd),shell_quote(home),shell_quote(command)),cancel).await;
+            let assignments = probe_policy::manual_environment(home)
+                .iter()
+                .map(|(key, value)| format!("{key}={}", shell_quote(value)))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let manual = self
+                .exec(
+                    &format!(
+                        "cd {} && env -i {assignments} /usr/bin/man -P cat -- {}",
+                        shell_quote(&catalog.cwd),
+                        shell_quote(command)
+                    ),
+                    cancel,
+                )
+                .await;
             if cancel.is_cancelled() {
                 return Err(ABORTED.into());
             }
@@ -475,12 +489,7 @@ impl SSHHost {
         Ok(help)
     }
 }
-fn valid_name(value: &str) -> bool {
-    !value.is_empty()
-        && value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"_.+-".contains(&b))
-}
+
 fn valid_env(value: &str) -> bool {
     !value.is_empty()
         && !value.as_bytes()[0].is_ascii_digit()
