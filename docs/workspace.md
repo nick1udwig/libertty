@@ -8,7 +8,7 @@ The workspace is terminal-first, with saved direct and SSH hosts, backend select
 `workspace-storage.ts` validates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
 These modules share one live workspace state so replacing saved hosts, backends or tabs is visible to pending actions.
 Each terminal uses a same-origin `terminal.html` frame running the existing renderer and input pipeline.
-The workspace caches four recently used terminal renderers and restores evicted views through session replay.
+The workspace caches four recently used renderers across ordinary terminal and Herdr tabs and restores evicted views through session replay.
 Views with unacknowledged input, retained recordings or pending browser operations remain mounted while that work is pending.
 Aware clients request input checkpoints with existing heartbeats, retaining newer keys until the backend confirms them.
 A terminal tab mounts when selected, stops parsing and painting when hidden, and releases its socket after two seconds.

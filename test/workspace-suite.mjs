@@ -546,10 +546,10 @@ try {
       const currentToken = await page.evaluate(url => localStorage.getItem('libertty.access:' + url + '/'), secondary);
       const replaced = await request(secondary, 'sessions', currentToken, { name: 'changed reference', ssh: { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, keyId: lockedReference.id, passphrase: 'existing-pass' } });
       assert.equal(replaced.status, 400); assert.match((await replaced.json()).error, /referenced SSH key has changed/);
-      const idleRenderers = await page.locator('#terminal-stack>iframe[id^="frame-"]').evaluateAll(frames => frames.filter(frame => {
+      const idleRenderers = await page.locator('#terminal-stack iframe[src*="terminal.html"]').evaluateAll(frames => frames.filter(frame => {
         const state = { allowed: false }; frame.contentDocument?.dispatchEvent(new CustomEvent('terminal-can-evict', { detail: state })); return state.allowed;
       }).length);
-      assert.ok(idleRenderers <= 4, 'The idle terminal renderer cache stays bounded');
+      assert.ok(idleRenderers <= 4, 'Native and Herdr renderers share one bounded cache');
     }
   }
   assert.deepEqual(errors, []);
