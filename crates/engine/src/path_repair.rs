@@ -389,21 +389,19 @@ pub type DirectoryInput = PathInput;
 pub fn directory_input(input: &str) -> Option<PathInput> {
     let expanded = expand_symbols(input, true);
     let expanded = expanded.trim();
-    let direct = regex!(r###"(?i)^(cd|pushd|upload)[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]+(.*)$"###).captures(expanded);
-    let (command, target) = if let Some(matched) = direct {
-        (matched[1].to_lowercase(), matched[2].trim().to_owned())
+    let direct = expanded
+        .split_once(crate::util::js_whitespace)
+        .filter(|(command, _)| crate::command_policy::directory_command(&command.to_lowercase()));
+    let (command, target) = if let Some((command, target)) = direct {
+        (command.to_lowercase(), target.trim().to_owned())
     } else {
-        // Resolve spelled command names before scanning directory operands.
-        // The general command repair path only has nearby catalog paths.
-        let commands = ["cd".to_owned(), "pushd".to_owned(), "upload".to_owned()];
+        let commands = crate::command_profiles::directory_commands();
         let matched = command_speech(&tokens(expanded), &commands)
             .into_iter()
             .filter(|matched| matched.score >= 100.0)
             .max_by_key(|matched| matched.consumed)?;
-        let end = regex!(r###"\S+[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*"###)
-            .find_iter(expanded)
-            .nth(matched.consumed - 1)?
-            .end();
+        let spans = crate::shell_structure::word_spans(expanded)?;
+        let end = spans.get(matched.consumed - 1)?.end;
         (matched.value, expanded[end..].trim().to_owned())
     };
     let mut target = target;

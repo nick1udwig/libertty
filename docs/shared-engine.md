@@ -4,6 +4,9 @@
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
 The library has no filesystem, subprocess, browser, network or terminal effects.
 `selection.rs` owns final evidence ordering, stable deduplication and original-text presentation, with separate search, validation, compound and display limits.
+`arguments.rs` shares plain argument values, source spans and option bindings across repair, completion and validation.
+`command_profiles.rs` defines built-in operand schemas, path repair, wrapper handling and directory changes in one registry.
+Add command aliases or operand policies there so these stages stay consistent.
 The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.
 Historical TypeScript revisions remain in Git for benchmark comparisons.
 

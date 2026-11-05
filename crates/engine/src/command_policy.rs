@@ -1,4 +1,7 @@
-use crate::types::{CommandMetadata, Flag};
+use crate::{
+    command_profiles::{OperandCheck, profile},
+    types::{CommandMetadata, Flag, ValueKind},
+};
 use serde::Deserialize;
 use std::{collections::BTreeMap, sync::OnceLock};
 
@@ -53,7 +56,10 @@ pub fn option_arity(value: &str, flags: &[Flag]) -> Option<bool> {
 }
 
 pub fn script_command(command: &str) -> bool {
-    ["python", "python3", "node", "ruby", "bash", "sh"].contains(&command)
+    profile(command)
+        .operands
+        .as_ref()
+        .is_some_and(|operands| operands.check == OperandCheck::First)
 }
 /// Locate a script after interpreter options, without interpreting script arguments.
 pub fn script_operand<T: AsRef<str>>(args: &[T]) -> Option<usize> {
@@ -79,16 +85,19 @@ pub fn script_operand<T: AsRef<str>>(args: &[T]) -> Option<usize> {
     None
 }
 pub fn directory_command(command: &str) -> bool {
-    ["cd", "pushd", "upload"].contains(&command)
+    profile(command).repair_kind == Some(ValueKind::Directory)
 }
 pub fn input_file_command(command: &str) -> bool {
-    [
-        "download", "cat", "less", "more", "head", "tail", "file", "stat", "wc", "du", "ls",
-    ]
-    .contains(&command)
+    matches!(
+        profile(command).repair_kind,
+        Some(ValueKind::Path | ValueKind::InputFile)
+    )
 }
 pub fn editor_command(command: &str) -> bool {
-    ["vi", "vim", "nvim", "view", "nano", "emacs", "micro", "hx"].contains(&command)
+    profile(command)
+        .operands
+        .as_ref()
+        .is_some_and(|operands| operands.check == OperandCheck::Repaired)
 }
 pub fn is_path_position<T: AsRef<str>>(args: &[T]) -> bool {
     let Some(command) = args.first().map(AsRef::as_ref) else {
@@ -102,5 +111,10 @@ pub fn is_path_position<T: AsRef<str>>(args: &[T]) -> bool {
             && !args
                 .iter()
                 .any(|arg| ["-c", "-m", "-e", "--eval"].contains(&arg.as_ref())))
-        || (command == "git" && args.get(1).is_some_and(|arg| arg.as_ref() == "add"))
+        || args.get(1).is_some_and(|arg| {
+            profile(&format!("{command} {}", arg.as_ref()))
+                .operands
+                .as_ref()
+                .is_some_and(|operands| operands.check == OperandCheck::All)
+        })
 }

@@ -2,6 +2,7 @@ use crate::test;
 use crate::types::Word;
 use crate::{
     command_policy::*,
+    command_profiles::{OperandCheck, profile},
     host::{self, Host},
     path,
     repair::command_available,
@@ -271,48 +272,52 @@ async fn policy_plain(
     if help {
         return Ok(true);
     }
-    let directory_only = directory_command(command);
-    if directory_only && operands.len() > 1 || command == "download" && operands.len() != 1 {
+    let profile = profile(&scope);
+    let policy = profile.operands.as_ref();
+    if policy.is_some_and(|policy| {
+        operands.len() < policy.schema.minimum
+            || policy
+                .schema
+                .maximum
+                .is_some_and(|maximum| operands.len() > maximum)
+    }) {
         return Ok(false);
     }
-    let script = script_command(command)
-        && !words
-            .iter()
-            .any(|word| ["-c", "-m", "-e", "--eval"].contains(&word.value.as_str()));
-    let check_all = directory_only
-        || input_file_command(command)
-        || command == "git" && scope == "git add"
-        || editor_command(command)
-            && candidate.changes.iter().any(|change| {
+    let count = policy.map_or(0, |policy| match policy.check {
+        OperandCheck::All => operands.len(),
+        OperandCheck::First => {
+            if words
+                .iter()
+                .any(|word| ["-c", "-m", "-e", "--eval"].contains(&word.value.as_str()))
+            {
+                0
+            } else {
+                operands.len().min(1)
+            }
+        }
+        OperandCheck::Repaired => {
+            if candidate.changes.iter().any(|change| {
                 matches!(
                     change,
                     crate::types::Change::File(_) | crate::types::Change::VerifiedFile
                 )
-            });
-    let count = if check_all {
-        operands.len()
-    } else if script {
-        operands.len().min(1)
-    } else {
-        0
-    };
-    let mut paths = option_paths;
-    for operand in operands.into_iter().take(count) {
-        if operand.value == "-" && command != "download" && command != "upload"
-            || opaque.contains(&operand.value.as_str())
-        {
-            continue;
-        }
-        paths.push((
-            operand.clone(),
-            if directory_only {
-                ValueKind::Directory
-            } else if script || command == "download" {
-                ValueKind::InputFile
+            }) {
+                operands.len()
             } else {
-                ValueKind::Path
-            },
-        ));
+                0
+            }
+        }
+    });
+    let mut paths = option_paths;
+    if let Some(policy) = policy {
+        for operand in operands.into_iter().take(count) {
+            if operand.value == "-" && !policy.dash_is_path
+                || opaque.contains(&operand.value.as_str())
+            {
+                continue;
+            }
+            paths.push((operand.clone(), policy.schema.kind));
+        }
     }
     let checked = futures::future::join_all(paths.into_iter().map(|(operand, kind)| {
         let cwd = &cwd;

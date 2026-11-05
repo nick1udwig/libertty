@@ -300,3 +300,70 @@ fn separate_engine_instances_never_share_learned_command_metadata() {
     };
     assert_eq!(reset["flags"], json!({}));
 }
+
+#[test]
+fn command_profiles_preserve_operand_types_and_script_argument_boundaries() {
+    use libertty_engine::host::HostOperation;
+    for (command, valid, expected_paths) in [
+        ("cd folder", true, vec!["/fixture/folder"]),
+        ("cd file", false, vec!["/fixture/file"]),
+        ("cd folder extra", false, vec![]),
+        ("download folder", false, vec!["/fixture/folder"]),
+        ("download file", true, vec!["/fixture/file"]),
+        ("download", false, vec![]),
+        (
+            "ls folder file",
+            true,
+            vec!["/fixture/folder", "/fixture/file"],
+        ),
+        ("python3 file missing-argument", true, vec!["/fixture/file"]),
+        ("python3 folder", false, vec!["/fixture/folder"]),
+        ("nano new-file", true, vec![]),
+        (
+            "git add file folder",
+            true,
+            vec!["/fixture/file", "/fixture/folder"],
+        ),
+        ("unknown missing-argument", true, vec![]),
+    ] {
+        let mut runtime = Runtime::default();
+        let mut step = runtime.start(1, Request {
+            operation: "candidateValid".into(),
+            args: vec![json!(command), json!({"command":command,"score":100,"changes":[]}),
+                json!({"cwd":"/fixture","commands":["cd","download","ls","python3","nano","git","unknown"],"paths":[],"history":[]}),
+                json!({}), json!({"flags":{},"subcommands":{}})],
+        }, 0.0);
+        let mut paths = Vec::new();
+        for wave in 1..=3 {
+            match step {
+                Step::Complete { value, .. } => {
+                    assert_eq!(value, json!(valid), "{command}");
+                    assert_eq!(paths, expected_paths, "{command}");
+                    break;
+                }
+                Step::Pending { callbacks, .. } => {
+                    let replies = callbacks
+                        .into_iter()
+                        .map(|callback| {
+                            Reply::Values {
+                        request: callback.request,
+                        values: callback.operations.into_iter().map(|operation| match operation {
+                            HostOperation::Syntax { .. } => json!(true),
+                            HostOperation::Stat { path, .. } => {
+                                let directory = path.ends_with("/folder");
+                                paths.push(path);
+                                json!({"file":!directory,"directory":directory,"executable":false})
+                            }
+                            _ => panic!("Unexpected fact: {operation:?}"),
+                        }).collect(),
+                    }
+                        })
+                        .collect();
+                    step = runtime.resume(1, replies, f64::from(wave));
+                }
+                _ => panic!("Unexpected profile validation result"),
+            }
+            assert!(wave < 3, "Profile validation did not finish: {command}");
+        }
+    }
+}

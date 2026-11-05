@@ -248,7 +248,7 @@ fn part_choices<'a>(
 
 fn next_directory(command: &str, catalog: &Catalog, env: &Environment) -> Option<String> {
     let words = simple_words(command)?;
-    if words.first()?.value != "cd" {
+    if !crate::command_profiles::profile(&words.first()?.value).changes_directory {
         return None;
     }
     let value = words.iter().skip(1).find(|w| !w.value.starts_with('-'));

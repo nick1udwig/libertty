@@ -136,7 +136,7 @@ pub async fn repair_input_file(
     };
     let mut operand = expanded[span.start..].to_owned();
     let quoted = test!(r###"^("[^"]*"|'[^']*')$"###, &operand);
-    if command != "download"
+    if !crate::command_profiles::profile(&command).repair_bare_paths
         && (!operand.contains('/')
             || (test!(
                 r###"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]"###,
@@ -190,10 +190,9 @@ pub async fn repair_input_file(
         .into(),
         parts,
     };
-    let expected = if ["ls", "du", "file", "stat"].contains(&command.as_str()) {
-        ExpectedType::Any
-    } else {
-        ExpectedType::File
+    let expected = match crate::command_profiles::profile(&command).repair_kind {
+        Some(ValueKind::InputFile) => ExpectedType::File,
+        _ => ExpectedType::Any,
     };
     resolve_path(&request, catalog, home, host, expected).await
 }
