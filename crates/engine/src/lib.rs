@@ -12,6 +12,7 @@ pub mod path_repair;
 pub mod pipeline;
 pub mod repair;
 pub mod runtime;
+mod selection;
 pub mod shell_structure;
 pub mod speech;
 pub mod suggestions;

@@ -3,6 +3,7 @@
 `crates/engine` implements the repair library in Rust, linked natively by the backend.
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
 The library has no filesystem, subprocess, browser, network or terminal effects.
+`selection.rs` owns final evidence ordering, stable deduplication and original-text presentation, with separate search, validation, compound and display limits.
 The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.
 Historical TypeScript revisions remain in Git for benchmark comparisons.
 

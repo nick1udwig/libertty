@@ -1,3 +1,7 @@
+use crate::selection::{
+    self, COMPOUND_FRONTIER, CONFIDENCE_WINDOW, DISCOVERY_TARGET_LIMIT, DISPLAY_LIMIT, Original,
+    SYMBOL_PENALTY, VALIDATION_LIMIT, sort, unique,
+};
 use crate::{
     command_policy::{
         child_scope, flags_for, is_path_position, option_arity, script_command, script_operand,
@@ -20,30 +24,6 @@ use crate::{regex, test};
 use futures::future::{LocalBoxFuture, join_all};
 use std::cell::RefCell;
 
-fn unique(candidates: impl IntoIterator<Item = Candidate>) -> Vec<Candidate> {
-    let mut result: Vec<Candidate> = Vec::new();
-    for candidate in candidates {
-        if !result.iter().any(|old| old.command == candidate.command) {
-            result.push(candidate);
-        }
-    }
-    result
-}
-fn sort(candidates: &mut [Candidate]) {
-    candidates.sort_by(|a, b| {
-        b.evidence.resolved.cmp(&a.evidence.resolved).then_with(|| {
-            a.evidence
-                .unresolved
-                .cmp(&b.evidence.unresolved)
-                .then_with(|| {
-                    b.evidence
-                        .confidence
-                        .total_cmp(&a.evidence.confidence)
-                        .then_with(|| b.score.total_cmp(&a.score))
-                })
-        })
-    });
-}
 fn covered(candidate: &Candidate, metadata: &CommandMetadata) -> bool {
     let Some(words) = simple_words(&candidate.command).filter(|words| !words.is_empty()) else {
         return false;
@@ -91,7 +71,7 @@ async fn check(
     let mut candidates: Vec<_> = candidates.into_iter().filter(|c| !c.is_literal()).collect();
     sort(&mut candidates);
     let mut ranked = unique(candidates);
-    ranked.truncate(16);
+    ranked.truncate(VALIDATION_LIMIT);
     let valid = join_all(
         ranked
             .iter()
@@ -126,8 +106,8 @@ async fn check(
     let top = valid.first().map_or(0.0, |c| c.evidence.confidence);
     Ok(valid
         .into_iter()
-        .filter(|c| c.evidence.confidence >= top - 18.0)
-        .take(3)
+        .filter(|c| c.evidence.confidence >= top - CONFIDENCE_WINDOW)
+        .take(DISPLAY_LIMIT)
         .collect())
 }
 async fn referenced_paths(
@@ -259,7 +239,10 @@ fn part_choices<'a>(
                 candidates.insert(0, literal);
             }
         }
-        Ok(unique(candidates).into_iter().take(3).collect())
+        Ok(unique(candidates)
+            .into_iter()
+            .take(COMPOUND_FRONTIER)
+            .collect())
     })
 }
 
@@ -402,13 +385,8 @@ fn suggest_text<'a>(
                         ));
                     }
                 }
-                next.sort_by(|a, b| {
-                    b.0.evidence
-                        .confidence
-                        .total_cmp(&a.0.evidence.confidence)
-                        .then_with(|| b.0.score.total_cmp(&a.0.score))
-                });
-                next.truncate(3);
+                next.sort_by(|a, b| selection::compare(&a.0, &b.0));
+                next.truncate(COMPOUND_FRONTIER);
                 combined = next;
             }
             let mut valid = Vec::new();
@@ -518,8 +496,9 @@ fn suggest_unchecked<'a>(
         for (index, group) in groups {
             for mut candidate in group.into_iter().filter(|c| !c.is_literal()) {
                 if index > 0 {
-                    candidate.score -= 12.0;
-                    candidate.evidence.confidence = (candidate.evidence.confidence - 12.0).max(0.0);
+                    candidate.score -= SYMBOL_PENALTY;
+                    candidate.evidence.confidence =
+                        (candidate.evidence.confidence - SYMBOL_PENALTY).max(0.0);
                     candidate.changes.insert(0, Change::SymbolAlternative);
                 } else if primary != input {
                     candidate.changes.insert(0, Change::Symbols);
@@ -528,10 +507,7 @@ fn suggest_unchecked<'a>(
             }
         }
         sort(&mut candidates);
-        let mut candidates = unique(candidates);
-        candidates.truncate(3);
-        candidates.push(Candidate::literal(input));
-        Ok(candidates)
+        Ok(selection::present(input, candidates, Original::Separate))
     })
 }
 
@@ -666,7 +642,7 @@ async fn suggest_one(
             script_operand(&words.iter().map(|word| &word.value).collect::<Vec<_>>())
                 .is_some_and(|index| words[index].value.ends_with(".py"))
         })
-        .take(3)
+        .take(DISCOVERY_TARGET_LIMIT)
         .map(|candidate| candidate.command.clone());
     for target in script_targets.chain(
         preliminary
@@ -679,7 +655,7 @@ async fn suggest_one(
             targets.push(target);
         }
     }
-    targets.truncate(3);
+    targets.truncate(DISCOVERY_TARGET_LIMIT);
     if targets.is_empty() {
         targets.push(discovery_target(input, &catalog));
     }

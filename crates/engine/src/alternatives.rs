@@ -161,14 +161,13 @@ pub async fn prepare<F: Future<Output = Result<Vec<Candidate>, String>>>(
             }
         };
     }
-    candidates.truncate(3);
+    let candidates =
+        crate::selection::present(text, candidates, crate::selection::Original::IfMissing);
     let selected = candidates
         .first()
+        .filter(|candidate| !candidate.is_literal())
         .map(|candidate| candidate.command.clone())
         .unwrap_or_else(|| text.into());
-    if candidates.iter().all(|candidate| candidate.command != text) {
-        candidates.push(Candidate::literal(text));
-    }
     let mut actions = std::collections::BTreeMap::new();
     for command in candidates
         .iter()

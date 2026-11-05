@@ -321,13 +321,9 @@ export class InlineSuggestions {
     this.literal = result.original;
     this.selected = result.selected;
     this.line.reset(result.selected);
-    this.choices = [
-      ...new Set(
-        result.candidates
-          .filter((candidate) => !candidate.literal && candidate.command !== this.literal)
-          .map((candidate) => candidate.command),
-      ),
-    ].slice(0, 3);
+    this.choices = result.candidates
+      .filter((candidate) => !candidate.literal && candidate.command !== this.literal)
+      .map((candidate) => candidate.command);
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true),
       pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
     this.reading = pipeline?.command || reading?.path;
