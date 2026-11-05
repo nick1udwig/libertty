@@ -1,0 +1,28 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { TerminalReplay } from '../src/terminal-replay.ts';
+test('reconnect cursor includes queued output and acknowledgements stay socket scoped', () => {
+  const replay = new TerminalReplay();
+  const acknowledgements: number[] = [];
+  const send = (seq: number) => { acknowledgements.push(seq); return true; };
+  replay.target = 2;
+  replay.receive({ type: 'output', seq: 2, data: 'text' });
+  replay.receive({ type: 'output', seq: 2, data: 'text' });
+  assert.equal(replay.queue.length, 1);
+  assert.equal(replay.cursor, 2);
+  replay.acknowledge(send);
+  assert.deepEqual(acknowledgements, []);
+  replay.after = replay.queue.shift()!.seq;
+  assert.equal(replay.complete, true);
+  replay.acknowledge(send);
+  replay.opened();
+  replay.acknowledge(send);
+  assert.deepEqual(acknowledgements, [2]);
+  replay.receive({ type: 'output', seq: 2, data: 'text' });
+  replay.acknowledge(() => false);
+  replay.acknowledge(send);
+  assert.deepEqual(acknowledgements, [2, 2]);
+  replay.reset();
+  assert.equal(replay.cursor, 0);
+  assert.equal(replay.complete, false);
+});

@@ -17,6 +17,8 @@ import type { ClientMessage, ServerMessage, ShellState, RepairResult } from './p
 import './style.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
 import { Queue } from './queue.ts';
+import { PendingRequests } from './pending-requests.ts';
+import { TerminalReplay } from './terminal-replay.ts';
 import { dictationTarget } from './protocol.ts';
 import { SentInput, UnsentInput, type InputContext } from './unsent-input.ts';
 import { applyTheme, terminalThemes, watchSystemTheme } from './theme.ts';
@@ -122,18 +124,13 @@ let state: ShellState = {
   prompt: 0,
   exited: false,
 };
-let after = 0;
-// The replay cursor covers queued output too, so a replacement socket never resends what is already held.
-let received = 0,
-  socketSeq = 0,
-  ackedSeq = 0;
-let streamId = '';
+const replay = new TerminalReplay();
 let lastOutputAt = 0;
 let capturedConnection: string | undefined;
 let pendingCommand: { id: string } | undefined;
-const edits = new Map<string, (accepted: boolean) => void>();
-const inputLines = new Map<string, (line?: { text: string; cursor: number }) => void>();
-const repairs = new Map<string, (result: RepairResult) => void>();
+const edits = new PendingRequests<boolean>();
+const inputLines = new PendingRequests<{ text: string; cursor: number } | undefined>();
+const repairs = new PendingRequests<RepairResult>();
 const unsentInput = new UnsentInput();
 // Numbered keys let a replacement connection resend exactly the ones its predecessor never delivered.
 const inputClient = crypto.randomUUID(),
@@ -164,7 +161,7 @@ const transfersSeen = new Set<string>();
 let shortcutState = '';
 let uploadingImage = false;
 let dictationWaiting = false;
-const queue = new Queue<Extract<ServerMessage, { type: 'output' }>>();
+const queue = replay.queue;
 let frameQueued = false;
 let outputFrame = 0;
 const pendingFrames = new Queue<{ socket: WebSocket | undefined; frame: HerdrFrameMessage }>();
@@ -336,7 +333,7 @@ const presentation = new TerminalPresentation(terminalViewport, () => {
   updateRun();
   synchronizeInput();
 });
-let replayTarget: number | undefined;
+
 const transcript = new TerminalTranscript();
 const cache = new TerminalCache();
 const cacheKey = terminalCacheKey(
@@ -389,7 +386,7 @@ function saveTranscript() {
     key: cacheKey,
     version: 2,
     updated: lastOutputAt || cachedUpdated || Date.now(),
-    stream: streamId || cachedStream,
+    stream: replay.stream || cachedStream,
     records: transcript.records.map((record) => ({ ...record })),
     picture,
     position: Math.floor(term.getViewportY()),
@@ -452,8 +449,7 @@ function showRetained(lines: number) {
   if (!cachePainted) return;
   // The next connection replays the whole stream over retained output.
   if (!herdrTerminal) {
-    after = received = 0;
-    queue.clear();
+    replay.reset();
   }
   term.scrollLines(lines);
 }
@@ -490,7 +486,7 @@ term.onScroll(() => {
   if (cachePainted) cacheTimer ??= setTimeout(saveTranscript, 1000);
 });
 void cache.read(cacheKey).then((saved) => {
-  if (!saved || (streamId && saved.stream !== streamId)) return;
+  if (!saved || (replay.stream && saved.stream !== replay.stream)) return;
   const current = transcript.records.map((record) => ({ ...record }));
   transcript.restore(saved.records);
   if (lastOutputAt || lifecycle.streamStarted) {
@@ -542,7 +538,7 @@ function scheduleBackfill() {
       return;
     }
     const controller = (backfill = new AbortController()),
-      expected = streamId;
+      expected = replay.stream;
     const timeout = setTimeout(() => controller.abort(), 15000);
     void api<{ streamId: string; seq: number; text: string }>(
       '/api/terminal/history',
@@ -550,7 +546,7 @@ function scheduleBackfill() {
       controller.signal,
     )
       .then((result) => {
-        if (controller.signal.aborted || expected !== streamId || result.streamId !== expected)
+        if (controller.signal.aborted || expected !== replay.stream || result.streamId !== expected)
           return;
         captureTranscript();
         transcript.backfill(result.text);
@@ -580,8 +576,8 @@ function inputContext(): InputContext | undefined {
     target,
   };
   if (!herdrTerminal) {
-    if (!streamId || !lifecycle.hasState) return;
-    return { ...context, stream: streamId };
+    if (!replay.stream || !lifecycle.hasState) return;
+    return { ...context, stream: replay.stream };
   }
   if (!state.inputContext) return;
   context.identity = state.inputContext;
@@ -604,7 +600,7 @@ function synchronizeInput() {
     !lifecycle.hasState ||
     presentation.pending ||
     queue.length ||
-    (!herdrTerminal && after < (replayTarget ?? after)) ||
+    (!herdrTerminal && replay.after < (replay.target ?? replay.after)) ||
     (herdrTerminal &&
       (!herdrReady || herdrLayout.pending || visibility.parked || state.inputContext === undefined))
   )
@@ -628,8 +624,7 @@ function revealReplay() {
     lifecycle.hasState &&
     handoff === undefined &&
     transport.socket?.readyState === WebSocket.OPEN &&
-    !queue.length &&
-    after >= (replayTarget ?? after)
+    replay.complete
   ) {
     if (handoffPosition) {
       term.scrollToLine(handoffPosition);
@@ -661,24 +656,15 @@ function drain() {
   frameQueued = false;
   if (!visibility.visible || document.hidden || visibility.parked) return;
   // Retained output stays readable until the complete replay replaces it in a single paint.
-  if (handoff !== undefined && received < (replayTarget ?? 0)) return;
-  let budget = 0,
-    last = after;
-  const chunks: string[] = [];
-  while (queue.length && (handoff !== undefined || budget < 65536)) {
-    const item = queue.shift()!;
-    if (item.seq <= last) continue;
-    chunks.push(item.data);
-    last = item.seq;
-    budget += item.data.length;
-  }
+  if (handoff !== undefined && replay.received < (replay.target ?? 0)) return;
+  const { chunks, sequence: last } = replay.take(handoff !== undefined ? Infinity : 65536);
   if (handoff !== undefined) {
     gestures.clear();
     term.scrollToBottom();
     term.write(handoff + chunks.join(''));
     handoff = undefined;
     cachePainted = false;
-    after = last;
+    replay.after = last;
     if (handoffPosition) {
       term.scrollToLine(handoffPosition);
       handoffPosition = 0;
@@ -689,14 +675,13 @@ function drain() {
     }
   } else if (chunks.length) {
     preserveScrollback(term, () => term.write(chunks.join('')));
-    after = last;
+    replay.after = last;
     lastOutputAt = Date.now();
     scheduleTranscript();
     echo.output();
   }
   // Acknowledge only what this socket delivered, including duplicates of output painted earlier.
-  const acknowledged = Math.min(after, socketSeq);
-  if (acknowledged > ackedSeq && send({ type: 'ack', seq: acknowledged })) ackedSeq = acknowledged;
+  replay.acknowledge((seq) => send({ type: 'ack', seq }));
   inline.refresh();
   if (queue.length) scheduleDrain();
   else revealReplay();
@@ -878,19 +863,12 @@ function replaceLine(text: string): Promise<boolean> {
   )
     return Promise.resolve(false);
   const id = crypto.randomUUID();
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      edits.delete(id);
-      resolve(false);
-    }, 5000);
-    edits.set(id, (accepted) => {
-      clearTimeout(timer);
-      resolve(accepted);
-    });
-    send({ type: 'replace', text, id, prompt: state.prompt, revision: state.inputRevision });
-    state.inputRevision++;
-    term.scrollToBottom();
-  });
+  const result = edits.start(id, () => false, { timeout: 5000 });
+  if (!send({ type: 'replace', text, id, prompt: state.prompt, revision: state.inputRevision }))
+    edits.cancel(id);
+  state.inputRevision++;
+  term.scrollToBottom();
+  return result;
 }
 const inline = new InlineSuggestions(term, {
   state: () => state,
@@ -906,26 +884,22 @@ const inline = new InlineSuggestions(term, {
     const id = crypto.randomUUID(),
       prompt = state.prompt,
       revision = state.inputRevision;
-    return new Promise((resolve) => {
-      const cancel = () => send({ type: 'repair-cancel', id });
-      const finish = (result: RepairResult) => {
-        signal.removeEventListener('abort', cancel);
-        repairs.delete(id);
-        resolve(result);
-      };
-      repairs.set(id, finish);
-      signal.addEventListener('abort', cancel, { once: true });
-      if (!send({ type: 'repair', id, text, intent, prompt, revision }))
-        finish({
-          id,
-          accepted: false,
-          candidates: [],
-          original: text,
-          selected: text,
-          prompt,
-          revision,
-        });
-    });
+    const result = repairs.start(
+      id,
+      () => ({
+        id,
+        accepted: false,
+        candidates: [],
+        original: text,
+        selected: text,
+        prompt,
+        revision,
+      }),
+      { signal, timeout: 15000, cancel: () => send({ type: 'repair-cancel', id }) },
+    );
+    if (!signal.aborted && !send({ type: 'repair', id, text, intent, prompt, revision }))
+      repairs.cancel(id);
+    return result;
   },
   ...(herdrTerminal
     ? {
@@ -948,20 +922,9 @@ const inline = new InlineSuggestions(term, {
     const id = crypto.randomUUID(),
       prompt = state.prompt,
       revision = state.inputRevision;
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        inputLines.delete(id);
-        resolve(undefined);
-      }, 3000);
-      inputLines.set(id, (line) => {
-        clearTimeout(timer);
-        resolve(line);
-      });
-      if (!send({ type: 'input-line', id, prompt, revision })) {
-        inputLines.get(id)?.();
-        inputLines.delete(id);
-      }
-    });
+    const result = inputLines.start(id, () => undefined, { timeout: 3000 });
+    if (!send({ type: 'input-line', id, prompt, revision })) inputLines.cancel(id);
+    return result;
   },
   raw: rawInput,
   execute,
@@ -1255,7 +1218,7 @@ async function socketURL(signal: AbortSignal) {
   if (lastOutputAt || cachePainted) presentation.wait();
   else presentation.freeze();
   const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
-  socketSeq = ackedSeq = 0;
+  replay.opened();
   if (herdrTerminal) {
     sizeTerminal();
     const geometry = {
@@ -1281,9 +1244,9 @@ async function socketURL(signal: AbortSignal) {
       (await api<{ ticket: string }>('/api/ticket', {}, signal)).ticket,
     );
   socketURL.protocol = baseURL.protocol === 'https:' ? 'wss:' : 'ws:';
-  socketURL.searchParams.set('after', String(Math.max(after, received)));
+  socketURL.searchParams.set('after', String(replay.cursor));
   socketURL.searchParams.set('client', inputClient);
-  if (streamId) socketURL.searchParams.set('stream', streamId);
+  if (replay.stream) socketURL.searchParams.set('stream', replay.stream);
   return socketURL;
 }
 async function prepareConnection(signal: AbortSignal, token?: string) {
@@ -1512,12 +1475,12 @@ const handlers: Handlers = {
   'input-line': (message) => {
     const intact =
       message.prompt === state.prompt && message.revision === state.inputRevision && state.ready;
-    inputLines.get(message.id)?.(
+    inputLines.complete(
+      message.id,
       intact && typeof message.text === 'string' && typeof message.cursor === 'number'
         ? { text: message.text, cursor: message.cursor }
         : undefined,
     );
-    inputLines.delete(message.id);
   },
   'repair-result': (message) => {
     const intact = message.prompt === state.prompt && state.ready && !state.exited;
@@ -1530,7 +1493,7 @@ const handlers: Handlers = {
     else if (message.accepted) message.accepted = false;
     if (message.source === 'dictation') {
       if (intact && message.revision === state.inputRevision) inline.backendResult(message);
-    } else repairs.get(message.id)?.(message);
+    } else repairs.complete(message.id, message);
     if (message.accepted) term.scrollToBottom();
   },
   pasted: (message) => {
@@ -1604,16 +1567,16 @@ const handlers: Handlers = {
       toast('Keys typed before the connection dropped were not delivered.');
   },
   hello: (message) => {
-    replayTarget = message.lastSeq;
+    replay.target = message.lastSeq;
     const changedStream = !!(
-      (streamId && streamId !== message.streamId) ||
+      (replay.stream && replay.stream !== message.streamId) ||
       (cachedStream && cachedStream !== message.streamId)
     );
     if (changedStream) {
       transcript.restore([]);
       cachedStream = '';
     }
-    streamId = message.streamId;
+    replay.stream = message.streamId;
     lifecycle.hello();
     // Reset through the terminal parser. Ghostty's reset() frees native memory
     // still referenced by its input and selection handlers.
@@ -1622,8 +1585,7 @@ const handlers: Handlers = {
       transcript.gap('The connection resumed from a screen snapshot; older output may be missing.');
       backfillNeeded = true;
       handoffPosition = Math.floor(term.getViewportY());
-      queue.clear();
-      after = received = 0;
+      replay.reset();
       inline.disconnect();
       if (cachePainted) {
         handoff = '\x1bc\x1b[3J';
@@ -1649,11 +1611,7 @@ const handlers: Handlers = {
   output: (message) => {
     // Output over retained rows is replayed after the next reset instead.
     if (cachePainted && handoff === undefined) return;
-    socketSeq = Math.max(socketSeq, message.seq);
-    if (message.seq > received) {
-      queue.push(message);
-      received = message.seq;
-    }
+    replay.receive(message);
     if (!frameQueued) scheduleDrain();
   },
   state: (message) => {
@@ -1681,8 +1639,8 @@ const handlers: Handlers = {
     synchronizeInput();
   },
   'edit-result': (message) => {
-    edits.get(message.id)?.(message.accepted);
-    edits.delete(message.id);
+    edits.complete(message.id, message.accepted);
+
     if (!message.accepted) state.inputRevision = message.revision;
   },
   result: (message) => {
@@ -1714,28 +1672,15 @@ function socketClosed(event?: CloseEvent) {
   // An unfinished replay leaves retained output in place, so the next connection replays from the start.
   if (handoff !== undefined) {
     handoff = undefined;
-    queue.clear();
-    after = received = 0;
+    replay.reset();
   }
   echo.reset();
   presentation.wait();
   herdrReady = false;
   if (event?.code === 4001 || state.exited) inline.disconnect();
   else inline.suspend();
-  for (const resolve of edits.values()) resolve(false);
   edits.clear();
-  for (const resolve of inputLines.values()) resolve();
   inputLines.clear();
-  for (const [id, resolve] of repairs)
-    resolve({
-      id,
-      accepted: false,
-      candidates: [],
-      original: '',
-      selected: '',
-      prompt: state.prompt,
-      revision: state.inputRevision,
-    });
   repairs.clear();
   // Never resend uncertain input or an uncertain command automatically.
   if (pendingCommand) {
@@ -1938,9 +1883,8 @@ $('new-shell').onclick = async () => {
     clearedScreen = terminalSnapshot(term).text;
     cachedStream = '';
     void cache.clear(cacheKey);
-    after = received = 0;
-    streamId = '';
-    queue.clear();
+    replay.reset();
+    replay.stream = '';
     unsentInput.clear();
     sentInput.clear();
     disconnectedContext = undefined;
