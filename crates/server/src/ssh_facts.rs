@@ -239,25 +239,12 @@ impl SSHHost {
                     }
                 },
             ))),
-            HostOperation::Syntax { command } => {
-                let key = serde_json::to_string(&(&catalog.cwd, command)).unwrap();
-                if let Some((_, value)) = self
-                    .syntax_cache
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .find(|(k, _)| k == &key)
-                {
-                    return Ok(FactValue::Syntax(*value));
-                }
-                let result = self.exec(&format!("cd {} && env -i PATH=/usr/bin:/bin BASH_ENV=/dev/null ENV=/dev/null bash --noprofile --norc -n -c {}",shell_quote(&catalog.cwd),shell_quote(command)),cancel).await?.code == 0;
-                let mut cache = self.syntax_cache.lock().unwrap();
-                if cache.len() >= 1000 {
-                    cache.pop_front();
-                }
-                cache.push_back((key, result));
-                Ok(FactValue::Syntax(result))
-            }
+            HostOperation::Syntax { command } => Ok(FactValue::Syntax(
+                self.syntax_many(&[(&catalog.cwd, command)], cancel)
+                    .await?
+                    .pop()
+                    .unwrap()?,
+            )),
             HostOperation::Completion { words, timeout } => {
                 let timeout = completion_timeout(f64::from_bits(*timeout))?;
                 if !valid_completion_words(words) {
@@ -334,6 +321,59 @@ impl SSHHost {
                 )))
             }
         }
+    }
+    pub(crate) async fn syntax_many(
+        &self,
+        requests: &[(&str, &str)],
+        cancel: &CancellationToken,
+    ) -> Result<Vec<Result<bool, String>>, String> {
+        if cancel.is_cancelled() {
+            return Err(ABORTED.into());
+        }
+        let mut results = vec![Err(ABORTED.into()); requests.len()];
+        let mut missing = std::collections::BTreeMap::<(String, String), Vec<usize>>::new();
+        {
+            let cache = self.syntax_cache.lock().unwrap();
+            for (index, &(cwd, command)) in requests.iter().enumerate() {
+                let key = (cwd.to_owned(), command.to_owned());
+                if let Some((_, value)) = cache.iter().find(|(old, _)| old == &key) {
+                    results[index] = Ok(*value);
+                } else {
+                    missing.entry(key).or_default().push(index);
+                }
+            }
+        }
+        let missing: Vec<_> = missing.into_iter().collect();
+        for chunk in missing.chunks(32) {
+            let requests: Vec<_> = chunk
+                .iter()
+                .map(|((cwd, command), _)| (cwd.as_str(), command.as_str()))
+                .collect();
+            let probe = async {
+                let output = self.exec(&syntax_script(&requests), cancel).await?;
+                if output.code != 0 {
+                    return Err("SSH syntax batch failed.".into());
+                }
+                syntax_results(&output.stdout, chunk.len())
+            };
+            let values = probe
+                .await
+                .unwrap_or_else(|error| vec![Err(error); chunk.len()]);
+            let mut cache = self.syntax_cache.lock().unwrap();
+            for ((key, indices), value) in chunk.iter().zip(values) {
+                if let Ok(valid) = value {
+                    cache.retain(|(old, _)| old != key);
+                    if cache.len() >= 1000 {
+                        cache.pop_front();
+                    }
+                    cache.push_back((key.clone(), valid));
+                }
+                for &index in indices {
+                    results[index] = value.clone();
+                }
+            }
+        }
+        Ok(results)
     }
     pub async fn read_help(
         self: &Arc<Self>,
@@ -493,4 +533,51 @@ fn valid_env(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+fn syntax_script(requests: &[(&str, &str)]) -> String {
+    requests.iter().enumerate().map(|(index, (cwd, command))| format!(
+        "(cd {} || exit 125; env -i PATH=/usr/bin:/bin BASH_ENV=/dev/null ENV=/dev/null bash --noprofile --norc -n -c {} >/dev/null 2>&1); printf 'LIBERTTY_SYNTAX {index} %s\\n' \"$?\";\n",
+        shell_quote(cwd), shell_quote(command)
+    )).collect()
+}
+fn syntax_results(output: &str, count: usize) -> Result<Vec<Result<bool, String>>, String> {
+    let records: Vec<_> = output
+        .lines()
+        .filter_map(|line| line.strip_prefix("LIBERTTY_SYNTAX "))
+        .collect();
+    if records.len() != count {
+        return Err("Incomplete SSH syntax batch.".into());
+    }
+    records
+        .into_iter()
+        .enumerate()
+        .map(|(index, record)| {
+            let (position, status) = record.split_once(' ').ok_or("Invalid SSH syntax result.")?;
+            if position.parse::<usize>().ok() != Some(index) {
+                return Err("Unordered SSH syntax results.".into());
+            }
+            Ok(match status {
+                "0" => Ok(true),
+                "2" => Ok(false),
+                "125" => Err("Syntax probe directory is unavailable.".into()),
+                _ => Err("Syntax probe failed.".into()),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod syntax_tests {
+    use super::*;
+    #[test]
+    fn batch_rejects_incomplete_or_unordered_results() {
+        assert!(syntax_results("LIBERTTY_SYNTAX 0 0\n", 2).is_err());
+        assert!(syntax_results("LIBERTTY_SYNTAX 1 0\nLIBERTTY_SYNTAX 0 0\n", 2).is_err());
+        let values = syntax_results("LIBERTTY_SYNTAX 0 0\nLIBERTTY_SYNTAX 1 2\nLIBERTTY_SYNTAX 2 125\nLIBERTTY_SYNTAX 3 127\n", 4).unwrap();
+        assert_eq!(values[0], Ok(true));
+        assert_eq!(values[1], Ok(false));
+        assert!(values[2].is_err());
+        assert!(values[3].is_err());
+    }
 }

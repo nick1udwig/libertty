@@ -903,3 +903,110 @@ async fn transport_ssh_benchmark() {
     std::fs::write("../../.test-artifacts/transport-ssh.json", serde_json::to_vec_pretty(&json!({"measurement":"Actual encrypted SSH TCP bytes, excluding TCP/IP headers; request to complete read; FIFO paced socket per direction; current CPU, no throttling; seven warm samples per case.","rows":rows})).unwrap()).unwrap();
     fixture.stop().await;
 }
+
+#[tokio::test]
+async fn ssh_syntax_batches_preserve_order_scopes_failures_and_cache_entries() {
+    use libertty_engine::{
+        host::{FactValue, HostOperation},
+        types::Catalog,
+    };
+    let fixture = Fixture::start().await;
+    let remote = fixture.connect(false).await;
+    let home = fixture.home();
+    let scoped = format!("{home}/quoted ' directory");
+    tokio::fs::create_dir(&scoped).await.unwrap();
+    let services = HostServices::new();
+    let mut host = NativeHost::new(
+        services.clone(),
+        Catalog {
+            cwd: home.clone(),
+            ..Default::default()
+        },
+        std::collections::BTreeMap::new(),
+        libertty_server::help::HelpProvider::new(services.pool.clone()),
+    );
+    host.remote = Some(remote.clone());
+    let syntax = |command: String| HostOperation::Syntax { command };
+    let mut operations: Vec<_> = (0..35).map(|i| syntax(format!("echo {i}"))).collect();
+    operations.insert(
+        3,
+        HostOperation::Stat {
+            path: home.clone(),
+            executable: false,
+        },
+    );
+    operations.insert(8, syntax("if then".into()));
+    operations.insert(
+        12,
+        HostOperation::Scoped {
+            cwd: scoped.clone(),
+            operation: Box::new(syntax(
+                "printf '%s\\n' \"$(touch should-not-exist)\"; echo 'quoted'".into(),
+            )),
+        },
+    );
+    let missing = format!("{home}/later");
+    operations.push(HostOperation::Scoped {
+        cwd: missing.clone(),
+        operation: Box::new(syntax("echo recover".into())),
+    });
+    operations.push(syntax("echo 0".into()));
+    let cancel = CancellationToken::new();
+    let results = host.engine_operations(&operations, &cancel).await;
+    for (index, result) in results.iter().enumerate() {
+        match index {
+            3 => assert!(matches!(result, Ok(FactValue::Stat(Some(_))))),
+            8 => assert!(matches!(result, Ok(FactValue::Syntax(false)))),
+            38 => assert!(result.is_err()),
+            _ => assert!(
+                matches!(result, Ok(FactValue::Syntax(true))),
+                "{index}: {result:?}"
+            ),
+        }
+    }
+    assert!(!std::path::Path::new(&format!("{scoped}/should-not-exist")).exists());
+    tokio::fs::create_dir(&missing).await.unwrap();
+    assert!(matches!(
+        host.engine_operation(&operations[38], &cancel).await,
+        Ok(FactValue::Syntax(true))
+    ));
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert!(
+        host.engine_operations(&operations, &cancelled)
+            .await
+            .iter()
+            .all(Result::is_err)
+    );
+    let pending = [
+        syntax("echo deadline1".into()),
+        syntax("echo deadline2".into()),
+    ];
+    assert!(
+        host.engine_operations_until(&pending, &cancel, Some(tokio::time::Instant::now()))
+            .await
+            .iter()
+            .all(Result::is_err)
+    );
+    remote.dispose().await;
+    let cached: Vec<_> = operations
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, op)| (i != 3).then_some(op))
+        .collect();
+    assert!(
+        host.engine_operations(&cached, &cancel)
+            .await
+            .iter()
+            .all(Result::is_ok)
+    );
+    let mixed = host
+        .engine_operations(
+            &[syntax("echo 0".into()), syntax("echo uncached".into())],
+            &cancel,
+        )
+        .await;
+    assert!(matches!(mixed[0], Ok(FactValue::Syntax(true))));
+    assert!(mixed[1].is_err());
+    fixture.stop().await;
+}

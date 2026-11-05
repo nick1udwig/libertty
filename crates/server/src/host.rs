@@ -127,17 +127,19 @@ impl NativeHost {
                 None => work.await,
             }
         }
-        let stats: Vec<_> = operations
+        let batch: Vec<_> = operations
             .iter()
             .enumerate()
-            .filter_map(|(i, op)| match op {
-                HostOperation::Stat { path, executable } if self.remote.is_none() => {
-                    Some((i, (path.clone(), *executable)))
-                }
-                _ => None,
+            .filter_map(|(i, op)| {
+                let compatible = if self.remote.is_some() {
+                    syntax_request(op, &self.catalog.cwd).is_some()
+                } else {
+                    matches!(op, HostOperation::Stat { .. })
+                };
+                compatible.then_some(i)
             })
             .collect();
-        if stats.len() < 2 {
+        if batch.len() < 2 {
             return futures::future::join_all(
                 operations
                     .iter()
@@ -145,18 +147,43 @@ impl NativeHost {
             )
             .await;
         }
-        let (stat_results, others) = futures::join!(
-            bounded(
-                deadline,
-                self.services
+        let collect = async {
+            if let Some(remote) = &self.remote {
+                let requests: Vec<_> = batch
+                    .iter()
+                    .map(|&i| syntax_request(&operations[i], &self.catalog.cwd).unwrap())
+                    .collect();
+                Ok(remote
+                    .syntax_many(&requests, cancel)
+                    .await?
+                    .into_iter()
+                    .map(|value| value.map(FactValue::Syntax))
+                    .collect::<Vec<_>>())
+            } else {
+                let files = batch
+                    .iter()
+                    .map(|&i| match &operations[i] {
+                        HostOperation::Stat { path, executable } => (path.clone(), *executable),
+                        _ => unreachable!("Only local stat operations enter this batch"),
+                    })
+                    .collect();
+                Ok(self
+                    .services
                     .directories
-                    .stat_many(stats.iter().map(|(_, file)| file.clone()).collect(), cancel)
-            ),
+                    .stat_many(files, cancel)
+                    .await?
+                    .into_iter()
+                    .map(|value| Ok(FactValue::Stat(value)))
+                    .collect())
+            }
+        };
+        let (batch_results, others) = futures::join!(
+            bounded(deadline, collect),
             futures::future::join_all(
                 operations
                     .iter()
                     .enumerate()
-                    .filter(|(i, _)| !stats.iter().any(|(at, _)| at == i))
+                    .filter(|(i, _)| !batch.contains(i))
                     .map(|(i, op)| async move {
                         (
                             i,
@@ -169,14 +196,14 @@ impl NativeHost {
         for (i, value) in others {
             results[i] = value;
         }
-        match stat_results {
+        match batch_results {
             Ok(values) => {
-                for ((i, _), value) in stats.into_iter().zip(values) {
-                    results[i] = Ok(FactValue::Stat(value));
+                for (i, value) in batch.into_iter().zip(values) {
+                    results[i] = value;
                 }
             }
             Err(error) => {
-                for (i, _) in stats {
+                for i in batch {
                     results[i] = Err(error.clone());
                 }
             }
@@ -354,5 +381,17 @@ impl NativeHost {
                 .read(command, route, &self.catalog, &self.environment, cancel)
                 .await
         }
+    }
+}
+
+fn syntax_request<'a>(
+    operation: &'a libertty_engine::host::HostOperation,
+    cwd: &'a str,
+) -> Option<(&'a str, &'a str)> {
+    use libertty_engine::host::HostOperation;
+    match operation {
+        HostOperation::Syntax { command } => Some((cwd, command)),
+        HostOperation::Scoped { cwd, operation } => syntax_request(operation, cwd),
+        _ => None,
     }
 }

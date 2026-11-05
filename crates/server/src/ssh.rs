@@ -130,7 +130,7 @@ pub struct SSHHost {
     context: tokio::sync::Mutex<Option<(u64, ShellContext)>>,
     closed: AtomicBool,
     pub(crate) help_cache: tokio::sync::Mutex<crate::help::HelpCache>,
-    pub(crate) syntax_cache: Mutex<std::collections::VecDeque<(String, bool)>>,
+    pub(crate) syntax_cache: Mutex<std::collections::VecDeque<((String, String), bool)>>,
     pub(crate) lifetime: CancellationToken,
 }
 impl std::fmt::Debug for SSHHost {
