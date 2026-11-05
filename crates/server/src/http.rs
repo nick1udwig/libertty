@@ -1,7 +1,7 @@
 use libertty_engine::utf16_len;
 mod idempotency;
 mod routes;
-mod socket;
+pub(crate) mod socket;
 use crate::{
     assets, dictation, files, herdr,
     host::HostServices,
