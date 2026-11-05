@@ -276,13 +276,18 @@ impl SSHHost {
                     shell_quote(&catalog.cwd),
                     shell_quote(COMPLETION_SCRIPT)
                 );
-                match tokio::time::timeout(timeout, self.exec(&command, cancel)).await {
-                    Ok(Ok(output)) => Ok(FactValue::Completion(Arc::new(completion_values(
-                        &output.stdout,
-                    )))),
-                    _ if cancel.is_cancelled() => Err(ABORTED.into()),
-                    _ => Ok(FactValue::Completion(Arc::default())),
+                let output = tokio::time::timeout(timeout, self.exec(&command, cancel))
+                    .await
+                    .map_err(|_| "Completion timed out.".to_owned())??;
+                if cancel.is_cancelled() {
+                    return Err(ABORTED.into());
                 }
+                if output.code != 0 {
+                    return Err("Completion probe failed.".into());
+                }
+                Ok(FactValue::Completion(Arc::new(completion_values(
+                    &output.stdout,
+                ))))
             }
             HostOperation::Help { command, route } => Ok(FactValue::Help(Arc::new(
                 self.read_help(command, route, catalog, env, true, cancel)

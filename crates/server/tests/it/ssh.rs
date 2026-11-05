@@ -29,6 +29,27 @@ async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
     )
     .await
     .unwrap();
+    let shell = remote
+        .prepare_shell("", "completion-test", &CancellationToken::new())
+        .await
+        .unwrap();
+    let installed = remote
+        .exec(
+            &format!(
+                "printf %s {} > {}",
+                libertty_engine::repair::shell_quote(
+                    "_slow(){ sleep 1; COMPREPLY=(late); }; complete -F _slow slow\n"
+                ),
+                libertty_engine::repair::shell_quote(&format!(
+                    "{}/completions",
+                    remote.directory()
+                ))
+            ),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(installed.code, 0, "{}", installed.stderr);
     let services = HostServices::new();
     let mut host = NativeHost::new(
         services.clone(),
@@ -67,11 +88,7 @@ async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
         )
         .await
         .expect("Completion must honor the supplied budget");
-        match result {
-            Ok(FactValue::Completion(values)) => assert!(values.is_empty()),
-            Err(message) => assert_eq!(message, "Completion timed out."),
-            other => panic!("Unexpected completion: {other:?}"),
-        }
+        assert_eq!(result.unwrap_err(), "Completion timed out.");
         for invalid in [-1.0, f64::INFINITY, f64::NAN] {
             assert_eq!(
                 host.engine_operation(&completion(invalid), &cancel)
@@ -81,6 +98,7 @@ async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
             );
         }
     }
+    drop(shell);
     remote.dispose().await;
     fixture.stop().await;
 }

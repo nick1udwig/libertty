@@ -267,7 +267,7 @@ impl CompletionProvider {
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }
-        Ok(result.unwrap_or_default())
+        result
     }
 }
 pub fn valid_completion_words(words: &[String]) -> bool {
@@ -357,9 +357,9 @@ pub async fn shell_complete(
     if cancel.is_cancelled() {
         return Err(ABORTED.into());
     }
-    Ok(result
-        .ok()
-        .filter(|r| r.success)
-        .map(|r| completion_values(&String::from_utf8_lossy(&r.stdout)))
-        .unwrap_or_default())
+    let result = result?;
+    if !result.success {
+        return Err("Completion probe failed.".into());
+    }
+    Ok(completion_values(&String::from_utf8_lossy(&result.stdout)))
 }

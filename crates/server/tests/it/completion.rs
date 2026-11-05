@@ -164,8 +164,7 @@ async fn cancelled_and_oversized_completions_discard_workers_and_recover() {
         provider
             .complete(&pool, &words, cwd, &env, &cancel)
             .await
-            .unwrap()
-            .is_empty()
+            .is_err()
     );
     std::fs::write(
         &definitions,
@@ -202,4 +201,41 @@ async fn worker_cache_eviction_keeps_new_contexts_warm() {
             .unwrap();
         assert_eq!(provider.worker_starts(), value + 1);
     }
+}
+
+#[tokio::test]
+async fn completion_failures_remain_distinct_from_successful_empty_results() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().join("later");
+    let cwd = cwd.to_str().unwrap();
+    let pool = ProbePool::new(1);
+    let provider = CompletionProvider::default();
+    let env = BTreeMap::from([("PATH".into(), "/usr/bin:/bin".into())]);
+    let cancel = CancellationToken::new();
+    let words = vec!["libertty_missing_command".into(), "".into()];
+    assert!(
+        provider
+            .complete(&pool, &words, cwd, &env, &cancel)
+            .await
+            .is_err()
+    );
+    assert!(
+        shell_complete(&pool, &words, cwd, &env, &cancel)
+            .await
+            .is_err()
+    );
+    std::fs::create_dir(cwd).unwrap();
+    assert!(
+        provider
+            .complete(&pool, &words, cwd, &env, &cancel)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        shell_complete(&pool, &words, cwd, &env, &cancel)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
