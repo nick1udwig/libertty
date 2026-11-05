@@ -344,12 +344,7 @@ impl Pane<'_> {
         };
         self.start_repair(request, true);
     }
-    async fn facts(&mut self) -> Result<(), String> {
-        let next = self
-            .client
-            .terminal_get(&self.current.address, DEADLINE)
-            .await
-            .map_err(error)?;
+    async fn facts(&mut self, next: herdr_client_lib::protocol::Terminal) -> Result<(), String> {
         if next.identity != self.current.identity || !next.is_live() {
             return Err("The terminal ended or was replaced.".into());
         }
@@ -767,7 +762,13 @@ pub async fn terminal(
             return Ok(());
         }
         let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
-        let mut facts = tokio::time::interval(Duration::from_millis(500));
+        let client = pane.client.clone();
+        let address = pane.current.address.clone();
+        let refresh = || async {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            client.terminal_get(&address, DEADLINE).await.map_err(error)
+        };
+        let mut facts = Box::pin(refresh());
         loop {
             let apply_deadline = pane
                 .applying
@@ -779,7 +780,11 @@ pub async fn terminal(
                     let (prepared, _) = pane.applying.take().unwrap();
                     pane.complete_prepared(prepared).await.map(|()| true)?
                 }
-                _ = facts.tick(), if pane.active => pane.facts().await.map(|()| true)?,
+                next = &mut facts, if pane.active => {
+                    pane.facts(next?).await?;
+                    facts.set(refresh());
+                    true
+                }
                 _ = heartbeat.tick() => {
                     if pane.last_contact.elapsed() > Duration::from_secs(45) {
                         return Err("Browser connection timed out.".into());
