@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { InlineSuggestions } from '../src/inline-suggestions.ts';
+import { createInline } from './support/inline-fixture.ts';
 import { InputLine } from '../src/input-line.ts';
 
 function fixture() {
   let acknowledge!: (accepted: boolean) => void;
   const acknowledgement = new Promise<boolean>(resolve => acknowledge = resolve);
   const replacements: string[] = [];
-  const inline = Object.assign(Object.create(InlineSuggestions.prototype), {
+  const inline = Object.assign(createInline({ state: () => ({ prompt: 1, ready: true, exited: false }) }), {
     generation: 0, literal: '', speech: '', choices: [], autoOpen: true, line: new InputLine(), status: {}, render() {}, armInput() {},
     host: {
       state: () => ({ prompt: 1, ready: true }),

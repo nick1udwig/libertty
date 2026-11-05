@@ -1,0 +1,7 @@
+[
+  {"text":"look at notes.md","phrases":["look at"],"intent":{"kind":"reading-file","phrase":"look at","operand":"notes.md"}},
+  {"text":"Inspect notes.md.","phrases":["inspect"],"intent":{"kind":"reading-file","phrase":"Inspect","operand":"notes.md"}},
+  {"text":"echo hello pipe look at","phrases":["look at"],"intent":{"kind":"reading-pipeline","phrase":"look at","command":"echo hello"}},
+  {"text":"echo 'pipe look at'","phrases":["look at"],"intent":{"kind":"shell"}},
+  {"text":"echo hello || look at","phrases":["look at"],"intent":{"kind":"shell"}}
+]

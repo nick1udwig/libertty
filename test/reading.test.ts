@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultReadingPhrases, readingPath, readingPhrases, readingRequest, readingPipeline } from '../src/reading-request.ts';
-import { shellQuote, simpleWords } from '../src/shell-words.ts';
-import { nativeSuggest } from './support/engine.ts';
+import { nativePrepare } from './support/engine.ts';
 import { mkdtemp, mkdir, writeFile, rm, stat, link } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,14 +30,6 @@ test('reader pipelines preserve Bash input and ignore quoted pipe text', () => {
   assert.equal(readingRequest("look at printf '%s' 'a b'", ['look at'])?.operand, "printf '%s' 'a b'");
 });
 
-// The backend repairs a reading operand as a `cat` command and keeps only single-file results.
-const readingSuggestionInput = (request: { path: string; operand?: string }) => 'cat ' + (request.operand || request.path);
-function readingSuggestionChoice(command: string, phrase: string) {
-  const words = simpleWords(command);
-  if (words?.length !== 2 || words[0].value !== 'cat') return undefined;
-  return phrase + ' ' + shellQuote(words[1].value);
-}
-
 test('reading alternatives use the command engine’s verified file and directory repairs', async () => {
   const cwd = await mkdtemp(path.join(os.tmpdir(), 'libertty-read-alternates-'));
   try {
@@ -59,9 +50,11 @@ test('reading alternatives use the command engine’s verified file and director
         ['inspect readme dot md', 'inspect README.md'],
       ]) {
         const request = readingRequest(spoken, ['look at', 'inspect'], true)!;
-        const candidates = await nativeSuggest(readingSuggestionInput(request), catalog, { HOME: cwd, PATH: process.env.PATH! });
-        const choices = candidates.filter(candidate => !candidate.literal)
-          .map(candidate => readingSuggestionChoice(candidate.command, request.phrase)).filter(Boolean);
+        const prepared = nativePrepare(spoken, {kind: 'reading-file', phrase: request.phrase, operand: request.operand}, catalog, { HOME: cwd, PATH: process.env.PATH! });
+        const candidates = prepared.candidates;
+        assert.equal(prepared.original, spoken);
+        const choices = candidates.filter(candidate => !candidate.literal).map(candidate => candidate.command);
+        assert.equal(prepared.selected, choices[0]);
         assert.ok(choices.length, JSON.stringify(candidates));
         const selected = readingPath(choices[0]!, [request.phrase]);
         assert.ok(selected, JSON.stringify(candidates));
@@ -73,7 +66,15 @@ test('reading alternatives use the command engine’s verified file and director
         if (lowerCaseFile?.dev !== targetFile.dev || lowerCaseFile?.ino !== targetFile.ino) assert.equal(choices[0], expected, JSON.stringify(candidates));
       }
     }
-    assert.equal(readingSuggestionChoice("cat 'note with spaces.md'", 'look at'), "look at 'note with spaces.md'");
-    assert.equal(readingSuggestionChoice('ls README.md', 'look at'), undefined);
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test('reading intents match the shared native contract', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const fixtures = JSON.parse(await readFile(new URL('./fixtures/reading-intents.json', import.meta.url), 'utf8'));
+  for (const { text, phrases, intent } of fixtures) {
+    const pipeline = readingPipeline(text, phrases, true), request = readingRequest(text, phrases, true);
+    const actual = pipeline ? {kind: 'reading-pipeline', ...pipeline} : request ? {kind: 'reading-file', phrase: request.phrase, operand: request.operand} : {kind: 'shell'};
+    assert.deepEqual(actual, intent, text);
+  }
 });
