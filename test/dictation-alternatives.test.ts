@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { InlineSuggestions } from '../src/inline-suggestions.ts';
+import { createInline } from './support/inline-fixture.ts';
 import { InputLine } from '../src/input-line.ts';
 
 const repaired = (original: string, selected: string) => ({ accepted: true, candidates: selected === original ? [] : [{ command: selected, score: 100, changes: [] }], original, selected, revision: 1, prompt: 1 });
 function fixture() {
   const replacements: string[] = [], requests: string[] = [], input: string[] = [], executed: string[] = [];
   const line = new InputLine(); line.reset();
-  const inline = Object.assign(Object.create(InlineSuggestions.prototype), {
+  const inline = Object.assign(createInline({ state: () => ({ prompt: 1, ready: true, exited: false }) }), {
     line, generation: 0, literal: '', speech: '', choices: [], autoOpen: true, tapToSend: false,
     status: {}, render() {}, armInput() {}, term: { focus() {} },
     host: {
@@ -109,4 +109,38 @@ test('a failed backend snapshot cannot offer a partial transcript as the entire 
   assert.equal(f.inline.literal, 'echo prefix voice tail');
   assert.equal(f.inline.selected, 'echo prefix voice tail');
   assert.equal(f.line.known, false, 'The next edit must recover the authoritative cursor');
+});
+
+test('successive repairs ignore an older result after a new prompt and transcript', async () => {
+  const f = fixture();
+  const replies: Array<(value: any) => void> = [];
+  const signals: AbortSignal[] = [];
+  f.inline.host.repair = (_text: string, _intent: unknown, signal: AbortSignal) => {
+    signals.push(signal);
+    return new Promise(resolve => replies.push(resolve));
+  };
+  const first = f.inline.externalPaste('first', false, true);
+  f.inline.onState({prompt: 2, ready: true, exited: false, inputRevision: 0, promptRevision: 0});
+  f.inline.host.state = () => ({prompt: 2, ready: true, exited: false});
+  const second = f.inline.externalPaste('second', false, true);
+  replies[1]({...repaired('second', 'echo second'), prompt: 2});
+  await second;
+  replies[0](repaired('first', 'echo first'));
+  await first;
+  assert.equal(signals[0].aborted, true);
+  assert.equal(f.inline.literal, 'second');
+  assert.equal(f.inline.selected, 'echo second');
+  assert.deepEqual(f.replacements, []);
+  assert.deepEqual(f.executed, []);
+});
+
+test('backend action metadata remains authoritative after reading preferences change', async () => {
+  const f = fixture();
+  f.inline.phrases = ['inspect'];
+  f.inline.backendResult({...repaired('look at readme', 'look at README.md'), actions: {
+    'look at README.md': {kind: 'reading-file', phrase: 'look at', operand: 'README.md'},
+  }});
+  await f.inline.choose('look at README.md');
+  assert.deepEqual(f.executed, ['look at README.md']);
+  assert.deepEqual(f.replacements, []);
 });

@@ -300,3 +300,225 @@ fn separate_engine_instances_never_share_learned_command_metadata() {
     };
     assert_eq!(reset["flags"], json!({}));
 }
+
+#[test]
+fn command_profiles_preserve_operand_types_and_script_argument_boundaries() {
+    use libertty_engine::host::HostOperation;
+    for (command, valid, expected_paths) in [
+        ("cd folder", true, vec!["/fixture/folder"]),
+        ("cd file", false, vec!["/fixture/file"]),
+        ("cd folder extra", false, vec![]),
+        ("download folder", false, vec!["/fixture/folder"]),
+        ("download file", true, vec!["/fixture/file"]),
+        ("download", false, vec![]),
+        (
+            "ls folder file",
+            true,
+            vec!["/fixture/folder", "/fixture/file"],
+        ),
+        ("python3 file missing-argument", true, vec!["/fixture/file"]),
+        ("python3 folder", false, vec!["/fixture/folder"]),
+        ("nano new-file", true, vec![]),
+        (
+            "git add file folder",
+            true,
+            vec!["/fixture/file", "/fixture/folder"],
+        ),
+        ("unknown missing-argument", true, vec![]),
+    ] {
+        let mut runtime = Runtime::default();
+        let mut step = runtime.start(1, Request {
+            operation: "candidateValid".into(),
+            args: vec![json!(command), json!({"command":command,"score":100,"changes":[]}),
+                json!({"cwd":"/fixture","commands":["cd","download","ls","python3","nano","git","unknown"],"paths":[],"history":[]}),
+                json!({}), json!({"flags":{},"subcommands":{}})],
+        }, 0.0);
+        let mut paths = Vec::new();
+        for wave in 1..=3 {
+            match step {
+                Step::Complete { value, .. } => {
+                    assert_eq!(value, json!(valid), "{command}");
+                    assert_eq!(paths, expected_paths, "{command}");
+                    break;
+                }
+                Step::Pending { callbacks, .. } => {
+                    let replies = callbacks
+                        .into_iter()
+                        .map(|callback| {
+                            Reply::Values {
+                        request: callback.request,
+                        values: callback.operations.into_iter().map(|operation| match operation {
+                            HostOperation::Syntax { .. } => json!(true),
+                            HostOperation::Stat { path, .. } => {
+                                let directory = path.ends_with("/folder");
+                                paths.push(path);
+                                json!({"file":!directory,"directory":directory,"executable":false})
+                            }
+                            _ => panic!("Unexpected fact: {operation:?}"),
+                        }).collect(),
+                    }
+                        })
+                        .collect();
+                    step = runtime.resume(1, replies, f64::from(wave));
+                }
+                _ => panic!("Unexpected profile validation result"),
+            }
+            assert!(wave < 3, "Profile validation did not finish: {command}");
+        }
+    }
+}
+
+#[test]
+fn compound_and_wrapper_syntax_checks_share_one_wave_and_filter_independently() {
+    use libertty_engine::host::HostOperation;
+    for input in ["sudo cat my notes", "cat my notes | cat"] {
+        let mut runtime = Runtime::default();
+        let mut step = runtime.start(1, Request {
+            operation: "suggest".into(),
+            args: vec![json!(input),
+                json!({"cwd":"/fixture","commands":["sudo","cat"],"paths":["my-notes","my_notes"],"history":[]}),
+                json!({}), json!(false)],
+        }, 0.0);
+        let mut syntax_waves: Vec<Vec<String>> = Vec::new();
+        let mut completed = false;
+        for wave in 1..=10 {
+            match step {
+                Step::Complete { value, .. } => {
+                    let commands: Vec<_> = value
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|candidate| candidate["literal"] != true)
+                        .map(|candidate| candidate["command"].as_str().unwrap())
+                        .collect();
+                    let expected = if input.starts_with("sudo") {
+                        "sudo cat my_notes"
+                    } else {
+                        "cat my_notes | cat"
+                    };
+                    assert!(commands.contains(&expected), "{input}: {commands:?}");
+                    assert!(!commands.iter().any(|command| command.contains("my-notes")));
+                    assert_eq!(syntax_waves.len(), 1, "{input}: {syntax_waves:?}");
+                    assert_eq!(syntax_waves[0].len(), 2, "{input}: {syntax_waves:?}");
+                    completed = true;
+                    break;
+                }
+                Step::Pending { callbacks, .. } => {
+                    let mut syntax_commands = Vec::new();
+                    let replies = callbacks
+                        .into_iter()
+                        .map(|callback| Reply::Values {
+                            request: callback.request,
+                            values: callback
+                                .operations
+                                .into_iter()
+                                .map(|operation| match operation {
+                                    HostOperation::Syntax { command } => {
+                                        if command.starts_with("sudo ") || command.contains(" | ") {
+                                            let valid = !command.contains("my-notes");
+                                            syntax_commands.push(command);
+                                            json!(valid)
+                                        } else {
+                                            json!(true)
+                                        }
+                                    }
+                                    HostOperation::Stat { path, .. } => {
+                                        if path.ends_with("my-notes") || path.ends_with("my_notes") {
+                                            json!({"file":true,"directory":false,"executable":false})
+                                        } else { Value::Null }
+                                    }
+                                    _ => panic!("Unexpected fact: {operation:?}"),
+                                })
+                                .collect(),
+                        })
+                        .collect();
+                    if !syntax_commands.is_empty() {
+                        syntax_waves.push(syntax_commands);
+                    }
+                    step = runtime.resume(1, replies, f64::from(wave * 150));
+                }
+                _ => panic!("Unexpected syntax validation result"),
+            }
+        }
+        assert!(completed, "Suggestion did not finish: {input}");
+    }
+}
+
+#[test]
+fn option_path_repair_and_argument_completion_share_a_callback_wave() {
+    use libertty_engine::host::HostOperation;
+    let mut runtime = Runtime::default();
+    let mut step = runtime.start(
+        1,
+        Request {
+            operation: "suggest".into(),
+            args: vec![
+                json!("orbit trget config dcos slash config dot txt"),
+                json!({"cwd":"/fixture","commands":["orbit"],"paths":[],"history":[]}),
+                json!({}),
+                json!(true),
+            ],
+        },
+        0.0,
+    );
+    let mut shared_wave = false;
+    for wave in 1..=20 {
+        match step {
+            Step::Complete { value, .. } => {
+                assert!(
+                    shared_wave,
+                    "Path repair and completion did not share a wave"
+                );
+                assert!(
+                    value
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|candidate| candidate["literal"] != true
+                            && candidate["command"]
+                                .as_str()
+                                .unwrap()
+                                .contains("docs/config.txt")),
+                    "{value}"
+                );
+                return;
+            }
+            Step::Pending { callbacks, .. } => {
+                let operations: Vec<_> = callbacks
+                    .iter()
+                    .flat_map(|callback| &callback.operations)
+                    .collect();
+                shared_wave |= operations
+                    .iter()
+                    .any(|op| matches!(op, HostOperation::Completion { .. }))
+                    && operations
+                        .iter()
+                        .any(|op| matches!(op, HostOperation::Lookup { .. }));
+                let replies = callbacks.into_iter().map(|callback| Reply::Values {
+                    request: callback.request,
+                    values: callback.operations.into_iter().map(|operation| match operation {
+                        HostOperation::Syntax { .. } => json!(true),
+                        HostOperation::Version { .. } => json!("v1"),
+                        HostOperation::Help { .. } => json!({"flags":[{"name":"--config","takesValue":true,"value":{"kind":"path","minimum":1,"maximum":1}}],"subcommands":[]}),
+                        HostOperation::Completion { .. } => json!(["target"]),
+                        HostOperation::Entries { .. } => json!([]),
+                        HostOperation::Stat { path, .. } => {
+                            if path == "/fixture/docs/config.txt" { json!({"file":true,"directory":false,"executable":false}) } else { Value::Null }
+                        }
+                        HostOperation::Lookup { path } => {
+                            if path == "/fixture/docs/config.txt" {
+                                json!({"info":{"file":true,"directory":false,"executable":false}})
+                            } else if path == "/fixture/dcos" {
+                                json!({"listing":{"version":"v1","complete":true,"entries":[{"name":"docs","directory":true,"symlink":false}]}})
+                            } else { json!({}) }
+                        }
+                        _ => panic!("Unexpected fact: {operation:?}"),
+                    }).collect(),
+                }).collect();
+                step = runtime.resume(1, replies, f64::from(wave * 50));
+            }
+            _ => panic!("Unexpected suggestion result"),
+        }
+    }
+    panic!("Suggestion did not finish");
+}

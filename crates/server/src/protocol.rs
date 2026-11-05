@@ -208,6 +208,7 @@ impl RepairReply {
                 original: text.clone(),
                 selected: text,
                 candidates: vec![],
+                actions: None,
             },
             error: None,
             source: backend.then_some(DictationSource::Dictation),

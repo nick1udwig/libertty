@@ -42,38 +42,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let owned_host = if request.operation.starts_with("bench") {
                 None
             } else {
-                let catalog: Catalog = serde_json::from_value(
-                    request.args[if [
-                        "seedMetadata",
-                        "hostFacts",
-                        "cachedMetadata",
-                        "benchSuggest",
-                    ]
-                    .contains(&request.operation.as_str())
-                    {
-                        0
-                    } else {
-                        1
-                    }]
-                    .clone(),
-                )
-                .map_err(|e| e.to_string())?;
-                let env: std::collections::BTreeMap<String, String> = serde_json::from_value(
-                    request.args[if [
-                        "seedMetadata",
-                        "hostFacts",
-                        "cachedMetadata",
-                        "benchSuggest",
-                    ]
-                    .contains(&request.operation.as_str())
-                    {
-                        1
-                    } else {
-                        2
-                    }]
-                    .clone(),
-                )
-                .map_err(|e| e.to_string())?;
+                let offset = match request.operation.as_str() {
+                    "seedMetadata" | "hostFacts" | "cachedMetadata" => 0,
+                    "alternatives" => 2,
+                    _ => 1,
+                };
+                let catalog: Catalog = serde_json::from_value(request.args[offset].clone())
+                    .map_err(|e| e.to_string())?;
+                let env: std::collections::BTreeMap<String, String> =
+                    serde_json::from_value(request.args[offset + 1].clone())
+                        .map_err(|e| e.to_string())?;
                 Some(NativeHost::new(
                     services.clone(),
                     catalog,

@@ -284,6 +284,7 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
     std::fs::create_dir(root.path().join("docs")).unwrap();
     std::fs::write(root.path().join("docs/My Notes.txt"), "notes").unwrap();
     std::fs::write(root.path().join("SKILL.md"), "skill").unwrap();
+    std::fs::write(root.path().join("docs/config.txt"), "config").unwrap();
     std::fs::write(root.path().join("tool.py"), "import argparse\nfrom pathlib import Path\np=argparse.ArgumentParser()\np.add_argument('--config', type=Path)\np.add_argument('--mode', choices=['east-zone','west-zone'])\np.add_argument('--pair', nargs=2)\np.add_argument('--tag', nargs='+')\np.add_argument('--force', action='store_true')\nsubs=p.add_subparsers()\nchild=subs.add_parser('child')\nchild.add_argument('--child-only')\n").unwrap();
     let services = HostServices::new();
     let host = NativeHost::new(
@@ -333,6 +334,18 @@ async fn shared_paths_and_option_schemas_preserve_types_choices_and_arity() {
         (
             "python3 tool.py config dcos slash My Notes dot txt force",
             "python3 tool.py --config 'docs/My Notes.txt' --force",
+        ),
+        (
+            "python3 tool.py --config='docs/My Notes.txt' --force",
+            "python3 tool.py '--config=docs/My Notes.txt' --force",
+        ),
+        (
+            "python3 tool.py --config=dcos/config.txt --force",
+            "python3 tool.py --config=docs/config.txt --force",
+        ),
+        (
+            "python3 tool.py --pair=one two --force",
+            "python3 tool.py --pair=one two --force",
         ),
         (
             "python3 tool.py mode east zone force",
@@ -1386,4 +1399,56 @@ async fn borrowed_command_checks_keep_private_helpers_explicit_and_public_functi
         let actual = engine.invoke(request("candidateValid", json!([input,{"command":command,"score":100,"changes":[]},catalog,{}, {"flags":{},"subcommands":{}}])), &host, &cancel).await.unwrap();
         assert_eq!(actual, json!(expected));
     }
+}
+
+#[tokio::test]
+async fn dictated_editor_paths_follow_real_directory_names_and_file_case() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().to_str().unwrap();
+    std::fs::create_dir_all(root.path().join("git/libertty")).unwrap();
+    std::fs::write(root.path().join("git/libertty/README.md"), "readme").unwrap();
+    let services = HostServices::new();
+    let host = NativeHost::new(
+        services.clone(),
+        catalog(home, &["micro", "nano"]),
+        BTreeMap::from([
+            ("HOME".into(), home.into()),
+            ("PATH".into(), "/usr/bin:/bin".into()),
+        ]),
+        HelpProvider::new(services.pool.clone()),
+    );
+    let engine = NativeEngine::new().unwrap();
+    for (input, expected) in [
+        (
+            "Micro tilde slash git slash liberty slash readme dot md",
+            "micro ~/git/libertty/README.md",
+        ),
+        (
+            "micro ~/git/liberty/readme.md",
+            "micro ~/git/libertty/README.md",
+        ),
+        (
+            "nano ~/git/libertty/readme.md",
+            "nano ~/git/libertty/README.md",
+        ),
+    ] {
+        let result = engine
+            .suggest(input, &host, &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(result[0].command, expected, "{input}: {result:?}");
+        assert!(
+            result
+                .iter()
+                .filter(|candidate| !candidate.is_literal())
+                .all(|candidate| candidate.command == expected),
+            "{result:?}"
+        );
+    }
+    let input = "micro ~/git/libertty/no-such-file.zzz";
+    let result = engine
+        .suggest(input, &host, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert!(result.iter().all(Candidate::is_literal), "{result:?}");
 }

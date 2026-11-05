@@ -1,5 +1,6 @@
 use crate::{
-    command_policy::{child_scope, flags_for, input_file_command, option_arity, script_operand},
+    arguments::{ParsedCommand, option_binding},
+    command_policy::{child_scope, flags_for, option_arity, script_operand},
     host::Host,
     path_repair::{ExpectedType, PathInput, path_input, resolve_path},
     shell_structure::word_spans,
@@ -26,15 +27,10 @@ pub async fn repair_copy_destination(
         return Ok(None);
     }
     let expanded = expand_symbols(input, true);
-    let Some(spans) = word_spans(&expanded) else {
+    let Some(parsed) = ParsedCommand::parse(&expanded) else {
         return Ok(None);
     };
-    let Some(words) = crate::validation::simple_words(&expanded) else {
-        return Ok(None);
-    };
-    if words.len() != spans.len() {
-        return Ok(None);
-    }
+    let (words, spans) = (parsed.words, parsed.spans);
     let flags = flags_for("cp", metadata);
     let mut index = 1;
     let mut options = true;
@@ -116,7 +112,11 @@ pub async fn repair_input_file(
         return Ok(None);
     };
     let command = expanded[spans[0].clone()].to_lowercase();
-    if !input_file_command(&command) || !catalog.commands.contains(&command) {
+    if !matches!(
+        crate::command_profiles::profile(&command).repair_kind,
+        Some(ValueKind::Path | ValueKind::InputFile)
+    ) || !catalog.commands.contains(&command)
+    {
         return Ok(None);
     }
     let flags = flags_for(&command, metadata);
@@ -140,7 +140,7 @@ pub async fn repair_input_file(
     };
     let mut operand = expanded[span.start..].to_owned();
     let quoted = test!(r###"^("[^"]*"|'[^']*')$"###, &operand);
-    if command != "download"
+    if !crate::command_profiles::profile(&command).repair_bare_paths
         && (!operand.contains('/')
             || (test!(
                 r###"[\x09-\x0d \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]"###,
@@ -194,10 +194,9 @@ pub async fn repair_input_file(
         .into(),
         parts,
     };
-    let expected = if ["ls", "du", "file", "stat"].contains(&command.as_str()) {
-        ExpectedType::Any
-    } else {
-        ExpectedType::File
+    let expected = match crate::command_profiles::profile(&command).repair_kind {
+        Some(ValueKind::InputFile) => ExpectedType::File,
+        _ => ExpectedType::Any,
     };
     resolve_path(&request, catalog, home, host, expected).await
 }
@@ -221,20 +220,18 @@ pub async fn repair_option_paths(
         if host.now_ms() >= deadline {
             break;
         }
-        let Some(words) = crate::validation::simple_words(&candidate.command) else {
+        let Some(parsed) = ParsedCommand::parse(&candidate.command) else {
             continue;
         };
-        let Some(spans) = word_spans(&candidate.command) else {
-            continue;
-        };
-        if words.len() != spans.len() || words.is_empty() {
+        let (words, spans) = (parsed.words, parsed.spans);
+        if words.is_empty() {
             continue;
         }
         let script = script_operand(&words.iter().map(|w| &w.value).collect::<Vec<_>>());
         let mut scope = words[0].value.clone();
         let mut flags = flags_for(&scope, metadata);
         let mut index = 1;
-        while index + 1 < words.len() {
+        while index < words.len() {
             if script.is_some_and(|script| index > script)
                 && let Some(script_flags) = script_flags
             {
@@ -244,23 +241,34 @@ pub async fn repair_option_paths(
             if word.value == "--" {
                 break;
             }
-            if let Some(flag) = flags.iter().find(|f| f.name == word.value) {
+            let binding = option_binding(&word.value, &flags);
+            if let Some(flag) = binding.as_ref().and_then(|binding| binding.descriptor) {
+                let attached = binding.as_ref().and_then(|binding| binding.attached);
+                let value_index = if attached.is_some() { index } else { index + 1 };
                 if let Some(schema) = &flag.value
                     && flag.value_bounds() == (1, Some(1))
                     && matches!(
                         schema.kind,
                         ValueKind::Path | ValueKind::Directory | ValueKind::InputFile
                     )
-                    && words[index + 1].value.contains('/')
+                    && words
+                        .get(value_index)
+                        .is_some_and(|word| attached.unwrap_or(&word.value).contains('/'))
                 {
-                    let end = ((index + 2)..words.len())
-                        .find(|i| words[*i].value.starts_with('-'))
-                        .unwrap_or(words.len());
-                    let start = spans[index + 1].start;
+                    let end = if attached.is_some() {
+                        index + 1
+                    } else {
+                        ((index + 2)..words.len())
+                            .find(|i| words[*i].value.starts_with('-'))
+                            .unwrap_or(words.len())
+                    };
+                    let start = spans[value_index].start;
                     let finish = spans[end - 1].end;
                     let raw = &candidate.command[start..finish];
                     let quoted = raw.starts_with(['\'', '"']);
-                    let operand = if end == index + 2 {
+                    let operand = if let Some(value) = attached {
+                        value.into()
+                    } else if end == index + 2 {
                         words[index + 1].value.clone()
                     } else {
                         expand_symbols(raw, true)
@@ -268,10 +276,15 @@ pub async fn repair_option_paths(
                     if operand.contains(['$', '`', '\\', '*', '?', '[', ']']) {
                         break;
                     }
-                    let from_home = words[index + 1].home && operand.starts_with('~');
+                    let from_home =
+                        attached.is_none() && words[value_index].home && operand.starts_with('~');
                     let target = if from_home { &operand[1..] } else { &operand };
                     let request = PathInput {
-                        command: candidate.command[..spans[index].end].into(),
+                        command: if attached.is_some() {
+                            candidate.command[..spans[index].start].trim_end().into()
+                        } else {
+                            candidate.command[..spans[index].end].into()
+                        },
                         options: String::new(),
                         quoted,
                         from_home,
@@ -302,6 +315,22 @@ pub async fn repair_option_paths(
                         .await?
                         .unwrap_or_default()
                     {
+                        if attached.is_some() {
+                            let Some(parsed) = ParsedCommand::parse(&repaired.command) else {
+                                continue;
+                            };
+                            let Some(value) = parsed.words.last() else {
+                                continue;
+                            };
+                            repaired.command = format!(
+                                "{}{}",
+                                &candidate.command[..spans[index].start],
+                                crate::repair::shell_quote(&format!(
+                                    "{}={}",
+                                    flag.name, value.value
+                                ))
+                            );
+                        }
                         repaired.command.push_str(&candidate.command[finish..]);
                         repaired.changes.extend(candidate.changes.clone());
                         result.push(repaired);

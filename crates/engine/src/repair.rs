@@ -15,24 +15,16 @@ pub fn tokens(input: &str) -> SharedList<Token> {
     memo(&TOKENS, input, 0, || parsed_tokens(input))
 }
 fn parsed_tokens(input: &str) -> SharedList<Token> {
-    if let Some(spans) = crate::shell_structure::word_spans(input) {
-        let parsed: Option<Vec<_>> = spans
-            .iter()
-            .map(|span| {
-                let text = &input[span.clone()];
-                let words = crate::validation::simple_words(text)?;
-                if words.len() != 1 {
-                    return None;
-                }
-                Some(Token {
-                    value: words[0].value.clone(),
-                    quoted: text.starts_with(['\'', '"']),
-                })
+    if let Some(parsed) = crate::arguments::ParsedCommand::parse(input) {
+        return parsed
+            .words
+            .into_iter()
+            .zip(parsed.spans)
+            .map(|(word, span)| Token {
+                value: word.value,
+                quoted: input[span].starts_with(['\'', '"']),
             })
             .collect();
-        if let Some(parsed) = parsed {
-            return parsed.into();
-        }
     }
     quoted_words(input)
         .into_iter()
@@ -833,11 +825,7 @@ pub fn repair(
 ) -> Vec<Candidate> {
     let candidates = repair_candidates(input, catalog, script_flags, metadata);
     let literal = candidates.iter().find(|c| c.is_literal()).cloned();
-    let mut selected: Vec<_> = candidates
-        .into_iter()
-        .filter(|c| !c.is_literal())
-        .take(3)
-        .collect();
+    let mut selected = crate::selection::choices(candidates);
     if let Some(literal) = literal {
         selected.push(literal);
     }
@@ -919,7 +907,7 @@ pub(crate) fn repair_candidates(
             Candidate::literal(input),
         ];
     }
-    result.truncate(16);
+    result.truncate(crate::selection::SEARCH_FRONTIER);
     result.push(Candidate::literal(input));
     result
 }
@@ -999,8 +987,8 @@ fn repair_normalized(
     candidates.sort_by(|a, b| b.score.total_cmp(&a.score));
     let mut seen = HashSet::new();
     candidates.retain(|candidate| seen.insert(candidate.command.clone()));
-    candidates.truncate(16);
-    if candidates.len() < 16 {
+    candidates.truncate(crate::selection::SEARCH_FRONTIER);
+    if candidates.len() < crate::selection::SEARCH_FRONTIER {
         candidates.push(Candidate::literal(input));
     }
     candidates
@@ -1635,7 +1623,7 @@ fn repair_one(
             );
         }
         next.sort_by(|a, b| b.score.total_cmp(&a.score));
-        next.truncate(16);
+        next.truncate(crate::selection::SEARCH_FRONTIER);
         states = next;
     }
     let mut unique = Vec::new();
@@ -1683,8 +1671,8 @@ fn repair_one(
         }
     }
     unique.sort_by(|a, b| b.score.total_cmp(&a.score));
-    unique.truncate(16);
-    if unique.len() < 16
+    unique.truncate(crate::selection::SEARCH_FRONTIER);
+    if unique.len() < crate::selection::SEARCH_FRONTIER
         && !unique
             .iter()
             .any(|candidate| candidate.command == literal.command)

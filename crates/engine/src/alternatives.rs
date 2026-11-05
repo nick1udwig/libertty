@@ -1,7 +1,7 @@
 //! Alternatives for typed or dictated input, shared by the backend and browser adapters.
 use crate::utf16_len;
 use crate::{
-    shell_structure::{Separator, command_list},
+    shell_structure::{Separator, reading_command_list},
     types::Candidate,
     validation::simple_words,
 };
@@ -24,32 +24,47 @@ pub enum Intent {
         command: String,
     },
 }
+fn trim_sentence(text: &str) -> &str {
+    text.strip_suffix(['.', '!', '?']).unwrap_or(text)
+}
+pub fn reading_phrases(value: &Value) -> Vec<String> {
+    let normalize = || -> Option<Vec<String>> {
+        let items = value.as_array().filter(|items| items.len() <= 12)?;
+        let mut phrases = Vec::new();
+        for item in items {
+            let phrase = item
+                .as_str()?
+                .split(crate::util::js_whitespace)
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            if phrase.is_empty()
+                || utf16_len(&phrase) > 50
+                || phrase.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}')
+            {
+                return None;
+            }
+            if !phrases.contains(&phrase) {
+                phrases.push(phrase);
+            }
+        }
+        phrases.sort_by_key(|phrase| std::cmp::Reverse(utf16_len(phrase)));
+        Some(phrases)
+    };
+    normalize().unwrap_or_else(|| vec!["look at".into()])
+}
 impl Intent {
     pub fn detect(text: &str, phrases: &Value) -> Self {
-        let phrases: Vec<String> = phrases
-            .as_array()
-            .filter(|items| items.len() <= 12)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .filter(|phrase| {
-                        !phrase.is_empty()
-                            && phrase.len() <= 50
-                            && !phrase.chars().any(char::is_control)
-                    })
-                    .map(str::to_owned)
-                    .collect()
-            })
-            .unwrap_or_else(|| vec!["look at".into()]);
+        let phrases = reading_phrases(phrases);
         let expanded = crate::speech::expand_symbols(text, true);
-        let expanded = expanded.trim_end_matches(['.', '!', '?']);
-        if let Some(list) = command_list(expanded)
+        let expanded = trim_sentence(&expanded);
+        if let Some(list) = reading_command_list(expanded)
             && list.separators.last() == Some(&Separator::Pipe)
             && let Some(last) = list.commands.last()
             && phrases
                 .iter()
-                .any(|phrase| phrase.eq_ignore_ascii_case(last.trim()))
+                .any(|phrase| phrase == &last.trim().to_lowercase())
         {
             let end = expanded.rfind('|').unwrap();
             return Self::ReadingPipeline {
@@ -61,17 +76,17 @@ impl Intent {
         for phrase in phrases {
             if text
                 .get(..phrase.len())
-                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&phrase))
+                .is_some_and(|prefix| prefix.to_lowercase() == phrase)
                 && text
                     .get(phrase.len()..)
                     .is_some_and(|rest| rest.starts_with(char::is_whitespace))
             {
+                if trim_sentence(text[phrase.len()..].trim()).is_empty() {
+                    continue;
+                }
                 return Self::ReadingFile {
                     phrase: text[..phrase.len()].into(),
-                    operand: text[phrase.len()..]
-                        .trim()
-                        .trim_end_matches(['.', '!', '?'])
-                        .into(),
+                    operand: trim_sentence(text[phrase.len()..].trim()).into(),
                 };
             }
         }
@@ -86,11 +101,13 @@ impl Intent {
     }
 }
 #[derive(Clone, Serialize)]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields))]
 pub struct Prepared {
     pub original: String,
     pub selected: String,
     pub candidates: Vec<Candidate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actions: Option<std::collections::BTreeMap<String, Intent>>,
 }
 pub async fn prepare<F: Future<Output = Result<Vec<Candidate>, String>>>(
     text: &str,
@@ -105,12 +122,19 @@ pub async fn prepare<F: Future<Output = Result<Vec<Candidate>, String>>>(
     if utf16_len(text) > crate::MAX_COMMAND
         || utf16_len(&query) > crate::MAX_COMMAND
         || text.chars().chain(query.chars()).any(char::is_control)
-        || phrase.len() > 50
+        || utf16_len(phrase) > 50
         || phrase.chars().any(char::is_control)
     {
         return Err("Expected command text under 2,000 characters.".into());
     }
-    let mut candidates = suggest(query).await?;
+    let canonical = match intent {
+        Intent::Shell => Intent::Shell,
+        Intent::ReadingFile { phrase, .. } | Intent::ReadingPipeline { phrase, .. } => {
+            Intent::detect(text, &serde_json::json!([phrase]))
+        }
+    };
+    let intent = &canonical;
+    let mut candidates = suggest(intent.query(text)).await?;
     candidates.retain(|candidate| !candidate.is_literal());
     let mut fallback = false;
     if let Intent::ReadingFile { operand, .. } = intent {
@@ -137,18 +161,50 @@ pub async fn prepare<F: Future<Output = Result<Vec<Candidate>, String>>>(
             }
         };
     }
-    candidates.truncate(3);
+    let candidates =
+        crate::selection::present(text, candidates, crate::selection::Original::IfMissing);
     let selected = candidates
         .first()
+        .filter(|candidate| !candidate.is_literal())
         .map(|candidate| candidate.command.clone())
         .unwrap_or_else(|| text.into());
-    if candidates.iter().all(|candidate| candidate.command != text) {
-        candidates.push(Candidate::literal(text));
+    let mut actions = std::collections::BTreeMap::new();
+    for command in candidates
+        .iter()
+        .map(|candidate| candidate.command.as_str())
+        .chain(std::iter::once(text))
+    {
+        let action = match intent {
+            Intent::Shell => Intent::Shell,
+            Intent::ReadingFile { phrase, .. } => Intent::ReadingFile {
+                phrase: phrase.clone(),
+                operand: command
+                    .strip_prefix(phrase)
+                    .unwrap_or(command)
+                    .trim()
+                    .into(),
+            },
+            Intent::ReadingPipeline { phrase, .. } => {
+                if command == text {
+                    intent.clone()
+                } else {
+                    Intent::ReadingPipeline {
+                        phrase: phrase.clone(),
+                        command: command
+                            .strip_suffix(&format!(" | {phrase}"))
+                            .unwrap_or(command)
+                            .into(),
+                    }
+                }
+            }
+        };
+        actions.insert(command.into(), action);
     }
     Ok(Prepared {
         original: text.into(),
         selected,
         candidates,
+        actions: Some(actions),
     })
 }
 

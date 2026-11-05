@@ -3,6 +3,11 @@
 `crates/engine` implements the repair library in Rust, linked natively by the backend.
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
 The library has no filesystem, subprocess, browser, network or terminal effects.
+`selection.rs` owns final evidence ordering, stable deduplication and original-text presentation, with separate search, validation, compound and display limits.
+`arguments.rs` shares plain argument values, source spans and option bindings across repair, completion and validation.
+`command_profiles.rs` defines built-in operand schemas, path repair, wrapper handling and directory changes in one registry.
+Add command aliases or operand policies there so these stages stay consistent.
+Independent option-path repair and argument completion share a host-fact round, as do final syntax checks for compound and wrapped choices.
 The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.
 Historical TypeScript revisions remain in Git for benchmark comparisons.
 
@@ -20,6 +25,8 @@ Native suggestions and prewarming use typed calls and results without JSON catal
 The WASM adapter retains the existing JSON protocol.
 Native help, script and completion adapters retain probe-pool capacity and cancellation.
 `src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
+Each prepared choice includes its backend action, so selection keeps its reading or shell meaning if browser preferences change.
+Browser and native reading recognition share contract fixtures, normalize phrases, and prefer the longest matching phrase.
 Cancellation, attachment, prompt and revision guards protect concurrent edits.
 `crates/server/src/input_coordinator.rs` shares repair deadlines, cancellation and microphone callbacks across native terminals and Herdr.
 Session replay credit, history snapshots and captured connection requests live in separate state types under the session lock.
