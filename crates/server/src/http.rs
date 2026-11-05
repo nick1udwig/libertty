@@ -257,7 +257,12 @@ fn json_response(status: StatusCode, data: impl serde::Serialize) -> Response<Bo
         .unwrap()
 }
 fn error(status: StatusCode, message: impl Into<String>) -> Response<Body> {
-    json_response(status, json!({"error":message.into()}))
+    json_response(
+        status,
+        crate::protocol::http::HttpError {
+            error: message.into(),
+        },
+    )
 }
 fn safe_integer(value: f64) -> bool {
     value.is_finite() && value.fract() == 0.0 && (0.0..=9007199254740991.0).contains(&value)

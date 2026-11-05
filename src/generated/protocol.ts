@@ -21,6 +21,14 @@ export type ClientMessage = { "type": "ping", checkpoint?: boolean, }
   | { "type": "terminal-click", column: number, row: number, cols: number, rows: number, }
   | { "type": "dictation-paste", text: string, applied: boolean, replace: boolean, prompt: number, revision: number, readingPhrases?: string[], };
 
+export type Connect = { token?: string, session?: string, noSession?: boolean, };
+
+export type Connected = { accessToken: string, state?: ShellState, };
+
+export type ConnectedHerdr = { herdrSession: string, herdrSource: string, };
+
+export type CreatedSession = { id: string, name: string, state: ShellState, };
+
 export type DictationAction = "start" | "finish" | "cancel";
 
 export type DictationCheckpoint = { acceptedFrames: number, finished: boolean, };
@@ -46,6 +54,8 @@ export type FileListing = { path: string, parent: string, entries: Array<FileEnt
 
 export type HerdrAgent = { terminalId: string, paneId: string, workspaceId?: string, tabId?: string, workspace: string, name: string, label?: string, kind: string, status: HerdrStatus, sequence: number, completion?: number, cwd: string, };
 
+export type HerdrConnect = { core?: boolean, source?: string, session?: string, };
+
 export type HerdrFrame = { /** Viewers receive only acknowledged frames. */ seq: number, width: number, height: number, full: boolean, /** Raw ANSI bytes, decoded once from Herdr and base64-encoded only for JSON clients. */ bytes: string, };
 
 export type HerdrMessage = { "type": "snapshot", snapshot: HerdrSnapshot, }
@@ -56,6 +66,10 @@ export type HerdrSnapshot = { agents: Array<HerdrAgent>, terminals: Array<HerdrA
 export type HerdrSpace = { id: string, name: string, terminalIds: Array<string>, cwd: string, selectedTerminalId?: string, linkedWorktree?: boolean, checkoutPath?: string, /** Checkouts of one repository share this key, so worktrees can group under their root. */ repoKey?: string, repoName?: string, };
 
 export type HerdrStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+
+export type HerdrTicket = { mobile?: boolean, cols?: number, rows?: number, };
+
+export type HttpError = { error: string, };
 
 export type ReadingCapture = { id: string, name: string, exitCode: number, };
 
@@ -90,6 +104,12 @@ export type ServerMessage = { "type": "pong" }
   | { "type": "input-ack", seq?: number, }
   | { "type": "result", id: string, accepted: boolean, message?: string, };
 
+export type Sessions = { name?: string, ssh?: unknown, files?: boolean, };
+
 export type ShellState = { cwd: string, inputRevision: number, inputContext?: string, promptRevision: number, ready: boolean, prompt: number, exited: boolean, exitCode?: number, inputTarget?: DictationTarget, terminalScroll?: boolean, };
+
+export type SocketTicket = { ticket: string, };
+
+export type Success = { ok: boolean, };
 
 export type TransferRequest = { id: string, action: 'upload' | 'download', path: string, name: string, };

@@ -17,7 +17,7 @@ import type { WorkspacePage, WorkspaceServices, WorkspaceState } from './workspa
 interface Options
   extends Pick<
     WorkspaceServices,
-    'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store' | 'notice' | 'fail'
+    'endpoint' | 'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store' | 'notice' | 'fail'
   > {
   workspace: WorkspaceState;
   unmount: (tab: TerminalTab) => void;
@@ -43,6 +43,7 @@ export function createWorkspaceConnections(options: Options) {
   const {
     workspace,
     api,
+    endpoint,
     unmount,
     mount,
     store,
@@ -366,7 +367,7 @@ export function createWorkspaceConnections(options: Options) {
     }
     try {
       const target = isHerdrPlugin(request.pluginId)
-        ? await api<{ herdrSession: string; herdrSource: string }>(backend, 'api/herdr/connect', {
+        ? await endpoint(backend, 'api/herdr/connect', {
             source: session,
             session: request.herdrSession || '',
             core: request.pluginId === 'herdr-core',
@@ -399,7 +400,7 @@ export function createWorkspaceConnections(options: Options) {
         ...(target ? { herdrSession: target.herdrSession, herdrSource: target.herdrSource } : {}),
       };
       if (request.herdrTab && !workspace.tabs.includes(request.herdrTab)) {
-        await api(backend, 'api/sessions/close', {}, session);
+        await endpoint(backend, 'api/sessions/close', {}, session);
         return;
       }
       if (target && request.herdrHost) {
@@ -422,7 +423,7 @@ export function createWorkspaceConnections(options: Options) {
       await mount(connected);
       if (request.herdrTab) herdrReconnects.get(connected.id)?.resolve();
     } catch (error) {
-      await api(backend, 'api/sessions/close', {}, session).catch(() => {});
+      await endpoint(backend, 'api/sessions/close', {}, session).catch(() => {});
       throw error;
     }
   }
@@ -485,7 +486,7 @@ export function createWorkspaceConnections(options: Options) {
         'The source host for this Herdr connection is missing. Add the host again and connect Herdr from its menu.',
       );
     if (tab.ownsSession)
-      await api(backendFor(tab.backendId), 'api/sessions/close', {}, tab.session);
+      await endpoint(backendFor(tab.backendId), 'api/sessions/close', {}, tab.session);
     await connectHost(source, {
       pluginId: tab.pluginId,
       herdrSession: tab.herdrSession,
@@ -541,7 +542,7 @@ export function createWorkspaceConnections(options: Options) {
       }
     }
     if (host.kind === 'http') {
-      const result = await api<{ id: string }>(backend, 'api/sessions', {
+      const result = await endpoint(backend, 'api/sessions', {
         name: host.name,
         files: request.pluginId !== 'terminal',
       });
@@ -732,7 +733,7 @@ export function createWorkspaceConnections(options: Options) {
             : { password: input('ssh-secret').value }),
       };
       const create = () =>
-        api<{ id: string }>(route.backend, 'api/sessions', {
+        endpoint(route.backend, 'api/sessions', {
           name: host.name,
           ssh,
           files: request.pluginId !== 'terminal',

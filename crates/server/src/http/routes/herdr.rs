@@ -38,7 +38,10 @@ pub(super) async fn api_herdr_connect(
         .lock()
         .unwrap()
         .insert((SessionKey::new(owner, &sid), target.storage_key()), target);
-    ok(json!({"herdrSession":session_name,"herdrSource":sid}))
+    ok(crate::protocol::http::ConnectedHerdr {
+        herdr_session: session_name,
+        herdr_source: sid,
+    })
 }
 
 pub(super) async fn api_herdr_captured(
@@ -247,7 +250,7 @@ pub(super) async fn api_herdr_ticket(
             until: Instant::now() + Duration::from_secs(15),
         },
     );
-    ok(json!({"ticket":ticket}))
+    ok(crate::protocol::http::SocketTicket { ticket })
 }
 
 pub(super) async fn api_herdr_reading(

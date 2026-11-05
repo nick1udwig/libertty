@@ -1,3 +1,4 @@
+import type { Connected } from './generated/protocol.ts';
 import { sendToTerminal } from './frame-protocol.ts';
 import { isHerdrPlugin } from './plugins.ts';
 import { requestJSON } from './api.ts';
@@ -48,6 +49,7 @@ function store() {
 }
 const services: WorkspaceServices = {
   api,
+  endpoint: api,
   authenticate,
   backendFor,
   tokenFor,
@@ -286,7 +288,7 @@ function authenticate(backend: BackendProfile, force = false): Promise<void> {
     }
     const save = (accessToken: string) => authorizeTerminals(backend, accessToken);
     try {
-      const result = await api<{ accessToken: string }>(backend, 'api/connect', {
+      const result = await api<Connected>(backend, 'api/connect', {
         noSession: true,
       });
       save(result.accessToken);
@@ -312,7 +314,7 @@ function authenticate(backend: BackendProfile, force = false): Promise<void> {
           $<HTMLFormElement>('backend-login-form').onsubmit = async (event) => {
             event.preventDefault();
             try {
-              const result = await api<{ accessToken: string }>(backend, 'api/connect', {
+              const result = await api<Connected>(backend, 'api/connect', {
                 noSession: true,
                 token: input('backend-token').value,
               });

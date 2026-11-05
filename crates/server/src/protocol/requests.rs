@@ -3,17 +3,22 @@ use serde_json::Value;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct Connect {
     pub token: Option<String>,
     pub session: Option<String>,
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub no_session: bool,
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct Sessions {
     pub name: Option<String>,
+    #[cfg_attr(test, ts(type = "unknown", optional))]
     pub ssh: Option<Value>,
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub files: bool,
 }
 #[derive(Clone, Copy, Default, Deserialize, PartialEq)]
@@ -35,8 +40,10 @@ pub struct Capture {
     pub trust: Option<String>,
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct HerdrConnect {
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub core: bool,
     pub source: Option<String>,
     pub session: Option<String>,
@@ -50,8 +57,10 @@ pub struct HerdrReading {
     pub cwd: String,
 }
 #[derive(Default, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct HerdrTicket {
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub mobile: bool,
     pub cols: Option<u16>,
     pub rows: Option<u16>,

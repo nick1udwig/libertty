@@ -1,3 +1,4 @@
+import type { HttpEndpoint, HttpInput, HttpOutput } from './http-contract.ts';
 import {
   backendURL,
   type BackendProfile,
@@ -22,6 +23,14 @@ export type WorkspacePage =
   | 'known'
   | 'settings';
 export interface WorkspaceServices {
+  endpoint<K extends HttpEndpoint>(
+    backend: BackendProfile,
+    name: K,
+    data: HttpInput<K>,
+    session?: string,
+    recoverAuth?: boolean,
+    signal?: AbortSignal,
+  ): Promise<HttpOutput<K>>;
   api: <T>(
     backend: BackendProfile,
     name: string,

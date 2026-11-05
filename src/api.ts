@@ -1,3 +1,9 @@
+import {
+  endpointTimeouts,
+  type HttpEndpoint,
+  type HttpInput,
+  type HttpOutput,
+} from './http-contract.ts';
 import { abortableDelay } from './abortable-delay.ts';
 import { constrainedLink } from './wire.ts';
 
@@ -7,6 +13,8 @@ export interface RequestOptions extends RequestInit {
   timeout?: number;
 }
 export function requestTimeout(url: URL, data?: unknown): number {
+  const endpoint = url.pathname.slice(url.pathname.lastIndexOf('/api/') + 1) as HttpEndpoint;
+  if (Object.hasOwn(endpointTimeouts, endpoint)) return endpointTimeouts[endpoint];
   if (
     url.pathname.endsWith('/api/herdr/action') &&
     ['list-worktrees', 'new-worktree', 'open-worktree', 'delete-worktree'].includes(
@@ -78,9 +86,20 @@ export async function request(url: URL | string, options: RequestOptions = {}): 
   return response;
 }
 export async function responseJSON<T>(response: Response): Promise<T> {
-  const result = await response.json();
+  let result;
+  try {
+    result = await response.json();
+  } catch (cause) {
+    throw Object.assign(
+      new Error(
+        response.ok ? 'Invalid JSON response.' : 'Request failed (' + response.status + ').',
+        { cause },
+      ),
+      { status: response.status },
+    );
+  }
   if (!response.ok)
-    throw Object.assign(new Error(result.error || 'Request failed'), result, {
+    throw Object.assign(new Error(result?.error || 'Request failed'), result, {
       status: response.status,
     });
   return result;
@@ -101,4 +120,16 @@ export async function requestJSON<T>(
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
     }),
   );
+}
+
+export function requestEndpoint<K extends HttpEndpoint>(
+  base: string | URL,
+  endpoint: K,
+  data: HttpInput<K>,
+  options: RequestOptions = {},
+): Promise<HttpOutput<K>> {
+  return requestJSON<HttpOutput<K>>(new URL(endpoint, base), data, {
+    ...options,
+    timeout: options.timeout ?? endpointTimeouts[endpoint],
+  });
 }

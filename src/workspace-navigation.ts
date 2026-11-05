@@ -23,7 +23,10 @@ import { readingTab } from './tabs.ts';
 import { currentShortcuts } from './workspace-settings.ts';
 import type { WorkspaceServices, WorkspaceState } from './workspace-storage.ts';
 interface Options
-  extends Pick<WorkspaceServices, 'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store'> {
+  extends Pick<
+    WorkspaceServices,
+    'endpoint' | 'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store'
+  > {
   workspace: WorkspaceState;
   populate: (id: string, selected?: string, extra?: boolean, browser?: boolean) => void;
   renderSettings: () => void;
@@ -55,7 +58,7 @@ export function createWorkspaceNavigation(options: Options) {
     frames,
     backendFor,
     authenticate,
-    api,
+    endpoint,
     authorizeTerminals,
     tokenFor,
     capturedSSH,
@@ -733,16 +736,16 @@ export function createWorkspaceNavigation(options: Options) {
   async function closeTabSession(tab: TerminalTab) {
     const backend = backendFor(tab.backendId);
     await authenticate(backend);
-    await api(backend, 'api/sessions/close', {}, tab.session);
+    await endpoint(backend, 'api/sessions/close', {}, tab.session);
   }
   async function recoverTerminal(tab: TerminalTab, backend: BackendProfile) {
     try {
       await authenticate(backend);
-      await api(backend, 'api/sessions/close', {}, tab.session);
+      await endpoint(backend, 'api/sessions/close', {}, tab.session);
       if (!workspace.tabs.includes(tab)) return;
-      const result = await api<{ id: string }>(backend, 'api/sessions', { name: tab.name });
+      const result = await endpoint(backend, 'api/sessions', { name: tab.name });
       if (!workspace.tabs.includes(tab)) {
-        await api(backend, 'api/sessions/close', {}, result.id);
+        await endpoint(backend, 'api/sessions/close', {}, result.id);
         return;
       }
       tab.session = result.id;
