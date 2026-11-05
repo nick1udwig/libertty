@@ -4,10 +4,29 @@ use std::fmt::Write as _;
 /// Keep a larger archive without increasing the foreground reconnect snapshot.
 const SCROLLBACK: usize = 5000;
 const SNAPSHOT_ROWS: usize = 1000;
-const ALTERNATE: [&str; 2] = ["\x1b[?1049h", "\x1b[?47h"];
+#[derive(Default)]
+struct AlternateEntry(bool);
+impl vte::Perform for AlternateEntry {
+    fn csi_dispatch(
+        &mut self,
+        params: &vte::Params,
+        intermediates: &[u8],
+        ignore: bool,
+        action: char,
+    ) {
+        self.0 = !ignore
+            && intermediates == b"?"
+            && action == 'h'
+            && params.iter().any(|param| matches!(param, [47] | [1049]));
+    }
+    fn terminated(&self) -> bool {
+        self.0
+    }
+}
 
 pub(super) struct Screen {
     parser: vt100::Parser,
+    modes: vte::Parser,
     /// The main screen as an application entered the alternate screen, which vt100 does not expose.
     main: Option<vt100::Screen>,
 }
@@ -15,6 +34,7 @@ impl Screen {
     pub fn new(rows: u16, cols: u16) -> Self {
         Self {
             parser: vt100::Parser::new(rows, cols, SCROLLBACK),
+            modes: vte::Parser::new(),
             main: None,
         }
     }
@@ -25,20 +45,21 @@ impl Screen {
         }
     }
     pub fn feed(&mut self, text: &str) {
-        let mut rest = text;
-        while let Some((at, entry)) = ALTERNATE
-            .iter()
-            .filter_map(|entry| rest.find(entry).map(|at| (at, entry.len())))
-            .min()
-        {
-            self.parser.process(&rest.as_bytes()[..at]);
-            if !self.parser.screen().alternate_screen() {
-                self.main = Some(self.parser.screen().clone());
+        let mut rest = text.as_bytes();
+        while !rest.is_empty() {
+            let mut entry = AlternateEntry::default();
+            let consumed = self.modes.advance_until_terminated(&mut entry, rest);
+            if entry.0 {
+                self.parser.process(&rest[..consumed - 1]);
+                if !self.parser.screen().alternate_screen() {
+                    self.main = Some(self.parser.screen().clone());
+                }
+                self.parser.process(&rest[consumed - 1..consumed]);
+            } else {
+                self.parser.process(&rest[..consumed]);
             }
-            self.parser.process(&rest.as_bytes()[at..at + entry]);
-            rest = &rest[at + entry..];
+            rest = &rest[consumed..];
         }
-        self.parser.process(rest.as_bytes());
         if !self.parser.screen().alternate_screen() {
             self.main = None;
         }
@@ -253,6 +274,28 @@ fn color(out: &mut String, color: vt100::Color, base: u8) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn alternate_screen_history_and_replay_do_not_depend_on_chunk_boundaries() {
+        for sequence in ["\x1b[?1049h", "\x1b[?47h", "\x1b[?2004;1049h"] {
+            let input = format!("{sequence}\x1b[H\x1b[2Japplication screen");
+            for split in 0..=input.len() {
+                let mut screen = Screen::new(5, 40);
+                screen.feed("shell history\r\n$ vim notes");
+                let history = screen.history();
+                screen.feed(&input[..split]);
+                screen.feed(&input[split..]);
+                assert_eq!(screen.history(), history, "{sequence:?}, split {split}");
+                assert_same(&mut screen, 5, 40);
+                let mut viewer = replay(&mut screen, 5, 40);
+                viewer.process(b"\x1b[?1049l");
+                assert!(viewer.screen().contents().contains("shell history"));
+                screen.feed("\x1b[?1049lnew shell output\r\n\x1b[?1049");
+                screen.feed("hsecond application");
+                assert!(screen.history().contains("new shell output"));
+            }
+        }
+    }
+
     #[test]
     fn history_is_larger_than_snapshots_and_keeps_the_main_screen() {
         let mut screen = Screen::new(4, 40);
