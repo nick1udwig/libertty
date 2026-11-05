@@ -61,3 +61,11 @@ test('the bridge cannot widen file permission, call shell APIs or persist excess
   assert.throws(() => pluginState(undefined), /JSON/);
   assert.throws(() => pluginState('🙂'.repeat(5000)), /16 KB/, 'State limits count encoded bytes');
 });
+
+test('packaged plugins cannot declare trusted workspace capabilities', async () => {
+  const sample = JSON.parse(await readFile(new URL('../examples/plugins/example.log-viewer.libertty-plugin.json', import.meta.url), 'utf8'));
+  const pkg = parsePluginPackage({ ...sample, capabilities: { terminal: true }, manifest: { ...sample.manifest, capabilities: { terminal: true, waitForReady: true } } });
+  assert.equal('capabilities' in pkg, false);
+  assert.equal('capabilities' in pkg.manifest, false);
+  assert.deepEqual(pkg.manifest.permissions, ['file.read']);
+});

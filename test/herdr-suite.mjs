@@ -498,10 +498,10 @@ try {
     assert.equal(fixture.actions.filter(a => a.method === 'pane.read').length, readsWhileHidden, 'Hidden views stop reading history');
     fixture.update(1, 'idle');
     await until(async () => (await page.evaluate(() => window.__sounds.length)) === 1, 'done sound under regular terminal');
-    assert.equal(await page.locator('.herdr-attention').textContent(), '1');
+    assert.equal(await page.locator('.tab-attention').textContent(), '1');
     fixture.update(0, 'blocked');
     await until(async () => (await page.evaluate(() => window.__sounds.length)) === 2, 'request sound under regular terminal');
-    assert.equal(await page.locator('.herdr-attention').textContent(), '2');
+    assert.equal(await page.locator('.tab-attention').textContent(), '2');
     await delay(150); assert.equal(await page.evaluate(() => window.__sounds.length), 2, 'snapshots must not repeat sound');
     await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').click(); await tab(1).waitFor();
     assert.equal(await tab(1).getAttribute('data-status'), 'done'); assert.equal(await tab(0).getAttribute('data-status'), 'blocked');

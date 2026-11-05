@@ -1,11 +1,10 @@
 import { terminalMessage, sendToTerminal } from './frame-protocol.ts';
 import { terminalRenderers } from './renderer-cache.ts';
-import { isHerdrPlugin, showsTerminal } from './plugins.ts';
+import { isHerdrPlugin } from './plugins.ts';
 import { closeIcon } from './icons.ts';
 import { type BackendProfile, type HostProfile, type TerminalTab } from './connections.ts';
 import { $, button, input, select } from './dom.ts';
 import { herdrName } from './herdr-protocol.ts';
-import type { HerdrView } from './herdr-view.ts';
 import { imagePicker } from './image-upload.ts';
 import { menuEvents } from './menu.ts';
 import {
@@ -16,7 +15,7 @@ import {
   type NoticeKind,
 } from './notice-model.ts';
 import { NoticeCenter } from './notices.ts';
-import { PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
+import { PluginRegistry, tabPluginId, type PluginView, type PluginNavigation } from './plugins.ts';
 import { readingMessage } from './reading-view.ts';
 import { type Shortcut } from './shortcuts.ts';
 import { tabGestures, tabStripSwipes } from './tab-gestures.ts';
@@ -26,7 +25,6 @@ import type { WorkspaceServices, WorkspaceState } from './workspace-storage.ts';
 interface Options
   extends Pick<WorkspaceServices, 'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store'> {
   workspace: WorkspaceState;
-  herdrViews: Map<string, HerdrView>;
   populate: (id: string, selected?: string, extra?: boolean, browser?: boolean) => void;
   renderSettings: () => void;
   renderCards: () => Promise<void>;
@@ -34,7 +32,6 @@ interface Options
   editHost: (host?: HostProfile) => void;
   pluginViews: Map<string, PluginView>;
   frames: Map<string, HTMLIFrameElement>;
-  herdrAttention: Map<string, number>;
   authorizeTerminals: (backend: BackendProfile, accessToken: string) => void;
   capturedSSH: (
     backend: BackendProfile,
@@ -48,7 +45,6 @@ interface Options
 export function createWorkspaceNavigation(options: Options) {
   const {
     workspace,
-    herdrViews,
     populate,
     renderSettings,
     renderCards,
@@ -58,7 +54,6 @@ export function createWorkspaceNavigation(options: Options) {
     pluginViews,
     frames,
     backendFor,
-    herdrAttention,
     authenticate,
     api,
     authorizeTerminals,
@@ -67,10 +62,12 @@ export function createWorkspaceNavigation(options: Options) {
     capturedHerdr,
     cancelReconnect,
   } = options;
+  const attentionCounts = new Map<string, number>();
+  const navigationFor = (id: string) => pluginViews.get(id)?.navigation;
   let navigationTab = '',
     terminalTabsExpanded = false;
   let drawerDrag:
-    | { view: HerdrView; height: number; expanded: boolean; release: () => void }
+    | { view: PluginNavigation; height: number; expanded: boolean; release: () => void }
     | undefined;
   let page: 'terminal' | 'hosts' | 'vault' | 'keychain' | 'backends' | 'known' | 'settings' =
     'terminal';
@@ -92,7 +89,7 @@ export function createWorkspaceNavigation(options: Options) {
   const handledEnds = new Map<string, string>();
   let terminalLoading: { id: string; waitForPrompt: boolean } | undefined;
   let presentedTab = '',
-    herdrLoading = false;
+    pluginLoading = false;
   const notices = new NoticeCenter();
   const tabStates = new Map<string, Map<string, NoticeInput>>();
   let presentedStates = new Set<string>();
@@ -323,17 +320,14 @@ export function createWorkspaceNavigation(options: Options) {
   menuEvents(tabMenu, () => tabMenuAnchor, closeTabMenu);
   function updateTerminalLoading() {
     const loading =
-      page === 'terminal' && (herdrLoading || terminalLoading?.id === workspace.active);
-    // A previous tab stays visible while Herdr prepares, so the orb shows the progress instead of a cover.
-    const behind = herdrLoading && !!presentedTab;
+      page === 'terminal' && (pluginLoading || terminalLoading?.id === workspace.active);
+    // A previous tab stays visible while the next view prepares, so the orb shows the progress instead of a cover.
+    const behind = pluginLoading && !!presentedTab;
     $('terminal-loading').hidden = !loading || behind;
-    $('terminal-loading-label').textContent = herdrLoading
-      ? 'Loading Herdr…'
-      : 'Opening SSH terminal…';
-    notices.set(
-      'tab-loading',
-      loading && behind ? { message: 'Loading Herdr…', kind: 'progress' } : undefined,
-    );
+    const tab = workspace.tabs.find((tab) => tab.id === workspace.active);
+    const message = 'Loading ' + ((tab && plugins.forTab(tab)?.name) || 'tab') + '…';
+    $('terminal-loading-label').textContent = pluginLoading ? message : 'Opening SSH terminal…';
+    notices.set('tab-loading', loading && behind ? { message, kind: 'progress' } : undefined);
   }
   function updateViewVisibility() {
     const visible = page === 'terminal' && !document.hidden,
@@ -341,16 +335,17 @@ export function createWorkspaceNavigation(options: Options) {
       tab = workspace.tabs.find((tab) => tab.id === workspace.active);
     if (page === 'terminal' && tab && !target) void mount(tab).catch(fail);
     target?.setHeld?.(false);
-    target?.setVisible(tab && showsTerminal(tabPluginId(tab)) ? page === 'terminal' : visible);
+    target?.setVisible(
+      tab && plugins.forTab(tab)?.capabilities?.terminal ? page === 'terminal' : visible,
+    );
     if (!pluginViews.has(presentedTab)) presentedTab = '';
     const waiting =
       visible &&
       tab &&
-      isHerdrPlugin(tabPluginId(tab)) &&
-      (!target || herdrViews.has(workspace.active)) &&
-      !herdrViews.get(workspace.active)?.ready;
+      plugins.forTab(tab)?.capabilities?.waitForReady &&
+      (!target || target.ready === false);
     const preparing = !!waiting && presentedTab !== workspace.active;
-    herdrLoading = preparing;
+    pluginLoading = preparing;
     if (visible && !preparing) presentedTab = target ? workspace.active : '';
     for (const [id, view] of pluginViews) {
       if (id !== workspace.active) view.setVisible(visible && id === presentedTab);
@@ -363,31 +358,32 @@ export function createWorkspaceNavigation(options: Options) {
     updateTerminalLoading();
     renderWorkspaceShortcuts();
     presentStates();
-    const activeFrame = frames.get(workspace.active);
+    const activeFrame = target?.terminal?.frame;
     if (activeFrame) terminalRenderers.touch(activeFrame);
     terminalRenderers.trim();
   }
   function updateWorkspaceNavigation() {
-    if (drawerDrag && (page !== 'terminal' || drawerDrag.view !== herdrViews.get(workspace.active)))
+    if (drawerDrag && (page !== 'terminal' || drawerDrag.view !== navigationFor(workspace.active)))
       cancelDrawerSwipe();
     if (navigationTab !== workspace.active) {
-      if (!herdrViews.has(navigationTab)) terminalTabsExpanded = false;
+      if (!navigationFor(navigationTab)) terminalTabsExpanded = false;
       navigationTab = workspace.active;
     }
-    const herdr = herdrViews.get(workspace.active),
-      expanded = !herdr || terminalTabsExpanded;
-    $('workspace-navigation').classList.toggle('herdr-navigation', !!herdr);
+    const navigation = navigationFor(workspace.active),
+      expanded = !navigation || terminalTabsExpanded;
+    $('workspace-navigation').classList.toggle('plugin-navigation', !!navigation);
     const drawer = $('terminal-tabs-drawer');
     drawer.classList.toggle('collapsed', !expanded);
     drawer.inert = !expanded;
     drawer.setAttribute('aria-hidden', String(!expanded));
-    for (const [id, view] of herdrViews) {
-      view.navigationElement.hidden = id !== workspace.active;
-      view.setTerminalTabsExpanded(terminalTabsExpanded);
+    for (const [id, view] of pluginViews) {
+      if (!view.navigation) continue;
+      view.navigation.element.hidden = id !== workspace.active;
+      view.navigation.setExpanded(terminalTabsExpanded);
     }
   }
   function shortcutFrame() {
-    return frames.get(workspace.active) || herdrViews.get(workspace.active)?.terminalFrame;
+    return pluginViews.get(workspace.active)?.terminal?.frame;
   }
   let imageTarget: Window | null | undefined;
   const images = imagePicker((files) => {
@@ -402,10 +398,10 @@ export function createWorkspaceNavigation(options: Options) {
       source = frame?.contentWindow,
       state = source && terminalShortcuts.get(source);
     const tab = workspace.tabs.find((tab) => tab.id === workspace.active),
-      herdr = herdrViews.get(workspace.active);
+      view = pluginViews.get(workspace.active);
     $('workspace-shortcuts').hidden =
-      page !== 'terminal' || !(state || (tab && showsTerminal(tabPluginId(tab))));
-    const ready = !!state && !frame?.inert && (!herdr || herdr.ready);
+      page !== 'terminal' || !(state || (tab && plugins.forTab(tab)?.capabilities?.terminal));
+    const ready = !!state && !frame?.inert && view?.ready !== false;
     // Reserve the configured controls before the incoming terminal publishes its state.
     const shortcuts = state?.shortcuts || currentShortcuts();
     const presentation = JSON.stringify({
@@ -502,13 +498,16 @@ export function createWorkspaceNavigation(options: Options) {
       close.innerHTML = closeIcon;
       close.setAttribute('aria-label', 'Close ' + tab.name);
       close.addEventListener('click', (event) => event.stopPropagation());
-      if (isHerdrPlugin(tabPluginId(tab))) {
-        el.classList.add('herdr-tab');
+      if (plugin?.capabilities?.attentionLabel) {
         const badge = document.createElement('span');
-        badge.className = 'herdr-attention';
-        badge.textContent = String(herdrAttention.get(tab.id) || 0);
-        badge.hidden = !herdrAttention.get(tab.id);
-        badge.setAttribute('aria-label', badge.textContent + ' agents need attention');
+        badge.className = 'tab-attention';
+        badge.dataset.tab = tab.id;
+        badge.textContent = String(attentionCounts.get(tab.id) || 0);
+        badge.hidden = !attentionCounts.get(tab.id);
+        badge.setAttribute(
+          'aria-label',
+          badge.textContent + ' ' + plugin.capabilities.attentionLabel,
+        );
         el.append(icon, name, badge, close);
       } else el.append(icon, name, close);
       tabGestures(el, {
@@ -583,8 +582,11 @@ export function createWorkspaceNavigation(options: Options) {
     addReading(source, { name, readPath: name, readCapture: capture, readExitCode: exitCode });
   }
   function unmount(tab: TerminalTab) {
-    const frame = frames.get(tab.id);
+    const view = pluginViews.get(tab.id);
+    const frame = view?.terminal?.retain && view.terminal.frame;
     if (frame) terminalRenderers.release(frame);
+    view?.navigation?.element.remove();
+    attentionCounts.delete(tab.id);
     mountGeneration.set(tab.id, (mountGeneration.get(tab.id) || 0) + 1);
     mounting.delete(tab.id);
     pluginViews.get(tab.id)?.dispose();
@@ -637,9 +639,10 @@ export function createWorkspaceNavigation(options: Options) {
       }
       pluginViews.set(tab.id, view);
       $('terminal-stack').append(view.element);
+      if (view.navigation) $('workspace-navigation').append(view.navigation.element);
       renderTabs();
-      const frame = frames.get(tab.id);
-      if (tabPluginId(tab) === 'terminal' && frame)
+      const frame = view.terminal?.retain && view.terminal.frame;
+      if (frame)
         terminalRenderers.retain(frame, {
           canEvict: () =>
             tab.id !== workspace.active && tab.id !== presentedTab && view.canEvict?.() !== false,
@@ -762,13 +765,9 @@ export function createWorkspaceNavigation(options: Options) {
     if (!data) return;
     if (data.type === 'terminal-shortcuts') {
       const source = event.source as Window;
-      const known =
-        [...frames.values()].some((frame) => frame.contentWindow === source) ||
-        [...herdrViews.values()].some((view) =>
-          [...view.element.querySelectorAll('iframe')].some(
-            (frame) => frame.contentWindow === source,
-          ),
-        );
+      const known = [...pluginViews.values()].some((view) =>
+        [...(view.terminal?.frames || [])].some((frame) => frame.contentWindow === source),
+      );
       if (known) {
         try {
           terminalShortcuts.set(source, {
@@ -881,7 +880,7 @@ export function createWorkspaceNavigation(options: Options) {
   function toggleTerminalTabs(tab: TerminalTab) {
     if (tab.id !== workspace.active) return;
     cancelDrawerSwipe();
-    const release = herdrViews.get(tab.id)?.holdTerminalSize();
+    const release = navigationFor(tab.id)?.holdSize();
     terminalTabsExpanded = !terminalTabsExpanded;
     updateWorkspaceNavigation();
     // Animate the surrounding bars with one terminal geometry change at the end.
@@ -892,7 +891,7 @@ export function createWorkspaceNavigation(options: Options) {
     ).then(() => release?.());
   }
   function moveTerminalTabs(dy: number) {
-    const view = herdrViews.get(workspace.active);
+    const view = navigationFor(workspace.active);
     if (!view || page !== 'terminal') return;
     const drawer = $('terminal-tabs-drawer');
     if (!drawerDrag) {
@@ -900,7 +899,7 @@ export function createWorkspaceNavigation(options: Options) {
         view,
         height: drawer.getBoundingClientRect().height,
         expanded: terminalTabsExpanded,
-        release: view.holdTerminalSize(),
+        release: view.holdSize(),
       };
       drawer.classList.add('dragging');
     }
@@ -916,7 +915,7 @@ export function createWorkspaceNavigation(options: Options) {
     drawer.getBoundingClientRect();
     drawer.classList.remove('dragging');
     drawer.style.removeProperty('height');
-    if (page === 'terminal' && drag.view === herdrViews.get(workspace.active))
+    if (page === 'terminal' && drag.view === navigationFor(workspace.active))
       terminalTabsExpanded = expanded ?? drag.expanded;
     updateWorkspaceNavigation();
     void Promise.allSettled(drawer.getAnimations().map((animation) => animation.finished)).then(
@@ -926,21 +925,24 @@ export function createWorkspaceNavigation(options: Options) {
   const cancelDrawerSwipe = tabStripSwipes(
     $('workspace-navigation'),
     () => {
-      const view = page === 'terminal' && herdrViews.get(workspace.active);
-      // An open worktree tree owns vertical gestures on the strip.
-      return view && !view.treeOpen && view;
+      const view = page === 'terminal' && navigationFor(workspace.active);
+      // A plugin can hold vertical gestures while its own menu is open.
+      return view && !view.gesturesBlocked && view;
     },
     { move: moveTerminalTabs, end: endTerminalTabs },
   );
   function attention(tab: TerminalTab, count: number) {
-    herdrAttention.set(tab.id, count);
-    const badge = $('tabs').querySelector<HTMLElement>(
-      '[aria-controls="herdr-' + tab.id + '"] .herdr-attention',
+    attentionCounts.set(tab.id, count);
+    const badge = [...$('tabs').querySelectorAll<HTMLElement>('.tab-attention')].find(
+      (badge) => badge.dataset.tab === tab.id,
     );
     if (badge) {
       badge.textContent = String(count);
       badge.hidden = !count;
-      badge.setAttribute('aria-label', count + ' agents need attention');
+      badge.setAttribute(
+        'aria-label',
+        count + ' ' + plugins.forTab(tab)?.capabilities?.attentionLabel,
+      );
     }
     if (tab.id === workspace.active) queueMicrotask(renderWorkspaceShortcuts);
   }

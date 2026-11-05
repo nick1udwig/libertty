@@ -38,8 +38,7 @@ const frames = new Map<string, HTMLIFrameElement>(),
   vaults = new Map<string, { keys: KeyInfo[]; knownHosts: KnownHost[] }>();
 const plugins = new PluginRegistry(),
   pluginViews = new Map<string, PluginView>();
-const herdrViews = new Map<string, HerdrView>(),
-  herdrAttention = new Map<string, number>();
+const herdrViews = new Map<string, HerdrView>();
 const herdrSounds = new HerdrSounds();
 const authenticating = new Map<string, Promise<void>>();
 const workspace = loadWorkspace(primary);
@@ -59,7 +58,6 @@ const services: WorkspaceServices = {
 const navigation = createWorkspaceNavigation({
   ...services,
   workspace,
-  herdrViews,
   populate: (...args) => library.populate(...args),
   renderSettings: (...args) => settings.renderSettings(...args),
   renderCards: (...args) => library.renderCards(...args),
@@ -67,7 +65,6 @@ const navigation = createWorkspaceNavigation({
   editHost: (...args) => library.editHost(...args),
   pluginViews,
   frames,
-  herdrAttention,
   cancelReconnect: (id) => connections.cancelReconnect(id),
   authorizeTerminals,
   capturedSSH: (...args) => connections.capturedSSH(...args),
@@ -174,10 +171,8 @@ for (const plugin of builtinPlugins({
   herdr(tab, view) {
     if (view) {
       herdrViews.set(tab.id, view);
-      $('workspace-navigation').append(view.navigationElement);
     } else {
       herdrViews.delete(tab.id);
-      herdrAttention.delete(tab.id);
     }
   },
   toggleTerminalTabs: navigation.toggleTerminalTabs,

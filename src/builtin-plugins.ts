@@ -53,6 +53,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     {
       ...common,
       id: 'terminal',
+      capabilities: { terminal: true },
       name: 'Terminal',
       connectLabel: 'Connect new terminal',
       icon: '▤',
@@ -68,6 +69,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         s.frame(tab, frame);
         return {
           element: frame,
+          terminal: { frame, frames: [frame], retain: true },
           setVisible(visible) {
             frame.hidden = !visible;
             sendToTerminal(frame.contentWindow, { type: 'tab-visibility', visible });
@@ -148,6 +150,11 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         iconHTML: herdrIcon,
         panelPrefix: 'herdr-',
         className: 'herdr-tab',
+        capabilities: {
+          terminal: true,
+          waitForReady: true,
+          attentionLabel: 'agents need attention',
+        },
         available: (host) => id === 'herdr' || host.kind !== 'herdr',
         connect: (host) => s.connect(host, id),
         async mount(tab) {
@@ -227,6 +234,25 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
             .catch(s.fail);
           return {
             element: view.element,
+            get ready() {
+              return view.ready;
+            },
+            terminal: {
+              get frame() {
+                return view.terminalFrame;
+              },
+              get frames() {
+                return view.element.querySelectorAll('iframe');
+              },
+            },
+            navigation: {
+              element: view.navigationElement,
+              get gesturesBlocked() {
+                return view.treeOpen;
+              },
+              setExpanded: (expanded) => view.setTerminalTabsExpanded(expanded),
+              holdSize: () => view.holdTerminalSize(),
+            },
             setVisible: (visible) => view.setVisible(visible),
             setHeld: (held) => view.setHeld(held),
             applySettings: () => view.applySettings(),

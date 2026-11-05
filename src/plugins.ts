@@ -5,14 +5,29 @@ export const builtinIds = ['terminal', 'files', 'herdr', 'herdr-core', 'reading'
 export function isHerdrPlugin(id: string): boolean {
   return id === 'herdr' || id === 'herdr-core';
 }
-/** Whether a tab shows a terminal pane with its shortcut controls. */
-export function showsTerminal(id: string): boolean {
-  return id === 'terminal' || isHerdrPlugin(id);
-}
 export function tabPluginId(tab: TerminalTab): string {
   return tab.pluginId;
 }
+export interface PluginTerminal {
+  readonly frame: HTMLIFrameElement | undefined;
+  readonly frames: Iterable<HTMLIFrameElement>;
+  retain?: boolean;
+}
+export interface PluginNavigation {
+  element: HTMLElement;
+  readonly gesturesBlocked: boolean;
+  setExpanded(expanded: boolean): void;
+  holdSize(): () => void;
+}
+export interface PluginCapabilities {
+  terminal?: boolean;
+  waitForReady?: boolean;
+  attentionLabel?: string;
+}
 export interface PluginView {
+  readonly ready?: boolean;
+  terminal?: PluginTerminal;
+  navigation?: PluginNavigation;
   element: HTMLElement;
   setVisible(visible: boolean): void;
   setHeld?(held: boolean): void;
@@ -31,6 +46,7 @@ export interface TabPlugin {
   iconHTML?: string;
   panelPrefix: string;
   className?: string;
+  capabilities?: PluginCapabilities;
   available(host: HostProfile): boolean;
   connect(host: HostProfile): Promise<void>;
   mount(tab: TerminalTab): Promise<PluginView>;

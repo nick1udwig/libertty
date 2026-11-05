@@ -167,3 +167,12 @@ Reproduce the comparison against the pre-plugin revision after building:
 BENCH_BEFORE=243b689 BENCH_BEFORE_WORKSPACE=1 BENCH_REPEATS=5 node test/workspace-benchmark.mjs
 BENCH_BEFORE=243b689 BENCH_BEFORE_WORKSPACE=1 BENCH_REPEATS=5 BENCH_REVERSE=1 node test/workspace-benchmark.mjs
 ```
+
+## Workspace capabilities
+
+Trusted plugins declare terminal controls, deferred readiness and an attention label through `TabPlugin.capabilities`.
+A mounted `PluginView` supplies its current terminal frame, owned frames, renderer retention policy and optional navigation through typed adapters.
+The workspace uses these adapters for shortcuts, visibility, navigation gestures, readiness handoffs, badges and renderer eviction.
+A navigation adapter keeps the same identity until the view is disposed so an active gesture can detect tab changes.
+The workspace mounts and removes its navigation element with the view.
+These capabilities do not grant packaged plugins additional permissions; packages keep the scoped file-read bridge.
