@@ -82,3 +82,37 @@ test('text snapshots retain OSC 4 foreground and background colors across grid s
     assert.match(recolored.text, /38;2;171;205;239/);
   } finally { restored.free(); term.wasmTerm.free(); ghostty.dispose(); }
 });
+
+test('snapshot capture reuses stable history and follows pruning, screens and resets', async () => {
+  const ghostty = await Ghostty.load({
+    wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
+    callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+  });
+  const term = new Terminal({ cols: 20, rows: 4 });
+  const core = term.wasmTerm = ghostty.createTerminal(20, 4, { scrollbackLimit: 128 });
+  const read = core.core.readBuffer.bind(core.core);
+  let decoded = 0;
+  core.core.readBuffer = range => { const value = read(range); decoded += value.rows.length; return value; };
+  const verify = () => {
+    const incremental = terminalSnapshot(term);
+    const fresh = new Terminal({ cols: core.cols, rows: core.rows });
+    fresh.wasmTerm = ghostty.createTerminal(core.cols, core.rows, { scrollbackLimit: 128 });
+    fresh.wasmTerm.restore(core.core.snapshot());
+    try { assert.deepEqual(incremental, terminalSnapshot(fresh)); }
+    finally { fresh.wasmTerm.free(); }
+  };
+  try {
+    core.write(Array.from({ length: 100 }, (_, index) => `row-${index}\r\n`).join(''));
+    verify();
+    decoded = 0;
+    core.write('tail');
+    verify();
+    assert.ok(decoded <= 16, `Only the active tail needs decoding, decoded ${decoded} rows`);
+    for (const output of [
+      '\r\n'.repeat(80), '\x1b[3J', '\x1b[?1049halternate', '\x1b[?1049l',
+      '\x1bcreset', '\x1b[31mred\x1b]4;1;#123456\x07', '\x1b]4;1;#abcdef\x07',
+    ]) { core.write(output); verify(); }
+    core.resize(15, 6);
+    verify();
+  } finally { core.free(); ghostty.dispose(); }
+});

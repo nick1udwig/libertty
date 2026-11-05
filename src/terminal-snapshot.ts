@@ -96,6 +96,10 @@ const snapshots = new WeakMap<
     columns: number;
     rows: number;
     foreground: number;
+    theme: unknown;
+    palette: string;
+    screen: string;
+    lines: Map<number, string>;
     value: Snapshot;
   }
 >();
@@ -118,23 +122,58 @@ export function terminalSnapshot(term: Terminal, limit = 5000) {
   )
     return cached.value;
   const palette = terminal.getPalette();
+  const paletteKey = JSON.stringify(palette),
+    changes = terminal.core.retainedRowChanges(),
+    retained = new Map<number, string>();
+  if (
+    cached &&
+    !changes.reset &&
+    cached.limit === limit &&
+    cached.columns === columns &&
+    cached.rows === rows &&
+    cached.foreground === foreground &&
+    cached.theme === terminal.core.theme &&
+    cached.palette === paletteKey &&
+    cached.screen === changes.state.screen
+  )
+    for (const [index, text] of cached.lines) {
+      const moved = index - changes.trimmed;
+      if (moved >= 0 && moved < changes.dirtyFrom) retained.set(moved, text);
+    }
   const history = term.buffer.active.type === 'normal' ? terminal.getScrollbackLength() : 0,
-    lines: string[] = [];
+    lines: string[] = [],
+    next = new Map<number, string>();
+  const read = (index: number) => {
+    const text =
+      retained.get(index) ?? row(terminal.getBufferRow(index)?.cells ?? [], columns, palette);
+    next.set(index, text);
+    return text;
+  };
   for (let offset = Math.max(0, history + rows - limit); offset < history; offset++) {
-    const cells = terminal.getScrollbackLine(offset);
-    lines.push(cells ? row(cells, columns, palette) : '');
+    lines.push(read(offset));
   }
   const cursor = terminal.getCursor();
   let last = -1;
   for (let y = 0; y < rows; y++) {
-    const text = row(terminal.getLine(y) ?? [], columns, palette);
+    const text = read(history + y);
     if (text) last = y;
     lines.push(text);
   }
   while (lines.at(-1) === '') lines.pop();
   const picture: TerminalPicture = { last, x: cursor.x, y: cursor.y, cursor: !!cursor.visible };
   const value = { text: lines.join('\n'), picture };
-  snapshots.set(terminal, { revision, limit, columns, rows, foreground, value });
+  snapshots.set(terminal, {
+    revision,
+    limit,
+    columns,
+    rows,
+    foreground,
+    theme: terminal.core.theme,
+    palette: paletteKey,
+    screen: changes.state.screen,
+    lines: next,
+    value,
+  });
   return value;
 }
 
