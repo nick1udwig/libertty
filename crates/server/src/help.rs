@@ -32,12 +32,12 @@ impl HelpCache {
         if let Some((_, _, task)) = self
             .0
             .iter()
-            .find(|(old, until, task)| old == key && *until > now && !task.aborted())
+            .find(|(old, until, task)| old == key && *until > now && task.reusable())
         {
             return task.clone();
         }
         self.0
-            .retain(|(old, until, task)| old != key && *until > now && !task.aborted());
+            .retain(|(old, until, task)| old != key && *until > now && task.reusable());
         if self.0.len() >= 200 {
             self.0.pop_front();
         }
@@ -45,9 +45,6 @@ impl HelpCache {
         self.0
             .push_back((key.into(), now + Duration::from_secs(600), task.clone()));
         task
-    }
-    pub fn remove(&mut self, key: &str) {
-        self.0.retain(|(old, _, _)| old != key);
     }
 }
 #[derive(Clone)]
@@ -250,15 +247,12 @@ impl HelpProvider {
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }
-        let text = result
-            .map(|r| {
-                format!(
-                    "{}\n{}",
-                    String::from_utf8_lossy(&r.stdout),
-                    String::from_utf8_lossy(&r.stderr)
-                )
-            })
-            .unwrap_or_default();
+        let result = result?;
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
         let mut found = parse_help(command, route, &text);
         if needs_manual(command, route, &text, &found) {
             let manual_options = ProbeOptions {
@@ -372,7 +366,7 @@ mod cache_tests {
         SharedTask::new(|_| Box::pin(async { Ok(Help::default()) }))
     }
     #[tokio::test]
-    async fn cache_reuses_tasks_until_expiry_cancellation_or_explicit_removal() {
+    async fn cache_reuses_success_and_retries_expired_failed_or_cancelled_tasks() {
         let mut cache = HelpCache::default();
         let task = cache.get_or_insert_with("help", success);
         task.wait(&CancellationToken::new()).await.unwrap();
@@ -385,8 +379,7 @@ mod cache_tests {
             expired.wait(&CancellationToken::new()).await.unwrap_err(),
             "expired"
         );
-        cache.get_or_insert_with("help", || panic!("local errors stay cached"));
-        cache.remove("help");
+        assert!(!expired.reusable());
         let pending = cache.get_or_insert_with("help", || {
             SharedTask::new(|_| Box::pin(std::future::pending()))
         });

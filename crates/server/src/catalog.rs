@@ -106,7 +106,7 @@ impl CatalogHost {
         let task = {
             let mut cache = self.flags.lock().await;
             if let Some((_, _, task)) = cache.iter().find(|(old, old_stamp, task)| {
-                old == &file && old_stamp == &stamp && !task.aborted()
+                old == &file && old_stamp == &stamp && task.reusable()
             }) {
                 task.clone()
             } else {
@@ -138,10 +138,11 @@ impl CatalogHost {
                         if cancel.is_cancelled() {
                             return Err(ABORTED.into());
                         }
-                        Ok(result
-                            .ok()
-                            .filter(|r| r.success)
-                            .and_then(|r| serde_json::from_slice(&r.stdout).ok()))
+                        let result = result?;
+                        if !result.success {
+                            return Err("Script description probe failed.".into());
+                        }
+                        serde_json::from_slice(&result.stdout).map_err(|error| error.to_string())
                     })
                 });
                 cache.push_back((file, stamp, task.clone()));

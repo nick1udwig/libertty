@@ -528,12 +528,12 @@ impl SSHHost {
                 .map_err(|e| e.to_string())?;
             let mut stdout = Vec::new();
             let mut stderr = Vec::new();
-            let mut code = 0;
+            let mut code = None;
             while let Some(message) = read.wait().await {
                 match message {
                     ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
                     ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
-                    ChannelMsg::ExitStatus { exit_status } => code = exit_status,
+                    ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
                     ChannelMsg::Failure => return Err("SSH command was refused.".into()),
                     ChannelMsg::Close => break,
                     _ => {}
@@ -545,7 +545,7 @@ impl SSHHost {
             Ok(Output {
                 stdout: String::from_utf8_lossy(&stdout).into_owned(),
                 stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                code,
+                code: code.ok_or("SSH command closed without an exit status.")?,
             })
         })
         .await

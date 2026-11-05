@@ -131,6 +131,9 @@ pub async fn probe(
                 tokio::try_join!(read(Box::new(stdout)), read(Box::new(stderr)), async {
                     child.wait().await.map_err(|e| e.to_string())
                 })?;
+            if status.code().is_none() {
+                return Err("Probe terminated without an exit status.".into());
+            }
             Ok(ProbeOutput {
                 stdout,
                 stderr,
@@ -198,6 +201,9 @@ impl<T: Clone + Send + Sync + 'static> SharedTask<T> {
     }
     pub fn aborted(&self) -> bool {
         self.cancel.is_cancelled()
+    }
+    pub fn reusable(&self) -> bool {
+        !self.aborted() && !matches!(*self.receiver.borrow(), Some(Err(_)))
     }
     pub async fn wait(&self, cancel: &CancellationToken) -> Result<T, String> {
         if cancel.is_cancelled() {

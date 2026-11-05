@@ -37,7 +37,7 @@ impl Syntax {
             let mut cache = self.cache.lock().await;
             if let Some((_, task)) = cache
                 .iter()
-                .find(|(old, task)| *old == key && !task.aborted())
+                .find(|(old, task)| *old == key && task.reusable())
             {
                 task.clone()
             } else {
@@ -83,7 +83,7 @@ impl Syntax {
                         if cancel.is_cancelled() {
                             return Err(ABORTED.into());
                         }
-                        Ok(result.is_ok_and(|result| result.success))
+                        result.map(|result| result.success)
                     })
                 });
                 cache.push_back((key, task.clone()));

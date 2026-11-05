@@ -326,11 +326,12 @@ impl SSHHost {
                         cancel,
                     )
                     .await?;
-                Ok(FactValue::Describe(Arc::new(if output.code == 0 {
-                    serde_json::from_str(&output.stdout).unwrap_or(None)
-                } else {
-                    None
-                })))
+                if output.code != 0 {
+                    return Err("Script description probe failed.".into());
+                }
+                Ok(FactValue::Describe(Arc::new(
+                    serde_json::from_str(&output.stdout).map_err(|error| error.to_string())?,
+                )))
             }
         }
     }
@@ -405,11 +406,7 @@ impl SSHHost {
                 })
             })
         });
-        let result = task.wait(cancel).await;
-        if result.is_err() {
-            self.help_cache.lock().await.remove(&key);
-        }
-        result
+        task.wait(cancel).await
     }
     async fn probe_help(
         &self,
