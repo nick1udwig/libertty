@@ -65,6 +65,7 @@ A loading cover shows only over an empty screen, and dialog form errors stay bes
 The orb draws once after a burst of changes, such as a tab switch, so it reads layout once.
 
 Each frame connects directly to its chosen backend.
+The shared frame protocol types both senders and decodes incoming payloads before the workspace or terminal handles them.
 Origin/source-checked messages supply access credentials; iframe URLs contain a backend URL and session ID, never tokens or passphrases.
 Cross-origin backends require an explicit frontend origin allowlist.
 HTTP uses bearer access tokens; cross-origin WebSockets use short-lived, single-use, session-bound tickets.

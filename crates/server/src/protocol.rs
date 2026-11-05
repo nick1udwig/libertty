@@ -580,6 +580,7 @@ mod tests {
         ClientMessage::export_all(&config).unwrap();
         crate::herdr::Metadata::export_all(&config).unwrap();
         crate::files::Listing::export_all(&config).unwrap();
+        super::requests::FileAction::export_all(&config).unwrap();
         libertty_engine::types::Catalog::export_all(&config).unwrap();
         let mut files: Vec<_> = std::fs::read_dir(directory.path())
             .unwrap()

@@ -98,6 +98,7 @@ pub struct SshAddress {
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum FileActionKind {
     Read,
@@ -118,6 +119,7 @@ impl FileActionKind {
     }
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct FileAction {
     pub action: FileActionKind,
     pub path: Option<String>,

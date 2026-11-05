@@ -1,3 +1,4 @@
+import { sendToTerminal } from './frame-protocol.ts';
 import { type TerminalTab } from './connections.ts';
 import { $, button, input, select } from './dom.ts';
 import { HerdrNotifications } from './herdr-notifications.ts';
@@ -277,13 +278,14 @@ export function createWorkspaceSettings(options: Options) {
   for (const [id, action] of [
     ['settings-copy', 'copy-selection'],
     ['settings-restart', 'new-shell'],
-  ])
+  ] as const)
     $(id).onclick = () => {
       if (action === 'copy-selection') pluginViews.get(workspace.active)?.copySelection?.();
       else
-        frames
-          .get(workspace.active)
-          ?.contentWindow?.postMessage({ type: 'settings-action', action }, location.origin);
+        sendToTerminal(frames.get(workspace.active)?.contentWindow, {
+          type: 'settings-action',
+          action,
+        });
     };
   return { renderSettings };
 }

@@ -1,4 +1,5 @@
 import { request as sendRequest, responseJSON } from './api.ts';
+import type { FileListing } from './generated/protocol.ts';
 import type { FileClient } from './file-browser.ts';
 import { downloadFile, type DownloadTicket } from './download-view.ts';
 import { uploadResumable } from './resumable-upload.ts';
@@ -11,7 +12,7 @@ export function fileClient(
   token: () => string | undefined,
   authenticate: () => Promise<void>,
 ): FileClient {
-  async function request<T = any>(
+  async function request<T = unknown>(
     route: string,
     query: Record<string, string>,
     init: RequestInit = {},
@@ -29,7 +30,7 @@ export function fileClient(
   }
   return {
     action: (input) =>
-      request(
+      request<Awaited<ReturnType<FileClient['action']>>>(
         'api/files/action',
         {},
         {
@@ -49,14 +50,14 @@ export function fileClient(
         },
       );
     },
-    list: (path) => request('api/files/list', { path }),
+    list: (path) => request<FileListing>('api/files/list', { path }),
     async upload(path, file, signal) {
       if (file.size > 1024 ** 3) throw new Error('Uploads are limited to 1 GB per file.');
       // A numbered upload keeps its partial file, so an interrupted attempt continues from the bytes that arrived.
       const query = { path, name: file.name, upload: crypto.randomUUID(), size: String(file.size) };
       await uploadResumable(
         (offset, body) =>
-          request(
+          request<{ received?: number; name?: string }>(
             'api/files/upload',
             { ...query, offset: String(offset) },
             {
@@ -74,7 +75,7 @@ export function fileClient(
       await saveDownload(
         base,
         () =>
-          request(
+          request<DownloadTicket>(
             'api/files/download',
             {},
             {

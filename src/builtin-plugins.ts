@@ -1,3 +1,4 @@
+import { sendToTerminal } from './frame-protocol.ts';
 import type { BackendProfile, HostProfile, TerminalTab } from './connections.ts';
 import { folderIcon, terminalIcon, herdrIcon } from './icons.ts';
 import { fileBrowser } from './file-browser.ts';
@@ -69,19 +70,19 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
           element: frame,
           setVisible(visible) {
             frame.hidden = !visible;
-            frame.contentWindow?.postMessage({ type: 'tab-visibility', visible }, location.origin);
+            sendToTerminal(frame.contentWindow, { type: 'tab-visibility', visible });
           },
           focus() {
-            frame.contentWindow?.postMessage({ type: 'focus-terminal' }, location.origin);
+            sendToTerminal(frame.contentWindow, { type: 'focus-terminal' });
           },
           applySettings() {
-            frame.contentWindow?.postMessage({ type: 'settings-changed' }, location.origin);
+            sendToTerminal(frame.contentWindow, { type: 'settings-changed' });
           },
           copySelection() {
-            frame.contentWindow?.postMessage(
-              { type: 'settings-action', action: 'copy-selection' },
-              location.origin,
-            );
+            sendToTerminal(frame.contentWindow, {
+              type: 'settings-action',
+              action: 'copy-selection',
+            });
           },
           canEvict: () => terminalCanEvict(frame),
           dispose() {

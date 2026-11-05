@@ -1,3 +1,4 @@
+import { workspaceMessage, type TerminalEvents } from './frame-protocol.ts';
 import { TerminalConnection, TerminalVisibility } from './terminal-lifecycle.ts';
 import {
   captureNativeSnapshot,
@@ -92,7 +93,11 @@ function herdrEndpoint(name: string) {
   if (herdrTerminal) url.searchParams.set('terminalId', herdrTerminal);
   return url;
 }
-function notify(type: string, data: object = {}) {
+function notify<K extends keyof TerminalEvents>(
+  type: K,
+  ...args: {} extends TerminalEvents[K] ? [data?: TerminalEvents[K]] : [data: TerminalEvents[K]]
+) {
+  const data = args[0];
   if (embedded) parent.postMessage({ type, session, ...data }, location.origin);
 }
 if (embedded) document.documentElement.classList.add('embedded-terminal');
@@ -1956,43 +1961,34 @@ if (!embedded && import.meta.env.PROD && 'serviceWorker' in navigator)
 if (embedded) {
   window.addEventListener('message', (event) => {
     if (event.source !== parent || event.origin !== location.origin) return;
-    if (event.data?.type === 'shortcut-host') {
+    const data = workspaceMessage(event.data);
+    if (!data) return;
+    if (data.type === 'shortcut-host') {
       document.documentElement.classList.add('hosted-shortcuts');
       shortcutState = '';
       publishShortcuts();
       sizeTerminal();
     }
-    if (event.data?.type === 'terminal-shortcut' && visibility.visible && !visibility.parked) {
-      shortcutBar.press(event.data.index, event.data.kind, event.data.value);
+    if (data.type === 'terminal-shortcut' && visibility.visible && !visibility.parked) {
+      shortcutBar.press(data.index, data.kind, data.value);
     }
-    if (event.data?.type === 'terminal-return' && visibility.visible && !visibility.parked)
-      sendReturn();
-    if (
-      event.data?.type === 'terminal-images' &&
-      visibility.visible &&
-      !visibility.parked &&
-      Array.isArray(event.data.files) &&
-      event.data.files.every((file: unknown) => file instanceof File)
-    )
-      void attachImages(event.data.files);
-    if (
-      event.data?.type === 'herdr-present' &&
-      herdrTerminal &&
-      typeof event.data.presentation === 'string'
-    ) {
+    if (data.type === 'terminal-return' && visibility.visible && !visibility.parked) sendReturn();
+    if (data.type === 'terminal-images' && visibility.visible && !visibility.parked)
+      void attachImages(data.files);
+    if (data.type === 'herdr-present' && herdrTerminal) {
       discardHerdrFrames();
       rendering.activity();
       frameScheduler.activity();
       releaseResizeCover();
       hold();
-      herdrPresentation = event.data.presentation;
+      herdrPresentation = data.presentation;
       presentedAt = performance.now();
       herdrLayout.cancel();
       notifyHerdrSizing();
       notifyCachedRendered();
       return;
     }
-    if (event.data?.type === 'herdr-resize-cover' && herdrTerminal) {
+    if (data.type === 'herdr-resize-cover' && herdrTerminal) {
       // The workspace resizes this pane after the reply, so the stale canvas never paints before the cover.
       if (canCoverResize() && !resizeCover.held) {
         resizeTarget = '';
@@ -2005,15 +2001,15 @@ if (embedded) {
       notify('herdr-resize-ready');
       return;
     }
-    if (event.data?.type === 'authorize') {
+    if (data.type === 'authorize') {
       visibility.authorize();
-      accessToken = event.data.accessToken;
+      accessToken = data.accessToken;
       void transport.connect(undefined, true);
     }
-    if (event.data?.type === 'recovery-failed') connection('Session ended');
-    if (event.data?.type === 'notice-action') runTerminalAction(event.data.id);
-    if (event.data?.type === 'herdr-park' && herdrTerminal) {
-      const parked = event.data.parked === true;
+    if (data.type === 'recovery-failed') connection('Session ended');
+    if (data.type === 'notice-action') runTerminalAction(data.id);
+    if (data.type === 'herdr-park' && herdrTerminal) {
+      const parked = data.parked === true;
       if (!visibility.park(parked)) return;
       dictation.visibility(!parked && visibility.visible);
       if (parked) {
@@ -2028,7 +2024,7 @@ if (embedded) {
         const cols = term.cols,
           rows = term.rows;
         sizeTerminal();
-        const preserve = event.data.preserve === true && cols === term.cols && rows === term.rows;
+        const preserve = data.preserve === true && cols === term.cols && rows === term.rows;
         herdrLayout.rendered = preserve && mobileTerminal();
         layout({ pending: mobileTerminal(), preserve });
         send({ type: 'herdr-frame-request' });
@@ -2037,8 +2033,8 @@ if (embedded) {
       }
       return;
     }
-    if (event.data?.type === 'tab-visibility') {
-      visibility.setVisible(event.data.visible);
+    if (data.type === 'tab-visibility') {
+      visibility.setVisible(data.visible);
       if (!visibility.visible) {
         cancelBackfill();
         flushTranscript();
@@ -2065,15 +2061,10 @@ if (embedded) {
         notifyCachedRendered();
       }
     }
-    if (event.data?.type === 'tab-visibility')
-      visibility.updateTransport(event.data.active === true);
-    if (event.data?.type === 'settings-changed') applySettings();
-    if (
-      event.data?.type === 'settings-action' &&
-      ['new-shell', 'copy-selection'].includes(event.data.action)
-    )
-      $(event.data.action).click();
-    if (event.data?.type === 'focus-terminal') {
+    if (data.type === 'tab-visibility') visibility.updateTransport(data.active === true);
+    if (data.type === 'settings-changed') applySettings();
+    if (data.type === 'settings-action') $(data.action).click();
+    if (data.type === 'focus-terminal') {
       sizeTerminal();
       term.focus();
     }

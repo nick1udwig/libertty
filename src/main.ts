@@ -1,3 +1,4 @@
+import { sendToTerminal } from './frame-protocol.ts';
 import { isHerdrPlugin } from './plugins.ts';
 import { requestJSON } from './api.ts';
 import { backendAccess, forgetBackendAccess, rememberBackendAccess } from './backend-access.ts';
@@ -253,7 +254,7 @@ function authorizeTerminals(backend: BackendProfile, accessToken: string) {
   for (const id of lockedTerminals) {
     if (workspace.tabs.find((tab) => tab.id === id)?.backendId !== backend.id) continue;
     lockedTerminals.delete(id);
-    frames.get(id)?.contentWindow?.postMessage({ type: 'authorize', accessToken }, location.origin);
+    sendToTerminal(frames.get(id)?.contentWindow, { type: 'authorize', accessToken });
   }
 }
 async function api<T>(

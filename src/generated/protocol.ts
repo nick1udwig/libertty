@@ -36,6 +36,10 @@ export type DictationTarget = "shell" | "program";
 
 export type EngineMode = "server";
 
+export type FileAction = { action: FileActionKind, path?: string, name?: string, text?: string, version?: string, paths?: Array<string>, destination?: string, };
+
+export type FileActionKind = "read" | "write" | "rename" | "copy" | "delete";
+
 export type FileEntry = { name: string, directory: boolean, symlink: boolean, size: number, modified: number, mode: number, };
 
 export type FileListing = { path: string, parent: string, entries: Array<FileEntry>, truncated: boolean, };

@@ -1,3 +1,4 @@
+import type { WorkspaceMessage } from './frame-protocol.ts';
 import { node } from './dom.ts';
 import { icon } from './icons.ts';
 import { saved } from './persistence.ts';
@@ -529,7 +530,7 @@ export class HerdrView {
     if (held && this.frames.displayed) this.frames.park(this.frames.displayed, true);
     else if (this.visible) this.mountTerminal(true);
   }
-  private post(message: object) {
+  private post(message: WorkspaceMessage) {
     this.frames.post(message);
   }
   get terminalFrame() {

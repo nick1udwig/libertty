@@ -1,3 +1,4 @@
+import { terminalMessage, sendToTerminal } from './frame-protocol.ts';
 import { terminalRenderers } from './renderer-cache.ts';
 import { isHerdrPlugin, showsTerminal } from './plugins.ts';
 import { closeIcon } from './icons.ts';
@@ -15,10 +16,9 @@ import {
   type NoticeKind,
 } from './notice-model.ts';
 import { NoticeCenter } from './notices.ts';
-import { validCapture } from './persistence.ts';
 import { PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
 import { readingMessage } from './reading-view.ts';
-import { validateShortcuts, type Shortcut } from './shortcuts.ts';
+import { type Shortcut } from './shortcuts.ts';
 import { tabGestures, tabStripSwipes } from './tab-gestures.ts';
 import { readingTab } from './tabs.ts';
 import { currentShortcuts } from './workspace-settings.ts';
@@ -392,7 +392,7 @@ export function createWorkspaceNavigation(options: Options) {
   let imageTarget: Window | null | undefined;
   const images = imagePicker((files) => {
     if (imageTarget && shortcutFrame()?.contentWindow === imageTarget)
-      imageTarget.postMessage({ type: 'terminal-images', files }, location.origin);
+      sendToTerminal(imageTarget, { type: 'terminal-images', files });
     else notice('Select the original terminal and attach the image again.', 'warning');
   });
   document.body.append(images);
@@ -423,7 +423,7 @@ export function createWorkspaceNavigation(options: Options) {
     enter.disabled = !ready || !state?.returnAvailable;
     enter.onclick = () => {
       if (!ready || !state?.returnAvailable || shortcutFrame()?.contentWindow !== source) return;
-      source!.postMessage({ type: 'terminal-return' }, location.origin);
+      sendToTerminal(source!, { type: 'terminal-return' });
     };
     const buttons = $('workspace-shortcut-buttons'),
       scroll = buttons.scrollLeft;
@@ -433,10 +433,12 @@ export function createWorkspaceNavigation(options: Options) {
         shortcut.label,
         () => {
           if (!ready || shortcutFrame()?.contentWindow !== source) return;
-          source!.postMessage(
-            { type: 'terminal-shortcut', index, kind: shortcut.kind, value: shortcut.value },
-            location.origin,
-          );
+          sendToTerminal(source!, {
+            type: 'terminal-shortcut',
+            index,
+            kind: shortcut.kind,
+            value: shortcut.value,
+          });
         },
         shortcut.kind === 'command' ? 'command-shortcut' : '',
       );
@@ -748,7 +750,7 @@ export function createWorkspaceNavigation(options: Options) {
       else await mount(tab);
       if (page === 'hosts') void renderCards();
     } catch (error: any) {
-      frames.get(tab.id)?.contentWindow?.postMessage({ type: 'recovery-failed' }, location.origin);
+      sendToTerminal(frames.get(tab.id)?.contentWindow, { type: 'recovery-failed' });
       notice(`Could not start ${tab.name}: ${error.message}`, 'error', [
         { label: 'Retry', run: () => void recoverTerminal(tab, backend) },
       ]);
@@ -756,7 +758,9 @@ export function createWorkspaceNavigation(options: Options) {
   }
   window.addEventListener('message', (event) => {
     if (event.origin !== location.origin) return;
-    if (event.data?.type === 'terminal-shortcuts') {
+    const data = terminalMessage(event.data);
+    if (!data) return;
+    if (data.type === 'terminal-shortcuts') {
       const source = event.source as Window;
       const known =
         [...frames.values()].some((frame) => frame.contentWindow === source) ||
@@ -768,11 +772,11 @@ export function createWorkspaceNavigation(options: Options) {
       if (known) {
         try {
           terminalShortcuts.set(source, {
-            shortcuts: validateShortcuts(event.data.shortcuts),
-            ctrl: event.data.ctrl === true,
-            available: event.data.available === true,
-            imageAvailable: event.data.imageAvailable === true,
-            returnAvailable: event.data.returnAvailable === true,
+            shortcuts: data.shortcuts,
+            ctrl: data.ctrl === true,
+            available: data.available === true,
+            imageAvailable: data.imageAvailable === true,
+            returnAvailable: data.returnAvailable === true,
           });
           renderWorkspaceShortcuts();
         } catch {
@@ -785,83 +789,56 @@ export function createWorkspaceNavigation(options: Options) {
     if (!entry) return;
     const tab = workspace.tabs.find((tab) => tab.id === entry[0]);
     if (!tab) return;
-    if (event.data?.session !== tab.session) return;
+    if (data.session !== tab.session) return;
     const backend = backendFor(tab.backendId),
       frame = entry[1];
-    if (
-      event.data?.type === 'terminal-authorized' &&
-      typeof event.data.accessToken === 'string' &&
-      /^[a-f0-9]{64}$/.test(event.data.accessToken)
-    )
-      authorizeTerminals(backend, event.data.accessToken);
-    if (event.data?.type === 'terminal-loaded') {
+    if (data.type === 'terminal-authorized' && typeof data.accessToken === 'string')
+      authorizeTerminals(backend, data.accessToken);
+    if (data.type === 'terminal-loaded') {
       tabState(tab, 'terminal');
-      frame.contentWindow!.postMessage({ type: 'shortcut-host' }, location.origin);
+      sendToTerminal(frame.contentWindow!, { type: 'shortcut-host' });
       // Visibility arrives first so a hidden tab does not connect until it is shown.
-      frame.contentWindow!.postMessage(
-        {
-          type: 'tab-visibility',
-          visible: tab.id === workspace.active && page === 'terminal',
-          active: tab.id === workspace.active,
-        },
-        location.origin,
-      );
-      frame.contentWindow!.postMessage(
-        { type: 'authorize', accessToken: tokenFor(backend) },
-        location.origin,
-      );
+      sendToTerminal(frame.contentWindow!, {
+        type: 'tab-visibility',
+        visible: tab.id === workspace.active && page === 'terminal',
+        active: tab.id === workspace.active,
+      });
+      sendToTerminal(frame.contentWindow!, { type: 'authorize', accessToken: tokenFor(backend) });
     }
-    if (event.data?.type === 'terminal-locked') {
+    if (data.type === 'terminal-locked') {
       hideTerminalLoading(tab.id);
       lockedTerminals.add(tab.id);
       const current = tokenFor(backend);
       // A delayed rejection may refer to credentials replaced by another frame.
-      if (current && current !== event.data.accessToken) authorizeTerminals(backend, current);
+      if (current && current !== data.accessToken) authorizeTerminals(backend, current);
       else void authenticate(backend, true).catch(fail);
     }
-    if (
-      event.data?.type === 'ssh-command' &&
-      typeof event.data.id === 'string' &&
-      typeof event.data.command === 'string'
-    ) {
+    if (data.type === 'ssh-command') {
       showTerminalLoading(tab.id);
-      void capturedSSH(backend, tab, event.data.id, event.data.command);
+      void capturedSSH(backend, tab, data.id, data.command);
     }
-    if (event.data?.type === 'herdr-command' && typeof event.data.id === 'string') {
+    if (data.type === 'herdr-command') {
       showTerminalLoading(tab.id);
-      void capturedHerdr(backend, tab, event.data.id);
+      void capturedHerdr(backend, tab, data.id);
     }
-    const remote = frameNotice(event.data, frame.contentWindow);
+    const remote = frameNotice(data, frame.contentWindow);
     if (remote?.status) tabState(tab, 'terminal', remote.input);
     else if (remote?.input) notices.notify({ ...remote.input, source: tab.name });
+    if (data.type === 'reading-open' && 'path' in data) openReading(tab, data.path);
+    if (data.type === 'reading-open' && 'capture' in data)
+      openReadingCapture(tab, data.capture, data.name, data.exitCode);
     if (
-      event.data?.type === 'reading-open' &&
-      typeof event.data.path === 'string' &&
-      event.data.path.length <= 4096
-    )
-      openReading(tab, event.data.path);
-    if (
-      event.data?.type === 'reading-open' &&
-      validCapture(event.data.capture) &&
-      typeof event.data.name === 'string' &&
-      event.data.name.length <= 180 &&
-      Number.isInteger(event.data.exitCode) &&
-      event.data.exitCode >= 0 &&
-      event.data.exitCode <= 255
-    )
-      openReadingCapture(tab, event.data.capture, event.data.name, event.data.exitCode);
-    if (
-      event.data?.type === 'terminal-state' &&
-      event.data.state?.ready === true &&
+      data.type === 'terminal-state' &&
+      data.state?.ready === true &&
       terminalLoading?.id === tab.id &&
       terminalLoading.waitForPrompt
     )
       hideTerminalLoading(tab.id);
     if (
-      event.data?.type === 'terminal-ended' ||
-      (event.data?.type === 'terminal-state' && typeof event.data.state?.exited === 'boolean')
+      data.type === 'terminal-ended' ||
+      (data.type === 'terminal-state' && typeof data.state?.exited === 'boolean')
     ) {
-      const ended = event.data.type === 'terminal-ended' || event.data.state.exited;
+      const ended = data.type === 'terminal-ended' || data.state.exited;
       if (ended) hideTerminalLoading(tab.id);
       const host = workspace.hosts.find((host) => host.id === tab.hostId);
       if (ended && host?.kind === 'http' && handledEnds.get(tab.id) !== tab.session) {
@@ -880,7 +857,7 @@ export function createWorkspaceNavigation(options: Options) {
         store();
         if (page === 'hosts') void renderCards();
       }
-      if (event.data.type === 'terminal-ended' && host?.kind !== 'http')
+      if (data.type === 'terminal-ended' && host?.kind !== 'http')
         notice(tab.name + ' has ended. Open its saved host to reconnect.', 'warning', [
           { label: 'Open hosts', run: () => show('hosts') },
         ]);

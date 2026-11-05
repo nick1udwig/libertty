@@ -12,10 +12,10 @@ import {
   closeIcon,
 } from './icons.ts';
 import { fileBreadcrumbs, sortedFiles, type FileOptions, type FileSort } from './file-options.ts';
-import type { FileListing, FileEntry } from './generated/protocol.ts';
+import type { FileListing, FileEntry, FileAction } from './generated/protocol.ts';
 
 export interface FileClient {
-  action(input: Record<string, unknown>): Promise<{ text?: string; version?: string }>;
+  action(input: FileAction): Promise<{ text?: string; version?: string }>;
   mkdir(path: string, name: string): Promise<void>;
   list(path: string): Promise<FileListing>;
   download(path: string): Promise<void>;
@@ -280,7 +280,7 @@ export function fileBrowser(
   function selectedPaths() {
     return [...selected].map((name) => (current === '/' ? '' : current) + '/' + name);
   }
-  async function runAction(input: Record<string, unknown>) {
+  async function runAction(input: FileAction) {
     status.textContent = 'Working…';
     try {
       await client.action(input);
