@@ -1871,7 +1871,7 @@ checksum = "ce5d3ddc6d3fa000eb1536d85e147bfe31aacaba692ed6a876f95cb7c855be78"
 
 [[package]]
 name = "libertty-engine"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "futures",
  "icu_collator",
@@ -1883,7 +1883,7 @@ dependencies = [
 
 [[package]]
 name = "libertty-engine-wasm"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "libertty-engine",
  "serde_json",
@@ -1891,7 +1891,7 @@ dependencies = [
 
 [[package]]
 name = "libertty-server"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "aes-gcm 0.10.3",
  "axum",
