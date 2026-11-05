@@ -28,6 +28,7 @@ export class InlineSuggestions {
   private controller?: AbortController;
   private literal = '';
   private choices: string[] = [];
+  private actions: NonNullable<RepairResult['actions']> = {};
   private reading?: string;
   private phrases = [...defaultReadingPhrases];
   private selected = '';
@@ -71,6 +72,7 @@ export class InlineSuggestions {
         reading: this.reading,
         phrases: this.phrases,
         selected: this.selected,
+        actions: this.actions,
         pendingPresentation: this.pendingPresentation,
         pendingCursor: this.pendingCursor,
       }),
@@ -315,6 +317,7 @@ export class InlineSuggestions {
       } else this.clear();
       return;
     }
+    this.actions = result.actions || {};
     this.literal = result.original;
     this.selected = result.selected;
     this.line.reset(result.selected);
@@ -434,6 +437,7 @@ export class InlineSuggestions {
     this.literal = '';
     this.speech = '';
     this.choices = [];
+    this.actions = {};
     this.reading = undefined;
     this.suspendedRevision = undefined;
     this.retryOnResume = false;
@@ -541,7 +545,16 @@ export class InlineSuggestions {
     }
   }
   private async choose(text: string) {
-    if (this.reading) {
+    const action = this.actions[text];
+    if (action?.kind === 'reading-file') {
+      this.openRead(action.operand);
+      return;
+    }
+    if (action?.kind === 'reading-pipeline') {
+      this.host.execute(action.command + ' | look at');
+      return;
+    }
+    if (!action && this.reading) {
       const pipeline = readingPipeline(text, this.phrases, true);
       if (pipeline) {
         this.host.execute(pipeline.command + ' | look at');

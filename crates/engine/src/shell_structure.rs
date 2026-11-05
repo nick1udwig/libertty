@@ -30,6 +30,12 @@ pub struct CommandList<'a> {
 }
 
 pub fn command_list(input: &str) -> Option<CommandList<'_>> {
+    split_commands(input, 6)
+}
+pub(crate) fn reading_command_list(input: &str) -> Option<CommandList<'_>> {
+    split_commands(input, usize::MAX)
+}
+fn split_commands(input: &str, limit: usize) -> Option<CommandList<'_>> {
     if utf16_len(input) > crate::MAX_COMMAND || input.contains(['\n', '\r']) {
         return None;
     }
@@ -94,7 +100,7 @@ pub fn command_list(input: &str) -> Option<CommandList<'_>> {
         return None;
     }
     commands.push(input[start..].trim());
-    if commands.len() > 6 || commands.iter().any(|part| part.is_empty()) {
+    if commands.len() > limit || commands.iter().any(|part| part.is_empty()) {
         return None;
     }
     Some(CommandList {

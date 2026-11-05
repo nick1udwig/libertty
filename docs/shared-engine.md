@@ -20,6 +20,8 @@ Native suggestions and prewarming use typed calls and results without JSON catal
 The WASM adapter retains the existing JSON protocol.
 Native help, script and completion adapters retain probe-pool capacity and cancellation.
 `src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
+Each prepared choice includes its backend action, so selection keeps its reading or shell meaning if browser preferences change.
+Browser and native reading recognition share contract fixtures, normalize phrases, and prefer the longest matching phrase.
 Cancellation, attachment, prompt and revision guards protect concurrent edits.
 `crates/server/src/input_coordinator.rs` shares repair deadlines, cancellation and microphone callbacks across native terminals and Herdr.
 Session replay credit, history snapshots and captured connection requests live in separate state types under the session lock.

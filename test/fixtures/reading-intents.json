@@ -1,7 +1,138 @@
 [
-  {"text":"look at notes.md","phrases":["look at"],"intent":{"kind":"reading-file","phrase":"look at","operand":"notes.md"}},
-  {"text":"Inspect notes.md.","phrases":["inspect"],"intent":{"kind":"reading-file","phrase":"Inspect","operand":"notes.md"}},
-  {"text":"echo hello pipe look at","phrases":["look at"],"intent":{"kind":"reading-pipeline","phrase":"look at","command":"echo hello"}},
-  {"text":"echo 'pipe look at'","phrases":["look at"],"intent":{"kind":"shell"}},
-  {"text":"echo hello || look at","phrases":["look at"],"intent":{"kind":"shell"}}
+  {
+    "text": "look at notes.md",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "reading-file",
+      "phrase": "look at",
+      "operand": "notes.md"
+    }
+  },
+  {
+    "text": "Inspect notes.md.",
+    "phrases": [
+      "inspect"
+    ],
+    "intent": {
+      "kind": "reading-file",
+      "phrase": "Inspect",
+      "operand": "notes.md"
+    }
+  },
+  {
+    "text": "echo hello pipe look at",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "reading-pipeline",
+      "phrase": "look at",
+      "command": "echo hello"
+    }
+  },
+  {
+    "text": "echo 'pipe look at'",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "shell"
+    }
+  },
+  {
+    "text": "echo hello || look at",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "shell"
+    }
+  },
+  {
+    "text": "look at notes.md",
+    "phrases": [
+      "look",
+      "look at"
+    ],
+    "intent": {
+      "kind": "reading-file",
+      "phrase": "look at",
+      "operand": "notes.md"
+    }
+  },
+  {
+    "text": "look at notes.md",
+    "phrases": [
+      "",
+      "inspect"
+    ],
+    "intent": {
+      "kind": "reading-file",
+      "phrase": "look at",
+      "operand": "notes.md"
+    }
+  },
+  {
+    "text": "LOOK AT notes.md",
+    "phrases": [
+      " LOOK   AT ",
+      "look at"
+    ],
+    "intent": {
+      "kind": "reading-file",
+      "phrase": "LOOK AT",
+      "operand": "notes.md"
+    }
+  },
+  {
+    "text": "echo a | cat | cat | cat | cat | cat | look at",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "reading-pipeline",
+      "phrase": "look at",
+      "command": "echo a | cat | cat | cat | cat | cat"
+    }
+  },
+  {
+    "text": "echo x # | look at",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "shell"
+    }
+  },
+  {
+    "text": "echo x; | look at",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "shell"
+    }
+  },
+  {
+    "text": "look at notes...",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "reading-file",
+      "phrase": "look at",
+      "operand": "notes.."
+    }
+  },
+  {
+    "text": "look at .",
+    "phrases": [
+      "look at"
+    ],
+    "intent": {
+      "kind": "shell"
+    }
+  }
 ]

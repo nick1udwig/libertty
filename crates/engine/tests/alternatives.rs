@@ -95,3 +95,16 @@ fn reading_intents_match_the_shared_browser_contract() {
         );
     }
 }
+
+#[test]
+fn preparation_uses_the_input_operand_and_returns_executable_action_metadata() {
+    let result = prepare(
+        "look at README.md",
+        json!({"kind":"reading-file","phrase":"look at","operand":"ignored"}),
+    );
+    assert_eq!(result["selected"], "look at README.md");
+    assert_eq!(
+        result["actions"]["look at README.md"],
+        json!({"kind":"reading-file","phrase":"look at","operand":"README.md"})
+    );
+}

@@ -30,7 +30,9 @@ export function readingPhrases(value: unknown): string[] {
   );
   if (phrases.some((item) => !item || item.length > 50 || /[\x00-\x1f\x7f]/.test(item)))
     return [...defaultReadingPhrases];
-  return [...new Set(phrases.map((item) => item.toLowerCase()))];
+  return [...new Set(phrases.map((item) => item.toLowerCase()))].sort(
+    (a, b) => b.length - a.length,
+  );
 }
 
 export function readingRequest(
@@ -39,7 +41,7 @@ export function readingRequest(
   spoken = false,
 ): { phrase: string; path: string; operand: string } | undefined {
   const trimmed = text.trim();
-  for (const phrase of [...phrases].sort((a, b) => b.length - a.length)) {
+  for (const phrase of readingPhrases(phrases)) {
     if (!trimmed.toLowerCase().startsWith(phrase.toLowerCase())) continue;
     const rest = trimmed.slice(phrase.length);
     if (!/^\s+/.test(rest)) continue;
@@ -65,6 +67,8 @@ export function readingPipeline(
   spoken = false,
 ): { command: string; phrase: string } | undefined {
   const source = spoken ? expandSymbols(text).replace(/[.!?]$/, '') : text;
+  if (source.length > 2000 || /[\n\r]/.test(source)) return;
+  let segment = 0;
   let quote = '',
     depth = 0,
     pipe = -1;
@@ -83,18 +87,24 @@ export function readingPipeline(
       continue;
     }
     if ('({'.includes(char)) depth++;
-    else if (')}'.includes(char)) depth--;
-    else if (
-      char === '|' &&
-      depth === 0 &&
-      source[i - 1] !== '|' &&
-      !['|', '&'].includes(source[i + 1])
-    )
-      pipe = i;
+    else if (')}'.includes(char)) {
+      if (--depth < 0) return;
+    } else if (depth === 0) {
+      if (char === '#' && (i === 0 || /\s/.test(source[i - 1]))) return;
+      if (!'|&;'.includes(char)) continue;
+      if (!source.slice(segment, i).trim()) return;
+      if (char === '|' && source[i + 1] === '&') return;
+      if (char === '&' && source[i + 1] !== '&') return;
+      if (char === '|' && source[i + 1] !== '|') pipe = i;
+      if ((char === '|' || char === '&') && source[i + 1] === char) i++;
+      segment = i + 1;
+    }
   }
   if (quote || depth || pipe < 1) return undefined;
   const suffix = source.slice(pipe + 1).trim();
-  const phrase = phrases.find((phrase) => phrase.toLowerCase() === suffix.toLowerCase());
+  const phrase = readingPhrases(phrases).find(
+    (phrase) => phrase.toLowerCase() === suffix.toLowerCase(),
+  );
   const command = source.slice(0, pipe).trim();
   if (phrase && command) return { command, phrase: suffix };
 }

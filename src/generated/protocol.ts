@@ -61,7 +61,7 @@ export type RepairIntent = { "kind": "shell" }
 
 export type RepairRequest = { id: string, text: string, prompt: number, revision: number, intent?: RepairIntent, };
 
-export type RepairResult = { id: string, prompt: number, revision: number, accepted: boolean, error?: string, source?: DictationSource, original: string, selected: string, candidates: Array<Candidate>, };
+export type RepairResult = { id: string, prompt: number, revision: number, accepted: boolean, error?: string, source?: DictationSource, original: string, selected: string, candidates: Array<Candidate>, actions?: { [key in string]: RepairIntent }, };
 
 export type ServerMessage = { "type": "pong" }
   | { "type": "repair-result" } & RepairResult

@@ -2,7 +2,7 @@ import { icon as svgIcon, uploadIcon, downloadIcon } from './icons.ts';
 import { transferAction, downloadPipeline } from './transfer-command.ts';
 import { readingPipeline, readingPath } from './reading-request.ts';
 import type { Terminal } from './terminal-adapter.ts';
-import type { ShellState } from './protocol.ts';
+import type { ShellState, RepairResult } from './protocol.ts';
 interface Model {
   literal: string;
   loading: boolean;
@@ -12,6 +12,7 @@ interface Model {
   reading?: string;
   phrases: string[];
   selected: string;
+  actions: NonNullable<RepairResult['actions']>;
   pendingPresentation?: { pending: boolean };
   pendingCursor?: { x: number; row: number };
 }
@@ -64,11 +65,19 @@ export class SuggestionView {
     button.className = 'alternative-choice';
     button.type = 'button';
     const pipeline = model.reading ? readingPipeline(text, model.phrases, true) : undefined;
-    const reading = pipeline
-      ? pipeline.command + ' output'
-      : model.reading
-        ? readingPath(text, model.phrases)
-        : undefined;
+    const action = model.actions[text];
+    const reading =
+      action?.kind === 'reading-file'
+        ? readingPath(text, [action.phrase]) || action.operand
+        : action?.kind === 'reading-pipeline'
+          ? action.command + ' output'
+          : action
+            ? undefined
+            : pipeline
+              ? pipeline.command + ' output'
+              : model.reading
+                ? readingPath(text, model.phrases)
+                : undefined;
     button.classList.toggle('reading-choice', !!reading);
     button.classList.toggle('literal-choice', literal);
     button.classList.toggle(

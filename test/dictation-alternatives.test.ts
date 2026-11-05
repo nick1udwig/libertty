@@ -133,3 +133,14 @@ test('successive repairs ignore an older result after a new prompt and transcrip
   assert.deepEqual(f.replacements, []);
   assert.deepEqual(f.executed, []);
 });
+
+test('backend action metadata remains authoritative after reading preferences change', async () => {
+  const f = fixture();
+  f.inline.phrases = ['inspect'];
+  f.inline.backendResult({...repaired('look at readme', 'look at README.md'), actions: {
+    'look at README.md': {kind: 'reading-file', phrase: 'look at', operand: 'README.md'},
+  }});
+  await f.inline.choose('look at README.md');
+  assert.deepEqual(f.executed, ['look at README.md']);
+  assert.deepEqual(f.replacements, []);
+});
