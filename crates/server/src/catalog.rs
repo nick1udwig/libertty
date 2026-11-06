@@ -1,27 +1,28 @@
+use crate::task_cache::TaskCache;
 use crate::{
     directories::executable,
     probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe},
 };
 use libertty_engine::types::Flag;
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
     time::Duration,
 };
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 pub const AST_SCRIPT: &str = include_str!("../assets/describe.py");
-type FlagEntry = (String, String, SharedTask<Option<Vec<Flag>>>);
+type Flags = TaskCache<String, String, Option<Vec<Flag>>, 200>;
 #[derive(Clone, Default)]
 pub struct CatalogHost {
     pool: ProbePool,
-    flags: Arc<Mutex<VecDeque<FlagEntry>>>,
+    flags: Arc<Mutex<Flags>>,
 }
 impl CatalogHost {
     pub fn new(pool: ProbePool) -> Self {
         Self {
             pool,
-            flags: Arc::new(Mutex::new(VecDeque::new())),
+            flags: Default::default(),
         }
     }
     pub async fn executable_names(
@@ -105,18 +106,10 @@ impl CatalogHost {
         );
         let task = {
             let mut cache = self.flags.lock().await;
-            if let Some((_, _, task)) = cache.iter().find(|(old, old_stamp, task)| {
-                old == &file && old_stamp == &stamp && task.reusable()
-            }) {
-                task.clone()
-            } else {
-                cache.retain(|(old, _, _)| old != &file);
-                if cache.len() >= 200 {
-                    cache.pop_front();
-                }
+            cache.get_or_insert_with(file.clone(), stamp, None, || {
                 let pool = self.pool.clone();
-                let target = file.clone();
-                let task = SharedTask::new(move |cancel| {
+                let target = file;
+                SharedTask::new(move |cancel| {
                     Box::pin(async move {
                         let options = ProbeOptions {
                             cwd: std::env::current_dir()
@@ -144,10 +137,8 @@ impl CatalogHost {
                         }
                         serde_json::from_slice(&result.stdout).map_err(|error| error.to_string())
                     })
-                });
-                cache.push_back((file, stamp, task.clone()));
-                task
-            }
+                })
+            })
         };
         task.wait(cancel).await
     }

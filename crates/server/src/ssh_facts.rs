@@ -1,4 +1,5 @@
 use crate::probe_policy::{self, valid_name};
+use crate::task_cache::TaskCache;
 use crate::{
     completion::{
         COMPLETION_SCRIPT, completion_args, completion_timeout, completion_values,
@@ -23,11 +24,8 @@ use tokio_util::sync::CancellationToken;
 
 pub(crate) type RequestVersions =
     Arc<std::sync::Mutex<std::collections::BTreeMap<String, SharedTask<String>>>>;
-pub(crate) type Descriptions = std::collections::VecDeque<(
-    String,
-    String,
-    SharedTask<Arc<Option<Vec<libertty_engine::types::Flag>>>>,
-)>;
+pub(crate) type Descriptions =
+    TaskCache<String, String, Arc<Option<Vec<libertty_engine::types::Flag>>>, 200>;
 #[derive(Clone, Copy)]
 pub(crate) struct FactContext<'a> {
     pub catalog: &'a Catalog,
@@ -374,19 +372,10 @@ impl SSHHost {
         );
         let task = {
             let mut cache = self.descriptions.lock().unwrap();
-            if let Some((_, _, task)) = cache
-                .iter()
-                .find(|(old, version, task)| old == &file && version == &stamp && task.reusable())
-            {
-                task.clone()
-            } else {
-                cache.retain(|(old, _, task)| old != &file && task.reusable());
-                if cache.len() >= 200 {
-                    cache.pop_front();
-                }
+            cache.get_or_insert_with(file.clone(), stamp, None, || {
                 let host = Arc::downgrade(self);
-                let target = file.clone();
-                let task = SharedTask::new(move |cancel| {
+                let target = file;
+                SharedTask::new(move |cancel| {
                     Box::pin(async move {
                         let host = host.upgrade().ok_or("SSH connection closed.")?;
                         let work = async {
@@ -409,10 +398,8 @@ impl SSHHost {
                         };
                         tokio::select! { biased; _ = host.lifetime.cancelled() => Err(ABORTED.into()), result = work => result }
                     })
-                });
-                cache.push_back((file, stamp, task.clone()));
-                task
-            }
+                })
+            })
         };
         task.wait(cancel).await
     }

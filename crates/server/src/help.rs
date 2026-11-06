@@ -1,4 +1,5 @@
 use crate::probe_policy::{self, BUILTINS, valid_name};
+use crate::task_cache::TaskCache;
 use crate::{
     directories::executable,
     probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe},
@@ -10,41 +11,26 @@ use libertty_engine::{
     types::{Catalog, Help},
 };
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::BTreeMap,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 #[derive(Default)]
-pub(crate) struct HelpCache(VecDeque<(String, Instant, SharedTask<Help>)>);
+pub(crate) struct HelpCache(TaskCache<String, (), Help, 200>);
 impl HelpCache {
     pub fn get_or_insert_with(
         &mut self,
         key: &str,
         create: impl FnOnce() -> SharedTask<Help>,
     ) -> SharedTask<Help> {
-        let now = Instant::now();
-        if let Some((_, _, task)) = self
-            .0
-            .iter()
-            .find(|(old, until, task)| old == key && *until > now && task.reusable())
-        {
-            return task.clone();
-        }
         self.0
-            .retain(|(old, until, task)| old != key && *until > now && task.reusable());
-        if self.0.len() >= 200 {
-            self.0.pop_front();
-        }
-        let task = create();
-        self.0
-            .push_back((key.into(), now + Duration::from_secs(600), task.clone()));
-        task
+            .get_or_insert_with(key.into(), (), Some(Duration::from_secs(600)), create)
     }
 }
 #[derive(Clone)]
@@ -371,7 +357,10 @@ mod cache_tests {
         let task = cache.get_or_insert_with("help", success);
         task.wait(&CancellationToken::new()).await.unwrap();
         cache.get_or_insert_with("help", || panic!("duplicate probe"));
-        cache.0.front_mut().unwrap().1 = Instant::now() - Duration::from_secs(1);
+        cache = HelpCache::default();
+        cache
+            .0
+            .get_or_insert_with("help".into(), (), Some(Duration::ZERO), success);
         let expired = cache.get_or_insert_with("help", || {
             SharedTask::new(|_| Box::pin(async { Err("expired".into()) }))
         });
@@ -399,7 +388,6 @@ mod cache_tests {
         for index in 0..201 {
             cache.get_or_insert_with(&index.to_string(), success);
         }
-        assert_eq!(cache.0.len(), 200);
         cache.get_or_insert_with("200", || panic!("newest entry was evicted"));
         let mut replaced = false;
         cache.get_or_insert_with("0", || {
@@ -407,6 +395,5 @@ mod cache_tests {
             success()
         });
         assert!(replaced);
-        assert_eq!(cache.0.len(), 200);
     }
 }

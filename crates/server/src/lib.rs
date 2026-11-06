@@ -37,6 +37,7 @@ mod ssh_pty;
 mod storage;
 pub mod syntax;
 pub mod system_ssh;
+mod task_cache;
 pub mod transfers;
 pub mod uploads;
 pub mod vault;
