@@ -3,6 +3,7 @@ import {
   type HttpEndpoint,
   type HttpInput,
   type HttpOutput,
+  type HttpQuery,
 } from './http-contract.ts';
 import { abortableDelay } from './abortable-delay.ts';
 import { constrainedLink } from './wire.ts';
@@ -126,10 +127,14 @@ export function requestEndpoint<K extends HttpEndpoint, I extends HttpInput<K>>(
   base: string | URL,
   endpoint: K,
   data: I,
-  options: RequestOptions = {},
+  options: Omit<RequestOptions, 'method' | 'body'> & { query?: HttpQuery<K> } = {},
 ): Promise<HttpOutput<K, I>> {
-  return requestJSON<HttpOutput<K, I>>(new URL(endpoint, base), data, {
-    ...options,
-    timeout: options.timeout ?? requestTimeout(new URL(endpoint, base), data),
+  const { query, ...requestOptions } = options;
+  const url = new URL(endpoint, base);
+  for (const [key, value] of Object.entries(query || {}))
+    if (value !== undefined) url.searchParams.set(key, String(value));
+  return requestJSON<HttpOutput<K, I>>(url, data, {
+    ...requestOptions,
+    timeout: options.timeout ?? requestTimeout(url, data),
   });
 }

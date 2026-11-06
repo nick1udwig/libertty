@@ -12,10 +12,11 @@ import {
   closeIcon,
 } from './icons.ts';
 import { fileBreadcrumbs, sortedFiles, type FileOptions, type FileSort } from './file-options.ts';
+import type { FileActionOutput } from './http-contract.ts';
 import type { FileListing, FileEntry, FileAction } from './generated/protocol.ts';
 
 export interface FileClient {
-  action(input: FileAction): Promise<{ text?: string; version?: string }>;
+  action<A extends FileAction>(input: A): Promise<FileActionOutput<A>>;
   mkdir(path: string, name: string): Promise<void>;
   list(path: string): Promise<FileListing>;
   download(path: string): Promise<void>;

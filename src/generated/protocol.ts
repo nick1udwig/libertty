@@ -44,13 +44,19 @@ export type DictationTarget = "shell" | "program";
 
 export type EngineMode = "server";
 
-export type FileAction = { action: FileActionKind, path?: string, name?: string, text?: string, version?: string, paths?: Array<string>, destination?: string, };
-
-export type FileActionKind = "read" | "write" | "rename" | "copy" | "delete";
+export type FileAction = { "action": "read", path: string, }
+  | { "action": "write", path: string, text: string, version: string, }
+  | { "action": "rename", path: string, name: string, }
+  | { "action": "copy", paths: Array<string>, destination: string, }
+  | { "action": "delete", paths: Array<string>, };
 
 export type FileEntry = { name: string, directory: boolean, symlink: boolean, size: number, modified: number, mode: number, };
 
 export type FileListing = { path: string, parent: string, entries: Array<FileEntry>, truncated: boolean, };
+
+export type FileText = { text: string, version: string, mode: number, };
+
+export type Folder = { path: string, name: string, };
 
 export type HerdrAction = { "action": "delete-worktree", workspaceId: string, path?: string, force?: boolean, }
   | { "action": "list-worktrees", workspaceId: string, terminalId?: string, }
@@ -98,6 +104,14 @@ export type HerdrWorktrees = { source: HerdrRepository, worktrees: Array<HerdrWo
 
 export type HttpError = { error: string, };
 
+export type KeychainAction = { "action": "delete", id: string, }
+  | { "action": "rename", id: string, name: string, }
+  | { "action": "forget", host: string, port?: number, }
+  | { "action": "inspect", privateKey: string, passphrase: string, }
+  | { "action": "create", name: string, passphrase: string, privateKey?: string, }
+  | { "action": "backup", name: string, passphrase: string, privateKey?: string, replaceId?: string, }
+  | { "action": "export", id: string, passphrase: string, };
+
 export type ReadingCapture = { id: string, name: string, exitCode: number, };
 
 export type RepairIntent = { "kind": "shell" }
@@ -136,6 +150,8 @@ export type Sessions = { name?: string, ssh?: unknown, files?: boolean, };
 export type ShellState = { cwd: string, inputRevision: number, inputContext?: string, promptRevision: number, ready: boolean, prompt: number, exited: boolean, exitCode?: number, inputTarget?: DictationTarget, terminalScroll?: boolean, };
 
 export type SocketTicket = { ticket: string, };
+
+export type SshAddress = { host: string, username: string, port?: number, };
 
 export type Success = { ok: boolean, };
 

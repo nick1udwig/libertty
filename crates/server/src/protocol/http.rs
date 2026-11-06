@@ -109,3 +109,11 @@ impl From<std::borrow::Cow<'_, str>> for HerdrActionError {
         error.into_owned().into()
     }
 }
+
+#[derive(Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+pub struct FileText {
+    pub text: String,
+    pub version: String,
+    pub mode: u32,
+}

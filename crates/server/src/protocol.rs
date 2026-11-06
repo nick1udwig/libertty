@@ -483,6 +483,7 @@ impl ClientMessage {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[serde(
     tag = "action",
     rename_all = "kebab-case",
@@ -582,6 +583,9 @@ mod tests {
         crate::herdr::Metadata::export_all(&config).unwrap();
         crate::files::Listing::export_all(&config).unwrap();
         super::requests::FileAction::export_all(&config).unwrap();
+        super::KeychainAction::export_all(&config).unwrap();
+        super::requests::SshAddress::export_all(&config).unwrap();
+        super::requests::Folder::export_all(&config).unwrap();
         super::requests::Connect::export_all(&config).unwrap();
         super::requests::Sessions::export_all(&config).unwrap();
         super::requests::HerdrConnect::export_all(&config).unwrap();
@@ -590,6 +594,7 @@ mod tests {
         super::http::CreatedSession::export_all(&config).unwrap();
         super::http::SocketTicket::export_all(&config).unwrap();
         super::http::Success::export_all(&config).unwrap();
+        super::http::FileText::export_all(&config).unwrap();
         super::http::HttpError::export_all(&config).unwrap();
         super::http::ConnectedHerdr::export_all(&config).unwrap();
         crate::herdr::action::Action::export_all(&config).unwrap();

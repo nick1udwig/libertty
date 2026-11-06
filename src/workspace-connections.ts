@@ -540,7 +540,7 @@ export function createWorkspaceConnections(options: Options) {
       await finishConnection(host, backend, result.id, request);
       return;
     }
-    const vault = await api<{ keys: KeyInfo[]; knownHosts: KnownHost[] }>(backend, 'api/keychain');
+    const vault = await endpoint(backend, 'api/keychain', undefined);
     vaults.set(backend.id, vault);
     sshHost = host;
     sshRequest = request;
@@ -626,7 +626,7 @@ export function createWorkspaceConnections(options: Options) {
         try {
           const matching = portable
             ? undefined
-            : (await api<{ keys: KeyInfo[] }>(backend, 'api/keychain')).keys.find(
+            : (await endpoint(backend, 'api/keychain', undefined)).keys.find(
                 (k) => keyValue(k) === keyFingerprint,
               );
           if (!portable && !matching) return;
@@ -634,10 +634,10 @@ export function createWorkspaceConnections(options: Options) {
             remote: number[] = [];
           for (let i = 0; i < 2; i++) {
             const start = performance.now();
-            const measured = await api<{ milliseconds: number }>(backend, 'api/ssh/probe', {
-              host: host.hostname,
+            const measured = await endpoint(backend, 'api/ssh/probe', {
+              host: host.hostname || '',
               port: host.port,
-              username: host.username,
+              username: host.username || '',
             });
             samples.push(performance.now() - start);
             remote.push(measured.milliseconds);

@@ -20,14 +20,14 @@ export type WorkspacePage =
   | 'known'
   | 'settings';
 export interface WorkspaceServices {
-  endpoint<K extends HttpEndpoint>(
+  endpoint<K extends HttpEndpoint, I extends HttpInput<K>>(
     backend: BackendProfile,
     name: K,
-    data: HttpInput<K>,
+    data: I,
     session?: string,
     recoverAuth?: boolean,
     signal?: AbortSignal,
-  ): Promise<HttpOutput<K>>;
+  ): Promise<HttpOutput<K, I>>;
   api: <T>(
     backend: BackendProfile,
     name: string,

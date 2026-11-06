@@ -1,5 +1,6 @@
-import { request as sendRequest, responseJSON } from './api.ts';
-import type { FileListing } from './generated/protocol.ts';
+import { request as sendRequest, responseJSON, requestEndpoint } from './api.ts';
+
+import type { FileAction } from './generated/protocol.ts';
 import type { FileClient } from './file-browser.ts';
 import { downloadFile, type DownloadTicket } from './download-view.ts';
 import { uploadResumable } from './resumable-upload.ts';
@@ -29,28 +30,26 @@ export function fileClient(
     );
   }
   return {
-    action: (input) =>
-      request<Awaited<ReturnType<FileClient['action']>>>(
-        'api/files/action',
-        {},
-        {
-          method: 'POST',
-          body: JSON.stringify(input),
-          headers: { 'Content-Type': 'application/json' },
-        },
-      ),
+    action: <A extends FileAction>(input: A) =>
+      requestEndpoint(base, 'api/files/action', input, {
+        query: { session },
+        token,
+        recoverAuth: authenticate,
+      }),
     async mkdir(path, name) {
-      await request(
+      await requestEndpoint(
+        base,
         'api/files/mkdir',
-        {},
-        {
-          method: 'POST',
-          body: JSON.stringify({ path, name }),
-          headers: { 'Content-Type': 'application/json' },
-        },
+        { path, name },
+        { query: { session }, token, recoverAuth: authenticate },
       );
     },
-    list: (path) => request<FileListing>('api/files/list', { path }),
+    list: (path) =>
+      requestEndpoint(base, 'api/files/list', undefined, {
+        query: { session, path },
+        token,
+        recoverAuth: authenticate,
+      }),
     async upload(path, file, signal) {
       if (file.size > 1024 ** 3) throw new Error('Uploads are limited to 1 GB per file.');
       // A numbered upload keeps its partial file, so an interrupted attempt continues from the bytes that arrived.
