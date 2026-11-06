@@ -1321,6 +1321,7 @@ const handlers: Handlers = {
   },
   dictation: (message) =>
     dictation.event(message.id, message.state, message.message, message.resume),
+  'dictation-progress': (message) => dictation.progress(message.id, message.forwardedFrames),
   'reading-file': (message) => showReading({ path: message.path }),
   'reading-capture': (message) =>
     showReading({ capture: message.id, name: message.name, exitCode: message.exitCode }),

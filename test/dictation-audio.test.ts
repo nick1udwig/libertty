@@ -57,3 +57,40 @@ test('a negotiated upload limit leaves complete audio available for a later retr
   assert.equal(audio.upload(bytes => { sent.push(bytes); return true; }), true);
   assert.deepEqual(sent, [first, last]);
 });
+
+test('upload credits bound replay and completion waits for all forwarded frames', () => {
+  const audio = new DictationAudio();
+  for (let i = 0; i < 40; i++) audio.append(frame(i, i === 39));
+  audio.resume(0, false, 3);
+  const sent: number[] = [];
+  const send = (bytes: ArrayBuffer) => { sent.push(parseOpusFrame(new Uint8Array(bytes)).sequence); return true; };
+  assert.equal(audio.upload(send), false);
+  assert.deepEqual(sent, [0, 1, 2]);
+  assert.equal(audio.waitingForCredit, true);
+  assert.equal(audio.upload(send), false);
+  assert.equal(sent.length, 3);
+  for (let forwarded = 1; forwarded <= 40; forwarded++) {
+    audio.acknowledge(forwarded);
+    assert.equal(audio.upload(send), forwarded === 40);
+    assert.ok(sent.length - forwarded <= 3);
+  }
+  assert.equal(sent.length, 40);
+  assert.throws(() => audio.acknowledge(41), /acknowledgement/);
+  audio.resume(7, false, 2);
+  assert.equal(audio.upload(send), false);
+  assert.deepEqual(sent.slice(-2), [7, 8]);
+  assert.throws(() => audio.acknowledge(40), /acknowledgement/);
+});
+
+test('socket backpressure preserves credits and invalid windows cannot start an upload', () => {
+  const audio = new DictationAudio(); audio.append(frame(0, true));
+  for (const value of [0, -1, 0.5, Infinity, 65]) assert.throws(() => audio.resume(0, false, value), /checkpoint/);
+  audio.resume(0, false, 1);
+  assert.equal(audio.upload(() => false), false);
+  assert.equal(audio.waitingForCredit, false);
+  assert.throws(() => audio.acknowledge(1), /acknowledgement/);
+  assert.equal(audio.upload(() => true), false);
+  assert.equal(audio.waitingForCredit, true);
+  audio.acknowledge(1);
+  assert.equal(audio.upload(() => assert.fail('Already forwarded')), true);
+});

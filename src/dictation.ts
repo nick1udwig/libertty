@@ -198,6 +198,7 @@ export class DictationControl {
     resume?: {
       acceptedFrames: number;
       finished: boolean;
+      uploadWindow?: number;
       maxSamples?: number;
       maxEncodedBytes?: number;
     },
@@ -214,7 +215,7 @@ export class DictationControl {
       try {
         this.audio.limit(resume?.maxEncodedBytes ?? MAX_OPUS_BYTES);
         this.capture?.limit(resume?.maxSamples ?? MAX_AUDIO_SAMPLES);
-        this.audio.resume(resume?.acceptedFrames, resume?.finished);
+        this.audio.resume(resume?.acceptedFrames, resume?.finished, resume?.uploadWindow);
       } catch (error) {
         this.retain((error as Error).message);
         return;
@@ -225,6 +226,16 @@ export class DictationControl {
     else if (this.delivery.acceptsResult()) this.cancel(false);
     this.render();
   }
+  progress(id: string, forwarded: number) {
+    if (id !== this.id || this.delivery.state !== 'uploading' || !this.online) return;
+    try {
+      this.audio.acknowledge(forwarded);
+    } catch (error) {
+      this.retain((error as Error).message);
+      return;
+    }
+    this.upload();
+  }
   private upload() {
     if (this.delivery.state !== 'uploading' || !this.online) return;
     let uploaded: boolean;
@@ -234,8 +245,9 @@ export class DictationControl {
       this.retain((error as Error).message);
       return;
     }
-    if (!uploaded) this.delivery.uploadLater(() => this.upload());
-    else if (this.captureFlushed) {
+    if (!uploaded) {
+      if (!this.audio.waitingForCredit) this.delivery.uploadLater(() => this.upload());
+    } else if (this.captureFlushed) {
       if (this.host.send({ type: 'dictation', id: this.id, action: 'finish' }))
         this.delivery.uploaded();
       else this.delivery.uploadLater(() => this.upload());

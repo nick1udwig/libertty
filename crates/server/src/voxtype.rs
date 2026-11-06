@@ -254,6 +254,7 @@ pub(crate) fn event(bytes: &[u8]) -> Result<Event, String> {
                 .clamp(17.0, MAX_OPUS_BYTES as f64) as usize;
             Ok(Event::Ready(Checkpoint {
                 accepted_frames,
+                upload_window: crate::dictation::UPLOAD_WINDOW,
                 finished,
                 max_samples,
                 max_encoded_bytes,

@@ -13,6 +13,7 @@ use std::{
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
+pub(crate) const UPLOAD_WINDOW: u32 = 16;
 pub const MAX_OPUS_BYTES: usize = profile::MAX_ENCODED_BYTES as usize;
 pub const MAX_OPUS_FRAMES: u64 = profile::MAX_FRAMES as u64;
 pub const MAX_AUDIO_SAMPLES: u32 = profile::SAMPLE_RATE * profile::MAX_SECONDS;
@@ -86,13 +87,16 @@ enum Control {
 pub struct Checkpoint {
     pub accepted_frames: u64,
     pub finished: bool,
+    pub upload_window: u32,
     pub max_samples: u32,
     pub max_encoded_bytes: usize,
 }
+pub type ProgressCallback = Arc<dyn Fn(u64) + Send + Sync>;
 pub type ReadyCallback = Arc<dyn Fn(Checkpoint) + Send + Sync>;
 struct Resume {
     session: String,
     ready: Option<ReadyCallback>,
+    progress: Option<ProgressCallback>,
     detached: Arc<AtomicBool>,
 }
 pub struct Recording {
@@ -137,7 +141,7 @@ impl Recording {
         result: AsyncResultCallback,
         status: StatusCallback,
     ) -> Self {
-        Self::start_config(env, result, status, storage::random_hex(16), None)
+        Self::start_config(env, result, status, storage::random_hex(16), None, None)
     }
     pub fn start_resumable(
         env: BTreeMap<String, String>,
@@ -145,8 +149,9 @@ impl Recording {
         result: AsyncResultCallback,
         status: StatusCallback,
         ready: ReadyCallback,
+        progress: ProgressCallback,
     ) -> Self {
-        Self::start_config(env, result, status, session, Some(ready))
+        Self::start_config(env, result, status, session, Some(ready), Some(progress))
     }
     fn start_config(
         env: BTreeMap<String, String>,
@@ -154,8 +159,9 @@ impl Recording {
         status: StatusCallback,
         session: String,
         ready: Option<ReadyCallback>,
+        progress: Option<ProgressCallback>,
     ) -> Self {
-        let (control, receive) = mpsc::channel(32);
+        let (control, receive) = mpsc::channel(UPLOAD_WINDOW as usize + 1);
         let cancel = CancellationToken::new();
         let failure = Arc::new(Mutex::new(None));
         let done = Arc::new(AtomicBool::new(false));
@@ -163,6 +169,7 @@ impl Recording {
         let resume = Resume {
             session,
             ready,
+            progress,
             detached: detached.clone(),
         };
         let recording = Self {
@@ -227,6 +234,17 @@ async fn close(socket: &mut voxtype::Socket, kind: &str) {
     })
     .await;
 }
+async fn send<S: futures::Sink<Message> + Unpin>(
+    socket: &mut S,
+    message: Message,
+    deadline: tokio::time::Instant,
+) -> Result<(), String> {
+    let deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(10));
+    tokio::time::timeout_at(deadline, socket.send(message))
+        .await
+        .map_err(|_| "Dictation upload timed out.")?
+        .map_err(|_| "Could not connect to Voxtype.".into())
+}
 async fn run(
     env: BTreeMap<String, String>,
     mut control: mpsc::Receiver<Control>,
@@ -264,19 +282,20 @@ async fn run(
                         let frame=parse_opus_frame(&encoded)?;
                         if !ready||finishing||audio_final||frame.sequence!=frames||frame.total_samples>max_samples||bytes+encoded.len()>max_bytes{return Err("Recording exceeded the audio limit or connection capacity. Please try again.".into())}
                         bytes+=encoded.len();frames+=1;audio_final=frame.final_frame;
-                        socket.send(Message::Binary(encoded.into())).await.map_err(|_|"Could not connect to Voxtype.")?;
+                        send(&mut socket, Message::Binary(encoded.into()), deadline).await?;
+                        if let Some(progress) = &resume.progress { progress(frames); }
                     },
                     Some(Control::Finish)=>{
                         if !ready||finishing{continue}
                         if !audio_final && (accepted_frames == 0 || frames != accepted_frames) {return Err("Recording ended without complete Opus audio.".into())}
                         finishing=true;
-                        socket.send(Message::Text(json!({"type":"finish"}).to_string().into())).await.map_err(|_|"Could not connect to Voxtype.")?;
+                        send(&mut socket, Message::Text(json!({"type":"finish"}).to_string().into()), deadline).await?;
                     },
                     None=>return Ok(false),
                 },
                 message=socket.next()=> {
                     let message=message.ok_or("Voxtype disconnected. Please try again.")?.map_err(|_|"Could not connect to Voxtype.")?;
-                    if let Message::Ping(bytes)=message {socket.send(Message::Pong(bytes)).await.map_err(|_|"Could not connect to Voxtype.")?;continue}
+                    if let Message::Ping(bytes)=message {send(&mut socket, Message::Pong(bytes), deadline).await?;continue}
                     if matches!(message,Message::Close(_)){return Err("Voxtype disconnected. Please try again.".into())}
                     if matches!(message,Message::Pong(_)){continue}
                     match voxtype::event(&message.into_data())? {
@@ -329,4 +348,20 @@ async fn run(
         status(DictationState::Done, None);
     }
     outcome.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn a_blocked_daemon_write_obeys_the_recording_deadline() {
+        let mut socket = Box::pin(futures::sink::unfold((), |(), _: Message| async {
+            std::future::pending::<Result<(), std::io::Error>>().await
+        }));
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(5);
+        assert_eq!(
+            send(&mut socket, Message::Binary(vec![1].into()), deadline).await,
+            Err("Dictation upload timed out.".into())
+        );
+    }
 }

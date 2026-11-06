@@ -422,11 +422,13 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
     });
     let results = Arc::new(Mutex::new(Vec::new()));
     let (checkpoints, mut checkpoint_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (progress, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let (statuses, mut status_rx) = tokio::sync::mpsc::unbounded_channel();
     let start = || {
         let results = results.clone();
         let checkpoints = checkpoints.clone();
         let statuses = statuses.clone();
+        let progress = progress.clone();
         Recording::start_resumable(
             env.clone(),
             "a".repeat(32),
@@ -443,15 +445,20 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
             Arc::new(move |checkpoint| {
                 checkpoints.send(checkpoint).unwrap();
             }),
+            Arc::new(move |frames| {
+                progress.send(frames).unwrap();
+            }),
         )
     };
     let first = start();
     let checkpoint = receive_with_timeout(&mut checkpoint_rx).await;
     assert_eq!(checkpoint.accepted_frames, 0);
+    assert_eq!(checkpoint.upload_window, 16);
     assert_eq!(checkpoint.max_samples, 32000);
     assert_eq!(checkpoint.max_encoded_bytes, 4096);
     first.audio(frame(0, false, true));
     receive_with_timeout(&mut accepted_rx).await;
+    assert_eq!(receive_with_timeout(&mut progress_rx).await, 1);
     first.suspend();
     let resumed = start();
     assert_eq!(
@@ -517,6 +524,7 @@ async fn finished_daemon_checkpoints_deliver_cached_final_without_reupload_or_fi
         Arc::new(move |checkpoint| {
             checkpoints.send(checkpoint).unwrap();
         }),
+        Arc::new(|_| {}),
     );
     assert!(receive_with_timeout(&mut checkpoint_rx).await.finished);
     assert_eq!(
@@ -580,6 +588,7 @@ async fn accepted_final_audio_can_finish_after_its_finish_control_was_lost() {
         Arc::new(move |checkpoint| {
             checkpoints.send(checkpoint).unwrap();
         }),
+        Arc::new(|_| {}),
     );
     assert_eq!(
         receive_with_timeout(&mut checkpoint_rx)

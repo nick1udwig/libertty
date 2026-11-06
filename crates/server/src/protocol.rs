@@ -92,6 +92,10 @@ pub enum ServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
+    DictationProgress {
+        id: String,
+        forwarded_frames: u64,
+    },
     ReadingFile {
         path: String,
     },

@@ -72,10 +72,16 @@ control.delivery = new DictationDelivery(message => control.retain(message), { a
 control.online = true;
 control.setup.available = true;
 await control.start();
-control.event(control.id, 'ready', undefined, { acceptedFrames: 0, finished: false });
+control.event(control.id, 'ready', undefined, { acceptedFrames: 0, finished: false, uploadWindow: 1 });
 control.finish();
 await new Promise(resolve => queueMicrotask(resolve));
 assert.ok([...timers.values()].some(timer => timer.delay === 480000));
+assert.equal(control.delivery.state, 'uploading');
+assert.equal([...timers.values()].some(timer => timer.delay === 10), false);
+control.progress('old-recording', 1);
+assert.equal(control.delivery.state, 'uploading');
+control.progress(control.id, 1);
+assert.equal(control.delivery.state, 'awaiting-result');
 control.retain('simulated failure');
 assert.equal(control.phase, 'retry');
 const beforeLateReady = audio.length;
