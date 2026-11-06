@@ -61,7 +61,7 @@ try {
   };
   const closeReader = async () => { await showTerminalTabs(page); await page.locator('#tabs [role=tab][aria-selected=true] .tab-close').click(); await terminal(); };
   await type('look at README.md'); await page.locator('.reading-markdown h1').filter({ hasText: 'Herdr reader' }).waitFor();
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'reading').readHerdrTerminal), pane.terminal_id);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'reading').pluginState.readHerdrTerminal), pane.terminal_id);
   await page.locator('.reading-markdown a').click(); await page.locator('.reading-text').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
   await page.reload(); await page.locator('.reading-text').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
   await closeReader();
@@ -75,7 +75,7 @@ try {
   assert.equal(await returned.locator('#terminal textarea').evaluate(input => input.readOnly), true, 'A cancelled touch keeps the keyboard closed before intentional input');
   for (const command of ['look at printf prefix-output', 'printf pipe-output | look at']) {
     await type(command); await page.locator('.reading-text').filter({ hasText: command.includes('prefix') ? 'prefix-output' : 'pipe-output' }).waitFor();
-    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).readCapture);
+    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).pluginState.readCapture);
     const foreign = await (await fetch(base + 'api/connect', { method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ token, noSession: true }) })).json();
     assert.equal((await fetch(base + 'api/herdr/reading/capture?id=' + capture, { headers: { Authorization: 'Bearer ' + foreign.accessToken } })).status, 404, 'Captured output belongs to its paired viewer');
     await page.reload(); await page.locator('.reading-text').waitFor(); await closeReader();
@@ -101,7 +101,7 @@ try {
   }, { host: '127.0.0.1', port: sshPort, username: os.userInfo().username, privateKey: identity.private, passphrase: 'fixture-passphrase', trust: fingerprint(ssh2.utils.parseKey(hostKey.private).getPublicSSH()) });
   await page.reload(); await terminal(); await type('look at note.txt');
   await page.locator('.reading-text').filter({ hasText: 'A reader inside Herdr.' }).waitFor();
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).herdrSource), remote);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).pluginState.herdrSource), remote);
   await closeReader(); await type("look at sh -c 'printf x >> once; printf remote-output'");
   await page.locator('.reading-text').filter({ hasText: 'remote-output' }).waitFor();
   assert.equal(await readFile(dir + '/work tree/once', 'utf8'), 'x');

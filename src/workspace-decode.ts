@@ -1,3 +1,4 @@
+import type { PluginRegistry } from './plugins.ts';
 import {
   backendURL,
   sshAddress,
@@ -5,7 +6,7 @@ import {
   type HostProfile,
   type TerminalTab,
 } from './connections.ts';
-import { validCapture, validPath, validSession } from './persistence.ts';
+import { validPath, validSession } from './persistence.ts';
 import { herdrSession } from './herdr-protocol.ts';
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -71,7 +72,11 @@ export function decodeHost(value: unknown, backends: Set<string>): HostProfile |
   }
   return host;
 }
-export function decodeTab(value: unknown, backends: Set<string>): TerminalTab | undefined {
+export function decodeTab(
+  value: unknown,
+  backends: Set<string>,
+  plugins?: Pick<PluginRegistry, 'stateFor'>,
+): TerminalTab | undefined {
   if (
     !record(value) ||
     !identity(value) ||
@@ -92,29 +97,17 @@ export function decodeTab(value: unknown, backends: Set<string>): TerminalTab | 
     pluginId: value.pluginId,
     pluginVersion: value.pluginVersion,
   };
-  for (const key of ['hostId', 'parentTabId', 'herdrSource', 'readHerdrTerminal'] as const)
+  for (const key of ['hostId', 'parentTabId'] as const)
     if (typeof value[key] === 'string') tab[key] = value[key];
-  for (const key of ['directory', 'readPath'] as const)
-    if (validPath(value[key])) tab[key] = value[key];
-  if (validCapture(value.readCapture)) tab.readCapture = value.readCapture;
-  if (
-    typeof value.readExitCode === 'number' &&
-    Number.isInteger(value.readExitCode) &&
-    value.readExitCode >= 0 &&
-    value.readExitCode <= 255
-  )
-    tab.readExitCode = value.readExitCode;
+  if (validPath(value.readPath)) tab.readPath = value.readPath;
   if (typeof value.lastUsed === 'number' && Number.isFinite(value.lastUsed))
     tab.lastUsed = value.lastUsed;
-  for (const key of ['ended', 'herdrCore'] as const)
-    if (typeof value[key] === 'boolean') tab[key] = value[key];
+  if (typeof value.ended === 'boolean') tab.ended = value.ended;
+  const codec = plugins?.stateFor(tab.pluginId, tab.pluginVersion);
   tab.ownsSession =
-    typeof value.ownsSession === 'boolean'
-      ? value.ownsSession
-      : !['herdr', 'herdr-core', 'reading'].includes(tab.pluginId);
-  tab.pluginState = value.pluginState;
+    typeof value.ownsSession === 'boolean' ? value.ownsSession : (codec?.ownsSession ?? true);
   try {
-    if (value.herdrSession !== undefined) tab.herdrSession = herdrSession(value.herdrSession);
+    tab.pluginState = codec ? codec.decode(value.pluginState, value) : value.pluginState;
   } catch {
     return;
   }

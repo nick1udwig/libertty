@@ -1,3 +1,4 @@
+import { builtinState } from './builtin-state.ts';
 import type { BackendProfile, HostProfile, TerminalTab } from './connections.ts';
 import type { WorkspaceServices } from './workspace-storage.ts';
 
@@ -5,9 +6,7 @@ export interface ConnectionInput {
   readPath?: string;
   herdrSession?: string;
 }
-export type ConnectionDetails = Partial<
-  Pick<TerminalTab, 'name' | 'readPath' | 'herdrSession' | 'herdrSource' | 'pluginState'>
->;
+export type ConnectionDetails = Partial<Pick<TerminalTab, 'name' | 'readPath' | 'pluginState'>>;
 export interface ConnectionContext extends Pick<WorkspaceServices, 'api' | 'endpoint'> {
   host: HostProfile;
   backend: BackendProfile;
@@ -41,7 +40,7 @@ export function herdrConnection(core = false): PluginConnection {
   return {
     session: 'files',
     fields: 'herdr',
-    matches: (tab, input) => (tab.herdrSession || '') === (input.herdrSession || ''),
+    matches: (tab, input) => (builtinState(tab).herdrSession || '') === (input.herdrSession || ''),
     async prepare({ host, backend, session, input, endpoint }) {
       const target = await endpoint(backend, 'api/herdr/connect', {
         source: session,
@@ -49,8 +48,7 @@ export function herdrConnection(core = false): PluginConnection {
         core,
       });
       return {
-        herdrSession: target.herdrSession,
-        herdrSource: target.herdrSource,
+        pluginState: { herdrSession: target.herdrSession, herdrSource: target.herdrSource },
         name:
           (core ? 'Herdr Core' : 'Herdr') +
           ' · ' +

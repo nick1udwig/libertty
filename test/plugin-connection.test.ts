@@ -38,9 +38,9 @@ test('Herdr connection hooks retain session identity and select the requested ba
     };
     const connection = herdrConnection(core);
     const details = await connection.prepare(ctx);
-    assert.equal(details?.herdrSource, 'resolved');
+    assert.equal((details?.pluginState as { herdrSource: string })?.herdrSource, 'resolved');
     assert.equal(details?.name, `${core ? 'Herdr Core' : 'Herdr'} · Machine · work`);
-    const tab = { id: 'tab', name: 'Test', session: 'transport', backendId: 'backend', pluginId: 'arbitrary', pluginVersion: '1', herdrSession: 'work' };
+    const tab = { id: 'tab', name: 'Test', session: 'transport', backendId: 'backend', pluginId: 'arbitrary', pluginVersion: '1', pluginState: { herdrSession: 'work' } };
     assert.equal(connection.matches!(tab, ctx.input), true);
     assert.equal(connection.matches!(tab, { herdrSession: 'other' }), false);
   }

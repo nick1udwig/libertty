@@ -411,3 +411,9 @@ Command output and completion suppress predicted echo until the next prompt or i
 These markers only constrain prediction and never authorize input or replace server readiness.
 Terminals without shell markers keep the existing prediction rules.
 A full reset or native snapshot restoration clears advisory shell state, and restoration reattaches the callbacks to the new native handle.
+
+Builtin tab details are stored in `pluginState`, with decoders selected by plugin ID and pinned version.
+The builtin decoders migrate older flat records when the workspace loads.
+Unknown plugin versions retain their opaque state.
+Tab identity, session ownership and selected-file permission remain in the workspace record.
+Selected-file permission is separate from plugin-writable state so saved plugin settings cannot widen access.

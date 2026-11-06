@@ -38,7 +38,12 @@ export interface PluginView {
   copySelection?(): void;
   canEvict?(): boolean;
 }
+export interface PluginStateCodec<State = unknown> {
+  ownsSession: boolean;
+  decode(value: unknown, legacy: Readonly<Record<string, unknown>>): State;
+}
 export interface TabPlugin {
+  state?: PluginStateCodec;
   id: string;
   version: string;
   name: string;
@@ -58,12 +63,20 @@ export interface TabPlugin {
 
 /** Versions stay registered so an update never silently replaces an open tab. */
 export class PluginRegistry {
+  private states = new Map<string, PluginStateCodec>();
+  constructor(states: readonly { id: string; version: string; state: PluginStateCodec }[] = []) {
+    for (const entry of states) this.states.set(this.key(entry.id, entry.version), entry.state);
+  }
+  stateFor(id: string, version: string) {
+    return this.states.get(this.key(id, version));
+  }
   private versions = new Map<string, TabPlugin>();
   private current = new Map<string, TabPlugin>();
   private disabled = new Set<string>();
   register(plugin: TabPlugin) {
     const key = this.key(plugin.id, plugin.version);
     if (this.versions.has(key)) throw new Error('This plugin version is already installed.');
+    if (plugin.state) this.states.set(key, plugin.state);
     this.versions.set(key, plugin);
     this.current.set(plugin.id, plugin);
   }

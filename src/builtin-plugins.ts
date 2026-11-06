@@ -1,3 +1,4 @@
+import { builtinState, builtinStateCodecs } from './builtin-state.ts';
 import type { HttpEndpoint, HttpInput, HttpOutput } from './http-contract.ts';
 import { sendToTerminal } from './frame-protocol.ts';
 import type { BackendProfile, HostProfile, TerminalTab } from './connections.ts';
@@ -52,7 +53,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     version: BUILTIN_VERSION,
     available: (host: HostProfile) => host.kind !== 'herdr',
   };
-  return [
+  const plugins: TabPlugin[] = [
     {
       ...common,
       id: 'terminal',
@@ -126,9 +127,9 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
             () => s.token(backend),
             () => s.authenticate(backend, true),
           ),
-          tab.directory || '.',
+          builtinState(tab).directory || '.',
           (directory) => {
-            tab.directory = directory;
+            builtinState(tab).directory = directory;
             s.store();
           },
         );
@@ -168,8 +169,8 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
           const backend = s.backend(tab);
           const { HerdrView } = await import('./herdr-view.ts');
           if (!s.active(tab)) throw new Error('This tab has closed.');
-          const session = herdrSession(tab.herdrSession),
-            source = tab.herdrSource,
+          const session = herdrSession(builtinState(tab).herdrSession),
+            source = builtinState(tab).herdrSource,
             sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
           const core = id === 'herdr-core';
           const connection =
@@ -189,7 +190,14 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
             reconnect: () => s.reconnectHerdr(tab),
             key: 'libertty.herdr.' + connection,
             reading: (terminalId, request) => {
-              const source = { ...tab, herdrCore: core, readHerdrTerminal: terminalId };
+              const source = {
+                ...tab,
+                pluginState: {
+                  ...builtinState(tab),
+                  herdrCore: core,
+                  readHerdrTerminal: terminalId,
+                },
+              };
               if ('path' in request) s.openReading(source, request.path);
               else s.openReadingCapture(source, request.capture, request.name, request.exitCode);
             },
@@ -220,7 +228,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
                   !signal?.aborted &&
                   error.status === 404 &&
                   source &&
-                  tab.herdrSource === source &&
+                  builtinState(tab).herdrSource === source &&
                   !tab.ended
                 ) {
                   tab.ended = true;
@@ -283,4 +291,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     ),
     readingPlugin(s),
   ];
+  for (const plugin of plugins)
+    plugin.state = builtinStateCodecs.find((entry) => entry.id === plugin.id)!.state;
+  return plugins;
 }

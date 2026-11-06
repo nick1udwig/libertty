@@ -1,3 +1,4 @@
+import { builtinState } from './builtin-state.ts';
 import { BrowserVault } from './browser-vault.ts';
 import {
   type BackendProfile,
@@ -106,7 +107,7 @@ export function createWorkspaceConnections(options: Options) {
         for (const tab of workspace.tabs.filter(
           (tab) => tabPluginId(tab) === 'herdr' && tab.hostId === host.id,
         )) {
-          tab.herdrSource = source;
+          builtinState(tab).herdrSource = source;
           unmount(tab);
           await mount(tab);
         }
@@ -382,7 +383,7 @@ export function createWorkspaceConnections(options: Options) {
       if (request.herdrHost) {
         const saved = request.herdrHost;
         saved.backendId = backend.id;
-        saved.herdrSource = details.herdrSource;
+        saved.herdrSource = builtinState(tab).herdrSource;
         tab.hostId = saved.id;
         tab.name = saved.name;
       }
@@ -422,13 +423,15 @@ export function createWorkspaceConnections(options: Options) {
           backend,
           'api/herdr/snapshot?' +
             new URLSearchParams({
-              herdrSession: tab.herdrSession || '',
+              herdrSession: builtinState(tab).herdrSession || '',
               ...(tab.pluginId === 'herdr-core' ? { herdrCore: '1' } : {}),
-              ...(tab.herdrSource ? { herdrSource: tab.herdrSource } : {}),
+              ...(builtinState(tab).herdrSource
+                ? { herdrSource: builtinState(tab).herdrSource }
+                : {}),
             }),
         );
       } catch (error: any) {
-        if (error.status !== 404 || !tab.herdrSource) throw error;
+        if (error.status !== 404 || !builtinState(tab).herdrSource) throw error;
         tab.ended = true;
         store();
       }
@@ -455,7 +458,7 @@ export function createWorkspaceConnections(options: Options) {
     const host = workspace.hosts.find((host) => host.id === tab.hostId);
     if (!host)
       throw new Error('This connection has no saved host. Open Herdr from its host again.');
-    if (host.kind === 'herdr' && !tab.herdrSource) {
+    if (host.kind === 'herdr' && !builtinState(tab).herdrSource) {
       unmount(tab);
       tab.ended = false;
       store();
@@ -476,7 +479,7 @@ export function createWorkspaceConnections(options: Options) {
     await connectHost(source, {
       pluginId: tab.pluginId,
       pluginVersion: tab.pluginVersion,
-      herdrSession: tab.herdrSession,
+      herdrSession: builtinState(tab).herdrSession,
       herdrTab: tab,
       ...(host.kind === 'herdr' ? { herdrHost: host } : {}),
     });
@@ -490,8 +493,8 @@ export function createWorkspaceConnections(options: Options) {
         (tab) =>
           tabPluginId(tab) === 'herdr' &&
           tab.backendId === host.backendId &&
-          (tab.herdrSession || '') === (host.herdrSession || '') &&
-          tab.herdrSource === host.herdrSource,
+          (builtinState(tab).herdrSession || '') === (host.herdrSession || '') &&
+          builtinState(tab).herdrSource === host.herdrSource,
       );
       if (existing) {
         await resumeTab(existing);
@@ -506,8 +509,7 @@ export function createWorkspaceConnections(options: Options) {
         pluginId: 'herdr',
         pluginVersion: '1',
         ownsSession: false,
-        herdrSession: host.herdrSession,
-        herdrSource: host.herdrSource,
+        pluginState: { herdrSession: host.herdrSession, herdrSource: host.herdrSource },
         lastUsed: Date.now(),
       };
       workspace.tabs.push(tab);

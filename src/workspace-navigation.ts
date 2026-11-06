@@ -1,3 +1,4 @@
+import { builtinState } from './builtin-state.ts';
 import { terminalMessage, sendToTerminal } from './frame-protocol.ts';
 import { terminalRenderers } from './renderer-cache.ts';
 import { closeIcon } from './icons.ts';
@@ -18,7 +19,7 @@ import { PluginRegistry, tabPluginId, type PluginView, type PluginNavigation } f
 import { readingMessage } from './reading-view.ts';
 import { type Shortcut } from './shortcuts.ts';
 import { tabGestures, tabStripSwipes } from './tab-gestures.ts';
-import { readingTab } from './tabs.ts';
+import { readingTab, type ReadingDetail } from './tabs.ts';
 import { currentShortcuts } from './workspace-settings.ts';
 import type { WorkspaceServices, WorkspaceState } from './workspace-storage.ts';
 interface Options
@@ -551,10 +552,7 @@ export function createWorkspaceNavigation(options: Options) {
     show('terminal');
     pluginViews.get(id)?.focus?.();
   }
-  function addReading(
-    source: TerminalTab,
-    detail: Pick<TerminalTab, 'name' | 'readPath' | 'readCapture' | 'readExitCode'>,
-  ) {
+  function addReading(source: TerminalTab, detail: ReadingDetail) {
     const tab = readingTab(source, detail);
     workspace.tabs.push(tab);
     workspace.active = tab.id;
@@ -577,7 +575,7 @@ export function createWorkspaceNavigation(options: Options) {
           tabPluginId(tab) === 'reading' &&
           tab.backendId === source.backendId &&
           tab.session === source.session &&
-          tab.readCapture === capture,
+          builtinState(tab).readCapture === capture,
       )
     )
       return;

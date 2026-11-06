@@ -1,3 +1,4 @@
+import { builtinState, builtinStateCodecs } from './builtin-state.ts';
 import type { Connected } from './generated/protocol.ts';
 import { sendToTerminal } from './frame-protocol.ts';
 import { isHerdrPlugin } from './plugins.ts';
@@ -37,12 +38,12 @@ const primary: BackendProfile = {
 const frames = new Map<string, HTMLIFrameElement>(),
   tokens = new Map<string, string>(),
   vaults = new Map<string, { keys: KeyInfo[]; knownHosts: KnownHost[] }>();
-const plugins = new PluginRegistry(),
+const plugins = new PluginRegistry(builtinStateCodecs),
   pluginViews = new Map<string, PluginView>();
 const herdrViews = new Map<string, HerdrView>();
 const herdrSounds = new HerdrSounds();
 const authenticating = new Map<string, Promise<void>>();
-const workspace = loadWorkspace(primary);
+const workspace = loadWorkspace(primary, plugins);
 const backendFor = (id: string) => workspace.backends.find((b) => b.id === id)!;
 function store() {
   saveWorkspace(workspace, notice);
@@ -123,8 +124,8 @@ const herdrNotifications = new HerdrNotifications(
           .watch(
             tab.backendId,
             tab.id,
-            herdrSession(tab.herdrSession),
-            tab.herdrSource,
+            herdrSession(builtinState(tab).herdrSession),
+            builtinState(tab).herdrSource,
             tab.pluginId === 'herdr-core',
           )
           .catch(fail);
@@ -189,8 +190,8 @@ for (const plugin of builtinPlugins({
     herdrNotifications.watch(
       tab.backendId,
       tab.id,
-      herdrSession(tab.herdrSession),
-      tab.herdrSource,
+      herdrSession(builtinState(tab).herdrSession),
+      builtinState(tab).herdrSource,
       tab.pluginId === 'herdr-core',
     ),
   unwatch: (tab) => herdrNotifications.unwatch(tab.backendId, tab.id),
@@ -484,10 +485,13 @@ async function consumePendingReading() {
       (!request.herdrSource || validSession(request.herdrSource))
         ? {
             ...source,
-            readHerdrTerminal: request.herdrTerminal,
-            herdrCore: request.herdrCore === true,
-            herdrSession: herdrSession(request.herdrSession),
-            herdrSource: request.herdrSource || undefined,
+            pluginState: {
+              ...builtinState(source),
+              readHerdrTerminal: request.herdrTerminal,
+              herdrCore: request.herdrCore === true,
+              herdrSession: herdrSession(request.herdrSession),
+              herdrSource: request.herdrSource || undefined,
+            },
           }
         : source;
     if (captured)

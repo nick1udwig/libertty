@@ -1,3 +1,4 @@
+import type { PluginRegistry } from './plugins.ts';
 import { decodeBackend, decodeHost, decodeTab, uniqueRecords } from './workspace-decode.ts';
 import type { HttpEndpoint, HttpInput, HttpOutput } from './http-contract.ts';
 import { type BackendProfile, type HostProfile, type TerminalTab } from './connections.ts';
@@ -42,7 +43,10 @@ export interface WorkspaceServices {
   notice: Notify;
   fail: Fail;
 }
-export function loadWorkspace(primary: BackendProfile): WorkspaceState {
+export function loadWorkspace(
+  primary: BackendProfile,
+  plugins?: Pick<PluginRegistry, 'stateFor'>,
+): WorkspaceState {
   const backends = [primary, ...uniqueRecords(saved<unknown[]>('backends', []), decodeBackend)];
   const ids = new Set(backends.map((backend) => backend.id));
   const hosts = uniqueRecords(
@@ -51,7 +55,9 @@ export function loadWorkspace(primary: BackendProfile): WorkspaceState {
     ]),
     (value) => decodeHost(value, ids),
   );
-  const tabs = uniqueRecords(saved<unknown[]>('tabs', []), (value) => decodeTab(value, ids));
+  const tabs = uniqueRecords(saved<unknown[]>('tabs', []), (value) =>
+    decodeTab(value, ids, plugins),
+  );
   const selected = saved<string>('activeTab', '');
   const active = tabs.some((tab) => tab.id === selected) ? selected : tabs[0]?.id || '';
   return { backends, hosts, tabs, active };
