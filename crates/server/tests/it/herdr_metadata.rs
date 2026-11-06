@@ -151,6 +151,7 @@ async fn cached_pane_addresses_cannot_rename_a_recycled_terminal() {
                 .action(&action)
                 .await
                 .unwrap_err()
+                .error
                 .contains("ended or moved")
         );
     }

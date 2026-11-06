@@ -1926,6 +1926,7 @@ dependencies = [
  "unicode-normalization",
  "url",
  "vt100",
+ "vte",
  "web-push",
  "zeroize",
 ]

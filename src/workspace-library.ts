@@ -26,7 +26,7 @@ import type { WorkspacePage, WorkspaceServices, WorkspaceState } from './workspa
 interface Options
   extends Pick<
     WorkspaceServices,
-    'api' | 'authenticate' | 'backendFor' | 'store' | 'notice' | 'fail'
+    'endpoint' | 'authenticate' | 'backendFor' | 'store' | 'notice' | 'fail'
   > {
   workspace: WorkspaceState;
   closeHostMenu: (focus?: boolean) => void;
@@ -64,7 +64,7 @@ export function createWorkspaceLibrary(options: Options) {
     tokens,
     store,
     browserVault,
-    api,
+    endpoint,
     vaults,
     primary,
     navigation,
@@ -236,10 +236,7 @@ export function createWorkspaceLibrary(options: Options) {
             );
         } else {
           await authenticate(backend);
-          const vault = await api<{ keys: KeyInfo[]; knownHosts: KnownHost[] }>(
-            backend,
-            'api/keychain',
-          );
+          const vault = await endpoint(backend, 'api/keychain', undefined);
           vaults.set(backend.id, vault);
           if (generation !== rendering) return;
           if (navigation.page === 'keychain')
@@ -269,7 +266,7 @@ export function createWorkspaceLibrary(options: Options) {
                       'Forget this SSH host fingerprint? Verify its identity again before your next connection.',
                     )
                   )
-                    void api(backend, 'api/keychain', {
+                    void endpoint(backend, 'api/keychain', {
                       action: 'forget',
                       host: item.host,
                       port: item.port,
@@ -407,7 +404,7 @@ export function createWorkspaceLibrary(options: Options) {
     backends: () => workspace.backends,
     backendFor,
     authenticate,
-    api,
+    endpoint,
     notice,
     fail,
     renderCards,

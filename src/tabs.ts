@@ -1,9 +1,9 @@
+import { builtinState, type BuiltinTabState } from './builtin-state.ts';
 import type { TerminalTab } from './connections.ts';
 import { BUILTIN_VERSION, tabPluginId } from './plugins.ts';
-export function readingTab(
-  source: TerminalTab,
-  detail: Pick<TerminalTab, 'name' | 'readPath' | 'readCapture' | 'readExitCode'>,
-): TerminalTab {
+export type ReadingDetail = Pick<TerminalTab, 'name'> &
+  Pick<BuiltinTabState, 'readPath' | 'readCapture' | 'readExitCode'>;
+export function readingTab(source: TerminalTab, detail: ReadingDetail): TerminalTab {
   return {
     id: crypto.randomUUID(),
     pluginId: 'reading',
@@ -11,16 +11,23 @@ export function readingTab(
     ownsSession: false,
     backendId: source.backendId,
     session: source.session,
-    ...(source.readHerdrTerminal
-      ? {
-          readHerdrTerminal: source.readHerdrTerminal,
-          ...(source.herdrCore || source.pluginId === 'herdr-core' ? { herdrCore: true } : {}),
-          herdrSession: source.herdrSession,
-          herdrSource: source.herdrSource,
-        }
-      : {}),
+    pluginState: {
+      ...(builtinState(source).readHerdrTerminal
+        ? {
+            readHerdrTerminal: builtinState(source).readHerdrTerminal,
+            ...(builtinState(source).herdrCore || source.pluginId === 'herdr-core'
+              ? { herdrCore: true }
+              : {}),
+            herdrSession: builtinState(source).herdrSession,
+            herdrSource: builtinState(source).herdrSource,
+          }
+        : {}),
+      readPath: detail.readPath,
+      readCapture: detail.readCapture,
+      readExitCode: detail.readExitCode,
+    },
     parentTabId: tabPluginId(source) === 'reading' ? source.parentTabId : source.id,
     lastUsed: Date.now(),
-    ...detail,
+    name: detail.name,
   };
 }

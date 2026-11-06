@@ -1,27 +1,28 @@
+use crate::task_cache::TaskCache;
 use crate::{
     directories::executable,
     probes::{ABORTED, ProbeOptions, ProbePool, SharedTask, probe},
 };
-use libertty_engine::{path, repair::tokens, types::Flag};
+use libertty_engine::types::Flag;
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet},
     sync::Arc,
     time::Duration,
 };
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 pub const AST_SCRIPT: &str = include_str!("../assets/describe.py");
-type FlagEntry = (String, String, SharedTask<Option<Vec<Flag>>>);
+type Flags = TaskCache<String, String, Option<Vec<Flag>>, 200>;
 #[derive(Clone, Default)]
 pub struct CatalogHost {
     pool: ProbePool,
-    flags: Arc<Mutex<VecDeque<FlagEntry>>>,
+    flags: Arc<Mutex<Flags>>,
 }
 impl CatalogHost {
     pub fn new(pool: ProbePool) -> Self {
         Self {
             pool,
-            flags: Arc::new(Mutex::new(VecDeque::new())),
+            flags: Default::default(),
         }
     }
     pub async fn executable_names(
@@ -82,18 +83,9 @@ impl CatalogHost {
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }
-        let words = tokens(command);
-        let script = libertty_engine::command_policy::script_operand(
-            &words.iter().map(|w| &w.value).collect::<Vec<_>>(),
-        );
-        if !words
-            .first()
-            .is_some_and(|w| ["python", "python3"].contains(&w.value.as_str()))
-            || !script.is_some_and(|index| words[index].value.ends_with(".py"))
-        {
+        let Some(file) = crate::probe_policy::python_script(command, cwd) else {
             return Ok(None);
-        }
-        let file = path::resolve(&[cwd, &words[script.unwrap()].value]);
+        };
         let info = tokio::fs::metadata(&file).await.ok();
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
@@ -114,18 +106,10 @@ impl CatalogHost {
         );
         let task = {
             let mut cache = self.flags.lock().await;
-            if let Some((_, _, task)) = cache.iter().find(|(old, old_stamp, task)| {
-                old == &file && old_stamp == &stamp && !task.aborted()
-            }) {
-                task.clone()
-            } else {
-                cache.retain(|(old, _, _)| old != &file);
-                if cache.len() >= 200 {
-                    cache.pop_front();
-                }
+            cache.get_or_insert_with(file.clone(), stamp, None, || {
                 let pool = self.pool.clone();
-                let target = file.clone();
-                let task = SharedTask::new(move |cancel| {
+                let target = file;
+                SharedTask::new(move |cancel| {
                     Box::pin(async move {
                         let options = ProbeOptions {
                             cwd: std::env::current_dir()
@@ -147,15 +131,14 @@ impl CatalogHost {
                         if cancel.is_cancelled() {
                             return Err(ABORTED.into());
                         }
-                        Ok(result
-                            .ok()
-                            .filter(|r| r.success)
-                            .and_then(|r| serde_json::from_slice(&r.stdout).ok()))
+                        let result = result?;
+                        if !result.success {
+                            return Err("Script description probe failed.".into());
+                        }
+                        serde_json::from_slice(&result.stdout).map_err(|error| error.to_string())
                     })
-                });
-                cache.push_back((file, stamp, task.clone()));
-                task
-            }
+                })
+            })
         };
         task.wait(cancel).await
     }

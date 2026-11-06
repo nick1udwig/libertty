@@ -1,3 +1,6 @@
+import { builtinState, builtinStateCodecs } from './builtin-state.ts';
+import type { Connected } from './generated/protocol.ts';
+import { sendToTerminal } from './frame-protocol.ts';
 import { isHerdrPlugin } from './plugins.ts';
 import { requestJSON } from './api.ts';
 import { backendAccess, forgetBackendAccess, rememberBackendAccess } from './backend-access.ts';
@@ -15,11 +18,11 @@ import { externalPlugin } from './external-plugin.ts';
 import { HerdrNotifications } from './herdr-notifications.ts';
 import { herdrSession } from './herdr-protocol.ts';
 import { HerdrSounds } from './herdr-sounds.ts';
-import type { HerdrView } from './herdr-view.ts';
+import { MountedTabs } from './mounted-tabs.ts';
 import { validCapture, validPath, validSession } from './persistence.ts';
 import { selectedFileReader } from './plugin-file.ts';
 import { type PluginPackage } from './plugin-package.ts';
-import { BUILTIN_VERSION, PluginRegistry, tabPluginId, type PluginView } from './plugins.ts';
+import { BUILTIN_VERSION, PluginRegistry, tabPluginId } from './plugins.ts';
 import { createWorkspaceConnections } from './workspace-connections.ts';
 import { createWorkspaceLibrary } from './workspace-library.ts';
 import { createWorkspaceNavigation } from './workspace-navigation.ts';
@@ -32,22 +35,21 @@ const primary: BackendProfile = {
   name: 'Primary backend',
   url: new URL('.', document.baseURI).href,
 };
-const frames = new Map<string, HTMLIFrameElement>(),
-  tokens = new Map<string, string>(),
+const tokens = new Map<string, string>(),
   vaults = new Map<string, { keys: KeyInfo[]; knownHosts: KnownHost[] }>();
-const plugins = new PluginRegistry(),
-  pluginViews = new Map<string, PluginView>();
-const herdrViews = new Map<string, HerdrView>(),
-  herdrAttention = new Map<string, number>();
+const plugins = new PluginRegistry(builtinStateCodecs);
+const mounts = new MountedTabs();
+const pluginViews = mounts.views;
 const herdrSounds = new HerdrSounds();
 const authenticating = new Map<string, Promise<void>>();
-const workspace = loadWorkspace(primary);
+const workspace = loadWorkspace(primary, plugins);
 const backendFor = (id: string) => workspace.backends.find((b) => b.id === id)!;
 function store() {
   saveWorkspace(workspace, notice);
 }
 const services: WorkspaceServices = {
   api,
+  endpoint: api,
   authenticate,
   backendFor,
   tokenFor,
@@ -58,15 +60,12 @@ const services: WorkspaceServices = {
 const navigation = createWorkspaceNavigation({
   ...services,
   workspace,
-  herdrViews,
   populate: (...args) => library.populate(...args),
   renderSettings: (...args) => settings.renderSettings(...args),
   renderCards: (...args) => library.renderCards(...args),
   plugins,
   editHost: (...args) => library.editHost(...args),
-  pluginViews,
-  frames,
-  herdrAttention,
+  mounts,
   cancelReconnect: (id) => connections.cancelReconnect(id),
   authorizeTerminals,
   capturedSSH: (...args) => connections.capturedSSH(...args),
@@ -115,7 +114,8 @@ const { capturedHerdr, openHost, routes, configureConnection, reconnectHerdr } =
 const herdrNotifications = new HerdrNotifications(
   <T>(id: string, name: string, data?: unknown) => api<T>(backendFor(id), name, data),
   () => {
-    for (const [id, view] of herdrViews) {
+    for (const [id, view] of pluginViews) {
+      if (!view.updatePresence) continue;
       view.updatePresence();
       const tab = workspace.tabs.find((tab) => tab.id === id);
       if (tab)
@@ -123,8 +123,8 @@ const herdrNotifications = new HerdrNotifications(
           .watch(
             tab.backendId,
             tab.id,
-            herdrSession(tab.herdrSession),
-            tab.herdrSource,
+            herdrSession(builtinState(tab).herdrSession),
+            builtinState(tab).herdrSource,
             tab.pluginId === 'herdr-core',
           )
           .catch(fail);
@@ -159,6 +159,7 @@ for (const plugin of builtinPlugins({
   connect: (host, id) => configureConnection(host, id),
   closeSession: closeTabSession,
   reconnectHerdr,
+  resumeHerdr: connections.resumeHerdr,
   store,
   notice,
   fail,
@@ -166,19 +167,6 @@ for (const plugin of builtinPlugins({
   terminalURL,
   openReading,
   openReadingCapture,
-  frame(tab, frame) {
-    if (frame) frames.set(tab.id, frame);
-    else frames.delete(tab.id);
-  },
-  herdr(tab, view) {
-    if (view) {
-      herdrViews.set(tab.id, view);
-      $('workspace-navigation').append(view.navigationElement);
-    } else {
-      herdrViews.delete(tab.id);
-      herdrAttention.delete(tab.id);
-    }
-  },
   toggleTerminalTabs: navigation.toggleTerminalTabs,
   ready(tab) {
     if (tab.id === workspace.active) updateViewVisibility();
@@ -190,8 +178,8 @@ for (const plugin of builtinPlugins({
     herdrNotifications.watch(
       tab.backendId,
       tab.id,
-      herdrSession(tab.herdrSession),
-      tab.herdrSource,
+      herdrSession(builtinState(tab).herdrSession),
+      builtinState(tab).herdrSource,
       tab.pluginId === 'herdr-core',
     ),
   unwatch: (tab) => herdrNotifications.unwatch(tab.backendId, tab.id),
@@ -208,7 +196,7 @@ const settings = createWorkspaceSettings({
   unmount,
   mount,
   renderTabs,
-  frames,
+  frame: (id) => mounts.frame(id),
 });
 const selectedFileReaders = new WeakMap<TerminalTab, ReturnType<typeof selectedFileReader>>();
 function registerExternal(pkg: PluginPackage) {
@@ -253,7 +241,7 @@ function authorizeTerminals(backend: BackendProfile, accessToken: string) {
   for (const id of lockedTerminals) {
     if (workspace.tabs.find((tab) => tab.id === id)?.backendId !== backend.id) continue;
     lockedTerminals.delete(id);
-    frames.get(id)?.contentWindow?.postMessage({ type: 'authorize', accessToken }, location.origin);
+    sendToTerminal(mounts.frame(id)?.contentWindow, { type: 'authorize', accessToken });
   }
 }
 async function api<T>(
@@ -290,7 +278,7 @@ function authenticate(backend: BackendProfile, force = false): Promise<void> {
     }
     const save = (accessToken: string) => authorizeTerminals(backend, accessToken);
     try {
-      const result = await api<{ accessToken: string }>(backend, 'api/connect', {
+      const result = await api<Connected>(backend, 'api/connect', {
         noSession: true,
       });
       save(result.accessToken);
@@ -316,7 +304,7 @@ function authenticate(backend: BackendProfile, force = false): Promise<void> {
           $<HTMLFormElement>('backend-login-form').onsubmit = async (event) => {
             event.preventDefault();
             try {
-              const result = await api<{ accessToken: string }>(backend, 'api/connect', {
+              const result = await api<Connected>(backend, 'api/connect', {
                 noSession: true,
                 token: input('backend-token').value,
               });
@@ -405,7 +393,7 @@ async function openHerdrNotification(tabId: unknown, terminalId: unknown) {
   show('terminal');
   await mount(tab);
   renderTabs();
-  if (typeof terminalId === 'string') herdrViews.get(tab.id)?.openTerminal(terminalId);
+  if (typeof terminalId === 'string') pluginViews.get(tab.id)?.openTerminal?.(terminalId);
 }
 navigator.serviceWorker?.addEventListener('message', (event) => {
   if (event.data?.type === 'herdr-notification')
@@ -485,10 +473,13 @@ async function consumePendingReading() {
       (!request.herdrSource || validSession(request.herdrSource))
         ? {
             ...source,
-            readHerdrTerminal: request.herdrTerminal,
-            herdrCore: request.herdrCore === true,
-            herdrSession: herdrSession(request.herdrSession),
-            herdrSource: request.herdrSource || undefined,
+            pluginState: {
+              ...builtinState(source),
+              readHerdrTerminal: request.herdrTerminal,
+              herdrCore: request.herdrCore === true,
+              herdrSession: herdrSession(request.herdrSession),
+              herdrSource: request.herdrSource || undefined,
+            },
           }
         : source;
     if (captured)

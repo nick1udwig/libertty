@@ -7,6 +7,7 @@ The workspace is terminal-first, with saved direct and SSH hosts, backend select
 `src/main.ts` wires workspace services, backend authentication and startup.
 `workspace-storage.ts` validates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
 These modules share one live workspace state so replacing saved hosts, backends or tabs is visible to pending actions.
+`terminal-lifecycle.ts` owns connection progress, visibility policy and timers for hidden tabs and parked panes.
 Each terminal uses a same-origin `terminal.html` frame running the existing renderer and input pipeline.
 `suggestion-input.ts` captures clipboard and IME events, `inline-suggestions.ts` owns the repair lifecycle, and `suggestion-view.ts` renders command choices.
 The repair lifecycle uses explicit idle, transcribing, repairing and ready phases while menu visibility and suspension remain independent.
@@ -64,6 +65,7 @@ A loading cover shows only over an empty screen, and dialog form errors stay bes
 The orb draws once after a burst of changes, such as a tab switch, so it reads layout once.
 
 Each frame connects directly to its chosen backend.
+The shared frame protocol types both senders and decodes incoming payloads before the workspace or terminal handles them.
 Origin/source-checked messages supply access credentials; iframe URLs contain a backend URL and session ID, never tokens or passphrases.
 Cross-origin backends require an explicit frontend origin allowlist.
 HTTP uses bearer access tokens; cross-origin WebSockets use short-lived, single-use, session-bound tickets.
@@ -409,3 +411,9 @@ Command output and completion suppress predicted echo until the next prompt or i
 These markers only constrain prediction and never authorize input or replace server readiness.
 Terminals without shell markers keep the existing prediction rules.
 A full reset or native snapshot restoration clears advisory shell state, and restoration reattaches the callbacks to the new native handle.
+
+Builtin tab details are stored in `pluginState`, with decoders selected by plugin ID and pinned version.
+The builtin decoders migrate older flat records when the workspace loads.
+Unknown plugin versions retain their opaque state.
+Tab identity, session ownership and selected-file permission remain in the workspace record.
+Selected-file permission is separate from plugin-writable state so saved plugin settings cannot widen access.

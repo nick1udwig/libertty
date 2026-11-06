@@ -1,6 +1,6 @@
 use crate::{
-    arguments::{ParsedCommand, option_binding},
-    command_policy::{child_scope, flags_for, option_arity, script_operand},
+    arguments::{Argument, ArgumentCursor, ParsedCommand},
+    command_policy::{flags_ref, option_arity, script_operand},
     host::Host,
     path_repair::{ExpectedType, PathInput, path_input, resolve_path},
     shell_structure::word_spans,
@@ -31,7 +31,7 @@ pub async fn repair_copy_destination(
         return Ok(None);
     };
     let (words, spans) = (parsed.words, parsed.spans);
-    let flags = flags_for("cp", metadata);
+    let flags = flags_ref("cp", metadata, &[]);
     let mut index = 1;
     let mut options = true;
     let mut operands = Vec::new();
@@ -54,7 +54,7 @@ pub async fn repair_copy_destination(
         {
             return Ok(None);
         }
-        let Some(takes_value) = option_arity(option, &flags) else {
+        let Some(takes_value) = option_arity(option, flags) else {
             return Ok(None);
         };
         index += if takes_value { 2 } else { 1 };
@@ -119,7 +119,7 @@ pub async fn repair_input_file(
     {
         return Ok(None);
     }
-    let flags = flags_for(&command, metadata);
+    let flags = flags_ref(&command, metadata, &[]);
     let mut index = 1;
     while index < spans.len() {
         let option = &expanded[spans[index].clone()];
@@ -130,7 +130,7 @@ pub async fn repair_input_file(
         if !option.starts_with('-') {
             break;
         }
-        let Some(takes) = option_arity(option, &flags) else {
+        let Some(takes) = option_arity(option, flags) else {
             return Ok(None);
         };
         index += if takes { 2 } else { 1 };
@@ -228,22 +228,20 @@ pub async fn repair_option_paths(
             continue;
         }
         let script = script_operand(&words.iter().map(|w| &w.value).collect::<Vec<_>>());
-        let mut scope = words[0].value.clone();
-        let mut flags = flags_for(&scope, metadata);
-        let mut index = 1;
-        while index < words.len() {
-            if script.is_some_and(|script| index > script)
-                && let Some(script_flags) = script_flags
-            {
-                flags = script_flags.to_vec();
+        let mut cursor =
+            ArgumentCursor::new(words.iter().map(|word| word.value.as_str()), metadata);
+        loop {
+            if script.is_some_and(|script| cursor.index > script) {
+                cursor.flags = script_flags;
             }
-            let word = &words[index];
-            if word.value == "--" {
+            let Some(argument) = cursor.next() else { break };
+            if matches!(argument, Argument::Delimiter) {
                 break;
             }
-            let binding = option_binding(&word.value, &flags);
-            if let Some(flag) = binding.as_ref().and_then(|binding| binding.descriptor) {
-                let attached = binding.as_ref().and_then(|binding| binding.attached);
+            if let Argument::Option { index, binding, .. } = argument
+                && let Some(flag) = binding.descriptor
+            {
+                let attached = binding.attached;
                 let value_index = if attached.is_some() { index } else { index + 1 };
                 if let Some(schema) = &flag.value
                     && flag.value_bounds() == (1, Some(1))
@@ -337,17 +335,6 @@ pub async fn repair_option_paths(
                     }
                     break;
                 }
-                index += if option_arity(&word.value, &flags) == Some(true) {
-                    2
-                } else {
-                    1
-                };
-            } else {
-                if let Some(child) = child_scope(&scope, &word.value, metadata) {
-                    scope = child;
-                    flags = flags_for(&scope, metadata);
-                }
-                index += 1;
             }
         }
     }

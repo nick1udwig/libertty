@@ -1,3 +1,4 @@
+import { builtinState } from '../src/builtin-state.ts';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -25,14 +26,14 @@ test('the registry preserves pinned versions and unavailable tabs', () => {
   registry.remove(old.id); assert.equal(registry.get(old.id, '1'), undefined); assert.equal(registry.get(old.id, '2'), undefined);
 });
 for (const pluginId of ['herdr', 'herdr-core']) test(pluginId + ' readers and linked files retain the pane connection and return to their source tab', () => {
-  const source = { ...tab, pluginId, herdrCore: pluginId === 'herdr-core', herdrSession: 'work', herdrSource: 'source-id', readHerdrTerminal: 'term_0' };
+  const source = { ...tab, pluginId, pluginState: { herdrCore: pluginId === 'herdr-core', herdrSession: 'work', herdrSource: 'source-id', readHerdrTerminal: 'term_0' } };
   const file = readingTab(source, { name: 'Notes', readPath: '/work/README.md' });
   const linked = readingTab(file, { name: 'Linked', readPath: '/work/linked.md' });
   for (const reader of [file, linked]) {
     assert.equal(reader.parentTabId, source.id);
-    assert.equal(reader.herdrSession, 'work'); assert.equal(reader.herdrSource, 'source-id');
-    assert.equal(reader.herdrCore === true, source.herdrCore);
-    assert.equal(reader.readHerdrTerminal, 'term_0'); assert.equal(reader.ownsSession, false);
+    assert.equal(builtinState(reader).herdrSession, 'work'); assert.equal(builtinState(reader).herdrSource, 'source-id');
+    assert.equal(builtinState(reader).herdrCore === true, builtinState(source).herdrCore);
+    assert.equal(builtinState(reader).readHerdrTerminal, 'term_0'); assert.equal(reader.ownsSession, false);
   }
 });
 test('nested reader handoffs reject malformed file paths and capture descriptors', () => {
@@ -60,4 +61,12 @@ test('the bridge cannot widen file permission, call shell APIs or persist excess
   await assert.rejects(pluginRequest('state.save', 'x'.repeat(16 * 1024), scope), /16 KB/);
   assert.throws(() => pluginState(undefined), /JSON/);
   assert.throws(() => pluginState('🙂'.repeat(5000)), /16 KB/, 'State limits count encoded bytes');
+});
+
+test('packaged plugins cannot declare trusted workspace capabilities', async () => {
+  const sample = JSON.parse(await readFile(new URL('../examples/plugins/example.log-viewer.libertty-plugin.json', import.meta.url), 'utf8'));
+  const pkg = parsePluginPackage({ ...sample, capabilities: { terminal: true }, manifest: { ...sample.manifest, capabilities: { terminal: true, waitForReady: true } } });
+  assert.equal('capabilities' in pkg, false);
+  assert.equal('capabilities' in pkg.manifest, false);
+  assert.deepEqual(pkg.manifest.permissions, ['file.read']);
 });

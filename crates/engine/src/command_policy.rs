@@ -67,7 +67,8 @@ pub fn script_operand<T: AsRef<str>>(args: &[T]) -> Option<usize> {
     if !script_command(command) {
         return None;
     }
-    let flags = flags_for(command, &CommandMetadata::default());
+    let metadata = CommandMetadata::default();
+    let flags = flags_ref(command, &metadata, &[]);
     let mut index = 1;
     while index < args.len() {
         let word = args[index].as_ref();
@@ -80,7 +81,7 @@ pub fn script_operand<T: AsRef<str>>(args: &[T]) -> Option<usize> {
         if !word.starts_with('-') {
             return Some(index);
         }
-        index += if option_arity(word, &flags)? { 2 } else { 1 };
+        index += if option_arity(word, flags)? { 2 } else { 1 };
     }
     None
 }

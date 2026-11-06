@@ -49,5 +49,5 @@ try:
                     flag['value'] = schema
                 flags.append(flag)
     print(json.dumps(flags if parsers else None))
-except (SyntaxError, UnicodeError, OSError):
+except (SyntaxError, UnicodeError):
     print('null')

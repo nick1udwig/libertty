@@ -1,3 +1,4 @@
+import type { HttpAPI } from './http-contract.ts';
 import { node } from './dom.ts';
 import {
   herdrName,
@@ -9,12 +10,10 @@ import { worktreePath, type SpaceRepo } from './herdr-spaces.ts';
 
 export type StripItem = HerdrAgent & { space?: HerdrSpace; repo?: SpaceRepo };
 /** The space or terminal a Herdr action created, which the strip selects after refreshing. */
-export interface Created {
-  workspaceId?: string;
-  terminalId?: string;
-}
+export type { HerdrCreated as Created } from './generated/protocol.ts';
+import type { HerdrCreated as Created } from './generated/protocol.ts';
 export interface DialogHost {
-  api<T>(path: string, data?: unknown): Promise<T>;
+  api: HttpAPI;
   refresh(created?: Created): Promise<void>;
   closeMenu(): void;
   closeTab(item: StripItem): Promise<void>;
@@ -164,7 +163,7 @@ export class HerdrDialogs {
       } catch (reason: any) {
         if (modal.open) {
           error.textContent = reason.message;
-          forceRemove.hidden = forceHint.hidden = !/--force\b/.test(reason.message);
+          forceRemove.hidden = forceHint.hidden = reason.code !== 'force_required';
         }
       } finally {
         dialog.busy = false;
@@ -245,15 +244,14 @@ export class HerdrDialogs {
             : 'Opening worktree…';
       branch?.update();
       try {
-        const created = await this.host.api<Created>('api/herdr/action', {
-          action,
+        const created = await this.host.api('api/herdr/action', {
           workspaceId: space.id,
           terminalId,
           ...(action === 'split'
-            ? { direction: picker.value }
+            ? { action, direction: picker.value === 'down' ? 'down' : 'right' }
             : action === 'new-worktree'
-              ? { branch: herdrName(input.value) }
-              : { path: picker.value }),
+              ? { action, branch: herdrName(input.value) }
+              : { action, path: picker.value }),
         });
         await this.host.refresh(created);
         modal.close();
@@ -269,7 +267,7 @@ export class HerdrDialogs {
     if (action === 'split') return;
     progress.textContent = 'Loading worktrees…';
     try {
-      const listing = await this.host.api<HerdrWorktrees>('api/herdr/action', {
+      const listing = await this.host.api('api/herdr/action', {
         action: 'list-worktrees',
         workspaceId: space.id,
         terminalId,
@@ -327,9 +325,9 @@ export class HerdrDialogs {
       save.disabled = true;
       try {
         await this.host.api('api/herdr/action', {
-          action: agent.space ? 'rename-space' : 'rename',
-          terminalId: agent.terminalId,
-          workspaceId: agent.space?.id,
+          ...(agent.space
+            ? { action: 'rename-space', workspaceId: agent.space.id }
+            : { action: 'rename', terminalId: agent.terminalId }),
           name: herdrName(input.value),
         });
         await this.host.refresh();

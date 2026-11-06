@@ -100,7 +100,10 @@ pub(crate) async fn validate_terminal(
         .ok_or("This terminal ended or moved.".into())
 }
 /// Runs an action on its own session, then waits until the shared session includes its result.
-pub async fn action(target: &Target, input: crate::herdr::action::Action) -> Result<Value, String> {
+pub async fn action(
+    target: &Target,
+    input: crate::herdr::action::Action,
+) -> Result<Value, crate::protocol::http::HerdrActionError> {
     let result = actions::action(target, input).await;
     hub::refresh(target).await?;
     result

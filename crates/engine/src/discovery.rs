@@ -12,14 +12,16 @@ use std::{
     cell::RefCell,
     collections::VecDeque,
     hash::{DefaultHasher, Hash, Hasher},
+    sync::{Arc, OnceLock},
 };
 
 /// A hash of the catalog and environment that learned metadata depends on.
 type ContextKey = u64;
+
 struct Snapshot {
     key: ContextKey,
     until: f64,
-    metadata: CommandMetadata,
+    metadata: Arc<CommandMetadata>,
 }
 type DiscoveryContext = (
     String,
@@ -283,29 +285,35 @@ impl Discovery {
             {
                 let keep =
                     |scope: &String| scope != root && !scope.starts_with(&format!("{root} "));
-                snapshot.metadata.flags.retain(|scope, _| keep(scope));
-                snapshot.metadata.subcommands.retain(|scope, _| keep(scope));
-                if let Some(required) = &mut snapshot.metadata.required_positionals {
+                let metadata = Arc::make_mut(&mut snapshot.metadata);
+                metadata.flags.retain(|scope, _| keep(scope));
+                metadata.subcommands.retain(|scope, _| keep(scope));
+                if let Some(required) = &mut metadata.required_positionals {
                     required.retain(|scope, _| keep(scope));
                 }
-                if let Some(schemas) = &mut snapshot.metadata.schemas {
+                if let Some(schemas) = &mut metadata.schemas {
                     schemas.retain(|scope, _| keep(scope));
                 }
-                if let Some(versions) = &mut snapshot.metadata.versions {
+                if let Some(versions) = &mut metadata.versions {
                     versions.remove(root);
                 }
             }
         }
         !changed
     }
-    pub fn cached(&self, catalog: &Catalog, env: &Environment, now: f64) -> CommandMetadata {
+    pub fn cached(&self, catalog: &Catalog, env: &Environment, now: f64) -> Arc<CommandMetadata> {
         let key = self.context(catalog, env);
         self.snapshots
             .borrow()
             .iter()
             .find(|entry| entry.key == key && entry.until >= now)
             .map(|entry| entry.metadata.clone())
-            .unwrap_or_else(CommandMetadata::empty)
+            .unwrap_or_else(|| {
+                static EMPTY: OnceLock<Arc<CommandMetadata>> = OnceLock::new();
+                EMPTY
+                    .get_or_init(|| Arc::new(CommandMetadata::empty()))
+                    .clone()
+            })
     }
     fn remember(&self, metadata: &CommandMetadata, catalog: &Catalog, env: &Environment, now: f64) {
         let key = self.context(catalog, env);
@@ -314,7 +322,7 @@ impl Discovery {
             .iter_mut()
             .find(|entry| entry.key == key && entry.until >= now)
         {
-            entry.metadata.merge(metadata.clone());
+            Arc::make_mut(&mut entry.metadata).merge(metadata.clone());
             return;
         }
         snapshots.retain(|entry| entry.key != key);
@@ -324,7 +332,7 @@ impl Discovery {
         snapshots.push_back(Snapshot {
             key,
             until: now + 600000.0,
-            metadata: metadata.clone(),
+            metadata: Arc::new(metadata.clone()),
         });
     }
     pub async fn discover(
@@ -491,5 +499,80 @@ impl Discovery {
             metadata,
             script_flags: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[test]
+    fn readers_share_snapshots_and_writers_preserve_existing_readers() {
+        let discovery = Discovery::default();
+        let catalog = Catalog::default();
+        let environment = Environment::new();
+        let mut metadata = CommandMetadata::empty();
+        metadata
+            .subcommands
+            .insert("example".into(), vec!["first".into()]);
+        discovery.seed(&metadata, &catalog, &environment, 0.0);
+        let original = discovery.cached(&catalog, &environment, 1.0);
+        let mut reader = discovery.cached(&catalog, &environment, 1.0);
+        assert!(Arc::ptr_eq(&original, &reader));
+        assert_eq!(
+            serde_json::to_value(&reader).unwrap(),
+            serde_json::to_value(&metadata).unwrap()
+        );
+        Arc::make_mut(&mut reader).subcommands.clear();
+        assert_eq!(original.subcommands["example"], ["first"]);
+        metadata
+            .subcommands
+            .insert("example".into(), vec!["second".into()]);
+        discovery.seed(&metadata, &catalog, &environment, 2.0);
+        assert_eq!(original.subcommands["example"], ["first"]);
+        assert_eq!(
+            discovery.cached(&catalog, &environment, 3.0).subcommands["example"],
+            ["second"]
+        );
+        discovery.clear();
+        assert_eq!(original.subcommands["example"], ["first"]);
+        assert!(
+            discovery
+                .cached(&catalog, &environment, 3.0)
+                .subcommands
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn expired_or_unrelated_contexts_do_not_reuse_learned_metadata() {
+        let discovery = Discovery::default();
+        let catalog = Catalog::default();
+        let environment = Environment::new();
+        let mut metadata = CommandMetadata::empty();
+        metadata
+            .subcommands
+            .insert("example".into(), vec!["first".into()]);
+        discovery.seed(&metadata, &catalog, &environment, 0.0);
+        assert!(
+            discovery
+                .cached(&catalog, &environment, 600001.0)
+                .subcommands
+                .is_empty()
+        );
+        let other = Catalog {
+            cwd: "/other".into(),
+            ..catalog.clone()
+        };
+        assert!(
+            discovery
+                .cached(&other, &environment, 1.0)
+                .subcommands
+                .is_empty()
+        );
+        assert_eq!(
+            discovery.cached(&catalog, &environment, 1.0).subcommands["example"],
+            ["first"]
+        );
     }
 }

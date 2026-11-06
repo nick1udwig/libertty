@@ -1,3 +1,6 @@
+import { builtinState, builtinStateCodecs } from './builtin-state.ts';
+import type { HttpEndpoint, HttpInput, HttpOutput } from './http-contract.ts';
+import { sendToTerminal } from './frame-protocol.ts';
 import type { BackendProfile, HostProfile, TerminalTab } from './connections.ts';
 import { folderIcon, terminalIcon, herdrIcon } from './icons.ts';
 import { fileBrowser } from './file-browser.ts';
@@ -8,6 +11,7 @@ import type { HerdrView } from './herdr-view.ts';
 import { BUILTIN_VERSION, type TabPlugin } from './plugins.ts';
 import { readingPlugin, type ReadingServices } from './reading-plugin.ts';
 import { terminalCanEvict } from './terminal-retention.ts';
+import { herdrConnection, terminalConnection } from './plugin-connection.ts';
 
 export interface BuiltinServices extends ReadingServices {
   active(tab: TerminalTab): boolean;
@@ -24,13 +28,12 @@ export interface BuiltinServices extends ReadingServices {
   closeSession(tab: TerminalTab): Promise<void>;
   openReadingCapture(tab: TerminalTab, capture: string, name: string, exitCode?: number): void;
   reconnectHerdr(tab: TerminalTab): Promise<void>;
+  resumeHerdr(tab: TerminalTab): Promise<void>;
   store(): void;
   notice: Notify;
   fail: Fail;
   tabState(tab: TerminalTab, key: string, state?: NoticeInput): void;
   terminalURL(backend: BackendProfile, session: string): string;
-  frame(tab: TerminalTab, frame?: HTMLIFrameElement): void;
-  herdr(tab: TerminalTab, view?: HerdrView): void;
   toggleTerminalTabs(tab: TerminalTab): void;
   ready(tab: TerminalTab): void;
   attention(tab: TerminalTab, count: number): void;
@@ -48,45 +51,47 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     version: BUILTIN_VERSION,
     available: (host: HostProfile) => host.kind !== 'herdr',
   };
-  return [
+  const plugins: TabPlugin[] = [
     {
       ...common,
       id: 'terminal',
+      connection: terminalConnection(),
+      capabilities: { terminal: true },
       name: 'Terminal',
       connectLabel: 'Connect new terminal',
       icon: '▤',
       iconHTML: terminalIcon,
       panelPrefix: 'frame-',
       connect: (host) => s.connect(host, 'terminal'),
-      async mount(tab) {
+      async mount(tab, signal) {
+        signal?.throwIfAborted();
         const frame = document.createElement('iframe');
         frame.title = tab.name + ' terminal';
         frame.id = 'frame-' + tab.id;
         frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write';
         frame.src = s.terminalURL(s.backend(tab), tab.session);
-        s.frame(tab, frame);
         return {
           element: frame,
+          terminal: { frame, frames: [frame], retain: true },
           setVisible(visible) {
             frame.hidden = !visible;
-            frame.contentWindow?.postMessage({ type: 'tab-visibility', visible }, location.origin);
+            sendToTerminal(frame.contentWindow, { type: 'tab-visibility', visible });
           },
           focus() {
-            frame.contentWindow?.postMessage({ type: 'focus-terminal' }, location.origin);
+            sendToTerminal(frame.contentWindow, { type: 'focus-terminal' });
           },
           applySettings() {
-            frame.contentWindow?.postMessage({ type: 'settings-changed' }, location.origin);
+            sendToTerminal(frame.contentWindow, { type: 'settings-changed' });
           },
           copySelection() {
-            frame.contentWindow?.postMessage(
-              { type: 'settings-action', action: 'copy-selection' },
-              location.origin,
-            );
+            sendToTerminal(frame.contentWindow, {
+              type: 'settings-action',
+              action: 'copy-selection',
+            });
           },
           canEvict: () => terminalCanEvict(frame),
           dispose() {
             frame.remove();
-            s.frame(tab);
           },
         };
       },
@@ -100,6 +105,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     {
       ...common,
       id: 'files',
+      connection: terminalConnection(true),
       name: 'SFTP / Files',
       connectLabel: 'Connect SFTP / Files',
       icon: '',
@@ -107,9 +113,10 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       panelPrefix: 'files-',
       className: 'files-tab',
       connect: (host) => s.connect(host, 'files'),
-      async mount(tab) {
+      async mount(tab, signal) {
         const backend = s.backend(tab);
         await s.authenticate(backend);
+        signal?.throwIfAborted();
         if (!s.active(tab)) throw new Error('This tab has closed.');
         const view = fileBrowser(
           fileClient(
@@ -118,9 +125,9 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
             () => s.token(backend),
             () => s.authenticate(backend, true),
           ),
-          tab.directory || '.',
+          builtinState(tab).directory || '.',
           (directory) => {
-            tab.directory = directory;
+            builtinState(tab).directory = directory;
             s.store();
           },
         );
@@ -141,20 +148,28 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       (id): TabPlugin => ({
         version: BUILTIN_VERSION,
         id,
+        connection: herdrConnection(id === 'herdr-core'),
+        resume: s.resumeHerdr,
         name: id === 'herdr-core' ? 'Herdr Core' : 'Herdr',
         connectLabel: id === 'herdr-core' ? 'Connect Herdr Core' : 'Connect Herdr',
         icon: 'H',
         iconHTML: herdrIcon,
         panelPrefix: 'herdr-',
         className: 'herdr-tab',
+        capabilities: {
+          terminal: true,
+          waitForReady: true,
+          attentionLabel: 'agents need attention',
+        },
         available: (host) => id === 'herdr' || host.kind !== 'herdr',
         connect: (host) => s.connect(host, id),
-        async mount(tab) {
+        async mount(tab, signal) {
           const backend = s.backend(tab);
           const { HerdrView } = await import('./herdr-view.ts');
+          signal?.throwIfAborted();
           if (!s.active(tab)) throw new Error('This tab has closed.');
-          const session = herdrSession(tab.herdrSession),
-            source = tab.herdrSource,
+          const session = herdrSession(builtinState(tab).herdrSession),
+            source = builtinState(tab).herdrSource,
             sourceHost = s.host(tab.hostId)?.herdrSourceHostId;
           const core = id === 'herdr-core';
           const connection =
@@ -174,15 +189,26 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
             reconnect: () => s.reconnectHerdr(tab),
             key: 'libertty.herdr.' + connection,
             reading: (terminalId, request) => {
-              const source = { ...tab, herdrCore: core, readHerdrTerminal: terminalId };
+              const source = {
+                ...tab,
+                pluginState: {
+                  ...builtinState(tab),
+                  herdrCore: core,
+                  readHerdrTerminal: terminalId,
+                },
+              };
               if ('path' in request) s.openReading(source, request.path);
               else s.openReadingCapture(source, request.capture, request.name, request.exitCode);
             },
             notificationDevice: () => s.notificationDevice(tab.backendId),
             toggleTerminalTabs: () => s.toggleTerminalTabs(tab),
-            api: async <T>(name: string, data?: unknown, signal?: AbortSignal) => {
+            api: async <K extends HttpEndpoint, I extends HttpInput<K>>(
+              name: K,
+              data: I,
+              signal?: AbortSignal,
+            ) => {
               try {
-                return await s.api<T>(
+                return await s.api<HttpOutput<K, I>>(
                   backend,
                   name +
                     (name.includes('?') ? '&' : '?') +
@@ -201,7 +227,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
                   !signal?.aborted &&
                   error.status === 404 &&
                   source &&
-                  tab.herdrSource === source &&
+                  builtinState(tab).herdrSource === source &&
                   !tab.ended
                 ) {
                   tab.ended = true;
@@ -219,20 +245,41 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
           });
           view.element.id = 'herdr-' + tab.id;
           view.navigationElement.id = 'herdr-strip-' + tab.id;
-          s.herdr(tab, view);
           void s
             .watch(tab)
-            .then(() => view.updatePresence())
+            .then(() => {
+              if (!signal?.aborted) view.updatePresence();
+            })
             .catch(s.fail);
           return {
             element: view.element,
+            get ready() {
+              return view.ready;
+            },
+            terminal: {
+              get frame() {
+                return view.terminalFrame;
+              },
+              get frames() {
+                return view.element.querySelectorAll('iframe');
+              },
+            },
+            navigation: {
+              element: view.navigationElement,
+              get gesturesBlocked() {
+                return view.treeOpen;
+              },
+              setExpanded: (expanded) => view.setTerminalTabsExpanded(expanded),
+              holdSize: () => view.holdTerminalSize(),
+            },
+            updatePresence: () => view.updatePresence(),
+            openTerminal: (id) => view.openTerminal(id),
             setVisible: (visible) => view.setVisible(visible),
             setHeld: (held) => view.setHeld(held),
             applySettings: () => view.applySettings(),
             copySelection: () => view.copySelection(),
             dispose() {
               view.dispose();
-              s.herdr(tab);
             },
           };
         },
@@ -245,4 +292,7 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
     ),
     readingPlugin(s),
   ];
+  for (const plugin of plugins)
+    plugin.state = builtinStateCodecs.find((entry) => entry.id === plugin.id)!.state;
+  return plugins;
 }

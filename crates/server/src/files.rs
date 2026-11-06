@@ -230,7 +230,7 @@ pub async fn upload_on(
     guard.committed = true;
     Ok(result)
 }
-async fn text_file(fs: &FileSystem, file: &str) -> Result<Value> {
+async fn text_file(fs: &FileSystem, file: &str) -> Result<crate::protocol::http::FileText> {
     let info = fs.metadata(file, false).await?;
     let too_large = || Error::new("Edit supports text files up to 32 KB.", 400);
     if !info.is_file() || info.len() > 32768 {
@@ -248,9 +248,11 @@ async fn text_file(fs: &FileSystem, file: &str) -> Result<Value> {
         return Err(Error::new("Binary files cannot be edited as text.", 400));
     }
     // TextDecoder removes a leading UTF-8 BOM but hashes the original bytes.
-    Ok(
-        json!({"text":text.strip_prefix('\u{feff}').unwrap_or(text),"version":format!("{:x}",Sha256::digest(&bytes)),"mode":info.mode()}),
-    )
+    Ok(crate::protocol::http::FileText {
+        text: text.strip_prefix('\u{feff}').unwrap_or(text).into(),
+        version: format!("{:x}", Sha256::digest(&bytes)),
+        mode: info.mode(),
+    })
 }
 async fn absent(fs: &FileSystem, file: &str) -> Result<()> {
     match fs.metadata(file, false).await {
@@ -274,72 +276,70 @@ where
     let input = input
         .try_into()
         .map_err(|error| Error::new(format!("Invalid file action: {error}"), 400))?;
-    let kind = input.action.as_str();
-    if ["read", "write", "rename"].contains(&kind) {
-        let file = file_path(cwd, home, input.path.as_deref().unwrap_or(""))?;
-        if kind == "rename" {
-            let name = input
-                .name
-                .as_deref()
-                .filter(|s| valid_name(s))
-                .ok_or_else(|| Error::new("Enter a valid file name.", 400))?;
+    use crate::protocol::requests::FileAction;
+    let (paths, destination) = match input {
+        FileAction::Read { path } => {
+            return Ok(json!(text_file(fs, &file_path(cwd, home, &path)?).await?));
+        }
+        FileAction::Rename { path, name } => {
+            if !valid_name(&name) {
+                return Err(Error::new("Enter a valid file name.", 400));
+            }
+            let file = file_path(cwd, home, &path)?;
             let destination =
-                libertty_engine::path::join(&[&libertty_engine::path::dirname(&file), name]);
+                libertty_engine::path::join(&[&libertty_engine::path::dirname(&file), &name]);
             if destination != file {
                 absent(fs, &destination).await?;
                 fs.rename(&file, &destination, false).await?;
             }
             return Ok(json!({"ok":true}));
         }
-        let original = text_file(fs, &file).await?;
-        if kind == "read" {
-            return Ok(original);
-        }
-        let content = input
-            .text
-            .as_deref()
-            .filter(|s| s.len() <= 32768 && !s.contains('\0'))
-            .ok_or_else(|| Error::new("Edit supports text files up to 32 KB.", 400))?;
-        if json!(input.version) != original["version"] {
-            return Err(Error::new(
-                "The file changed since you opened it. Reopen it before saving.",
-                409,
-            ));
-        }
-        let temporary = libertty_engine::path::join(&[
-            &libertty_engine::path::dirname(&file),
-            &format!(".libertty-edit-{}", crate::storage::random_hex(12)),
-        ]);
-        let mut output = fs
-            .create_new(
-                &temporary,
-                original["mode"].as_u64().unwrap() as u32 & 0o777,
-            )
-            .await?;
-        let _guard = RemoveOnDrop::new(temporary.clone(), fs);
-        tokio::time::timeout(Duration::from_secs(30), async {
-            output.write_all(content.as_bytes()).await?;
-            output.flush().await?;
-            output.shutdown().await?;
-            if text_file(fs, &file).await?["version"] != original["version"] {
+        FileAction::Write {
+            path,
+            text,
+            version,
+        } => {
+            let file = file_path(cwd, home, &path)?;
+            let original = text_file(fs, &file).await?;
+            if text.len() > 32768 || text.contains('\0') {
+                return Err(Error::new("Edit supports text files up to 32 KB.", 400));
+            }
+            let content = text;
+            if version != original.version {
                 return Err(Error::new(
-                    "The file changed while saving. Reopen it before saving.",
+                    "The file changed since you opened it. Reopen it before saving.",
                     409,
                 ));
             }
-            fs.rename(&temporary, &file, true).await?;
-            Ok::<_, Error>(())
-        })
-        .await
-        .map_err(|_| Error::new("The operation was aborted due to timeout", 400))??;
-        return Ok(json!({"ok":true}));
+            let temporary = libertty_engine::path::join(&[
+                &libertty_engine::path::dirname(&file),
+                &format!(".libertty-edit-{}", crate::storage::random_hex(12)),
+            ]);
+            let mut output = fs.create_new(&temporary, original.mode & 0o777).await?;
+            let _guard = RemoveOnDrop::new(temporary.clone(), fs);
+            tokio::time::timeout(Duration::from_secs(30), async {
+                output.write_all(content.as_bytes()).await?;
+                output.flush().await?;
+                output.shutdown().await?;
+                if text_file(fs, &file).await?.version != original.version {
+                    return Err(Error::new(
+                        "The file changed while saving. Reopen it before saving.",
+                        409,
+                    ));
+                }
+                fs.rename(&temporary, &file, true).await?;
+                Ok::<_, Error>(())
+            })
+            .await
+            .map_err(|_| Error::new("The operation was aborted due to timeout", 400))??;
+            return Ok(json!({"ok":true}));
+        }
+        FileAction::Copy { paths, destination } => (paths, file_path(cwd, home, &destination)?),
+        FileAction::Delete { paths } => (paths, String::new()),
+    };
+    if paths.is_empty() || paths.len() > 100 {
+        return Err(Error::new("Select between 1 and 100 items.", 400));
     }
-    let paths = input
-        .paths
-        .as_deref()
-        .filter(|p| !p.is_empty() && p.len() <= 100)
-        .filter(|_| ["copy", "delete"].contains(&kind))
-        .ok_or_else(|| Error::new("Select between 1 and 100 items.", 400))?;
     let mut seen = HashSet::new();
     let mut files = vec![];
     for value in paths {
@@ -351,11 +351,6 @@ where
     if files.iter().any(|f| f == "/") {
         return Err(Error::new("The filesystem root cannot be changed.", 400));
     }
-    let destination = if kind == "copy" {
-        file_path(cwd, home, input.destination.as_deref().unwrap_or(""))?
-    } else {
-        String::new()
-    };
     if !destination.is_empty() && !fs.metadata(&destination, false).await?.is_dir() {
         return Err(Error::new("Choose a destination folder.", 400));
     }

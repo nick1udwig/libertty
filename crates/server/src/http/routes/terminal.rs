@@ -1,4 +1,5 @@
 use super::*;
+use crate::protocol::http::{Connected, CreatedSession, SocketTicket, Success};
 use libertty_engine::truncate_utf16;
 
 pub(super) async fn healthz(State(app): State<Arc<App>>) -> Result<Response<Body>, Failure> {
@@ -34,7 +35,10 @@ pub(super) async fn api_connect(
     let owner = owner.unwrap();
     let sid = session_id_text(input.session.as_deref())?;
     let result = if input.no_session {
-        json!({"accessToken":owner})
+        Connected {
+            access_token: owner.clone(),
+            state: None,
+        }
     } else {
         if sid != "default"
             && !app
@@ -48,7 +52,14 @@ pub(super) async fn api_connect(
                 "This terminal has ended. Open its saved host to reconnect.".into(),
             ));
         }
-        json!({"state":app.get_session(&owner,&sid,"Terminal",false).await?.state(),"accessToken":owner})
+        Connected {
+            access_token: owner.clone(),
+            state: Some(
+                app.get_session(&owner, &sid, "Terminal", false)
+                    .await?
+                    .state(),
+            ),
+        }
     };
     let secure = if req
         .headers()
@@ -84,7 +95,7 @@ pub(super) async fn api_dictation(_ctx: OwnerContext) -> Result<Response<Body>, 
 }
 
 pub(super) async fn api_ping(_ctx: OwnerContext) -> Result<Response<Body>, Failure> {
-    ok(json!({"ok":true}))
+    ok(Success { ok: true })
 }
 
 pub(super) async fn api_sessions_get(
@@ -128,7 +139,11 @@ pub(super) async fn api_sessions_post(
     } else {
         app.get_session(&owner, &sid, &name, input.files).await?
     };
-    ok(json!({"id":sid,"name":name,"state":session.state()}))
+    ok(CreatedSession {
+        id: sid,
+        name,
+        state: session.state(),
+    })
 }
 
 pub(super) async fn api_sessions_close(
@@ -138,7 +153,7 @@ pub(super) async fn api_sessions_close(
     let owner = ctx.owner;
     let sid = ctx.sid;
     app.close_session(&owner, &sid).await;
-    ok(json!({"ok":true}))
+    ok(Success { ok: true })
 }
 
 pub(super) async fn api_ticket(
@@ -171,7 +186,7 @@ pub(super) async fn api_ticket(
             until: Instant::now() + Duration::from_secs(15),
         },
     );
-    ok(json!({"ticket":ticket}))
+    ok(SocketTicket { ticket })
 }
 
 pub(super) async fn api_dictation_install(
@@ -188,7 +203,7 @@ pub(super) async fn api_dictation_install(
             "The terminal changed. Return to the shell prompt and try again.",
         ));
     }
-    ok(json!({"ok":true}))
+    ok(Success { ok: true })
 }
 
 pub(super) async fn api_reading_capture(
@@ -201,7 +216,7 @@ pub(super) async fn api_reading_capture(
     let id = query.get("id").map(String::as_str).unwrap_or("");
     if *req.method() == Method::DELETE {
         session.remove_reading_capture(id);
-        return ok(json!({"ok":true}));
+        return ok(Success { ok: true });
     }
     if get {
         let capture = session.reading_capture(id).ok_or(Failure(

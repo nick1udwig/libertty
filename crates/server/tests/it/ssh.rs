@@ -29,6 +29,27 @@ async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
     )
     .await
     .unwrap();
+    let shell = remote
+        .prepare_shell("", "completion-test", &CancellationToken::new())
+        .await
+        .unwrap();
+    let installed = remote
+        .exec(
+            &format!(
+                "printf %s {} > {}",
+                libertty_engine::repair::shell_quote(
+                    "_slow(){ sleep 1; COMPREPLY=(late); }; complete -F _slow slow\n"
+                ),
+                libertty_engine::repair::shell_quote(&format!(
+                    "{}/completions",
+                    remote.directory()
+                ))
+            ),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(installed.code, 0, "{}", installed.stderr);
     let services = HostServices::new();
     let mut host = NativeHost::new(
         services.clone(),
@@ -67,11 +88,7 @@ async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
         )
         .await
         .expect("Completion must honor the supplied budget");
-        match result {
-            Ok(FactValue::Completion(values)) => assert!(values.is_empty()),
-            Err(message) => assert_eq!(message, "Completion timed out."),
-            other => panic!("Unexpected completion: {other:?}"),
-        }
+        assert_eq!(result.unwrap_err(), "Completion timed out.");
         for invalid in [-1.0, f64::INFINITY, f64::NAN] {
             assert_eq!(
                 host.engine_operation(&completion(invalid), &cancel)
@@ -81,6 +98,238 @@ async fn typed_host_facts_and_completion_budgets_work_locally_and_over_ssh() {
             );
         }
     }
+    drop(shell);
+    remote.dispose().await;
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn repair_listings_share_ssh_reads_but_verify_against_fresh_snapshots() {
+    use libertty_engine::{
+        host::{FactValue, HostOperation},
+        types::Catalog,
+    };
+    let fixture = Fixture::start().await;
+    let remote = fixture.connect(false).await;
+    let directory = format!("{}/listing", fixture.home());
+    tokio::fs::create_dir(&directory).await.unwrap();
+    tokio::fs::write(format!("{directory}/alpha"), "a")
+        .await
+        .unwrap();
+    tokio::fs::write(format!("{directory}/beta"), "b")
+        .await
+        .unwrap();
+    let services = HostServices::new();
+    let mut host = NativeHost::new(
+        services.clone(),
+        Catalog {
+            cwd: directory.clone(),
+            ..Default::default()
+        },
+        std::collections::BTreeMap::new(),
+        libertty_server::help::HelpProvider::new(services.pool.clone()),
+    );
+    host.remote = Some(remote.clone());
+    host.verify_listings();
+    let cancel = CancellationToken::new();
+    let mut operations: Vec<_> = (0..8)
+        .map(|i| HostOperation::Lookup {
+            path: format!("{directory}/missing-{i}"),
+        })
+        .collect();
+    operations.push(HostOperation::Entries {
+        path: directory.clone(),
+        limit: 10000,
+    });
+    let results = host.engine_operations(&operations, &cancel).await;
+    let FactValue::Entries(entries) = results.last().unwrap().as_ref().unwrap() else {
+        panic!("Expected directory entries");
+    };
+    assert_eq!(entries.len(), 2);
+    for result in &results[..8] {
+        let FactValue::Lookup(lookup) = result.as_ref().unwrap() else {
+            panic!("Expected a missing path lookup");
+        };
+        assert!(lookup.info.is_none());
+        let listing = lookup.listing.as_ref().unwrap();
+        assert!(listing.complete);
+        assert!(
+            entries.shares_storage(&listing.entries),
+            "Lookups must share one snapshot"
+        );
+    }
+    let limited = host.snapshot(&directory, 1, &cancel).await.unwrap();
+    assert_eq!(limited.entries.len(), 1);
+    assert!(!entries.shares_storage(&limited.entries));
+    assert!(host.listings_unchanged(&cancel).await.unwrap());
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert!(host.snapshot(&directory, 10000, &cancelled).await.is_err());
+    let cached = host.snapshot(&directory, 10000, &cancel).await.unwrap();
+    assert!(entries.shares_storage(&cached.entries));
+    tokio::fs::write(format!("{directory}/gamma"), "c")
+        .await
+        .unwrap();
+    assert!(!host.listings_unchanged(&cancel).await.unwrap());
+    assert!(!host.listings_unchanged(&cancel).await.unwrap());
+    assert_eq!(
+        host.snapshot(&directory, 10000, &cancel)
+            .await
+            .unwrap()
+            .entries
+            .len(),
+        2
+    );
+    host.verify_listings();
+    let fresh = host.snapshot(&directory, 10000, &cancel).await.unwrap();
+    assert_eq!(fresh.entries.len(), 3);
+    assert!(!entries.shares_storage(&fresh.entries));
+    remote.dispose().await;
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn ssh_schema_facts_share_work_and_refresh_at_their_own_scope() {
+    use libertty_engine::{
+        host::{FactValue, HostOperation},
+        types::Catalog,
+    };
+    let fixture = Fixture::start().await;
+    let remote = fixture.connect(false).await;
+    let home = fixture.home();
+    let script = format!("{home}/tool.py");
+    tokio::fs::write(
+        &script,
+        "import argparse\np=argparse.ArgumentParser()\np.add_argument('--first')\n",
+    )
+    .await
+    .unwrap();
+    let executable = format!("{home}/orchard");
+    tokio::fs::write(
+        &executable,
+        "#!/bin/sh\nprintf '  --first  First option\\n'\n",
+    )
+    .await
+    .unwrap();
+    tokio::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+        .await
+        .unwrap();
+    let services = HostServices::new();
+    let mut host = NativeHost::new(
+        services.clone(),
+        Catalog {
+            cwd: home.clone(),
+            commands: vec!["orchard".into()].into(),
+            ..Default::default()
+        },
+        std::collections::BTreeMap::from([
+            ("HOME".into(), home.clone()),
+            ("PATH".into(), format!("{home}:/usr/bin:/bin")),
+        ]),
+        libertty_server::help::HelpProvider::new(services.pool.clone()),
+    );
+    host.remote = Some(remote.clone());
+    host.verify_listings();
+    let cancel = CancellationToken::new();
+    let operations = [
+        HostOperation::Describe {
+            command: "python3 tool.py --first a".into(),
+        },
+        HostOperation::Describe {
+            command: "python3 tool.py --first b".into(),
+        },
+    ];
+    let results = host.engine_operations(&operations, &cancel).await;
+    let (FactValue::Describe(first), FactValue::Describe(second)) =
+        (results[0].as_ref().unwrap(), results[1].as_ref().unwrap())
+    else {
+        panic!("Expected descriptions");
+    };
+    assert!(
+        Arc::ptr_eq(first, second),
+        "Concurrent alternatives share one AST probe"
+    );
+    assert!(
+        first
+            .as_ref()
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|flag| flag.name == "--first")
+    );
+    let cached = host
+        .engine_operation(&operations[0], &cancel)
+        .await
+        .unwrap();
+    let FactValue::Describe(cached) = cached else {
+        panic!("Expected description");
+    };
+    assert!(
+        Arc::ptr_eq(first, &cached),
+        "Later requests reuse the successful probe"
+    );
+    tokio::fs::write(
+        &script,
+        "import argparse\np=argparse.ArgumentParser()\np.add_argument('--changed')\n",
+    )
+    .await
+    .unwrap();
+    let changed = host
+        .engine_operation(&operations[0], &cancel)
+        .await
+        .unwrap();
+    let FactValue::Describe(changed) = changed else {
+        panic!("Expected description");
+    };
+    assert!(!Arc::ptr_eq(first, &changed));
+    assert!(
+        changed
+            .as_ref()
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|flag| flag.name == "--changed")
+    );
+    tokio::fs::write(&script, "print('no parser')\n")
+        .await
+        .unwrap();
+    let negative = host.engine_operations(&operations, &cancel).await;
+    let (FactValue::Describe(first), FactValue::Describe(second)) =
+        (negative[0].as_ref().unwrap(), negative[1].as_ref().unwrap())
+    else {
+        panic!("Expected descriptions");
+    };
+    assert!(Arc::ptr_eq(first, second));
+    assert!(first.as_ref().is_none());
+    let version = HostOperation::Version {
+        command: "orchard".into(),
+    };
+    let original =
+        serde_json::to_value(host.engine_operation(&version, &cancel).await.unwrap()).unwrap();
+    tokio::fs::write(
+        &executable,
+        "#!/bin/sh\nprintf '  --changed  Changed option\\n'\n",
+    )
+    .await
+    .unwrap();
+    let help = host.read_help("orchard", &[], true, &cancel).await.unwrap();
+    assert_eq!(
+        help.version.as_deref(),
+        original.as_str(),
+        "Help uses the version already resolved in this repair"
+    );
+    host.verify_listings();
+    let fresh =
+        serde_json::to_value(host.engine_operation(&version, &cancel).await.unwrap()).unwrap();
+    assert_ne!(fresh, original, "The next repair checks current metadata");
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert!(
+        host.engine_operation(&operations[0], &cancelled)
+            .await
+            .is_err()
+    );
+    assert!(host.engine_operation(&operations[0], &cancel).await.is_ok());
     remote.dispose().await;
     fixture.stop().await;
 }
@@ -901,5 +1150,112 @@ async fn transport_ssh_benchmark() {
     }
     std::fs::create_dir_all("../../.test-artifacts").unwrap();
     std::fs::write("../../.test-artifacts/transport-ssh.json", serde_json::to_vec_pretty(&json!({"measurement":"Actual encrypted SSH TCP bytes, excluding TCP/IP headers; request to complete read; FIFO paced socket per direction; current CPU, no throttling; seven warm samples per case.","rows":rows})).unwrap()).unwrap();
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn ssh_syntax_batches_preserve_order_scopes_failures_and_cache_entries() {
+    use libertty_engine::{
+        host::{FactValue, HostOperation},
+        types::Catalog,
+    };
+    let fixture = Fixture::start().await;
+    let remote = fixture.connect(false).await;
+    let home = fixture.home();
+    let scoped = format!("{home}/quoted ' directory");
+    tokio::fs::create_dir(&scoped).await.unwrap();
+    let services = HostServices::new();
+    let mut host = NativeHost::new(
+        services.clone(),
+        Catalog {
+            cwd: home.clone(),
+            ..Default::default()
+        },
+        std::collections::BTreeMap::new(),
+        libertty_server::help::HelpProvider::new(services.pool.clone()),
+    );
+    host.remote = Some(remote.clone());
+    let syntax = |command: String| HostOperation::Syntax { command };
+    let mut operations: Vec<_> = (0..35).map(|i| syntax(format!("echo {i}"))).collect();
+    operations.insert(
+        3,
+        HostOperation::Stat {
+            path: home.clone(),
+            executable: false,
+        },
+    );
+    operations.insert(8, syntax("if then".into()));
+    operations.insert(
+        12,
+        HostOperation::Scoped {
+            cwd: scoped.clone(),
+            operation: Box::new(syntax(
+                "printf '%s\\n' \"$(touch should-not-exist)\"; echo 'quoted'".into(),
+            )),
+        },
+    );
+    let missing = format!("{home}/later");
+    operations.push(HostOperation::Scoped {
+        cwd: missing.clone(),
+        operation: Box::new(syntax("echo recover".into())),
+    });
+    operations.push(syntax("echo 0".into()));
+    let cancel = CancellationToken::new();
+    let results = host.engine_operations(&operations, &cancel).await;
+    for (index, result) in results.iter().enumerate() {
+        match index {
+            3 => assert!(matches!(result, Ok(FactValue::Stat(Some(_))))),
+            8 => assert!(matches!(result, Ok(FactValue::Syntax(false)))),
+            38 => assert!(result.is_err()),
+            _ => assert!(
+                matches!(result, Ok(FactValue::Syntax(true))),
+                "{index}: {result:?}"
+            ),
+        }
+    }
+    assert!(!std::path::Path::new(&format!("{scoped}/should-not-exist")).exists());
+    tokio::fs::create_dir(&missing).await.unwrap();
+    assert!(matches!(
+        host.engine_operation(&operations[38], &cancel).await,
+        Ok(FactValue::Syntax(true))
+    ));
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert!(
+        host.engine_operations(&operations, &cancelled)
+            .await
+            .iter()
+            .all(Result::is_err)
+    );
+    let pending = [
+        syntax("echo deadline1".into()),
+        syntax("echo deadline2".into()),
+    ];
+    assert!(
+        host.engine_operations_until(&pending, &cancel, Some(tokio::time::Instant::now()))
+            .await
+            .iter()
+            .all(Result::is_err)
+    );
+    remote.dispose().await;
+    let cached: Vec<_> = operations
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, op)| (i != 3).then_some(op))
+        .collect();
+    assert!(
+        host.engine_operations(&cached, &cancel)
+            .await
+            .iter()
+            .all(Result::is_ok)
+    );
+    let mixed = host
+        .engine_operations(
+            &[syntax("echo 0".into()), syntax("echo uncached".into())],
+            &cancel,
+        )
+        .await;
+    assert!(matches!(mixed[0], Ok(FactValue::Syntax(true))));
+    assert!(mixed[1].is_err());
     fixture.stop().await;
 }

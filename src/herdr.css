@@ -327,17 +327,7 @@
 .herdr-tab-menu button.danger {
   color: var(--danger);
 }
-.herdr-attention {
-  display: grid;
-  place-items: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-radius: 9px;
-  font: 600 11px var(--font-ui);
-}
+
 .herdr-terminal-cached {
   position: absolute;
   inset: 0;

@@ -1,3 +1,4 @@
+import type { WorkspaceServices } from './workspace-storage.ts';
 import { $, input, select, dialog } from './dom.ts';
 import type { BackendProfile, KeyInfo } from './connections.ts';
 import type { BrowserKeyInfo } from './browser-key.ts';
@@ -9,14 +10,14 @@ interface VaultServices {
   backends(): BackendProfile[];
   backendFor(id: string): BackendProfile;
   authenticate(backend: BackendProfile): Promise<void>;
-  api<T>(backend: BackendProfile, name: string, data?: unknown): Promise<T>;
+  endpoint: WorkspaceServices['endpoint'];
   notice: Notify;
   fail: Fail;
   renderCards(): Promise<void>;
   clearRoutes(): void;
 }
 export function vaultUI(services: VaultServices) {
-  const { browserVault, primary, backendFor, authenticate, api, notice, fail, renderCards } =
+  const { browserVault, primary, backendFor, authenticate, endpoint, notice, fail, renderCards } =
     services;
   let keyDetail: { backend?: BackendProfile; key: KeyInfo | BrowserKeyInfo } | undefined;
   function keyDetails(backend: BackendProfile | undefined, key: KeyInfo | BrowserKeyInfo) {
@@ -61,7 +62,7 @@ export function vaultUI(services: VaultServices) {
     const { backend, key } = keyDetail;
     void (
       backend
-        ? api(backend, 'api/keychain', {
+        ? endpoint(backend, 'api/keychain', {
             action: 'rename',
             id: key.id,
             name: input('key-rename').value,
@@ -88,7 +89,7 @@ export function vaultUI(services: VaultServices) {
     )
       void (
         backend
-          ? api(backend, 'api/keychain', { action: 'delete', id: key.id })
+          ? endpoint(backend, 'api/keychain', { action: 'delete', id: key.id })
           : browserVault.remove(key.id)
       )
         .then(() => {
@@ -168,7 +169,7 @@ export function vaultUI(services: VaultServices) {
     try {
       if (mode === 'restore' && backend) {
         await authenticate(backend);
-        const result = await api<KeyInfo & { privateKey: string }>(backend, 'api/keychain', {
+        const result = await endpoint(backend, 'api/keychain', {
           action: 'export',
           id: key.id,
           passphrase,
@@ -198,7 +199,7 @@ export function vaultUI(services: VaultServices) {
             try {
               await authenticate(device);
               const local = (await browserVault.list()).find((k) => k.id === key.id)!;
-              const copy = await api<KeyInfo>(device, 'api/keychain', {
+              const copy = await endpoint(device, 'api/keychain', {
                 action: 'backup',
                 name: local.name,
                 privateKey,
@@ -269,11 +270,11 @@ export function vaultUI(services: VaultServices) {
         if (raw.startsWith('{')) key = await browserVault.restore(raw, passphrase, name);
         else {
           await authenticate(primary);
-          const info = await api<{ publicKey: string; fingerprint: string }>(
-            primary,
-            'api/keychain',
-            { action: 'inspect', privateKey: raw, passphrase },
-          );
+          const info = await endpoint(primary, 'api/keychain', {
+            action: 'inspect',
+            privateKey: raw,
+            passphrase,
+          });
           key = await browserVault.create(name, passphrase, { privateKey: raw, ...info });
         }
       } else key = await browserVault.create(name, passphrase);

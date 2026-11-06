@@ -1,4 +1,5 @@
-import { isHerdrPlugin } from './plugins.ts';
+import { probeRoutes } from './route-probes.ts';
+import { builtinState } from './builtin-state.ts';
 import { BrowserVault } from './browser-vault.ts';
 import {
   type BackendProfile,
@@ -11,13 +12,14 @@ import {
 import { $, dialog, input, select } from './dom.ts';
 import { herdrSession } from './herdr-protocol.ts';
 import { validPath } from './persistence.ts';
+import type { ConnectionInput } from './plugin-connection.ts';
 import { type PluginPackage } from './plugin-package.ts';
 import { PluginRegistry, tabPluginId } from './plugins.ts';
 import type { WorkspacePage, WorkspaceServices, WorkspaceState } from './workspace-storage.ts';
 interface Options
   extends Pick<
     WorkspaceServices,
-    'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store' | 'notice' | 'fail'
+    'endpoint' | 'api' | 'authenticate' | 'backendFor' | 'tokenFor' | 'store' | 'notice' | 'fail'
   > {
   workspace: WorkspaceState;
   unmount: (tab: TerminalTab) => void;
@@ -43,6 +45,7 @@ export function createWorkspaceConnections(options: Options) {
   const {
     workspace,
     api,
+    endpoint,
     unmount,
     mount,
     store,
@@ -105,7 +108,7 @@ export function createWorkspaceConnections(options: Options) {
         for (const tab of workspace.tabs.filter(
           (tab) => tabPluginId(tab) === 'herdr' && tab.hostId === host.id,
         )) {
-          tab.herdrSource = source;
+          builtinState(tab).herdrSource = source;
           unmount(tab);
           await mount(tab);
         }
@@ -272,13 +275,17 @@ export function createWorkspaceConnections(options: Options) {
       .get(sshHost?.backendId || '')
       ?.keys.find((key) => keyValue(key) === select('ssh-key').value);
   let selectedRoute: { backend: BackendProfile; keyId?: string; compression?: boolean } | undefined,
-    routeGeneration = 0;
+    routeController: AbortController | undefined;
+  function cancelRoute() {
+    routeController?.abort();
+    routeController = undefined;
+    selectedRoute = undefined;
+  }
+  dialog('ssh-dialog').addEventListener('close', cancelRoute);
   const openingHosts = new Map<string, Promise<void>>();
-  interface ConnectionRequest {
+  interface ConnectionRequest extends ConnectionInput {
     pluginId: string;
     pluginVersion?: string;
-    readPath?: string;
-    herdrSession?: string;
     herdrTab?: TerminalTab;
     herdrHost?: HostProfile;
   }
@@ -289,19 +296,18 @@ export function createWorkspaceConnections(options: Options) {
     pluginId: string,
     pkg?: PluginPackage,
   ): Promise<void> {
-    if ((!isHerdrPlugin(pluginId) && !pkg) || host.kind === 'herdr')
-      return openHost(host, true, { pluginId });
-    pendingConnection = { host, request: { pluginId, pluginVersion: pkg?.manifest.version } };
-    $('plugin-connect-title').textContent = pkg
-      ? pkg.manifest.connectLabel
-      : pluginId === 'herdr-core'
-        ? 'Connect Herdr Core'
-        : 'Connect Herdr';
+    const plugin = plugins.get(pluginId, pkg?.manifest.version);
+    if (!plugin?.connection) throw new Error('This plugin cannot open a connection.');
+    const request = { pluginId, pluginVersion: plugin.version };
+    const fields = plugin.connection.fields;
+    if (!fields || host.kind === 'herdr') return openHost(host, true, request);
+    pendingConnection = { host, request };
+    $('plugin-connect-title').textContent = plugin.connectLabel;
     $('plugin-connect-host').textContent = host.name;
-    $('plugin-read-fields').hidden = !pkg;
-    input('plugin-read-path').required = !!pkg;
+    $('plugin-read-fields').hidden = fields !== 'file';
+    input('plugin-read-path').required = fields === 'file';
     input('plugin-read-path').value = '';
-    $('plugin-herdr-fields').hidden = !isHerdrPlugin(pluginId);
+    $('plugin-herdr-fields').hidden = fields !== 'herdr';
     input('plugin-herdr-session').value = host.herdrSession || '';
     $('plugin-connect-error').textContent = '';
     dialog('plugin-connect-dialog').showModal();
@@ -312,7 +318,7 @@ export function createWorkspaceConnections(options: Options) {
     if (!pendingConnection) return;
     const { host, request } = pendingConnection;
     try {
-      if (isHerdrPlugin(request.pluginId))
+      if (connectionPlugin(request).connection.fields === 'herdr')
         request.herdrSession = herdrSession(input('plugin-herdr-session').value);
       else {
         const path = input('plugin-read-path').value.trim();
@@ -337,8 +343,7 @@ export function createWorkspaceConnections(options: Options) {
           open.find((tab) => tab.id === workspace.active) ||
           open.sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))[0];
       if (existing) {
-        if (isHerdrPlugin(request.pluginId)) await resumeHerdr(existing);
-        else activate(existing.id);
+        await resumeTab(existing);
         return;
       }
     }
@@ -353,59 +358,39 @@ export function createWorkspaceConnections(options: Options) {
     session: string,
     request: ConnectionRequest,
   ) {
-    if (request.pluginId === 'terminal' || request.pluginId === 'files') {
-      await addTerminal(
+    try {
+      const plugin = connectionPlugin(request);
+      const details = await plugin.connection.prepare({
+        host,
         backend,
         session,
-        host.name,
-        host.id,
-        undefined,
-        request.pluginId === 'files',
-      );
-      return;
-    }
-    try {
-      const target = isHerdrPlugin(request.pluginId)
-        ? await api<{ herdrSession: string; herdrSource: string }>(backend, 'api/herdr/connect', {
-            source: session,
-            session: request.herdrSession || '',
-            core: request.pluginId === 'herdr-core',
-          })
-        : undefined;
-      const read = request.readPath
-        ? await api<{ path: string }>(
-            backend,
-            'api/plugins/read?' + new URLSearchParams({ path: request.readPath, session }),
-          )
-        : undefined;
-      const plugin = plugins.get(request.pluginId, request.pluginVersion);
-      if (!plugin) throw new Error('This plugin is no longer available.');
+        input: request,
+        api,
+        endpoint,
+        addTerminal,
+      });
+      if (!details) return;
       const tab: TerminalTab = {
         id: request.herdrTab?.id || crypto.randomUUID(),
         pluginId: plugin.id,
         pluginVersion: plugin.version,
         pluginState: null,
-        readPath: read?.path,
         ownsSession: true,
         session,
         backendId: backend.id,
         hostId: host.id,
-        name:
-          plugin.name +
-          ' · ' +
-          host.name +
-          (target?.herdrSession ? ' · ' + target.herdrSession : ''),
+        name: plugin.name + ' · ' + host.name,
         lastUsed: Date.now(),
-        ...(target ? { herdrSession: target.herdrSession, herdrSource: target.herdrSource } : {}),
+        ...details,
       };
       if (request.herdrTab && !workspace.tabs.includes(request.herdrTab)) {
-        await api(backend, 'api/sessions/close', {}, session);
+        await endpoint(backend, 'api/sessions/close', {}, session);
         return;
       }
-      if (target && request.herdrHost) {
+      if (request.herdrHost) {
         const saved = request.herdrHost;
         saved.backendId = backend.id;
-        saved.herdrSource = target.herdrSource;
+        saved.herdrSource = builtinState(tab).herdrSource;
         tab.hostId = saved.id;
         tab.name = saved.name;
       }
@@ -422,9 +407,19 @@ export function createWorkspaceConnections(options: Options) {
       await mount(connected);
       if (request.herdrTab) herdrReconnects.get(connected.id)?.resolve();
     } catch (error) {
-      await api(backend, 'api/sessions/close', {}, session).catch(() => {});
+      await endpoint(backend, 'api/sessions/close', {}, session).catch(() => {});
       throw error;
     }
+  }
+  function connectionPlugin(request: ConnectionRequest) {
+    const plugin = plugins.get(request.pluginId, request.pluginVersion);
+    if (!plugin?.connection) throw new Error('This plugin cannot open a connection.');
+    return { ...plugin, connection: plugin.connection };
+  }
+  async function resumeTab(tab: TerminalTab) {
+    const plugin = plugins.forTab(tab);
+    if (plugin?.resume) await plugin.resume(tab);
+    else activate(tab.id);
   }
   async function resumeHerdr(tab: TerminalTab) {
     const backend = backendFor(tab.backendId);
@@ -435,13 +430,15 @@ export function createWorkspaceConnections(options: Options) {
           backend,
           'api/herdr/snapshot?' +
             new URLSearchParams({
-              herdrSession: tab.herdrSession || '',
+              herdrSession: builtinState(tab).herdrSession || '',
               ...(tab.pluginId === 'herdr-core' ? { herdrCore: '1' } : {}),
-              ...(tab.herdrSource ? { herdrSource: tab.herdrSource } : {}),
+              ...(builtinState(tab).herdrSource
+                ? { herdrSource: builtinState(tab).herdrSource }
+                : {}),
             }),
         );
       } catch (error: any) {
-        if (error.status !== 404 || !tab.herdrSource) throw error;
+        if (error.status !== 404 || !builtinState(tab).herdrSource) throw error;
         tab.ended = true;
         store();
       }
@@ -468,7 +465,7 @@ export function createWorkspaceConnections(options: Options) {
     const host = workspace.hosts.find((host) => host.id === tab.hostId);
     if (!host)
       throw new Error('This connection has no saved host. Open Herdr from its host again.');
-    if (host.kind === 'herdr' && !tab.herdrSource) {
+    if (host.kind === 'herdr' && !builtinState(tab).herdrSource) {
       unmount(tab);
       tab.ended = false;
       store();
@@ -485,10 +482,11 @@ export function createWorkspaceConnections(options: Options) {
         'The source host for this Herdr connection is missing. Add the host again and connect Herdr from its menu.',
       );
     if (tab.ownsSession)
-      await api(backendFor(tab.backendId), 'api/sessions/close', {}, tab.session);
+      await endpoint(backendFor(tab.backendId), 'api/sessions/close', {}, tab.session);
     await connectHost(source, {
       pluginId: tab.pluginId,
-      herdrSession: tab.herdrSession,
+      pluginVersion: tab.pluginVersion,
+      herdrSession: builtinState(tab).herdrSession,
       herdrTab: tab,
       ...(host.kind === 'herdr' ? { herdrHost: host } : {}),
     });
@@ -502,11 +500,11 @@ export function createWorkspaceConnections(options: Options) {
         (tab) =>
           tabPluginId(tab) === 'herdr' &&
           tab.backendId === host.backendId &&
-          (tab.herdrSession || '') === (host.herdrSession || '') &&
-          tab.herdrSource === host.herdrSource,
+          (builtinState(tab).herdrSession || '') === (host.herdrSession || '') &&
+          builtinState(tab).herdrSource === host.herdrSource,
       );
       if (existing) {
-        await resumeHerdr(existing);
+        await resumeTab(existing);
         return;
       }
       const tab: TerminalTab = {
@@ -517,8 +515,8 @@ export function createWorkspaceConnections(options: Options) {
         hostId: host.id,
         pluginId: 'herdr',
         pluginVersion: '1',
-        herdrSession: host.herdrSession,
-        herdrSource: host.herdrSource,
+        ownsSession: false,
+        pluginState: { herdrSession: host.herdrSession, herdrSource: host.herdrSource },
         lastUsed: Date.now(),
       };
       workspace.tabs.push(tab);
@@ -528,28 +526,30 @@ export function createWorkspaceConnections(options: Options) {
       await mount(tab);
       return;
     }
-    if (isHerdrPlugin(request.pluginId) && !request.herdrTab) {
+    const plugin = connectionPlugin(request);
+    if (plugin.connection.matches && !request.herdrTab) {
       const existing = workspace.tabs.find(
         (tab) =>
           tabPluginId(tab) === request.pluginId &&
           tab.hostId === host.id &&
-          (tab.herdrSession || '') === (request.herdrSession || ''),
+          plugin.connection.matches!(tab, request),
       );
       if (existing) {
-        await resumeHerdr(existing);
+        await resumeTab(existing);
         return;
       }
     }
     if (host.kind === 'http') {
-      const result = await api<{ id: string }>(backend, 'api/sessions', {
+      const result = await endpoint(backend, 'api/sessions', {
         name: host.name,
-        files: request.pluginId !== 'terminal',
+        files: connectionPlugin(request).connection.session === 'files',
       });
       await finishConnection(host, backend, result.id, request);
       return;
     }
-    const vault = await api<{ keys: KeyInfo[]; knownHosts: KnownHost[] }>(backend, 'api/keychain');
+    const vault = await endpoint(backend, 'api/keychain', undefined);
     vaults.set(backend.id, vault);
+    cancelRoute();
     sshHost = host;
     sshRequest = request;
     $('ssh-title').textContent = host.name;
@@ -618,7 +618,9 @@ export function createWorkspaceConnections(options: Options) {
   async function chooseRoute(
     host: HostProfile,
     keyFingerprint: string,
+    signal: AbortSignal,
   ): Promise<{ backend: BackendProfile; keyId?: string; compression?: boolean }> {
+    signal.throwIfAborted();
     const selected = backendFor(host.backendId),
       localKey = vaults.get(selected.id)?.keys.find((k) => keyValue(k) === keyFingerprint);
     const portable = keyFingerprint === 'password' || keyFingerprint.startsWith('browser:');
@@ -628,42 +630,50 @@ export function createWorkspaceConnections(options: Options) {
     const key = JSON.stringify([host.id, keyFingerprint]),
       cached = routes.get(key);
     if (cached && Date.now() - cached.at < 60000) return cached;
-    const candidates = workspace.backends.filter((b) => b.id === selected.id || !!tokenFor(b));
-    const measurements = await Promise.all(
-      candidates.map(async (backend) => {
-        try {
-          const matching = portable
-            ? undefined
-            : (await api<{ keys: KeyInfo[] }>(backend, 'api/keychain')).keys.find(
-                (k) => keyValue(k) === keyFingerprint,
-              );
-          if (!portable && !matching) return;
-          const samples: number[] = [],
-            remote: number[] = [];
-          for (let i = 0; i < 2; i++) {
-            const start = performance.now();
-            const measured = await api<{ milliseconds: number }>(backend, 'api/ssh/probe', {
-              host: host.hostname,
-              port: host.port,
-              username: host.username,
-            });
-            samples.push(performance.now() - start);
-            remote.push(measured.milliseconds);
-          }
-          return {
+    const candidates = [
+      selected,
+      ...workspace.backends.filter((b) => b.id !== selected.id && !!tokenFor(b)),
+    ];
+    const measurements = await probeRoutes(
+      candidates,
+      async (backend, signal) => {
+        const matching = portable
+          ? undefined
+          : (
+              await endpoint(backend, 'api/keychain', undefined, undefined, false, signal)
+            ).keys.find((k) => keyValue(k) === keyFingerprint);
+        if (!portable && !matching) return;
+        const samples: number[] = [],
+          remote: number[] = [];
+        for (let i = 0; i < 2; i++) {
+          signal.throwIfAborted();
+          const start = performance.now();
+          const measured = await endpoint(
             backend,
-            keyId: matching?.id,
-            latency: (samples[0] + samples[1]) / 2,
-            compression: (remote[0] + remote[1]) / 2 >= 40,
-          };
-        } catch {
-          return undefined;
+            'api/ssh/probe',
+            {
+              host: host.hostname || '',
+              port: host.port,
+              username: host.username || '',
+            },
+            undefined,
+            false,
+            signal,
+          );
+          samples.push(performance.now() - start);
+          remote.push(measured.milliseconds);
         }
-      }),
+        return {
+          backend,
+          keyId: matching?.id,
+          latency: (samples[0] + samples[1]) / 2,
+          compression: (remote[0] + remote[1]) / 2 >= 40,
+        };
+      },
+      signal,
     );
-    const best = measurements
-      .filter((m): m is NonNullable<typeof m> => !!m)
-      .sort((a, b) => a.latency - b.latency)[0];
+    signal.throwIfAborted();
+    const best = measurements.sort((a, b) => a.latency - b.latency)[0];
     if (!best)
       throw new Error(
         'No connected backend can reach this SSH host with the selected credentials.',
@@ -673,15 +683,17 @@ export function createWorkspaceConnections(options: Options) {
   }
   async function prepareRoute() {
     if (!sshHost) return;
-    const generation = ++routeGeneration;
-    selectedRoute = undefined;
+    cancelRoute();
+    const controller = new AbortController();
+    routeController = controller;
+    const signal = controller.signal;
     input('ssh-secret').disabled = true;
     $<HTMLButtonElement>('ssh-connect').disabled = true;
     $('ssh-error').textContent = '';
     $('ssh-progress').textContent = 'Measuring available routes…';
     try {
-      const route = await chooseRoute(sshHost, select('ssh-key').value);
-      if (generation !== routeGeneration) return;
+      const route = await chooseRoute(sshHost, select('ssh-key').value, signal);
+      if (signal.aborted) return;
       selectedRoute = route;
       $('ssh-progress').textContent = 'Connect through ' + route.backend.name;
       $('ssh-secret-label').textContent =
@@ -694,7 +706,7 @@ export function createWorkspaceConnections(options: Options) {
       $<HTMLButtonElement>('ssh-connect').disabled = false;
       sshSecretLabel();
     } catch (error: any) {
-      if (generation === routeGeneration) {
+      if (!signal.aborted) {
         $('ssh-error').textContent = error.message;
         $('ssh-progress').textContent = '';
       }
@@ -732,10 +744,10 @@ export function createWorkspaceConnections(options: Options) {
             : { password: input('ssh-secret').value }),
       };
       const create = () =>
-        api<{ id: string }>(route.backend, 'api/sessions', {
+        endpoint(route.backend, 'api/sessions', {
           name: host.name,
           ssh,
-          files: request.pluginId !== 'terminal',
+          files: connectionPlugin(request).connection.session === 'files',
         });
       let result;
       try {
@@ -802,6 +814,7 @@ export function createWorkspaceConnections(options: Options) {
     routes,
     configureConnection,
     reconnectHerdr,
+    resumeHerdr,
     cancelReconnect,
   };
 }

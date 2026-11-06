@@ -21,6 +21,14 @@ export type ClientMessage = { "type": "ping", checkpoint?: boolean, }
   | { "type": "terminal-click", column: number, row: number, cols: number, rows: number, }
   | { "type": "dictation-paste", text: string, applied: boolean, replace: boolean, prompt: number, revision: number, readingPhrases?: string[], };
 
+export type Connect = { token?: string, session?: string, noSession?: boolean, };
+
+export type Connected = { accessToken: string, state?: ShellState, };
+
+export type ConnectedHerdr = { herdrSession: string, herdrSource: string, };
+
+export type CreatedSession = { id: string, name: string, state: ShellState, };
+
 export type DictationAction = "start" | "finish" | "cancel";
 
 export type DictationCheckpoint = { acceptedFrames: number, finished: boolean, };
@@ -36,22 +44,73 @@ export type DictationTarget = "shell" | "program";
 
 export type EngineMode = "server";
 
+export type FileAction = { "action": "read", path: string, }
+  | { "action": "write", path: string, text: string, version: string, }
+  | { "action": "rename", path: string, name: string, }
+  | { "action": "copy", paths: Array<string>, destination: string, }
+  | { "action": "delete", paths: Array<string>, };
+
 export type FileEntry = { name: string, directory: boolean, symlink: boolean, size: number, modified: number, mode: number, };
 
 export type FileListing = { path: string, parent: string, entries: Array<FileEntry>, truncated: boolean, };
 
+export type FileText = { text: string, version: string, mode: number, };
+
+export type Folder = { path: string, name: string, };
+
+export type HerdrAction = { "action": "delete-worktree", workspaceId: string, path?: string, force?: boolean, }
+  | { "action": "list-worktrees", workspaceId: string, terminalId?: string, }
+  | { "action": "new-worktree", workspaceId: string, terminalId?: string, branch: string, }
+  | { "action": "open-worktree", workspaceId: string, terminalId?: string, path: string, }
+  | { "action": "split", workspaceId: string, terminalId: string, direction: HerdrDirection, }
+  | { "action": "create-space", workspaceId?: string, terminalId?: string, }
+  | { "action": "move-space", workspaceId: string, beforeWorkspaceId?: string, }
+  | { "action": "create", workspaceId: string, name: string, kind: string, cwd?: string, }
+  | { "action": "rename-space", workspaceId: string, name: string, }
+  | { "action": "close-space", workspaceId: string, }
+  | { "action": "rename", terminalId: string, name: string, }
+  | { "action": "close", terminalId: string, };
+
+export type HerdrActionError = { error: string, code: HerdrActionErrorCode, };
+
+export type HerdrActionErrorCode = "failed" | "force_required";
+
 export type HerdrAgent = { terminalId: string, paneId: string, workspaceId?: string, tabId?: string, workspace: string, name: string, label?: string, kind: string, status: HerdrStatus, sequence: number, completion?: number, cwd: string, };
+
+export type HerdrConnect = { core?: boolean, source?: string, session?: string, };
+
+export type HerdrCreated = { workspaceId?: string, terminalId?: string, error?: string, };
+
+export type HerdrDirection = "right" | "down";
 
 export type HerdrFrame = { /** Viewers receive only acknowledged frames. */ seq: number, width: number, height: number, full: boolean, /** Raw ANSI bytes, decoded once from Herdr and base64-encoded only for JSON clients. */ bytes: string, };
 
 export type HerdrMessage = { "type": "snapshot", snapshot: HerdrSnapshot, }
   | { "type": "error", message: string, };
 
+export type HerdrRepository = { repo_name: string, repo_root: string, };
+
 export type HerdrSnapshot = { agents: Array<HerdrAgent>, terminals: Array<HerdrAgent>, spaces: Array<HerdrSpace>, worktreeDirectory?: string, version?: string, protocol?: number, };
 
 export type HerdrSpace = { id: string, name: string, terminalIds: Array<string>, cwd: string, selectedTerminalId?: string, linkedWorktree?: boolean, checkoutPath?: string, /** Checkouts of one repository share this key, so worktrees can group under their root. */ repoKey?: string, repoName?: string, };
 
 export type HerdrStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+
+export type HerdrTicket = { mobile?: boolean, cols?: number, rows?: number, };
+
+export type HerdrWorktree = { path: string, label: string, is_bare: boolean, is_prunable: boolean, branch?: string, open_workspace_id?: string, };
+
+export type HerdrWorktrees = { source: HerdrRepository, worktrees: Array<HerdrWorktree>, directory?: string, branches?: Array<string>, };
+
+export type HttpError = { error: string, };
+
+export type KeychainAction = { "action": "delete", id: string, }
+  | { "action": "rename", id: string, name: string, }
+  | { "action": "forget", host: string, port?: number, }
+  | { "action": "inspect", privateKey: string, passphrase: string, }
+  | { "action": "create", name: string, passphrase: string, privateKey?: string, }
+  | { "action": "backup", name: string, passphrase: string, privateKey?: string, replaceId?: string, }
+  | { "action": "export", id: string, passphrase: string, };
 
 export type ReadingCapture = { id: string, name: string, exitCode: number, };
 
@@ -86,6 +145,14 @@ export type ServerMessage = { "type": "pong" }
   | { "type": "input-ack", seq?: number, }
   | { "type": "result", id: string, accepted: boolean, message?: string, };
 
+export type Sessions = { name?: string, ssh?: unknown, files?: boolean, };
+
 export type ShellState = { cwd: string, inputRevision: number, inputContext?: string, promptRevision: number, ready: boolean, prompt: number, exited: boolean, exitCode?: number, inputTarget?: DictationTarget, terminalScroll?: boolean, };
+
+export type SocketTicket = { ticket: string, };
+
+export type SshAddress = { host: string, username: string, port?: number, };
+
+export type Success = { ok: boolean, };
 
 export type TransferRequest = { id: string, action: 'upload' | 'download', path: string, name: string, };
