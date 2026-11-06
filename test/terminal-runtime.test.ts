@@ -152,3 +152,19 @@ test('reverse video swaps effective render colors and restores them when disable
     terminal.dispose();
   }
 });
+test('snapshot restore retains the destination theme and ANSI palette', () => {
+  const source = runtime.createTerminal({ theme: { background: '#ffffff', foreground: '#000000', red: '#ff0000' } });
+  const destination = runtime.createTerminal({ theme: { background: '#000000', foreground: '#ffffff', red: '#abcdef', cursor: '#123456' } });
+  try {
+    const colors = destination.viewport().colors;
+    const palette = destination.getPalette();
+    source.write('\x1b[31mretained');
+    destination.restore(source.snapshot());
+    assert.deepEqual(destination.viewport().colors, colors);
+    assert.deepEqual(destination.getPalette(), palette);
+    assert.equal(destination.readBuffer().rows[0].text, 'retained');
+  } finally {
+    source.dispose();
+    destination.dispose();
+  }
+});

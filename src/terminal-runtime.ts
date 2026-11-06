@@ -319,6 +319,7 @@ export class CoreTerminal extends Events<TerminalEvents> {
       this.runtime.exports.terminal_restore(this.id, p, n),
     );
     this.geometry = { ...this.geometry, cols: this.state.cols, rows: this.state.rows };
+    this.setTheme(this.theme);
     this.emit('reset', undefined);
   }
   input(data: string | Uint8Array, source: InputSource) {
