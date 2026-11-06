@@ -135,3 +135,20 @@ test('copied callback effects permit synchronous reply handling and terminal dis
   assert.equal(runtime.terminals.has(t.id), false);
   assert.throws(() => t.render(), /disposed/);
 });
+test('reverse video swaps effective render colors and restores them when disabled', () => {
+  const terminal = runtime.createTerminal({ theme: { foreground: '#123456', background: '#abcdef' } });
+  const rgb = ({ r, g, b }: { r: number; g: number; b: number }) => [r, g, b];
+  try {
+    const initial = terminal.viewport().colors;
+    terminal.write('hello\x1b[?5h');
+    const reversed = terminal.render().colors;
+    assert.deepEqual(rgb(reversed.foreground), rgb(initial.background));
+    assert.deepEqual(rgb(reversed.background), rgb(initial.foreground));
+    terminal.write('\x1b[?5l');
+    const restored = terminal.render().colors;
+    assert.deepEqual(rgb(restored.foreground), rgb(initial.foreground));
+    assert.deepEqual(rgb(restored.background), rgb(initial.background));
+  } finally {
+    terminal.dispose();
+  }
+});

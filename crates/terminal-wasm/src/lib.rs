@@ -747,6 +747,12 @@ impl Terminal {
         unsafe {
             check(g::ghostty_render_state_update(self.render, self.handle))?;
             let mut cursor = g::sized!(g::RenderStateCursor);
+            let mut colors = g::sized!(g::RenderStateColors);
+            check(g::ghostty_render_state_get(
+                self.render,
+                g::RenderStateData::COLORS,
+                (&mut colors as *mut g::RenderStateColors).cast(),
+            ))?;
             let mut dirty = 0i32;
             check(g::ghostty_render_state_get(
                 self.render,
@@ -809,9 +815,9 @@ impl Terminal {
                     "passwordInput": cursor.password_input,
                 },
                 "colors": {
-                    "foreground": rgb(self.get(g::TerminalData::COLOR_FOREGROUND)?),
-                    "background": rgb(self.get(g::TerminalData::COLOR_BACKGROUND)?),
-                    "cursor": rgb(self.get(g::TerminalData::COLOR_CURSOR).unwrap_or_default()),
+                    "foreground": rgb(colors.foreground),
+                    "background": rgb(colors.background),
+                    "cursor": colors.cursor_has_value.then(|| rgb(colors.cursor)),
                 },
             }))
         }
