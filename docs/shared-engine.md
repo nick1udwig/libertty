@@ -25,6 +25,8 @@ Tools can request suggestions through `/api/suggest`.
 `crates/server/src/engine.rs` supplies native host facts and delegates to the library's bounded asynchronous runtime.
 Native suggestions and prewarming use typed calls and results without JSON catalog or candidate conversions.
 The WASM adapter retains the existing JSON protocol.
+The runtime decodes JSON host replies once, using the pending operation type, before it stores them in the request cache.
+Engine host adapters must supply typed facts, including schema versions.
 Native help, script and completion adapters retain probe-pool capacity and cancellation.
 Local and SSH completion probes use the same shell functions as the reusable worker, with explicit entrypoints and per-request subshell isolation.
 Help, syntax and script-description caches reuse pending work and successful results, including valid negatives, but retry failed or abandoned work.

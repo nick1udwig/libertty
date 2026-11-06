@@ -7,7 +7,7 @@ use crate::{
     syntax::Syntax,
 };
 use libertty_engine::types::{Catalog, DirectoryLookup, DirectorySnapshot};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::{collections::BTreeMap, sync::Arc};
 use tokio_util::sync::CancellationToken;
 
@@ -277,11 +277,12 @@ impl NativeHost {
         }
         let value = match operation {
             HostOperation::Scoped { .. } => unreachable!("Scoped operations are handled above"),
-            HostOperation::Version { command } => FactValue::from(json!(
+            HostOperation::Version { command } => FactValue::Version(
                 self.help
                     .version(command, &self.catalog, &self.environment)
                     .await?
-            )),
+                    .into(),
+            ),
             HostOperation::Lookup { path } => FactValue::Lookup(Arc::new(
                 self.services.directories.lookup(path, cancel).await?,
             )),

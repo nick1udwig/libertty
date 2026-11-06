@@ -281,9 +281,9 @@ impl SSHHost {
             HostOperation::Scoped { .. } => {
                 unreachable!("Scoped operations are handled by NativeHost")
             }
-            HostOperation::Version { command } => Ok(FactValue::from(json!(
-                self.schema_version(command, context, cancel).await?
-            ))),
+            HostOperation::Version { command } => Ok(FactValue::Version(
+                self.schema_version(command, context, cancel).await?.into(),
+            )),
             HostOperation::Stat { path, executable } => {
                 Ok(FactValue::Stat(self.stat(path, *executable, cancel).await?))
             }
