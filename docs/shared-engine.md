@@ -14,6 +14,8 @@ Each repair stage holds one catalog and metadata snapshot for generation, comple
 Option-path repair reuses candidates generated from that snapshot.
 Completion planning stops at the callback budget or deadline before scanning further operands.
 Independent option-path repair and argument completion share a host-fact round, as do final syntax checks for compound and wrapped choices.
+Failed validation facts remove only their own candidates.
+An unavailable original-text probe or optional enrichment does not discard independently validated alternatives.
 The SSH adapter sends up to 32 uncached syntax checks through one channel, preserves scoped directories and result order, and caches only completed syntax results.
 The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.
 Historical TypeScript revisions remain in Git for benchmark comparisons.

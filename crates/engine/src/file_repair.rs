@@ -297,10 +297,12 @@ pub async fn repair_option_paths(
                         ValueKind::InputFile => ExpectedType::File,
                         _ => ExpectedType::Any,
                     };
-                    for mut repaired in resolve_path(&request, catalog, home, host, expected)
-                        .await?
-                        .unwrap_or_default()
-                    {
+                    let Ok(Some(repairs)) =
+                        resolve_path(&request, catalog, home, host, expected).await
+                    else {
+                        break;
+                    };
+                    for mut repaired in repairs {
                         if attached.is_some() {
                             let Some(parsed) = ParsedCommand::parse(&repaired.command) else {
                                 continue;

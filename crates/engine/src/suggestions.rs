@@ -24,6 +24,22 @@ use crate::{regex, test};
 use futures::future::{LocalBoxFuture, join_all};
 use std::{cell::RefCell, sync::Arc};
 
+fn validated_candidates(
+    candidates: Vec<Candidate>,
+    results: Vec<Result<bool, String>>,
+) -> impl Iterator<Item = Candidate> {
+    candidates
+        .into_iter()
+        .zip(results)
+        .filter_map(|(mut candidate, result)| {
+            if !matches!(result, Ok(true)) {
+                return None;
+            }
+            candidate.evidence.validated = true;
+            Some(candidate)
+        })
+}
+
 async fn check_syntax(
     candidates: Vec<Candidate>,
     host: &dyn Host,
@@ -34,13 +50,7 @@ async fn check_syntax(
             .map(|candidate| host::syntax(host, &candidate.command)),
     )
     .await;
-    let mut valid = Vec::new();
-    for (candidate, result) in candidates.into_iter().zip(results) {
-        if result? {
-            valid.push(candidate);
-        }
-    }
-    Ok(valid)
+    Ok(validated_candidates(candidates, results).collect())
 }
 
 fn covered(candidate: &Candidate, metadata: &CommandMetadata) -> bool {
@@ -96,29 +106,22 @@ async fn check(
             .iter()
             .map(|c| candidate_valid(input, c, catalog, env, metadata, host, script_flags)),
     )
-    .await
-    .into_iter()
-    .map(|result| result.unwrap_or(false))
-    .collect::<Vec<_>>();
-    let mut valid: Vec<_> = ranked
-        .into_iter()
-        .zip(valid)
-        .filter_map(|(mut c, valid)| {
-            c.evidence.validated = valid;
-            if valid
-                && simple_words(&c.command)
-                    .and_then(|words| {
-                        words.first().map(|word| {
-                            crate::command_policy::input_file_command(&word.value)
-                                || crate::command_policy::directory_command(&word.value)
-                        })
+    .await;
+    let mut valid: Vec<_> = validated_candidates(ranked, valid)
+        .map(|mut c| {
+            if simple_words(&c.command)
+                .and_then(|words| {
+                    words.first().map(|word| {
+                        crate::command_policy::input_file_command(&word.value)
+                            || crate::command_policy::directory_command(&word.value)
                     })
-                    .unwrap_or(false)
+                })
+                .unwrap_or(false)
             {
                 c.evidence.resolved = true;
                 c.evidence.unresolved = 0;
             }
-            valid.then_some(c)
+            c
         })
         .collect();
     sort(&mut valid);
@@ -246,7 +249,7 @@ fn part_choices<'a>(
             .filter(|c| !c.is_literal())
             .collect();
         if !candidates.iter().any(|c| c.command == input) {
-            let literal = Candidate {
+            let mut literal = Candidate {
                 command: input.into(),
                 score: 110.0,
                 changes: vec![],
@@ -254,7 +257,11 @@ fn part_choices<'a>(
                 evidence: Evidence::default(),
             };
             let metadata = discovery.cached(catalog, env, host.now_ms());
-            if candidate_valid(input, &literal, catalog, env, &metadata, host, None).await? {
+            if candidate_valid(input, &literal, catalog, env, &metadata, host, None)
+                .await
+                .unwrap_or(false)
+            {
+                literal.evidence.validated = true;
                 candidates.insert(0, literal);
             }
         }
@@ -573,7 +580,7 @@ impl RepairStage<'_> {
         .await
     }
 
-    async fn enrich(&self, repairs: Vec<Candidate>) -> Result<Vec<Candidate>, String> {
+    async fn enrich(&self, repairs: Vec<Candidate>) -> Vec<Candidate> {
         let home = self.env.get("HOME").map(String::as_str).unwrap_or_default();
         let (paths, completed) = futures::join!(
             repair_option_paths(
@@ -586,11 +593,12 @@ impl RepairStage<'_> {
             ),
             self.complete(),
         );
-        Ok(completed?
+        completed
+            .unwrap_or_default()
             .into_iter()
-            .chain(paths?)
+            .chain(paths.unwrap_or_default())
             .chain(repairs)
-            .collect())
+            .collect()
     }
 }
 
@@ -784,7 +792,7 @@ async fn suggest_one(
         host,
         script_flags: script_flags.as_deref(),
     };
-    let repairs = discovered.enrich(discovered.candidates()).await?;
+    let repairs = discovered.enrich(discovered.candidates()).await;
     let mut candidates = discovered
         .validate(repairs.into_iter().chain(historic).collect())
         .await?;

@@ -261,13 +261,15 @@ pub async fn resolve_path(
                 }))
                 .await
                 .into_iter()
-                .collect::<Result<Vec<_>, String>>()?;
+                .filter_map(Result::<Option<Branch>, String>::ok)
+                .collect::<Vec<_>>();
                 Ok(found.into_iter().flatten().collect())
             }
         }))
         .await
         .into_iter()
-        .collect::<Result<Vec<Vec<Branch>>, String>>()?;
+        .filter_map(Result::<Vec<Branch>, String>::ok)
+        .collect::<Vec<_>>();
         branches = groups.into_iter().flatten().collect();
         branches.sort_by(|a, b| b.score.total_cmp(&a.score));
         branches.truncate(4);
@@ -345,7 +347,8 @@ pub async fn resolve_path(
             }))
             .await
             .into_iter()
-            .collect::<Result<Vec<Vec<Branch>>, String>>()?;
+            .filter_map(Result::<Vec<Branch>, String>::ok)
+            .collect::<Vec<_>>();
             found.extend(groups.into_iter().flatten());
             if found.iter().any(|branch| branch.score >= 58.0) {
                 break;
