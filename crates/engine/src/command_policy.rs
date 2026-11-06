@@ -68,20 +68,22 @@ pub fn script_operand<T: AsRef<str>>(args: &[T]) -> Option<usize> {
         return None;
     }
     let metadata = CommandMetadata::default();
-    let flags = flags_ref(command, &metadata, &[]);
-    let mut index = 1;
-    while index < args.len() {
-        let word = args[index].as_ref();
-        if ["-c", "-m", "-e", "--eval"].contains(&word) {
-            return None;
+    let mut cursor =
+        crate::arguments::ArgumentCursor::new(args.iter().map(AsRef::as_ref), &metadata);
+    while let Some(argument) = cursor.next() {
+        use crate::arguments::Argument;
+        match argument {
+            Argument::Operand(index) => return Some(index),
+            Argument::UnknownOption => return None,
+            Argument::Option {
+                index, complete, ..
+            } => {
+                if !complete || ["-c", "-m", "-e", "--eval"].contains(&args[index].as_ref()) {
+                    return None;
+                }
+            }
+            Argument::Delimiter | Argument::Subcommand => {}
         }
-        if word == "--" {
-            return (index + 1 < args.len()).then_some(index + 1);
-        }
-        if !word.starts_with('-') {
-            return Some(index);
-        }
-        index += if option_arity(word, flags)? { 2 } else { 1 };
     }
     None
 }

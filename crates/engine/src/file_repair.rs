@@ -1,9 +1,8 @@
 use crate::{
     arguments::{Argument, ArgumentCursor, ParsedCommand},
-    command_policy::{flags_ref, option_arity, script_operand},
+    command_policy::script_operand,
     host::Host,
     path_repair::{ExpectedType, PathInput, path_input, resolve_path},
-    shell_structure::word_spans,
     speech::expand_symbols,
     types::{Candidate, Catalog, CommandMetadata, Flag, ValueKind},
     util::utf16_len,
@@ -30,34 +29,28 @@ pub async fn repair_copy_destination(
     let Some(parsed) = ParsedCommand::parse(&expanded) else {
         return Ok(None);
     };
-    let (words, spans) = (parsed.words, parsed.spans);
-    let flags = flags_ref("cp", metadata, &[]);
-    let mut index = 1;
-    let mut options = true;
+    let (mut words, spans) = (parsed.words, parsed.spans);
+    words[0].value = "cp".into();
+    let mut cursor = ArgumentCursor::new(words.iter().map(|word| word.value.as_str()), metadata);
     let mut operands = Vec::new();
-    while index < words.len() {
-        let option = &words[index].value;
-        if !options || !option.starts_with('-') {
-            operands.push(index);
-            index += 1;
-            continue;
+    while let Some(argument) = cursor.next() {
+        match argument {
+            Argument::Operand(index) => operands.push(index),
+            Argument::Option {
+                index, complete, ..
+            } => {
+                let option = &words[index].value;
+                if !complete
+                    || option.starts_with("--target-directory")
+                    || option == "--no-target-directory"
+                    || !option.starts_with("--") && option.contains(['t', 'T'])
+                {
+                    return Ok(None);
+                }
+            }
+            Argument::UnknownOption => return Ok(None),
+            Argument::Delimiter | Argument::Subcommand => {}
         }
-        if option == "--" {
-            options = false;
-            index += 1;
-            continue;
-        }
-        // These forms do not use the final operand as a destination directory.
-        if option.starts_with("--target-directory")
-            || option == "--no-target-directory"
-            || !option.starts_with("--") && option.contains(['t', 'T'])
-        {
-            return Ok(None);
-        }
-        let Some(takes_value) = option_arity(option, flags) else {
-            return Ok(None);
-        };
-        index += if takes_value { 2 } else { 1 };
     }
     for start in operands
         .into_iter()
@@ -108,10 +101,12 @@ pub async fn repair_input_file(
 ) -> Result<Option<Vec<Candidate>>, String> {
     let expanded = expand_symbols(input, true);
     let expanded = expanded.trim();
-    let Some(spans) = word_spans(expanded).filter(|spans| spans.len() >= 2) else {
+    let Some(parsed) = ParsedCommand::parse(expanded).filter(|parsed| parsed.words.len() >= 2)
+    else {
         return Ok(None);
     };
-    let command = expanded[spans[0].clone()].to_lowercase();
+    let (mut words, spans) = (parsed.words, parsed.spans);
+    let command = words[0].value.to_lowercase();
     if !matches!(
         crate::command_profiles::profile(&command).repair_kind,
         Some(ValueKind::Path | ValueKind::InputFile)
@@ -119,25 +114,22 @@ pub async fn repair_input_file(
     {
         return Ok(None);
     }
-    let flags = flags_ref(&command, metadata, &[]);
-    let mut index = 1;
-    while index < spans.len() {
-        let option = &expanded[spans[index].clone()];
-        if option == "--" {
-            index += 1;
-            break;
+    words[0].value.clone_from(&command);
+    let mut cursor = ArgumentCursor::new(words.iter().map(|word| word.value.as_str()), metadata);
+    let index = loop {
+        match cursor.next() {
+            Some(Argument::Operand(index)) => break index,
+            Some(
+                Argument::UnknownOption
+                | Argument::Option {
+                    complete: false, ..
+                },
+            )
+            | None => return Ok(None),
+            _ => {}
         }
-        if !option.starts_with('-') {
-            break;
-        }
-        let Some(takes) = option_arity(option, flags) else {
-            return Ok(None);
-        };
-        index += if takes { 2 } else { 1 };
-    }
-    let Some(span) = spans.get(index) else {
-        return Ok(None);
     };
+    let span = &spans[index];
     let mut operand = expanded[span.start..].to_owned();
     let quoted = test!(r###"^("[^"]*"|'[^']*')$"###, &operand);
     if !crate::command_profiles::profile(&command).repair_bare_paths

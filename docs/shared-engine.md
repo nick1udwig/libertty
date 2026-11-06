@@ -4,8 +4,10 @@
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
 The library has no filesystem, subprocess, browser, network or terminal effects.
 `selection.rs` owns final evidence ordering, stable deduplication and original-text presentation, with separate search, validation, compound and display limits.
-`arguments.rs` shares plain argument values and source spans across repair, completion and validation.
+`arguments.rs` scans plain argument values and source spans together across repair, completion and validation.
+The scanner uses one whitespace policy and preserves literal backslashes inside double quotes.
 Its argument cursor tracks option value bounds, subcommand scopes, operands and the literal delimiter while each consumer applies its own acceptance rules.
+File repair, script detection and help discovery use the same cursor.
 `command_profiles.rs` defines built-in operand schemas, path repair, wrapper handling and directory changes in one registry.
 Add command aliases or operand policies there so these stages stay consistent.
 Independent option-path repair and argument completion share a host-fact round, as do final syntax checks for compound and wrapped choices.

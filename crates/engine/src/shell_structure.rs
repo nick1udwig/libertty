@@ -116,7 +116,7 @@ pub fn word_spans(input: &str) -> Option<Vec<Range<usize>>> {
     let (mut start, mut quote, mut depth) = (None, None, 0_i32);
     let mut chars = input.char_indices();
     while let Some((offset, ch)) = chars.next() {
-        if start.is_none() && ch.is_whitespace() {
+        if start.is_none() && crate::util::js_whitespace(ch) {
             continue;
         }
         start.get_or_insert(offset);
@@ -143,7 +143,7 @@ pub fn word_spans(input: &str) -> Option<Vec<Range<usize>>> {
                 return None;
             }
         }
-        if ch.is_whitespace() && depth == 0 {
+        if crate::util::js_whitespace(ch) && depth == 0 {
             spans.push(start.take().unwrap()..offset);
         }
     }
