@@ -355,12 +355,22 @@ export class TerminalSurface extends Events<SurfaceEvents> {
                 ? 'right'
                 : event.buttons & 4
                   ? 'middle'
-                  : undefined
+                  : event.buttons & 8
+                    ? 'wheel-up'
+                    : event.buttons & 16
+                      ? 'wheel-down'
+                      : undefined
             : event.button === 1
               ? 'middle'
               : event.button === 2
                 ? 'right'
-                : 'left',
+                : event.button === 3
+                  ? 'wheel-up'
+                  : event.button === 4
+                    ? 'wheel-down'
+                    : event.button === 0
+                      ? 'left'
+                      : undefined,
         shift: event.shiftKey,
         ctrl: event.ctrlKey,
         alt: event.altKey,
