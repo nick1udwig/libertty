@@ -5,8 +5,7 @@ import { Ghostty, GhosttyTerminal } from '../src/terminal-core.ts';
 import { createTerminalBuffer } from '../src/terminal-buffer.ts';
 
 const ghostty = await Ghostty.load({
-  wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-  callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+  wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
 });
 after(() => ghostty.dispose());
 
@@ -142,7 +141,7 @@ test('adopted terminals detect direct writes, screen switches and resize without
 });
 
 test('mode queries and response queues stay synchronous and exclude keyboard input', () => {
-  const terminal = ghostty.createTerminal(20, 6);
+  const terminal = ghostty.createTerminal(20, 6, {collectResponses:true});
   try {
     terminal.write('\x1b[?2004h\x1b[?1h\x1b[3;4H\x1b[6n');
     assert.equal(terminal.isMode(2004), true);
@@ -211,4 +210,10 @@ test('walking long scrollback keeps retained row copies bounded', () => {
     assert.equal(terminal.getBufferRow(0)?.text, 'row 0');
     assert.equal(terminal.getBufferRow(499)?.text, 'row 499');
   } finally { terminal.free(); }
+});
+
+test('projection terminals discard replies unless collection is explicitly requested',()=>{
+  const terminal=ghostty.createTerminal(20,6);
+  try{terminal.write('\x1b[6n'.repeat(1000));assert.equal(terminal.readResponse(),undefined);}
+  finally{terminal.free();}
 });

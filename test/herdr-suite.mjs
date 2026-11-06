@@ -579,7 +579,7 @@ try {
     });
     assert.match(await preview.getAttribute('src'), /herdrPreview=1/, 'Cached metadata mounts only an unauthorized preview');
     const previewFrame = page.frameLocator('.herdr-screen > iframe.herdr-terminal');
-    assert.ok(await previewFrame.locator('#terminal .gespenst__text').evaluate(canvas => {
+    assert.ok(await previewFrame.locator('#terminal .terminal-text').evaluate(canvas => {
       const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
       let painted = 0;
       for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] > 0) painted++;

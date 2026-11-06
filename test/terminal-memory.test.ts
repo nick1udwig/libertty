@@ -5,8 +5,7 @@ import { Ghostty } from '../src/terminal-core.ts';
 
 test('memory diagnostics count every runtime terminal once without consuming render state', async () => {
   const ghostty = await Ghostty.load({
-    wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-    callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+    wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
   });
   const first = ghostty.createTerminal(80, 24, { scrollbackLimit: 5000 });
   const second = ghostty.core.createTerminal({ cols: 80, rows: 24 });

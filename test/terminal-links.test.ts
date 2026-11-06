@@ -6,8 +6,7 @@ import { Terminal } from '../src/terminal-adapter.ts';
 import { terminalLinkAt } from '../src/terminal-links.ts';
 
 const ghostty = await Ghostty.load({
-  wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-  callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+  wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
 });
 
 function terminal(rows: { text: string; wrapped?: boolean; uri?: string }[]) {

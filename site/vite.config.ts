@@ -102,7 +102,6 @@ function demoEntries(base: string, site: string): Plugin {
 export default defineConfig(({ command }) => ({
   root, base: './',
   build: { outDir: 'dist-site', emptyOutDir: true, target: 'es2022', assetsInlineLimit: file => file.endsWith('.wasm') ? false : undefined, rolldownOptions: { input: { site: 'site/index.html', app: 'index.html', terminal: 'terminal.html' } } },
-  optimizeDeps: { exclude: ['@gespenst/core'] },
   server: { port: 5180, fs: { allow: [root] } },
   plugins: [demoEntries(command === 'serve' ? '/' : process.env.LIBERTTY_SITE_BASE || '/', normalizeSiteUrl(process.env.LIBERTTY_SITE_URL || 'https://libertty.sh/')), repository(), engine(), terminalPreloads()],
 }));

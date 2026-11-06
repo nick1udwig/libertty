@@ -75,7 +75,7 @@ export class TerminalRendering {
   private paint() {
     if (this.disposed || !this.visible || document.hidden) return;
     const term = this.term;
-    // Gespenst keeps its render pending while this paint waits, so the next write cannot request another one; each frame checks again instead.
+    // the terminal keeps its render pending while this paint waits, so the next write cannot request another one; each frame checks again instead.
     if (this.synchronized.hold(!!term.wasmTerm?.getMode(2026))) {
       this.scheduler.request();
       return;

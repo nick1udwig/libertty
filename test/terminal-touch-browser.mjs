@@ -81,7 +81,7 @@ try {
       let measurements = 0;
       if (measure) canvas.getBoundingClientRect = function () { measurements++; return bounds.call(this); };
       try {
-        for (const { type, point, selector = '#terminal .gespenst__background' } of events) {
+        for (const { type, point, selector = '#terminal .terminal-background' } of events) {
           const target = document.querySelector(selector);
           if (type.startsWith('touch')) {
             const contact = { identifier: 42, target, clientX: point.x, clientY: point.y };
@@ -97,7 +97,7 @@ try {
       return measurements;
       }, { events, measure });
     };
-    const touch = (type, point, selector = '#terminal .gespenst__background') => contacts([{ type, point, selector }]);
+    const touch = (type, point, selector = '#terminal .terminal-background') => contacts([{ type, point, selector }]);
     const start = { x: 150, y: 180 }, end = { x: 150, y: 280 };
     const idleWork = await frame.evaluate(() => {
       const term = window.__testTerminal, canvas = document.querySelector('#terminal .terminal-screen'), highlights = document.querySelector('.terminal-selection');

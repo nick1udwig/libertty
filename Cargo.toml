@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/engine", "crates/engine-wasm", "crates/server"]
+members = ["crates/engine", "crates/engine-wasm", "crates/server", "crates/terminal-wasm"]
 resolver = "2"
 exclude = ["vendor/herdr-client-lib"]
 
