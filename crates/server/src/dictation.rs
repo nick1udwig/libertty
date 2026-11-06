@@ -1,4 +1,4 @@
-use crate::storage;
+use crate::{dictation_profile as profile, storage};
 use futures::{SinkExt, StreamExt};
 use libertty_engine::repair::shell_quote_literal;
 use libertty_engine::utf16_len;
@@ -18,9 +18,9 @@ use tokio_tungstenite::{
     tungstenite::{Message, client::IntoClientRequest, protocol::WebSocketConfig},
 };
 use tokio_util::sync::CancellationToken;
-pub const MAX_OPUS_BYTES: usize = 2 * 1024 * 1024;
-pub const MAX_OPUS_FRAMES: u64 = 15002;
-pub const MAX_AUDIO_SAMPLES: u32 = 16000 * 300;
+pub const MAX_OPUS_BYTES: usize = profile::MAX_ENCODED_BYTES as usize;
+pub const MAX_OPUS_FRAMES: u64 = profile::MAX_FRAMES as u64;
+pub const MAX_AUDIO_SAMPLES: u32 = profile::SAMPLE_RATE * profile::MAX_SECONDS;
 pub struct OpusFrame {
     pub sequence: u64,
     pub first: bool,
@@ -29,8 +29,9 @@ pub struct OpusFrame {
     pub total_samples: u32,
     pub packets: Vec<Vec<u8>>,
 }
+const _: () = assert!(profile::MAX_FRAMES == MAX_AUDIO_SAMPLES / profile::FRAME_SAMPLES + 2);
 pub fn parse_opus_frame(bytes: &[u8]) -> Result<OpusFrame, String> {
-    if !(17..=6402).contains(&bytes.len()) {
+    if !(17..=17 + profile::BATCH_PACKETS as usize * 1277).contains(&bytes.len()) {
         return Err("Invalid Opus frame size.".into());
     }
     let sequence = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
@@ -49,7 +50,7 @@ pub fn parse_opus_frame(bytes: &[u8]) -> Result<OpusFrame, String> {
         || (!first && pre_skip != 0)
         || (!final_frame && total_samples != 0)
         || total_samples > MAX_AUDIO_SAMPLES
-        || count > 5
+        || u32::from(count) > profile::BATCH_PACKETS
         || (count == 0 && !final_frame)
     {
         return Err("Invalid Opus frame header.".into());
@@ -131,10 +132,11 @@ async fn configuration(env: &BTreeMap<String, String>) -> Result<(url::Url, Stri
 }
 pub fn compatible(value: &Value) -> bool {
     value["type"] == "capabilities"
-        && value["protocol"].as_f64() == Some(2.0)
+        && value["protocol"].as_f64() == Some(profile::PROTOCOL as f64)
         && value["dictation"] == true
-        && value["sample_rate"].as_f64() == Some(16000.0)
-        && value["channels"].as_f64() == Some(1.0)
+        && value["resume"] == true
+        && value["sample_rate"].as_f64() == Some(profile::SAMPLE_RATE as f64)
+        && value["channels"].as_f64() == Some(profile::CHANNELS as f64)
         && value["format"] == "opus"
         && value["framing"] == "sequence_opus_v1"
         && value["audio_encodings"]
@@ -164,7 +166,10 @@ async fn connect(
             .map_err(|_| "Invalid Voxtype token.")?,
     );
     if let Some(session) = recording {
-        for (name, value) in [("X-Voxtype-Protocol", "2"), ("X-Voxtype-Audio", "opus_v1")] {
+        for (name, value) in [
+            ("X-Voxtype-Protocol", profile::PROTOCOL.to_string()),
+            ("X-Voxtype-Audio", "opus_v1".to_owned()),
+        ] {
             request.headers_mut().insert(name, value.parse().unwrap());
         }
         request.headers_mut().insert(
@@ -278,6 +283,8 @@ enum Control {
 pub struct Checkpoint {
     pub accepted_frames: u64,
     pub finished: bool,
+    pub max_samples: u32,
+    pub max_encoded_bytes: usize,
 }
 pub type ReadyCallback = Arc<dyn Fn(Checkpoint) + Send + Sync>;
 struct Resume {
@@ -471,7 +478,7 @@ async fn run(
                     if matches!(message,Message::Pong(_)){continue}
                     let event: Value=serde_json::from_slice(&message.into_data()).map_err(|_|"Invalid Voxtype response.")?;
                     if event["type"]=="ready"&&!ready {
-                        if event["protocol"].as_f64()!=Some(2.0)||event["sample_rate"].as_f64()!=Some(16000.0)||event["channels"].as_f64()!=Some(1.0)||event["format"]!="opus"||event["audio_encoding"]!="opus_v1"||event["framing"]!="sequence_opus_v1"||event["resume"]!=true{return Err(concat!(
+                        if event["protocol"].as_f64()!=Some(profile::PROTOCOL as f64)||event["sample_rate"].as_f64()!=Some(profile::SAMPLE_RATE as f64)||event["channels"].as_f64()!=Some(profile::CHANNELS as f64)||event["format"]!="opus"||event["audio_encoding"]!="opus_v1"||event["framing"]!="sequence_opus_v1"||event["resume"]!=true{return Err(concat!(
                             "Unsupported Voxtype audio format. ",
                             "Update libertty and Voxtype together."
                         ).into())}
@@ -482,10 +489,10 @@ async fn run(
                             "Update libertty and Voxtype together."
                         ).into()); }
                         frames = accepted; accepted_frames = accepted; finishing = finished; audio_final = finished;
-                        max_samples=(event["max_seconds"].as_f64().filter(|n|*n!=0.0).unwrap_or(300.0).clamp(1.0,300.0)*16000.0) as u32;
+                        max_samples=(event["max_seconds"].as_f64().filter(|n|*n!=0.0).unwrap_or(profile::MAX_SECONDS as f64).clamp(1.0,profile::MAX_SECONDS as f64)*profile::SAMPLE_RATE as f64) as u32;
                         max_bytes=event["max_encoded_bytes"].as_f64().filter(|n|*n!=0.0).unwrap_or(MAX_OPUS_BYTES as f64).clamp(17.0,MAX_OPUS_BYTES as f64) as usize;
                         ready=true;deadline=tokio::time::Instant::now()+Duration::from_secs(480);
-                        if let Some(callback) = &resume.ready { callback(Checkpoint { accepted_frames: accepted, finished }); } else { status("ready",None); }
+                        if let Some(callback) = &resume.ready { callback(Checkpoint { accepted_frames: accepted, finished, max_samples, max_encoded_bytes: max_bytes }); } else { status("ready",None); }
                     } else if event["type"]=="final" {
                         let text=event["text"].as_str().filter(|s|utf16_len(s)<=crate::protocol::MAX_TEXT).filter(|_|finishing).ok_or("Invalid Voxtype result.")?;
                         let text=breaks.replace_all(text," ").into_owned();

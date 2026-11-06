@@ -5,6 +5,7 @@ pub mod completion;
 pub mod context;
 mod dev;
 pub mod dictation;
+mod dictation_profile;
 pub mod directories;
 pub mod engine;
 pub mod facts;

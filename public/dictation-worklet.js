@@ -1,8 +1,12 @@
+// Begin generated dictation profile.
+const AUDIO_PROFILE = {"protocol":2,"sampleRate":16000,"channels":1,"frameSamples":320,"batchPackets":5,"maxSeconds":300,"maxEncodedBytes":2097152,"maxFrames":15002};
+// End generated dictation profile.
 // Streaming mono downsampling, retaining fractional sample coverage across blocks.
 class DictationPCM extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.ratio = sampleRate / 16000;
+    this.ratio = sampleRate / AUDIO_PROFILE.sampleRate;
+    this.chunkSamples = AUDIO_PROFILE.frameSamples * AUDIO_PROFILE.batchPackets;
     this.remaining = this.ratio; this.sum = 0;
     this.samples = []; this.stopped = false; this.gain = 1; this.power = 0; this.pending = 0;
     this.port.onmessage = event => {
@@ -48,7 +52,7 @@ class DictationPCM extends AudioWorkletProcessor {
           const normalized = Math.max(-1, Math.min(1, this.sum / this.ratio));
           this.samples.push(Math.round(normalized * (normalized < 0 ? 32768 : 32767)));
           this.sum = 0; this.remaining = this.ratio;
-          if (this.samples.length >= 1600) { this.flush(); if (this.stopped) return false; }
+          if (this.samples.length >= this.chunkSamples) { this.flush(); if (this.stopped) return false; }
         }
       }
     }

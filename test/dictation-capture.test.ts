@@ -94,3 +94,18 @@ test('flushing releases capture resources while encoded audio remains available 
     assert.deepEqual(sent, [encoded]);
   }
 });
+
+test('negotiated sample limits trim the last chunk and finish without exceeding duration', async t => {
+  const env = environment(t);
+  let count = 0, finishes = 0;
+  const capture = new DictationCapture({ ...events(), level: pcm => count += pcm.byteLength / 2, finish: () => finishes++ });
+  t.after(() => capture.dispose());
+  await capture.start();
+  capture.limit(100);
+  env.processor.port.onmessage?.({ data: new ArrayBuffer(3200) });
+  assert.equal(count, 100);
+  assert.equal(finishes, 1);
+  env.processor.port.onmessage?.({ data: new ArrayBuffer(3200) });
+  assert.equal(count, 100);
+  assert.throws(() => capture.limit(99), /duration/);
+});

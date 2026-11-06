@@ -1,0 +1,10 @@
+export const AUDIO_PROFILE = {
+  protocol: 2,
+  sampleRate: 16000,
+  channels: 1,
+  frameSamples: 320,
+  batchPackets: 5,
+  maxSeconds: 300,
+  maxEncodedBytes: 2097152,
+  maxFrames: 15002,
+} as const;

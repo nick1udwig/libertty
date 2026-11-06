@@ -168,13 +168,15 @@ test('dictation detection authenticates the capabilities endpoint and rejects in
   await writeFile(tokenFile, 'a'.repeat(32), { mode: 0o600 });
   const server = new WebSocketServer({ port: 0, host: '127.0.0.1' }); await once(server, 'listening');
   t.after(() => new Promise(resolve => server.close(resolve)));
-  let compatible = true;
+  let compatible = true, resume = true;
   server.on('connection', (socket, request) => {
     assert.equal(request.url, '/v1/capabilities'); assert.equal(request.headers.authorization, 'Bearer ' + 'a'.repeat(32));
-    socket.send(JSON.stringify({ type: 'capabilities', protocol: compatible ? 2 : 1, dictation: true, sample_rate: 16000, channels: 1, format: 'opus', framing: 'sequence_opus_v1', audio_encodings: ['opus_v1'], results: ['final'] }));
+    socket.send(JSON.stringify({ type: 'capabilities', protocol: compatible ? 2 : 1, dictation: true, resume, sample_rate: 16000, channels: 1, format: 'opus', framing: 'sequence_opus_v1', audio_encodings: ['opus_v1'], results: ['final'] }));
   });
   const env = { ...f.config.env, LIBERTTY_VOXTYPE_URL: 'ws://127.0.0.1:' + server.address().port + '/v1/dictate' };
   assert.equal(await voxtypeAvailable(env), true); compatible = false;
   assert.equal(await voxtypeAvailable(env), false);
+  compatible = true; resume = false;
+  assert.equal(await voxtypeAvailable(env), false, "Resume support is required before offering dictation");
   assert.equal(await voxtypeAvailable({ ...env, LIBERTTY_VOXTYPE_URL: 'wss://example.com/v1/dictate' }), false);
 });

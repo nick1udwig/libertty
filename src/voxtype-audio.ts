@@ -1,7 +1,9 @@
+import { AUDIO_PROFILE } from './generated/dictation-profile.ts';
+export { AUDIO_PROFILE };
 /** Voxtype protocol 2: sequence + raw Opus packets, no file container. */
-export const MAX_OPUS_BYTES = 2 * 1024 * 1024;
-export const MAX_OPUS_FRAMES = 15002;
-export const MAX_AUDIO_SAMPLES = 16000 * 300;
+export const MAX_OPUS_BYTES = AUDIO_PROFILE.maxEncodedBytes;
+export const MAX_OPUS_FRAMES = AUDIO_PROFILE.maxFrames;
+export const MAX_AUDIO_SAMPLES = AUDIO_PROFILE.sampleRate * AUDIO_PROFILE.maxSeconds;
 export function opusFrame(
   sequence: number,
   packets: Uint8Array[],
@@ -28,7 +30,8 @@ export function opusFrame(
   return bytes.buffer;
 }
 export function parseOpusFrame(bytes: Uint8Array) {
-  if (bytes.length < 17 || bytes.length > 6402) throw new Error('Invalid Opus frame size.');
+  if (bytes.length < 17 || bytes.length > 17 + AUDIO_PROFILE.batchPackets * 1277)
+    throw new Error('Invalid Opus frame size.');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const sequence = view.getBigUint64(0),
     flags = bytes[9],
@@ -47,7 +50,7 @@ export function parseOpusFrame(bytes: Uint8Array) {
     (!first && preSkip) ||
     (!final && totalSamples) ||
     totalSamples > MAX_AUDIO_SAMPLES ||
-    count > 5 ||
+    count > AUDIO_PROFILE.batchPackets ||
     (!count && !final)
   )
     throw new Error('Invalid Opus frame header.');

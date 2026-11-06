@@ -36,3 +36,24 @@ test('retained audio remains bounded to the negotiated two MiB recording limit',
     audio.append(value); bytes += value.byteLength; sequence++;
   }
 });
+
+test('negotiated byte limits reject oversized replay without discarding retained frames', () => {
+  const audio = new DictationAudio(), bytes = frame(0, true);
+  audio.append(bytes);
+  for (const invalid of [0, 16, Infinity, MAX_OPUS_BYTES + 1]) assert.throws(() => audio.limit(invalid), /limit/);
+  assert.throws(() => audio.limit(bytes.byteLength - 1), /limit/);
+  audio.limit(bytes.byteLength);
+  assert.equal(audio.upload(value => { assert.equal(value, bytes); return true; }), true);
+  audio.clear(); audio.append(bytes);
+});
+
+test('a negotiated upload limit leaves complete audio available for a later retry', () => {
+  const audio = new DictationAudio(), first = frame(0), last = frame(1, true);
+  audio.limit(first.byteLength);
+  audio.append(first); audio.append(last);
+  assert.throws(() => audio.upload(() => assert.fail('Oversized recordings must not upload')), /daemon audio limit/);
+  audio.limit(MAX_OPUS_BYTES); audio.resume();
+  const sent: ArrayBuffer[] = [];
+  assert.equal(audio.upload(bytes => { sent.push(bytes); return true; }), true);
+  assert.deepEqual(sent, [first, last]);
+});

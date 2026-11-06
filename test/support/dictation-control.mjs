@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 const root = process.cwd();
 const { DictationDelivery } = await import(pathToFileURL(root + '/src/dictation-delivery.ts'));
+const audioProfile = await import(pathToFileURL(root + '/src/voxtype-audio.ts'));
 const { DictationAudio } = await import(pathToFileURL(root + '/src/dictation-audio.ts'));
 const { opusFrame } = await import(pathToFileURL(root + '/src/voxtype-audio.ts'));
 class Element {
@@ -28,6 +29,7 @@ class Capture {
       this.events.flushed();
     });
   }
+  limit() {}
   dispose() {}
 }
 let nextTimer = 0;
@@ -41,6 +43,7 @@ const context = createContext({
 });
 const definitions = {
   './dictation-delivery.ts': { DictationDelivery },
+  './voxtype-audio.ts': audioProfile,
   './dictation-capture.ts': { DictationCapture: Capture },
   './dictation-audio.ts': { DictationAudio },
   './unsent-input.ts': { sameInputContext: () => true },

@@ -31,7 +31,7 @@ export type CreatedSession = { id: string, name: string, state: ShellState, };
 
 export type DictationAction = "start" | "finish" | "cancel";
 
-export type DictationCheckpoint = { acceptedFrames: number, finished: boolean, };
+export type DictationCheckpoint = { acceptedFrames: number, finished: boolean, maxSamples: number, maxEncodedBytes: number, };
 
 export type DictationRequest = { id: string, action: DictationAction, prompt?: number, revision?: number, target?: DictationTarget, readingPhrases?: string[], };
 

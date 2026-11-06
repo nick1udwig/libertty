@@ -18,7 +18,7 @@ use tokio_tungstenite::{
     },
 };
 fn capabilities() -> Value {
-    json!({"type":"capabilities","protocol":2,"dictation":true,"sample_rate":16000,"channels":1,"format":"opus","framing":"sequence_opus_v1","audio_encodings":["opus_v1"],"results":["partial","final"]})
+    json!({"type":"capabilities","protocol":2,"dictation":true,"resume":true,"sample_rate":16000,"channels":1,"format":"opus","framing":"sequence_opus_v1","audio_encodings":["opus_v1"],"results":["partial","final"]})
 }
 fn ready() -> Value {
     json!({"type":"ready","protocol":2,"sample_rate":16000,"channels":1,"format":"opus","audio_encoding":"opus_v1","framing":"sequence_opus_v1","max_seconds":300,"max_encoded_bytes":2097152,"resume":true,"accepted_frames":0,"finished":false})
@@ -39,6 +39,7 @@ fn capability_negotiation_and_binary_opus_validation_reject_older_or_malformed_i
     assert!(dictation::compatible(&capabilities()));
     for patch in [
         json!({"protocol":1}),
+        json!({"resume":false}),
         json!({"sample_rate":48000}),
         json!({"results":["partial"]}),
         json!({"dictation":false}),
@@ -363,8 +364,11 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
     let task = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut first = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let mut limits = ready();
+        limits["max_seconds"] = json!(2);
+        limits["max_encoded_bytes"] = json!(4096);
         first
-            .send(Message::Text(ready().to_string().into()))
+            .send(Message::Text(limits.to_string().into()))
             .await
             .unwrap();
         let audio = first.next().await.unwrap().unwrap();
@@ -438,12 +442,10 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
         )
     };
     let first = start();
-    assert_eq!(
-        receive_with_timeout(&mut checkpoint_rx)
-            .await
-            .accepted_frames,
-        0
-    );
+    let checkpoint = receive_with_timeout(&mut checkpoint_rx).await;
+    assert_eq!(checkpoint.accepted_frames, 0);
+    assert_eq!(checkpoint.max_samples, 32000);
+    assert_eq!(checkpoint.max_encoded_bytes, 4096);
     first.audio(frame(0, false, true));
     receive_with_timeout(&mut accepted_rx).await;
     first.suspend();

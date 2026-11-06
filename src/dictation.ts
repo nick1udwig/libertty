@@ -1,3 +1,4 @@
+import { MAX_AUDIO_SAMPLES, MAX_OPUS_BYTES } from './voxtype-audio.ts';
 import { DictationCapture } from './dictation-capture.ts';
 import { DictationDelivery } from './dictation-delivery.ts';
 import { DictationAudio } from './dictation-audio.ts';
@@ -364,7 +365,12 @@ export class DictationControl {
     id: string,
     state: 'ready' | 'done' | 'error',
     message?: string,
-    resume?: { acceptedFrames: number; finished: boolean },
+    resume?: {
+      acceptedFrames: number;
+      finished: boolean;
+      maxSamples?: number;
+      maxEncodedBytes?: number;
+    },
   ) {
     if (
       id !== this.id ||
@@ -376,6 +382,8 @@ export class DictationControl {
     if (state === 'ready') {
       if (!this.delivery.ready(resume?.finished)) return;
       try {
+        this.audio.limit(resume?.maxEncodedBytes ?? MAX_OPUS_BYTES);
+        this.capture?.limit(resume?.maxSamples ?? MAX_AUDIO_SAMPLES);
         this.audio.resume(resume?.acceptedFrames, resume?.finished);
       } catch (error) {
         this.retain((error as Error).message);
@@ -389,7 +397,13 @@ export class DictationControl {
   }
   private upload() {
     if (this.delivery.state !== 'uploading' || !this.online) return;
-    const uploaded = this.audio.upload((frame) => this.host.audio(frame));
+    let uploaded: boolean;
+    try {
+      uploaded = this.audio.upload((frame) => this.host.audio(frame));
+    } catch (error) {
+      this.retain((error as Error).message);
+      return;
+    }
     if (!uploaded) this.delivery.uploadLater(() => this.upload());
     else if (this.captureFlushed) {
       if (this.host.send({ type: 'dictation', id: this.id, action: 'finish' }))

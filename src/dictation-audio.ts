@@ -5,6 +5,7 @@ export class DictationAudio {
   private frames: ArrayBuffer[] = [];
   private bytes = 0;
   private next = 0;
+  private maxBytes: number = MAX_OPUS_BYTES;
   finished = false;
   append(frame: ArrayBuffer) {
     if (
@@ -14,6 +15,12 @@ export class DictationAudio {
       throw new Error('Recording exceeded its audio limit.');
     this.frames.push(frame);
     this.bytes += frame.byteLength;
+  }
+  limit(bytes: number) {
+    if (!Number.isSafeInteger(bytes) || bytes < 17 || bytes > MAX_OPUS_BYTES)
+      throw new Error('Invalid encoded audio limit.');
+    if (this.bytes > bytes) throw new Error('Recording exceeds the daemon audio limit.');
+    this.maxBytes = bytes;
   }
   resume(accepted = 0, finished = false) {
     if (
@@ -27,6 +34,7 @@ export class DictationAudio {
     this.finished = finished;
   }
   upload(send: (frame: ArrayBuffer) => boolean) {
+    if (this.bytes > this.maxBytes) throw new Error('Recording exceeds the daemon audio limit.');
     for (let count = 0; this.next < this.frames.length && count < 4 && !this.finished; count++) {
       if (!send(this.frames[this.next])) return false;
       this.next++;
@@ -35,6 +43,7 @@ export class DictationAudio {
   }
   clear() {
     this.frames = [];
+    this.maxBytes = MAX_OPUS_BYTES;
     this.bytes = this.next = 0;
     this.finished = false;
   }

@@ -1,3 +1,6 @@
+// Begin generated dictation profile.
+const AUDIO_PROFILE = {"protocol":2,"sampleRate":16000,"channels":1,"frameSamples":320,"batchPackets":5,"maxSeconds":300,"maxEncodedBytes":2097152,"maxFrames":15002};
+// End generated dictation profile.
 import { access, readFile, writeFile, rename, chmod, mkdir, rm, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -24,7 +27,7 @@ export async function voxtypeAvailable(env) {
     const timer = setTimeout(() => finish(false), 2500);
     socket.on('error', () => finish(false)); socket.on('close', () => finish(false));
     socket.once('message', bytes => {
-      try { const event = JSON.parse(bytes.toString()); finish(event.type === 'capabilities' && event.protocol === 2 && event.dictation === true && event.sample_rate === 16000 && event.channels === 1 && event.format === 'opus' && event.framing === 'sequence_opus_v1' && event.audio_encodings?.includes('opus_v1') && event.results?.includes('final')); }
+      try { const event = JSON.parse(bytes.toString()); finish(event.type === 'capabilities' && event.protocol === AUDIO_PROFILE.protocol && event.dictation === true && event.resume === true && event.sample_rate === AUDIO_PROFILE.sampleRate && event.channels === AUDIO_PROFILE.channels && event.format === 'opus' && event.framing === 'sequence_opus_v1' && event.audio_encodings?.includes('opus_v1') && event.results?.includes('final')); }
       catch { finish(false); }
     });
   });
