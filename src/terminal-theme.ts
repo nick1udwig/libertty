@@ -22,8 +22,15 @@ const defaults = [
   '#9ed2cb',
   '#ffffff',
 ];
+function normalizeColor({ r, g, b, a = 1 }: RenderColor): RenderColor {
+  if ([r, g, b].some((channel) => !Number.isFinite(channel) || channel < 0 || channel > 255))
+    throw new TypeError('Terminal RGB channels must be finite numbers from 0 to 255');
+  if (!Number.isFinite(a) || a < 0 || a > 1)
+    throw new TypeError('Terminal alpha must be a finite number from 0 to 1');
+  return { r: Math.round(r), g: Math.round(g), b: Math.round(b), a };
+}
 export function parseColor(value: string | RenderColor): RenderColor {
-  if (typeof value !== 'string') return { ...value };
+  if (typeof value !== 'string') return normalizeColor(value);
   value = value.trim();
   const hex = /^#([a-f\d]{3,4}|[a-f\d]{6}|[a-f\d]{8})$/i.exec(value)?.[1];
   if (hex) {
@@ -35,17 +42,32 @@ export function parseColor(value: string | RenderColor): RenderColor {
       a: full.length === 8 ? parseInt(full.slice(6), 16) / 255 : 1,
     };
   }
-  const rgb = /^rgba?\((.*)\)$/i
-    .exec(value)?.[1]
-    .split(/[,\s/]+/)
-    .filter(Boolean)
-    .map((channel, index) => {
-      if (!channel.endsWith('%')) return Number(channel);
-      const fraction = Number(channel.slice(0, -1)) / 100;
-      return index < 3 ? Math.round(fraction * 255) : fraction;
+  const functional = /^(rgba?)\((.*)\)$/i.exec(value);
+  if (functional) {
+    const body = functional[2],
+      comma = body.includes(',');
+    const parts = body.split(comma ? ',' : '/').map((part) => part.trim());
+    const channels = comma ? parts.slice(0, 3) : parts[0].split(/\s+/);
+    const opacity = parts[comma ? 3 : 1];
+    if (
+      channels.length !== 3 ||
+      parts.length > (comma ? 4 : 2) ||
+      (functional[1].toLowerCase() === 'rgba' && opacity === undefined)
+    )
+      throw new TypeError(`Invalid terminal color: ${value}`);
+    const component = (channel: string, maximum: number) => {
+      if (!channel || channel === '%') throw new TypeError(`Invalid terminal color: ${value}`);
+      return channel.endsWith('%')
+        ? (Number(channel.slice(0, -1)) * maximum) / 100
+        : Number(channel);
+    };
+    return normalizeColor({
+      r: component(channels[0], 255),
+      g: component(channels[1], 255),
+      b: component(channels[2], 255),
+      a: opacity === undefined ? 1 : component(opacity, 1),
     });
-  if (rgb?.length && rgb.length >= 3 && rgb.every(Number.isFinite))
-    return { r: rgb[0], g: rgb[1], b: rgb[2], a: rgb[3] ?? 1 };
+  }
   throw new TypeError(`Invalid terminal color: ${value}`);
 }
 export function resolveTerminalTheme(

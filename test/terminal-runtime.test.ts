@@ -192,3 +192,12 @@ test('appearance queries report derived and explicit themes after updates and re
     terminal.dispose();
   }
 });
+test('fractional theme channels reach the native terminal rounded', () => {
+  const terminal = runtime.createTerminal({ theme: { foreground: { r: 110.2, g: 220.8, b: 3.5 } } });
+  try {
+    const { r, g, b } = terminal.viewport().colors.foreground;
+    assert.deepEqual([r, g, b], [110, 221, 4]);
+  } finally {
+    terminal.dispose();
+  }
+});
