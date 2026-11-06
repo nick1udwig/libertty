@@ -310,7 +310,7 @@ export class TerminalSurface extends Events<SurfaceEvents> {
     this.element.addEventListener(
       'wheel',
       (event) => {
-        if (event.ctrlKey || !event.deltaY) return;
+        if (!event.deltaY) return;
         event.preventDefault();
         const metrics = this.layout.metrics,
           lineHeight = metrics.cellHeight / metrics.devicePixelRatio;
@@ -330,6 +330,7 @@ export class TerminalSurface extends Events<SurfaceEvents> {
             x: (event.clientX - bounds.left) * metrics.devicePixelRatio,
             y: (event.clientY - bounds.top) * metrics.devicePixelRatio,
             shift: event.shiftKey,
+            ctrl: event.ctrlKey,
             alt: event.altKey,
             meta: event.metaKey,
           },
