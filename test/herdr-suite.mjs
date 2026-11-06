@@ -552,7 +552,7 @@ try {
     assert.equal(await page.locator('.herdr-status-lane[data-lane=done] .herdr-mark-read').count(), 1, 'Mark read sits in the Done lane');
     await markRead.click();
     await until(async () => JSON.stringify(await lanes()) === JSON.stringify(['blocked:term_0', 'idle:term_1,term_2']), 'mark all done as read');
-    assert.equal(await markRead.count(), 0); assert.equal(await page.locator('.herdr-attention').textContent(), '1', 'Only the request still needs attention');
+    assert.equal(await markRead.count(), 0); assert.equal(await page.locator('#tabs .herdr-tab .tab-attention').textContent(), '1', 'Only the request still needs attention');
     await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
     await page.locator('#herdr-strip-order').selectOption('manual'); await page.locator('#nav-terminals').click();
     await until(async () => await page.locator('.herdr-agent-strip:visible .herdr-status-lane').count() === 0, 'manual strip');
