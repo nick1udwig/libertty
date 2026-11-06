@@ -134,6 +134,23 @@
   padding: 0 9px;
   font: 600 12px var(--font-ui);
 }
+.herdr-mark-read {
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--r-sm);
+  background: var(--info-soft);
+  color: var(--herdr-done);
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+.herdr-mark-read:hover {
+  background: var(--hover);
+}
+.herdr-mark-read:active {
+  background: var(--press);
+}
 .herdr-lane-toggle[data-status='blocked'] {
   background: var(--danger-soft);
   color: var(--herdr-blocked);

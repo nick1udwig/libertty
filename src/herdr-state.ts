@@ -94,6 +94,15 @@ export class HerdrState {
     state.seen = state.completion;
     return true;
   }
+  /** Marks every unseen completion as viewed and reports whether any changed. */
+  viewedAll(): boolean {
+    let changed = false;
+    for (const id of this.states.keys()) changed = this.viewed(id) || changed;
+    return changed;
+  }
+  get unread() {
+    return this.agents.some((agent) => this.status(agent) === 'done');
+  }
   completion(terminalId: string) {
     return this.states.get(terminalId)?.completion;
   }

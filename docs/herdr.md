@@ -156,6 +156,8 @@ Ordinary shell tabs retain their stop-process confirmation.
 
 Hollow green is idle, orange is working, red is blocked/requesting attention, and blue is completed but not yet viewed here.
 Viewed acknowledgements are local; desktop focus does not clear this browser's unread completions.
+While any completion is unread, a double-check button marks all of them as read.
+It sits in the Done lane, or at the start of the strip when that lane is absent.
 Servers with completion_seq report completion directly.
 Older versions use done status or an observed working-to-idle transition, so completions entirely during a disconnect cannot always be detected.
 

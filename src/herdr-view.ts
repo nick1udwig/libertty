@@ -885,6 +885,7 @@ export class HerdrView {
       this.stripSelection,
       this.preferences.collapsedLanes,
       this.preferences.collapsedGroups,
+      this.tracker.unread,
       this.preferences.spaceGroups,
       lanes?.map((lane) => [lane.lane, lane.items.map((item) => item.terminalId)]),
       agents.map((agent) => [
@@ -1121,6 +1122,20 @@ export class HerdrView {
     add.disabled = !this.liveSnapshot || this.creatingSpace;
     add.onclick = () => void this.createSpace();
     this.strip.append(add);
+    if (this.tracker.unread) {
+      // The Done lane holds the action when it exists, otherwise it leads the strip so it stays in view.
+      const markRead = node('button', 'herdr-mark-read');
+      markRead.type = 'button';
+      markRead.title = 'Mark all done as read';
+      markRead.setAttribute('aria-label', markRead.title);
+      markRead.innerHTML = icon('<path d="m2 12 5 5L18 6m-6 9 2 2L22 9"/>', 16, 2);
+      markRead.onclick = () => {
+        if (!this.tracker.viewedAll()) return;
+        this.save();
+        this.render();
+      };
+      (laneGroups.get('done')?.firstElementChild ?? this.tabsToggle).after(markRead);
+    }
     this.strip.scrollLeft = scroll;
     if (this.tree) this.refreshTree();
   }
