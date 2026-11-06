@@ -17,16 +17,22 @@ pub(crate) const UPLOAD_WINDOW: u32 = 16;
 pub const MAX_OPUS_BYTES: usize = profile::MAX_ENCODED_BYTES as usize;
 pub const MAX_OPUS_FRAMES: u64 = profile::MAX_FRAMES as u64;
 pub const MAX_AUDIO_SAMPLES: u32 = profile::SAMPLE_RATE * profile::MAX_SECONDS;
-pub struct OpusFrame {
+pub struct OpusFrame<'a> {
     pub sequence: u64,
     pub first: bool,
     pub final_frame: bool,
     pub pre_skip: u16,
     pub total_samples: u32,
-    pub packets: Vec<Vec<u8>>,
+    packets: [&'a [u8]; profile::BATCH_PACKETS as usize],
+    packet_count: u8,
+}
+impl<'a> OpusFrame<'a> {
+    pub fn packets(&self) -> &[&'a [u8]] {
+        &self.packets[..self.packet_count as usize]
+    }
 }
 const _: () = assert!(profile::MAX_FRAMES == MAX_AUDIO_SAMPLES / profile::FRAME_SAMPLES + 2);
-pub fn parse_opus_frame(bytes: &[u8]) -> Result<OpusFrame, String> {
+pub fn parse_opus_frame(bytes: &[u8]) -> Result<OpusFrame<'_>, String> {
     if !(17..=17 + profile::BATCH_PACKETS as usize * 1277).contains(&bytes.len()) {
         return Err("Invalid Opus frame size.".into());
     }
@@ -51,9 +57,10 @@ pub fn parse_opus_frame(bytes: &[u8]) -> Result<OpusFrame, String> {
     {
         return Err("Invalid Opus frame header.".into());
     }
-    let mut packets = vec![];
+    let mut packets: [&[u8]; profile::BATCH_PACKETS as usize] =
+        [&[]; profile::BATCH_PACKETS as usize];
     let mut offset = 17;
-    for _ in 0..count {
+    for packet in packets.iter_mut().take(count as usize) {
         if offset + 2 > bytes.len() {
             return Err("Truncated Opus packet.".into());
         }
@@ -62,7 +69,7 @@ pub fn parse_opus_frame(bytes: &[u8]) -> Result<OpusFrame, String> {
         if !(1..=1275).contains(&length) || offset + length > bytes.len() {
             return Err("Invalid Opus packet size.".into());
         }
-        packets.push(bytes[offset..offset + length].to_vec());
+        *packet = &bytes[offset..offset + length];
         offset += length;
     }
     if offset != bytes.len() {
@@ -75,6 +82,7 @@ pub fn parse_opus_frame(bytes: &[u8]) -> Result<OpusFrame, String> {
         pre_skip,
         total_samples,
         packets,
+        packet_count: count,
     })
 }
 enum Control {

@@ -1,4 +1,4 @@
-import { MAX_OPUS_BYTES, parseOpusFrame } from './voxtype-audio.ts';
+import { MAX_OPUS_BYTES, validateOpusFrame } from './voxtype-audio.ts';
 
 /** Retain complete encoded frames until the recording is delivered or discarded. */
 export class DictationAudio {
@@ -12,7 +12,7 @@ export class DictationAudio {
   append(frame: ArrayBuffer) {
     if (
       this.bytes + frame.byteLength > MAX_OPUS_BYTES ||
-      parseOpusFrame(new Uint8Array(frame)).sequence !== this.frames.length
+      validateOpusFrame(new Uint8Array(frame)).sequence !== this.frames.length
     )
       throw new Error('Recording exceeded its audio limit.');
     this.frames.push(frame);

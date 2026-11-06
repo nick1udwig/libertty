@@ -109,3 +109,24 @@ test('negotiated sample limits trim the last chunk and finish without exceeding 
   assert.equal(count, 100);
   assert.throws(() => capture.limit(99), /duration/);
 });
+
+test('capture transfers an unclipped PCM buffer after reading its level', async t => {
+  const env = environment(t), pcm = new ArrayBuffer(3200);
+  new DataView(pcm).setInt16(0, 1234, true);
+  let levelRead = false;
+  const capture = new DictationCapture({ ...events(), level: value => {
+    assert.equal(value, pcm);
+    assert.equal(new DataView(value).getInt16(0, true), 1234);
+    levelRead = true;
+  } });
+  t.after(() => capture.dispose());
+  await capture.start();
+  env.worker.postMessage = (data: any) => {
+    assert.equal(levelRead, true);
+    assert.equal(data.pcm, pcm);
+    const delivered = structuredClone(data, { transfer: [data.pcm] });
+    assert.equal(new DataView(delivered.pcm).getInt16(0, true), 1234);
+  };
+  env.processor.port.onmessage?.({ data: pcm });
+  assert.equal(pcm.byteLength, 0);
+});

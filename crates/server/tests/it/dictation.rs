@@ -58,7 +58,8 @@ fn capability_negotiation_and_binary_opus_validation_reject_older_or_malformed_i
     let parsed = dictation::parse_opus_frame(&encoded).unwrap();
     assert!(parsed.first && parsed.final_frame);
     assert_eq!(parsed.total_samples, 1600);
-    assert_eq!(parsed.packets, vec![vec![0xf8, 0xff, 0xfe]]);
+    assert_eq!(parsed.packets(), &[&[0xf8, 0xff, 0xfe][..]]);
+    assert_eq!(parsed.packets()[0].as_ptr(), encoded[19..].as_ptr());
     for bytes in [vec![0; 16], vec![0; 6403], vec![0; 3200]] {
         assert!(dictation::parse_opus_frame(&bytes).is_err());
     }

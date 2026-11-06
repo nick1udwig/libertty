@@ -46,3 +46,29 @@ test('capture boosts quiet audio without boosting silence or clipping louder spe
   assert.ok(Math.max(...loud.map(Math.abs)) <= 0.951, 'sudden loud speech keeps peak headroom');
   assert.ok(rms(loud.slice(-4000)) > 0.60 && rms(loud.slice(-4000)) < 0.66, 'loud speech retains its original level');
 });
+
+test('transferred PCM buffers preserve every sample across full and partial chunks', () => {
+  let Processor: any;
+  const frames: ArrayBuffer[] = [];
+  vm.runInNewContext(readFileSync(new URL('../public/dictation-worklet.js', import.meta.url), 'utf8'), {
+    AudioWorkletProcessor: class { port = { onmessage: null, postMessage: (message: unknown, transfer?: ArrayBuffer[]) => {
+      const received = structuredClone(message, { transfer });
+      if (typeof received !== 'string') frames.push(received as ArrayBuffer);
+      if (transfer?.length) assert.equal(transfer[0].byteLength, 0);
+    } }; },
+    sampleRate: 16000, registerProcessor: (_name: string, type: any) => { Processor = type; },
+  });
+  const processor = new Processor();
+  for (let offset = 0; offset < 3211; offset += 128) {
+    processor.process([[Float32Array.from({ length: Math.min(128, 3211 - offset) }, (_, i) => (offset + i) % 2 ? -0.5 : 0.5)]]);
+    processor.port.onmessage({ data: { type: 'consumed' } });
+  }
+  processor.port.onmessage();
+  assert.deepEqual(frames.map(frame => frame.byteLength), [3200, 3200, 22]);
+  let sample = 0;
+  for (const frame of frames) {
+    const view = new DataView(frame);
+    for (let offset = 0; offset < frame.byteLength; offset += 2) assert.equal(view.getInt16(offset, true), sample++ % 2 ? -16384 : 16384);
+  }
+  assert.equal(sample, 3211);
+});

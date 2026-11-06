@@ -91,7 +91,9 @@ export class DictationCapture {
           this.lastAudio = Date.now();
           this.checkCapture();
           if (generation !== this.generation) return;
-          const pcm = event.data.slice(0, Math.max(0, this.maxSamples - this.samples) * 2);
+          const available = Math.max(0, this.maxSamples - this.samples) * 2;
+          const pcm =
+            event.data.byteLength <= available ? event.data : event.data.slice(0, available);
           if (!pcm.byteLength) return;
           this.samples += pcm.byteLength / 2;
           this.events.level(pcm);
