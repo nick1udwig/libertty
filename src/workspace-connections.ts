@@ -1,3 +1,4 @@
+import { probeRoutes } from './route-probes.ts';
 import { builtinState } from './builtin-state.ts';
 import { BrowserVault } from './browser-vault.ts';
 import {
@@ -274,7 +275,13 @@ export function createWorkspaceConnections(options: Options) {
       .get(sshHost?.backendId || '')
       ?.keys.find((key) => keyValue(key) === select('ssh-key').value);
   let selectedRoute: { backend: BackendProfile; keyId?: string; compression?: boolean } | undefined,
-    routeGeneration = 0;
+    routeController: AbortController | undefined;
+  function cancelRoute() {
+    routeController?.abort();
+    routeController = undefined;
+    selectedRoute = undefined;
+  }
+  dialog('ssh-dialog').addEventListener('close', cancelRoute);
   const openingHosts = new Map<string, Promise<void>>();
   interface ConnectionRequest extends ConnectionInput {
     pluginId: string;
@@ -542,6 +549,7 @@ export function createWorkspaceConnections(options: Options) {
     }
     const vault = await endpoint(backend, 'api/keychain', undefined);
     vaults.set(backend.id, vault);
+    cancelRoute();
     sshHost = host;
     sshRequest = request;
     $('ssh-title').textContent = host.name;
@@ -610,7 +618,9 @@ export function createWorkspaceConnections(options: Options) {
   async function chooseRoute(
     host: HostProfile,
     keyFingerprint: string,
+    signal: AbortSignal,
   ): Promise<{ backend: BackendProfile; keyId?: string; compression?: boolean }> {
+    signal.throwIfAborted();
     const selected = backendFor(host.backendId),
       localKey = vaults.get(selected.id)?.keys.find((k) => keyValue(k) === keyFingerprint);
     const portable = keyFingerprint === 'password' || keyFingerprint.startsWith('browser:');
@@ -620,42 +630,50 @@ export function createWorkspaceConnections(options: Options) {
     const key = JSON.stringify([host.id, keyFingerprint]),
       cached = routes.get(key);
     if (cached && Date.now() - cached.at < 60000) return cached;
-    const candidates = workspace.backends.filter((b) => b.id === selected.id || !!tokenFor(b));
-    const measurements = await Promise.all(
-      candidates.map(async (backend) => {
-        try {
-          const matching = portable
-            ? undefined
-            : (await endpoint(backend, 'api/keychain', undefined)).keys.find(
-                (k) => keyValue(k) === keyFingerprint,
-              );
-          if (!portable && !matching) return;
-          const samples: number[] = [],
-            remote: number[] = [];
-          for (let i = 0; i < 2; i++) {
-            const start = performance.now();
-            const measured = await endpoint(backend, 'api/ssh/probe', {
+    const candidates = [
+      selected,
+      ...workspace.backends.filter((b) => b.id !== selected.id && !!tokenFor(b)),
+    ];
+    const measurements = await probeRoutes(
+      candidates,
+      async (backend, signal) => {
+        const matching = portable
+          ? undefined
+          : (
+              await endpoint(backend, 'api/keychain', undefined, undefined, false, signal)
+            ).keys.find((k) => keyValue(k) === keyFingerprint);
+        if (!portable && !matching) return;
+        const samples: number[] = [],
+          remote: number[] = [];
+        for (let i = 0; i < 2; i++) {
+          signal.throwIfAborted();
+          const start = performance.now();
+          const measured = await endpoint(
+            backend,
+            'api/ssh/probe',
+            {
               host: host.hostname || '',
               port: host.port,
               username: host.username || '',
-            });
-            samples.push(performance.now() - start);
-            remote.push(measured.milliseconds);
-          }
-          return {
-            backend,
-            keyId: matching?.id,
-            latency: (samples[0] + samples[1]) / 2,
-            compression: (remote[0] + remote[1]) / 2 >= 40,
-          };
-        } catch {
-          return undefined;
+            },
+            undefined,
+            false,
+            signal,
+          );
+          samples.push(performance.now() - start);
+          remote.push(measured.milliseconds);
         }
-      }),
+        return {
+          backend,
+          keyId: matching?.id,
+          latency: (samples[0] + samples[1]) / 2,
+          compression: (remote[0] + remote[1]) / 2 >= 40,
+        };
+      },
+      signal,
     );
-    const best = measurements
-      .filter((m): m is NonNullable<typeof m> => !!m)
-      .sort((a, b) => a.latency - b.latency)[0];
+    signal.throwIfAborted();
+    const best = measurements.sort((a, b) => a.latency - b.latency)[0];
     if (!best)
       throw new Error(
         'No connected backend can reach this SSH host with the selected credentials.',
@@ -665,15 +683,17 @@ export function createWorkspaceConnections(options: Options) {
   }
   async function prepareRoute() {
     if (!sshHost) return;
-    const generation = ++routeGeneration;
-    selectedRoute = undefined;
+    cancelRoute();
+    const controller = new AbortController();
+    routeController = controller;
+    const signal = controller.signal;
     input('ssh-secret').disabled = true;
     $<HTMLButtonElement>('ssh-connect').disabled = true;
     $('ssh-error').textContent = '';
     $('ssh-progress').textContent = 'Measuring available routes…';
     try {
-      const route = await chooseRoute(sshHost, select('ssh-key').value);
-      if (generation !== routeGeneration) return;
+      const route = await chooseRoute(sshHost, select('ssh-key').value, signal);
+      if (signal.aborted) return;
       selectedRoute = route;
       $('ssh-progress').textContent = 'Connect through ' + route.backend.name;
       $('ssh-secret-label').textContent =
@@ -686,7 +706,7 @@ export function createWorkspaceConnections(options: Options) {
       $<HTMLButtonElement>('ssh-connect').disabled = false;
       sshSecretLabel();
     } catch (error: any) {
-      if (generation === routeGeneration) {
+      if (!signal.aborted) {
         $('ssh-error').textContent = error.message;
         $('ssh-progress').textContent = '';
       }
