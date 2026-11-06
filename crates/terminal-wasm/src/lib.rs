@@ -36,6 +36,24 @@ fn point(x: u16, y: u32) -> g::Point {
 #[derive(Default)]
 struct Effects {
     events: Vec<Value>,
+    light: bool,
+}
+unsafe extern "C" fn color_scheme(
+    _: g::Terminal,
+    user: *mut c_void,
+    out: *mut g::ColorScheme::Type,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    unsafe {
+        *out = if (*user.cast::<Effects>()).light {
+            g::ColorScheme::LIGHT
+        } else {
+            g::ColorScheme::DARK
+        };
+    }
+    true
 }
 unsafe extern "C" fn reply(_: g::Terminal, user: *mut c_void, data: *const u8, len: usize) {
     unsafe {
@@ -162,6 +180,10 @@ impl Terminal {
             ))?;
             for (key, callback) in [
                 (g::TerminalOption::WRITE_PTY, reply as *const c_void),
+                (
+                    g::TerminalOption::COLOR_SCHEME,
+                    color_scheme as *const c_void,
+                ),
                 (
                     g::TerminalOption::SEMANTIC_PROMPT,
                     semantic as *const c_void,
@@ -946,6 +968,7 @@ impl Runtime {
                 t.state()
             }
             "theme" => {
+                t.effects.light = v["harmonious"] == true;
                 for (name, key) in [
                     ("foreground", g::TerminalOption::COLOR_FOREGROUND),
                     ("background", g::TerminalOption::COLOR_BACKGROUND),

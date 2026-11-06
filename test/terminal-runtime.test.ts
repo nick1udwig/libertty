@@ -168,3 +168,27 @@ test('snapshot restore retains the destination theme and ANSI palette', () => {
     destination.dispose();
   }
 });
+test('appearance queries report derived and explicit themes after updates and restore', () => {
+  const terminal = runtime.createTerminal();
+  let reply = '';
+  terminal.on('input', (event) => { reply += decode(event.data); });
+  const query = () => {
+    reply = '';
+    terminal.write('\x1b[?996n');
+    return reply;
+  };
+  try {
+    assert.equal(query(), '\x1b[?997;1n');
+    const snapshot = terminal.snapshot();
+    terminal.setTheme({ background: '#ffffff' });
+    assert.equal(query(), '\x1b[?997;2n');
+    terminal.restore(snapshot);
+    assert.equal(query(), '\x1b[?997;2n');
+    terminal.setTheme({ appearance: 'dark' });
+    assert.equal(query(), '\x1b[?997;1n');
+    terminal.setTheme({ appearance: 'light', background: '#000000' });
+    assert.equal(query(), '\x1b[?997;2n');
+  } finally {
+    terminal.dispose();
+  }
+});
