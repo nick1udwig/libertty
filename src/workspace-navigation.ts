@@ -1,3 +1,4 @@
+import type { MountedTabs } from './mounted-tabs.ts';
 import { builtinState } from './builtin-state.ts';
 import { terminalMessage, sendToTerminal } from './frame-protocol.ts';
 import { terminalRenderers } from './renderer-cache.ts';
@@ -33,8 +34,7 @@ interface Options
   renderCards: () => Promise<void>;
   plugins: PluginRegistry;
   editHost: (host?: HostProfile) => void;
-  pluginViews: Map<string, PluginView>;
-  frames: Map<string, HTMLIFrameElement>;
+  mounts: MountedTabs;
   authorizeTerminals: (backend: BackendProfile, accessToken: string) => void;
   capturedSSH: (
     backend: BackendProfile,
@@ -54,8 +54,7 @@ export function createWorkspaceNavigation(options: Options) {
     plugins,
     editHost,
     store,
-    pluginViews,
-    frames,
+    mounts,
     backendFor,
     authenticate,
     endpoint,
@@ -65,6 +64,7 @@ export function createWorkspaceNavigation(options: Options) {
     capturedHerdr,
     cancelReconnect,
   } = options;
+  const pluginViews = mounts.views;
   const attentionCounts = new Map<string, number>();
   const navigationFor = (id: string) => pluginViews.get(id)?.navigation;
   let navigationTab = '',
@@ -74,8 +74,6 @@ export function createWorkspaceNavigation(options: Options) {
     | undefined;
   let page: 'terminal' | 'hosts' | 'vault' | 'keychain' | 'backends' | 'known' | 'settings' =
     'terminal';
-  const mounting = new Map<string, Promise<void>>(),
-    mountGeneration = new Map<string, number>();
   const terminalShortcuts = new WeakMap<
     Window,
     {
@@ -585,77 +583,69 @@ export function createWorkspaceNavigation(options: Options) {
     const view = pluginViews.get(tab.id);
     const frame = view?.terminal?.retain && view.terminal.frame;
     if (frame) terminalRenderers.release(frame);
-    view?.navigation?.element.remove();
     attentionCounts.delete(tab.id);
-    mountGeneration.set(tab.id, (mountGeneration.get(tab.id) || 0) + 1);
-    mounting.delete(tab.id);
-    pluginViews.get(tab.id)?.dispose();
-    pluginViews.delete(tab.id);
+    mounts.unmount(tab.id);
     tabStates.delete(tab.id);
     presentStates();
   }
   async function mount(tab: TerminalTab): Promise<void> {
     if (pluginViews.has(tab.id) || !workspace.tabs.includes(tab)) return;
-    if (mounting.has(tab.id)) return mounting.get(tab.id);
-    const generation = mountGeneration.get(tab.id) || 0,
-      plugin = plugins.forTab(tab);
-    const work = (async () => {
-      let view: PluginView;
-      try {
-        if (!plugin)
-          throw new Error(
-            'This plugin version is missing or disabled. Install or enable ' +
-              tabPluginId(tab) +
-              ' (' +
-              tab.pluginVersion +
-              ') in Settings.',
+    const plugin = plugins.forTab(tab);
+    return mounts.mount(
+      tab.id,
+      async (signal) => {
+        let view: PluginView;
+        try {
+          if (!plugin)
+            throw new Error(
+              'This plugin version is missing or disabled. Install or enable ' +
+                tabPluginId(tab) +
+                ' (' +
+                tab.pluginVersion +
+                ') in Settings.',
+            );
+          view = await plugin.mount(tab, signal);
+        } catch (error: any) {
+          signal.throwIfAborted();
+          const element = readingMessage(tab.name, error.message || 'Could not open this tab.');
+          element.id = 'plugin-' + tab.id;
+          const retry = button(
+            'Retry connection',
+            () => {
+              unmount(tab);
+              void mount(tab);
+            },
+            'secondary',
           );
-        view = await plugin.mount(tab);
-      } catch (error: any) {
-        const element = readingMessage(tab.name, error.message || 'Could not open this tab.');
-        element.id = 'plugin-' + tab.id;
-        const retry = button(
-          'Retry connection',
-          () => {
-            unmount(tab);
-            void mount(tab);
-          },
-          'secondary',
-        );
-        element.append(retry);
-        view = {
-          element,
-          setVisible(visible) {
-            element.hidden = !visible;
-          },
-          dispose() {
-            element.remove();
-          },
-        };
-      }
-      if (!workspace.tabs.includes(tab) || (mountGeneration.get(tab.id) || 0) !== generation) {
-        view.dispose();
-        return;
-      }
-      pluginViews.set(tab.id, view);
-      $('terminal-stack').append(view.element);
-      if (view.navigation) $('workspace-navigation').append(view.navigation.element);
-      renderTabs();
-      const frame = view.terminal?.retain && view.terminal.frame;
-      if (frame)
-        terminalRenderers.retain(frame, {
-          canEvict: () =>
-            tab.id !== workspace.active && tab.id !== presentedTab && view.canEvict?.() !== false,
-          dispose: () => unmount(tab),
-        });
-    })();
-    mounting.set(tab.id, work);
-    try {
-      await work;
-    } finally {
-      if (mounting.get(tab.id) === work) mounting.delete(tab.id);
-    }
+          element.append(retry);
+          view = {
+            element,
+            setVisible(visible) {
+              element.hidden = !visible;
+            },
+            dispose() {
+              element.remove();
+            },
+          };
+        }
+        return view;
+      },
+      () => workspace.tabs.includes(tab),
+      (view) => {
+        $('terminal-stack').append(view.element);
+        if (view.navigation) $('workspace-navigation').append(view.navigation.element);
+        renderTabs();
+        const frame = view.terminal?.retain && view.terminal.frame;
+        if (frame)
+          terminalRenderers.retain(frame, {
+            canEvict: () =>
+              tab.id !== workspace.active && tab.id !== presentedTab && view.canEvict?.() !== false,
+            dispose: () => unmount(tab),
+          });
+      },
+    );
   }
+
   function terminalURL(backend: BackendProfile, session: string) {
     const url = new URL('terminal.html', document.baseURI);
     url.search = new URLSearchParams({ embedded: '1', backend: backend.url, session }).toString();
@@ -744,12 +734,12 @@ export function createWorkspaceNavigation(options: Options) {
       tab.session = result.id;
       tab.ended = false;
       store();
-      const frame = frames.get(tab.id);
+      const frame = mounts.frame(tab.id);
       if (frame) frame.src = terminalURL(backend, result.id);
       else await mount(tab);
       if (page === 'hosts') void renderCards();
     } catch (error: any) {
-      sendToTerminal(frames.get(tab.id)?.contentWindow, { type: 'recovery-failed' });
+      sendToTerminal(mounts.frame(tab.id)?.contentWindow, { type: 'recovery-failed' });
       notice(`Could not start ${tab.name}: ${error.message}`, 'error', [
         { label: 'Retry', run: () => void recoverTerminal(tab, backend) },
       ]);
@@ -780,7 +770,7 @@ export function createWorkspaceNavigation(options: Options) {
       }
       return;
     }
-    const entry = [...frames].find(([, frame]) => frame.contentWindow === event.source);
+    const entry = [...mounts.frames()].find(([, frame]) => frame.contentWindow === event.source);
     if (!entry) return;
     const tab = workspace.tabs.find((tab) => tab.id === entry[0]);
     if (!tab) return;

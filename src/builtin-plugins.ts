@@ -34,8 +34,6 @@ export interface BuiltinServices extends ReadingServices {
   fail: Fail;
   tabState(tab: TerminalTab, key: string, state?: NoticeInput): void;
   terminalURL(backend: BackendProfile, session: string): string;
-  frame(tab: TerminalTab, frame?: HTMLIFrameElement): void;
-  herdr(tab: TerminalTab, view?: HerdrView): void;
   toggleTerminalTabs(tab: TerminalTab): void;
   ready(tab: TerminalTab): void;
   attention(tab: TerminalTab, count: number): void;
@@ -65,13 +63,13 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       iconHTML: terminalIcon,
       panelPrefix: 'frame-',
       connect: (host) => s.connect(host, 'terminal'),
-      async mount(tab) {
+      async mount(tab, signal) {
+        signal?.throwIfAborted();
         const frame = document.createElement('iframe');
         frame.title = tab.name + ' terminal';
         frame.id = 'frame-' + tab.id;
         frame.allow = 'microphone; screen-wake-lock; clipboard-read; clipboard-write';
         frame.src = s.terminalURL(s.backend(tab), tab.session);
-        s.frame(tab, frame);
         return {
           element: frame,
           terminal: { frame, frames: [frame], retain: true },
@@ -94,7 +92,6 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
           canEvict: () => terminalCanEvict(frame),
           dispose() {
             frame.remove();
-            s.frame(tab);
           },
         };
       },
@@ -116,9 +113,10 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
       panelPrefix: 'files-',
       className: 'files-tab',
       connect: (host) => s.connect(host, 'files'),
-      async mount(tab) {
+      async mount(tab, signal) {
         const backend = s.backend(tab);
         await s.authenticate(backend);
+        signal?.throwIfAborted();
         if (!s.active(tab)) throw new Error('This tab has closed.');
         const view = fileBrowser(
           fileClient(
@@ -165,9 +163,10 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
         },
         available: (host) => id === 'herdr' || host.kind !== 'herdr',
         connect: (host) => s.connect(host, id),
-        async mount(tab) {
+        async mount(tab, signal) {
           const backend = s.backend(tab);
           const { HerdrView } = await import('./herdr-view.ts');
+          signal?.throwIfAborted();
           if (!s.active(tab)) throw new Error('This tab has closed.');
           const session = herdrSession(builtinState(tab).herdrSession),
             source = builtinState(tab).herdrSource,
@@ -246,10 +245,11 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
           });
           view.element.id = 'herdr-' + tab.id;
           view.navigationElement.id = 'herdr-strip-' + tab.id;
-          s.herdr(tab, view);
           void s
             .watch(tab)
-            .then(() => view.updatePresence())
+            .then(() => {
+              if (!signal?.aborted) view.updatePresence();
+            })
             .catch(s.fail);
           return {
             element: view.element,
@@ -272,13 +272,14 @@ export function builtinPlugins(s: BuiltinServices): TabPlugin[] {
               setExpanded: (expanded) => view.setTerminalTabsExpanded(expanded),
               holdSize: () => view.holdTerminalSize(),
             },
+            updatePresence: () => view.updatePresence(),
+            openTerminal: (id) => view.openTerminal(id),
             setVisible: (visible) => view.setVisible(visible),
             setHeld: (held) => view.setHeld(held),
             applySettings: () => view.applySettings(),
             copySelection: () => view.copySelection(),
             dispose() {
               view.dispose();
-              s.herdr(tab);
             },
           };
         },

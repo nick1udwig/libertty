@@ -26,13 +26,13 @@ interface Options extends Pick<WorkspaceServices, 'backendFor' | 'notice' | 'fai
   workspace: WorkspaceState;
   registerExternal: (pkg: PluginPackage) => void;
   plugins: PluginRegistry;
-  pluginViews: Map<string, PluginView>;
+  pluginViews: ReadonlyMap<string, PluginView>;
   herdrNotifications: HerdrNotifications;
   tabLabel: (tab: TerminalTab) => string;
   unmount: (tab: TerminalTab) => void;
   mount: (tab: TerminalTab) => Promise<void>;
   renderTabs: () => void;
-  frames: Map<string, HTMLIFrameElement>;
+  frame(id: string): HTMLIFrameElement | undefined;
 }
 export function createWorkspaceSettings(options: Options) {
   const {
@@ -48,7 +48,7 @@ export function createWorkspaceSettings(options: Options) {
     unmount,
     mount,
     renderTabs,
-    frames,
+    frame,
   } = options;
   let installedPlugins: InstalledPlugin[] = [];
   try {
@@ -282,7 +282,7 @@ export function createWorkspaceSettings(options: Options) {
     $(id).onclick = () => {
       if (action === 'copy-selection') pluginViews.get(workspace.active)?.copySelection?.();
       else
-        sendToTerminal(frames.get(workspace.active)?.contentWindow, {
+        sendToTerminal(frame(workspace.active)?.contentWindow, {
           type: 'settings-action',
           action,
         });

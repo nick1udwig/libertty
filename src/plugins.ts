@@ -37,6 +37,8 @@ export interface PluginView {
   applySettings?(): void;
   copySelection?(): void;
   canEvict?(): boolean;
+  updatePresence?(): void;
+  openTerminal?(id: string): void;
 }
 export interface PluginStateCodec<State = unknown> {
   ownsSession: boolean;
@@ -57,7 +59,7 @@ export interface TabPlugin {
   resume?(tab: TerminalTab): Promise<void>;
   available(host: HostProfile): boolean;
   connect(host: HostProfile): Promise<void>;
-  mount(tab: TerminalTab): Promise<PluginView>;
+  mount(tab: TerminalTab, signal?: AbortSignal): Promise<PluginView>;
   close(tab: TerminalTab): Promise<boolean>;
 }
 
