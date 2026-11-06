@@ -217,22 +217,19 @@ export class TerminalSurface extends Events<SurfaceEvents> {
           !event.metaKey &&
           (event.altKey || event.getModifierState('AltGraph')) &&
           event.key.toLowerCase() !== base;
-        if (
-          this.terminal.sendKey({
-            code: event.code || (printable ? 'Unidentified' : event.key),
-            key: event.key,
-            action: event.repeat ? 'repeat' : 'press',
-            shift: event.shiftKey,
-            ctrl: event.ctrlKey && !composed,
-            alt: event.altKey && !composed,
-            meta: event.metaKey,
-            capsLock: event.getModifierState('CapsLock'),
-            numLock: event.getModifierState('NumLock'),
-          })
-        ) {
-          event.preventDefault();
-          input.value = '';
-        }
+        const handled = this.terminal.sendKey({
+          code: event.code || (printable ? 'Unidentified' : event.key),
+          key: event.key,
+          action: event.repeat ? 'repeat' : 'press',
+          shift: event.shiftKey,
+          ctrl: event.ctrlKey && !composed,
+          alt: event.altKey && !composed,
+          meta: event.metaKey,
+          capsLock: event.getModifierState('CapsLock'),
+          numLock: event.getModifierState('NumLock'),
+        });
+        event.preventDefault();
+        if (handled) input.value = '';
       },
       { signal },
     );
@@ -251,6 +248,7 @@ export class TerminalSurface extends Events<SurfaceEvents> {
             alt: event.altKey,
             meta: event.metaKey,
           });
+        event.preventDefault();
       },
       { signal },
     );
