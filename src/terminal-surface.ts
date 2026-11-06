@@ -264,7 +264,8 @@ export class TerminalSurface extends Events<SurfaceEvents> {
       (event) => {
         if (this.composing || (event as globalThis.InputEvent).isComposing) return;
         const text = input.value.replace(/^\u200b/, '');
-        if (text && text !== this.compositionCommit) this.sendText(text);
+        if (text && text !== this.compositionCommit)
+          this.sendText(text.replace(/\r\n|\r|\n/g, '\r'));
         this.compositionCommit = '';
         input.value = '';
       },
