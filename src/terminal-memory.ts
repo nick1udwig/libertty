@@ -1,4 +1,5 @@
-import type { CoreRuntime, CoreTerminal } from '@gespenst/core/headless';
+import { terminalABI, runtimeTerminals } from './gespenst-compat.ts';
+import type { CoreRuntime } from '@gespenst/core/headless';
 
 export interface TerminalMemory {
   id: number;
@@ -17,13 +18,12 @@ export interface TerminalMemoryUsage {
 export function terminalMemoryUsage(runtime: CoreRuntime): TerminalMemoryUsage {
   const { bindings } = runtime,
     { abi } = bindings;
-  const terminals = (runtime as unknown as { terminals: ReadonlyMap<number, CoreTerminal> })
-    .terminals;
+  const terminals = runtimeTerminals(runtime);
   const usage = bindings.allocType('GhosttyTerminalMemoryUsage', true);
   const result: TerminalMemory[] = [];
   try {
     for (const terminal of terminals.values()) {
-      const handle = (terminal as unknown as { handle: number }).handle;
+      const { handle } = terminalABI(terminal);
       bindings.check(
         bindings.exports.ghostty_terminal_get(
           handle,

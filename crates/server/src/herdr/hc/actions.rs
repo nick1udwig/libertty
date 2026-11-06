@@ -1,5 +1,6 @@
 use super::*;
 use crate::herdr::action::{Action, Direction};
+use crate::protocol::http::{HerdrActionError, HerdrActionErrorCode};
 use herdr_client_lib::{
     commands::{Creation, Launch, Placement},
     document::{Axis, Document},
@@ -104,7 +105,7 @@ pub async fn options(target: &Target) -> Result<Value, String> {
         json!({"kinds":kinds(&hub::live(target).await?.client).await?,"actions":crate::herdr::action::NAMES}),
     )
 }
-pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
+pub async fn action(target: &Target, action: Action) -> Result<Value, HerdrActionError> {
     let mut session = session(target).await?;
     let snapshot = projection::project(&session)?;
     let workspace = action.workspace().map(projection::split).transpose()?;
@@ -228,7 +229,9 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
                 )
                 .await
                 .map_err(error)?;
-            return created(&session, &machine, &id, creation).await;
+            return created(&session, &machine, &id, creation)
+                .await
+                .map_err(Into::into);
         }
         Action::Split {
             terminal_id,
@@ -270,7 +273,9 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
                 )
                 .await
                 .map_err(error)?;
-            return created(&session, &machine, &space_id, creation).await;
+            return created(&session, &machine, &space_id, creation)
+                .await
+                .map_err(Into::into);
         }
         Action::Create {
             name,
@@ -303,7 +308,9 @@ pub async fn action(target: &Target, action: Action) -> Result<Value, String> {
                 .create(&machine, placement, launch, new_id())
                 .await
                 .map_err(error)?;
-            return created(&session, &machine, &space_id, creation).await;
+            return created(&session, &machine, &space_id, creation)
+                .await
+                .map_err(Into::into);
         }
         action => {
             return worktree(
@@ -330,7 +337,7 @@ async fn worktree(
     space_id: &str,
     cwd: Option<String>,
     action: Action,
-) -> Result<Value, String> {
+) -> Result<Value, HerdrActionError> {
     let git = Git {
         client: session.client.clone(),
         machine: machine.to_owned(),
@@ -403,7 +410,9 @@ async fn worktree(
             if result.git.code != Some(0) {
                 return Err(String::from_utf8_lossy(&result.git.stderr).into());
             }
-            return created(session, machine, &id, result.workspace.map_err(error)?).await;
+            return created(session, machine, &id, result.workspace.map_err(error)?)
+                .await
+                .map_err(Into::into);
         }
         Action::OpenWorktree { path, .. } => {
             if !checkouts
@@ -430,7 +439,9 @@ async fn worktree(
                 .open(session, &path, placement, new_id())
                 .await
                 .map_err(error)?;
-            return created(session, machine, &id, result).await;
+            return created(session, machine, &id, result)
+                .await
+                .map_err(Into::into);
         }
         Action::DeleteWorktree {
             path: confirmed,
@@ -443,7 +454,7 @@ async fn worktree(
             }
             let removal = git.assess_remove(root, &path).await.map_err(error)?;
             if !removal.allowed(force) {
-                return Err("Checkout has local changes or unreferenced commits; --force is required for an assessed removal.".into());
+                return Err(HerdrActionError { error: "Checkout has local changes or unreferenced commits; --force is required for an assessed removal.".into(), code: HerdrActionErrorCode::ForceRequired });
             }
             close(session, machine, space_id).await?;
             let output = git.remove(&removal, force).await.map_err(error)?;

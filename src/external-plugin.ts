@@ -2,6 +2,7 @@ import { mergeFileSnapshot, packFileSnapshot, type FileSnapshot } from './plugin
 import type { HostProfile, TerminalTab } from './connections.ts';
 import type { PluginView, TabPlugin } from './plugins.ts';
 import { pluginRequest, type PluginPackage } from './plugin-package.ts';
+import { selectedFileConnection } from './plugin-connection.ts';
 
 // The opaque frame receives only a private port, a display name and its own state.
 const sdk =
@@ -47,6 +48,7 @@ export function externalPlugin(pkg: PluginPackage, s: ExternalServices): TabPlug
   const m = pkg.manifest;
   return {
     id: m.id,
+    connection: selectedFileConnection,
     version: m.version,
     name: m.name,
     connectLabel: m.connectLabel,

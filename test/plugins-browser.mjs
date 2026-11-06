@@ -94,7 +94,7 @@ try {
 
   await action('Connect Herdr'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
   const localHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'herdr'));
-  assert.equal(localHerdr.ownsSession, true); assert.equal(localHerdr.herdrSource, localHerdr.session);
+  assert.equal(localHerdr.ownsSession, true); assert.equal(localHerdr.pluginState.herdrSource, localHerdr.session);
   assert.equal((await request('ticket?session=' + localHerdr.session, {})).status, 404);
   await page.reload(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
   await showTerminalTabs(page); await page.getByRole('button', { name: 'Close ' + localHerdr.name, exact: true }).click();
@@ -137,23 +137,23 @@ try {
   await action('Connect Herdr', 'Remote host'); await page.locator('#plugin-connect-form button[type=submit]').click(); await page.locator('#ssh-secret').fill('fixture-secret'); await connectSSH(page);
   await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
   const remoteHerdr = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.pluginId === 'herdr' && tab.hostId === 'ssh-plugin'));
-  assert.equal(remoteHerdr.ownsSession, true); assert.equal(remoteHerdr.herdrSource, remoteHerdr.session);
+  assert.equal(remoteHerdr.ownsSession, true); assert.equal(remoteHerdr.pluginState.herdrSource, remoteHerdr.session);
   const sourceTabs = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).filter(tab => tab.hostId === 'ssh-plugin'));
   assert.equal(sourceTabs.length, 1, 'Direct SSH Herdr needs no source terminal');
   const other = (await (await request('connect', { noSession: true, token: 'plugin-test-pairing-token-123456789' }, '')).json()).accessToken;
-  assert.equal((await request('herdr/ticket?herdrSource=' + remoteHerdr.herdrSource, {}, other)).status, 404);
+  assert.equal((await request('herdr/ticket?herdrSource=' + remoteHerdr.pluginState.herdrSource, {}, other)).status, 404);
   assert.equal((await request('plugins/read?session=' + remoteHerdr.session + '&path=' + encodeURIComponent(fixture.directory + '/remote/app.log'), undefined, other)).status, 404, 'Other pairings cannot read plugin sessions');
   await action('Connect new terminal', 'Remote host'); await page.locator('#ssh-secret').fill('fixture-secret'); await connectSSH(page);
   await until(async () => await page.locator('#terminal-stack > iframe:not([sandbox]):visible').count() === 1, 'independent SSH terminal');
   await page.getByRole('button', { name: 'Close Remote host', exact: true }).click();
   await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').filter({ hasText: 'Remote host' }).click(); await page.locator('.herdr-agent-strip:visible .herdr-agent-tab').first().waitFor();
-  const ticket = await (await request('herdr/ticket?herdrSource=' + remoteHerdr.herdrSource, {})).json();
-  const socket = new WebSocket(base.replace('http:', 'ws:') + '/herdr/ws?herdrSource=' + remoteHerdr.herdrSource + '&ticket=' + ticket.ticket, { origin });
+  const ticket = await (await request('herdr/ticket?herdrSource=' + remoteHerdr.pluginState.herdrSource, {})).json();
+  const socket = new WebSocket(base.replace('http:', 'ws:') + '/herdr/ws?herdrSource=' + remoteHerdr.pluginState.herdrSource + '&ticket=' + ticket.ticket, { origin });
   await once(socket, 'open'); const closed = once(socket, 'close');
   await showTerminalTabs(page); await page.getByRole('button', { name: 'Close ' + remoteHerdr.name, exact: true }).click(); await closed;
   await tabClosed(remoteHerdr);
   assert.ok(!(await (await request('sessions')).json()).some(session => session.id === remoteHerdr.session));
-  assert.equal((await request('herdr/ticket?herdrSource=' + remoteHerdr.herdrSource, {})).status, 404, 'Closed connections cannot issue new tickets');
+  assert.equal((await request('herdr/ticket?herdrSource=' + remoteHerdr.pluginState.herdrSource, {})).status, 404, 'Closed connections cannot issue new tickets');
   assert.equal((await request('herdr/snapshot')).status, 200, 'Remote connection cleanup leaves agents running');
 
   assert.deepEqual(errors, []); console.log('Plugin browser checks passed: runtime installation, scoped bridge, state/versions, unavailable packages, mobile layout, local and independent SSH Herdr, ownership and cleanup.');

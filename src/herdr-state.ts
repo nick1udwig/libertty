@@ -16,7 +16,7 @@ export class HerdrState {
   private states = new Map<string, State>();
   private initialized = false;
   agents: HerdrAgent[] = [];
-  constructor(checkpoint?: Record<string, State>) {
+  constructor(checkpoint?: unknown) {
     if (!checkpoint || typeof checkpoint !== 'object') return;
     for (const [id, state] of Object.entries(checkpoint).slice(0, 256)) {
       if (

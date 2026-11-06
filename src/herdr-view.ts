@@ -1,3 +1,6 @@
+import type { HttpAPI } from './http-contract.ts';
+import { decodePreferences, type Preferences } from './herdr-preferences.ts';
+import type { WorkspaceMessage } from './frame-protocol.ts';
 import { node } from './dom.ts';
 import { icon } from './icons.ts';
 import { saved } from './persistence.ts';
@@ -10,7 +13,6 @@ import {
   herdrURL,
   type HerdrAgent,
   type HerdrMessage,
-  type HerdrSnapshot,
   type HerdrStatus,
   type HerdrSpace,
 } from './herdr-protocol.ts';
@@ -59,7 +61,7 @@ interface Host {
   key: string;
   token(): string | undefined;
   authenticate(): Promise<void>;
-  api<T>(path: string, data?: unknown, signal?: AbortSignal): Promise<T>;
+  api: HttpAPI;
   changed(attention: number): void;
   notification(event: HerdrNotification): void;
   notice: Notify;
@@ -71,17 +73,6 @@ interface Host {
   ready?(): void;
   toggleTerminalTabs?(): void;
   notificationDevice?(): string | undefined;
-}
-interface Preferences {
-  order: string[];
-  spaceOrder?: string[];
-  spaceGroups?: string[][];
-  collapsedGroups?: string[];
-  collapsedLanes?: HerdrLane[];
-  spaceTerminals?: Record<string, string>;
-  repoSpaces?: Record<string, string>;
-  selected?: string;
-  state?: ReturnType<HerdrState['checkpoint']>;
 }
 export class HerdrView {
   readonly element = node('section', 'herdr-view');
@@ -153,30 +144,13 @@ export class HerdrView {
       closing: this.closing,
       terminalName: (id) => this.terminals.find((agent) => agent.terminalId === id)?.name,
     });
+    let preferences: unknown;
     try {
-      this.preferences = JSON.parse(localStorage.getItem(host.key) || 'null') || { order: [] };
+      preferences = JSON.parse(localStorage.getItem(host.key) || 'null');
     } catch {
-      this.preferences = { order: [] };
+      preferences = undefined;
     }
-    if (!Array.isArray(this.preferences.order)) this.preferences = { order: [] };
-    this.preferences.order = this.preferences.order.filter((id) => typeof id === 'string');
-    this.preferences.spaceOrder = (this.preferences.spaceOrder || []).filter(
-      (id) => typeof id === 'string',
-    );
-    this.preferences.spaceTerminals ||= {};
-    this.preferences.repoSpaces ||= {};
-    this.preferences.spaceGroups = Array.isArray(this.preferences.spaceGroups)
-      ? this.preferences.spaceGroups
-      : [];
-    this.preferences.collapsedGroups = Array.isArray(this.preferences.collapsedGroups)
-      ? this.preferences.collapsedGroups
-      : [];
-    // Idle lanes start folded so the strip opens on agents that need attention.
-    this.preferences.collapsedLanes = Array.isArray(this.preferences.collapsedLanes)
-      ? this.preferences.collapsedLanes.filter((lane) => lane in herdrLaneNames)
-      : ['idle'];
-    delete (this.preferences as any).hidden;
-    delete (this.preferences as any).hiddenSpaces;
+    this.preferences = decodePreferences(preferences);
     this.tracker = new HerdrState(this.preferences.state);
     this.selected = this.preferences.selected || '';
     let stored: unknown;
@@ -412,7 +386,7 @@ export class HerdrView {
         (!document.hidden || !this.transport.backgroundExpired),
       protocols: wireProtocols,
       prepare: async (signal) => {
-        const { ticket } = await this.host.api<{ ticket: string }>('api/herdr/ticket', {}, signal);
+        const { ticket } = await this.host.api('api/herdr/ticket', {}, signal);
         signal.throwIfAborted();
         const url = this.endpoint('herdr/ws');
         url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -529,7 +503,7 @@ export class HerdrView {
     if (held && this.frames.displayed) this.frames.park(this.frames.displayed, true);
     else if (this.visible) this.mountTerminal(true);
   }
-  private post(message: object) {
+  private post(message: WorkspaceMessage) {
     this.frames.post(message);
   }
   get terminalFrame() {
@@ -1228,16 +1202,13 @@ export class HerdrView {
     const terminal = this.terminalsById.get(this.selected);
     const space = this.spaces.find((space) => space.id === terminal?.workspaceId) || this.spaces[0];
     try {
-      const result = await this.host.api<{ workspaceId: string; terminalId?: string }>(
-        'api/herdr/action',
-        {
-          action: 'create-space',
-          ...(space ? { workspaceId: space.id } : {}),
-          ...(terminal ? { terminalId: terminal.terminalId } : {}),
-        },
-      );
+      const result = await this.host.api('api/herdr/action', {
+        action: 'create-space',
+        ...(space ? { workspaceId: space.id } : {}),
+        ...(terminal ? { terminalId: terminal.terminalId } : {}),
+      });
       if (this.disposed) return;
-      const snapshot = await this.host.api<HerdrSnapshot>('api/herdr/snapshot');
+      const snapshot = await this.host.api('api/herdr/snapshot', undefined);
       try {
         localStorage.setItem('libertty.herdrStrip', JSON.stringify('spaces'));
       } catch {
@@ -1556,9 +1527,9 @@ export class HerdrView {
       save.disabled = input.disabled = true;
       try {
         await this.host.api('api/herdr/action', {
-          action: item.space ? 'rename-space' : 'rename',
-          terminalId: item.terminalId,
-          workspaceId: item.space?.id,
+          ...(item.space
+            ? { action: 'rename-space', workspaceId: item.space.id }
+            : { action: 'rename', terminalId: item.terminalId }),
           name: herdrName(input.value),
         });
         this.renaming = false;
@@ -1596,7 +1567,7 @@ export class HerdrView {
     }
   }
   private async refreshSnapshot(created?: Created) {
-    const snapshot = await this.host.api<HerdrSnapshot>('api/herdr/snapshot');
+    const snapshot = await this.host.api('api/herdr/snapshot', undefined);
     if (this.disposed) return;
     if (created)
       this.selected =

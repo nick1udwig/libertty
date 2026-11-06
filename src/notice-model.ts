@@ -1,3 +1,5 @@
+import type { WorkspaceMessage } from './frame-protocol.ts';
+
 /** Notice kinds from the least to the most severe. */
 export const noticeKinds = ['progress', 'done', 'info', 'warning', 'error'] as const;
 export type NoticeKind = (typeof noticeKinds)[number];
@@ -92,7 +94,10 @@ export function frameNotice(
     input: remote && {
       ...remote,
       actions: remoteActions(remote, (id) =>
-        frame?.postMessage({ type: 'notice-action', id }, location.origin),
+        frame?.postMessage(
+          { type: 'notice-action', id } satisfies WorkspaceMessage,
+          location.origin,
+        ),
       ),
     },
   };

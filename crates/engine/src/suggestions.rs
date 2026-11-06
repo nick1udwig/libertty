@@ -4,7 +4,7 @@ use crate::selection::{
 };
 use crate::{
     command_policy::{
-        child_scope, flags_for, is_path_position, option_arity, script_command, script_operand,
+        child_scope, flags_ref, is_path_position, option_arity, script_command, script_operand,
         vocabulary,
     },
     completion::complete_arguments,
@@ -22,7 +22,7 @@ use crate::{
 };
 use crate::{regex, test};
 use futures::future::{LocalBoxFuture, join_all};
-use std::cell::RefCell;
+use std::{cell::RefCell, sync::Arc};
 
 async fn check_syntax(
     candidates: Vec<Candidate>,
@@ -57,7 +57,7 @@ fn covered(candidate: &Candidate, metadata: &CommandMetadata) -> bool {
     while i < words.len() {
         let word = &words[i].value;
         if word.starts_with('-') {
-            if option_arity(word, &flags_for(&scope, metadata)) == Some(true) {
+            if option_arity(word, flags_ref(&scope, metadata, &[])) == Some(true) {
                 i += 1;
             }
         } else {
@@ -202,7 +202,7 @@ async fn nearby_file_paths(
         return catalog.clone();
     };
     if words.len() < 2
-        || !flags_for(command, metadata).iter().any(|flag| {
+        || !flags_ref(command, metadata, &[]).iter().any(|flag| {
             flag.value.as_ref().is_some_and(|value| {
                 matches!(
                     value.kind,
@@ -447,7 +447,7 @@ fn suggest_text<'a>(
             {
                 for target in discovery_targets(&protected.text, catalog) {
                     if let Ok(found) = discovery.discover(&target, catalog, env, host).await {
-                        metadata.merge(found.metadata);
+                        Arc::make_mut(&mut metadata).merge(found.metadata);
                     }
                 }
             }
@@ -691,7 +691,7 @@ async fn suggest_one(
     .collect::<Vec<_>>();
     let mut script_flags = None;
     for found in discoveries {
-        metadata.merge(found.metadata);
+        Arc::make_mut(&mut metadata).merge(found.metadata);
         if script_flags.is_none() {
             script_flags = found.script_flags;
         }

@@ -498,10 +498,10 @@ try {
     assert.equal(fixture.actions.filter(a => a.method === 'pane.read').length, readsWhileHidden, 'Hidden views stop reading history');
     fixture.update(1, 'idle');
     await until(async () => (await page.evaluate(() => window.__sounds.length)) === 1, 'done sound under regular terminal');
-    assert.equal(await page.locator('.herdr-attention').textContent(), '1');
+    assert.equal(await page.locator('.tab-attention').textContent(), '1');
     fixture.update(0, 'blocked');
     await until(async () => (await page.evaluate(() => window.__sounds.length)) === 2, 'request sound under regular terminal');
-    assert.equal(await page.locator('.herdr-attention').textContent(), '2');
+    assert.equal(await page.locator('.tab-attention').textContent(), '2');
     await delay(150); assert.equal(await page.evaluate(() => window.__sounds.length), 2, 'snapshots must not repeat sound');
     await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').click(); await tab(1).waitFor();
     assert.equal(await tab(1).getAttribute('data-status'), 'done'); assert.equal(await tab(0).getAttribute('data-status'), 'blocked');
@@ -620,7 +620,7 @@ try {
     });
     await page.reload(); await tab(0).waitFor();
     await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, localHerdr.session);
-    await page.waitForFunction(previous => JSON.parse(localStorage.getItem('libertty.tabs')).some(tab => tab.id === previous.id && tab.session !== previous.session && tab.herdrSource === tab.session && !tab.ended), localHerdr);
+    await page.waitForFunction(previous => JSON.parse(localStorage.getItem('libertty.tabs')).some(tab => tab.id === previous.id && tab.session !== previous.session && tab.pluginState?.herdrSource === tab.session && !tab.ended), localHerdr);
     await agentFrame(); assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the local Herdr tab');
     assert.equal(await page.getByRole('button', { name: 'Reconnect', exact: true }).count(), 0, 'An expired source restores without a manual reconnect');
     // Exercise the opening transition before using touch coordinates for the tab menu.
@@ -669,7 +669,7 @@ try {
     await page.evaluate(async source => { const response = await fetch(new URL('api/sessions/close?session=' + source, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); if (!response.ok) throw new Error(await response.text()); }, remote.id);
     await page.locator('#ssh-dialog').waitFor({ state: 'visible' });
     await page.locator('#ssh-key').selectOption(reconnectKey.fingerprint); await page.locator('#ssh-secret').fill('fixture-passphrase'); await page.locator('#ssh-connect').click();
-    await page.waitForFunction(previous => JSON.parse(localStorage.getItem('libertty.tabs')).some(tab => tab.id === previous.id && tab.herdrSource !== previous.herdrSource && tab.herdrSource === tab.session && tab.ownsSession && !tab.ended), remoteHerdrTab);
+    await page.waitForFunction(previous => JSON.parse(localStorage.getItem('libertty.tabs')).some(tab => tab.id === previous.id && tab.pluginState?.herdrSource !== previous.pluginState?.herdrSource && tab.pluginState?.herdrSource === tab.session && tab.ownsSession && !tab.ended), remoteHerdrTab);
     await tab(0).waitFor(); terminal = await agentFrame();
     assert.equal(await page.locator('#tabs .herdr-tab').count(), 1, 'Reconnecting must reuse the captured SSH Herdr tab');
     const restoredSource = await page.evaluate(hostId => JSON.parse(localStorage.getItem('libertty.hosts')).find(host => host.id === hostId).herdrSource, remoteHost.id);
@@ -681,7 +681,7 @@ try {
     await standalone.waitForURL(base + '/');
     await standalone.waitForFunction(() => {
       const active = JSON.parse(localStorage.getItem('libertty.activeTab')), tab = JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === active);
-      return tab?.pluginId === 'herdr' && !tab.herdrSource;
+      return tab?.pluginId === 'herdr' && !tab.pluginState?.herdrSource;
     });
     await until(async () => (await standalone.locator('.herdr-agent-strip:visible .herdr-agent-tab').count()) === 3, 'standalone discovery opens the workspace');
     await standalone.close();

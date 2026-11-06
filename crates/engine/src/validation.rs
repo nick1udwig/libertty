@@ -163,98 +163,79 @@ async fn policy_plain(
         }
     }
     let mut cwd = catalog.cwd.clone();
-    let mut scope = command.clone();
-    let mut flags = flags_for(command, metadata);
-    let mut literal = false;
+    use crate::arguments::{Argument, ArgumentCursor};
+    let mut cursor = ArgumentCursor::new(words.iter().map(|word| word.value.as_str()), metadata);
     let mut value_flags = Vec::new();
     let mut operands = Vec::new();
     let mut option_paths = Vec::new();
-    let mut index = 1;
-    while index < words.len() {
-        let word = &words[index];
-        let arg = &word.value;
-        index += 1;
-        if !literal && arg == "--" {
-            literal = true;
-            continue;
-        }
-        if !literal && test!(r###"^-."###, arg) {
-            let Some(binding) = crate::arguments::option_binding(arg, &flags) else {
-                return Ok(false);
-            };
-            let descriptor = binding.descriptor;
-            if binding.attached.is_some()
-                && descriptor
-                    .is_some_and(|flag| !flag.takes_value && flag.optional_value != Some(true))
-            {
-                return Ok(false);
-            }
-            let (minimum, maximum) = binding.following_bounds();
-            let mut supplied = Vec::new();
-            if let Some(value) = binding.attached {
-                supplied.push(Word {
-                    value: value.into(),
-                    home: false,
-                });
-            }
-            let mut count = 0;
-            while maximum.is_none_or(|maximum| count < maximum) && index < words.len() {
-                let value = &words[index];
-                if value.value == "--" || option_arity(&value.value, &flags).is_some() {
-                    break;
+    while let Some(argument) = cursor.next() {
+        match argument {
+            Argument::Delimiter | Argument::Subcommand => {}
+            Argument::UnknownOption => return Ok(false),
+            Argument::Option {
+                index,
+                binding,
+                following,
+                complete,
+            } => {
+                let arg = &words[index].value;
+                let descriptor = binding.descriptor;
+                if !complete
+                    || binding.attached.is_some()
+                        && descriptor.is_some_and(|flag| {
+                            !flag.takes_value && flag.optional_value != Some(true)
+                        })
+                {
+                    return Ok(false);
                 }
-                supplied.push(value.clone());
-                count += 1;
-                index += 1;
-            }
-            if count < minimum {
-                return Ok(false);
-            }
-            if !supplied.is_empty() {
-                value_flags.push(arg.as_str());
-                if command == "git" && arg == "-C" {
-                    cwd = resolve(&supplied[0], &cwd, env);
+                let mut supplied = Vec::new();
+                if let Some(value) = binding.attached {
+                    supplied.push(Word {
+                        value: value.into(),
+                        home: false,
+                    });
                 }
-            }
-            if let Some(schema) = descriptor.and_then(|flag| flag.value.as_ref()) {
-                for value in supplied {
-                    if opaque.contains(&value.value.as_str()) {
-                        continue;
+                supplied.extend_from_slice(&words[following]);
+                if !supplied.is_empty() {
+                    value_flags.push(arg.as_str());
+                    if command == "git" && arg == "-C" {
+                        cwd = resolve(&supplied[0], &cwd, env);
                     }
-                    if schema.kind == ValueKind::Choice
-                        && schema
-                            .choices
-                            .as_ref()
-                            .is_some_and(|choices| !choices.contains(&value.value))
-                    {
-                        return Ok(false);
-                    }
-                    if matches!(
-                        schema.kind,
-                        ValueKind::Path | ValueKind::Directory | ValueKind::InputFile
-                    ) {
-                        option_paths.push((value, schema.kind));
+                }
+                if let Some(schema) = descriptor.and_then(|flag| flag.value.as_ref()) {
+                    for value in supplied {
+                        if opaque.contains(&value.value.as_str()) {
+                            continue;
+                        }
+                        if schema.kind == ValueKind::Choice
+                            && schema
+                                .choices
+                                .as_ref()
+                                .is_some_and(|choices| !choices.contains(&value.value))
+                        {
+                            return Ok(false);
+                        }
+                        if matches!(
+                            schema.kind,
+                            ValueKind::Path | ValueKind::Directory | ValueKind::InputFile
+                        ) {
+                            option_paths.push((value, schema.kind));
+                        }
                     }
                 }
             }
-            continue;
-        }
-        if !literal && !subcommands_for(&scope, metadata).is_empty() {
-            let Some(child) = child_scope(&scope, arg, metadata) else {
-                return Ok(false);
-            };
-            scope = child;
-            flags = flags_for(&scope, metadata);
-            continue;
-        }
-        operands.push(word);
-        if test!(r###"^python[23]?$"###, command)
-            && operands.len() == 1
-            && let Some(script_flags) = script_flags
-        {
-            flags = script_flags.to_vec();
+            Argument::Operand(index) => {
+                if !cursor.literal && !subcommands_ref(&cursor.scope, metadata).is_empty() {
+                    return Ok(false);
+                }
+                operands.push(&words[index]);
+                if test!(r###"^python[23]?$"###, command) && operands.len() == 1 {
+                    cursor.flags = script_flags;
+                }
+            }
         }
     }
+    let scope = cursor.scope;
     let help = words
         .iter()
         .any(|word| ["--help", "-h", "--version"].contains(&word.value.as_str()));

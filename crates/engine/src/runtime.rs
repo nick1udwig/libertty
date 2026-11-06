@@ -1,7 +1,7 @@
 //! Cooperative executor for native and browser adapters, with request-owned futures.
 use crate::{
     Request,
-    host::{FactValue, Host, HostOperation},
+    host::{FactKind, FactValue, Host, HostOperation},
 };
 use futures::{future::LocalBoxFuture, task::noop_waker};
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,24 @@ impl Output {
     }
 }
 
+impl FactKind {
+    pub(crate) fn decode(self, value: Value) -> Result<FactValue, String> {
+        fn read<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, String> {
+            serde_json::from_value(value).map_err(|e| format!("Invalid host fact: {e}"))
+        }
+        Ok(match self {
+            Self::Version => FactValue::Version(Arc::from(read::<String>(value)?)),
+            Self::Lookup => FactValue::Lookup(Arc::new(read(value)?)),
+            Self::Entries => FactValue::Entries(read(value)?),
+            Self::Stat => FactValue::Stat(read(value)?),
+            Self::Syntax => FactValue::Syntax(read(value)?),
+            Self::Completion => FactValue::Completion(Arc::new(read(value)?)),
+            Self::Help => FactValue::Help(Arc::new(read(value)?)),
+            Self::Describe => FactValue::Describe(Arc::new(read(value)?)),
+        })
+    }
+}
+
 type Slot = Rc<RefCell<Option<Result<FactValue, String>>>>;
 #[derive(Default)]
 struct RequestHost {
@@ -70,12 +88,6 @@ impl Host for RequestHost {
     }
     fn deadline_ms(&self) -> f64 {
         self.deadline.get()
-    }
-    fn request(&self, operation: Value) -> LocalBoxFuture<'_, Result<FactValue, String>> {
-        match crate::deserialize(&operation) {
-            Ok(operation) => self.fact(operation),
-            Err(error) => Box::pin(async move { Err(format!("Invalid host operation: {error}")) }),
-        }
     }
     fn fact(&self, operation: HostOperation) -> LocalBoxFuture<'_, Result<FactValue, String>> {
         if self.deadline.get() > 0.0 && self.now.get() >= self.deadline.get() {
@@ -110,11 +122,6 @@ impl Host for RequestHost {
                     let result = slot.borrow();
                     let info = match result.as_ref()? {
                         Ok(FactValue::Lookup(lookup)) => lookup.info.clone(),
-                        Ok(FactValue::Json(value)) => {
-                            crate::deserialize::<crate::types::DirectoryLookup>(value)
-                                .ok()?
-                                .info
-                        }
                         _ => return None,
                     };
                     Some(Rc::new(RefCell::new(Some(Ok(FactValue::Stat(info))))))
@@ -147,8 +154,83 @@ impl Host for RequestHost {
     }
 }
 #[cfg(test)]
-mod completion_cache_tests {
+mod host_fact_tests {
     use super::*;
+    #[test]
+    fn scoped_replies_enter_the_cache_as_typed_facts() {
+        for encoding in ["values", "results", "native", "malformed"] {
+            let host = Rc::new(RequestHost::default());
+            let pending = host.clone();
+            let operation = HostOperation::Scoped {
+                cwd: "/work".into(),
+                operation: Box::new(HostOperation::Lookup {
+                    path: "/work/file".into(),
+                }),
+            };
+            let mut runtime = Runtime::default();
+            runtime.tasks.insert(
+                1,
+                Task {
+                    host,
+                    waiting: BTreeMap::new(),
+                    future: Box::pin(async move {
+                        match pending.fact(operation).await? {
+                            FactValue::Lookup(lookup) => Ok(Output::Json(serde_json::json!(
+                                lookup.info.as_ref().is_some_and(|info| info.file)
+                            ))),
+                            _ => Err("The engine received an untyped lookup.".into()),
+                        }
+                    }),
+                },
+            );
+            let Step::Pending { callbacks, .. } = runtime.poll(1) else {
+                panic!("Expected lookup");
+            };
+            assert_eq!(callbacks.len(), 1);
+            assert!(matches!(
+                &callbacks[0].operations[0],
+                HostOperation::Scoped { .. }
+            ));
+            let request = callbacks[0].request;
+            let value =
+                serde_json::json!({"info":{"file":true,"directory":false,"executable":false}});
+            let reply = match encoding {
+                "values" => Reply::Values {
+                    request,
+                    values: vec![value],
+                },
+                "results" => Reply::Results {
+                    request,
+                    results: vec![HostResult::Value { value }],
+                },
+                "native" => Reply::Native {
+                    request,
+                    results: vec![Ok(FactValue::Lookup(Arc::new(
+                        serde_json::from_value(value).unwrap(),
+                    )))],
+                },
+                _ => Reply::Values {
+                    request,
+                    values: vec![serde_json::json!(true)],
+                },
+            };
+            let result = runtime.resume_call(1, vec![reply], 1.0);
+            if encoding == "malformed" {
+                assert!(
+                    matches!(result, Step::Error { error, .. } if error.starts_with("Invalid host fact:"))
+                );
+            } else {
+                assert!(matches!(
+                    result,
+                    Step::Complete {
+                        value: Output::Json(Value::Bool(true)),
+                        ..
+                    }
+                ));
+            }
+            assert_eq!(runtime.active(), 0);
+        }
+    }
     #[test]
     fn stronger_stats_and_successful_lookups_satisfy_operand_checks() {
         let host = RequestHost::default();
@@ -184,21 +266,24 @@ mod completion_cache_tests {
     #[test]
     fn successful_completion_reuses_results_across_budgets_but_errors_retry() {
         let host = RequestHost::default();
-        let op = |timeout| serde_json::json!({"kind":"completion","words":["tool","x"],"timeoutMs":timeout});
-        drop(host.request(op(1000.0)));
+        let op = |timeout: f64| HostOperation::Completion {
+            words: vec!["tool".into(), "x".into()],
+            timeout: timeout.to_bits(),
+        };
+        drop(host.fact(op(1000.0)));
         let (_, slot) = host.queue.borrow_mut().pop_front().unwrap();
         *slot.borrow_mut() = Some(Ok(FactValue::Completion(Arc::new(vec!["value".into()]))));
-        drop(host.request(op(900.0)));
+        drop(host.fact(op(900.0)));
         assert!(host.queue.borrow().is_empty());
         *slot.borrow_mut() = Some(Err("Timed out".into()));
-        drop(host.request(op(800.0)));
+        drop(host.fact(op(800.0)));
         assert_eq!(host.queue.borrow().len(), 1);
     }
 }
 struct Task {
     host: Rc<RequestHost>,
     future: LocalBoxFuture<'static, Result<Output, String>>,
-    waiting: BTreeMap<u32, Vec<Slot>>,
+    waiting: BTreeMap<u32, Vec<(FactKind, Slot)>>,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HostRequest {
@@ -467,7 +552,7 @@ impl Runtime {
         for reply in replies {
             match reply {
                 Reply::Native { request, results } => {
-                    for (slot, result) in task
+                    for ((_, slot), result) in task
                         .waiting
                         .remove(&request)
                         .expect("validated callback")
@@ -478,7 +563,7 @@ impl Runtime {
                     }
                 }
                 Reply::Results { request, results } => {
-                    for (slot, result) in task
+                    for ((kind, slot), result) in task
                         .waiting
                         .remove(&request)
                         .expect("validated callback")
@@ -486,24 +571,24 @@ impl Runtime {
                         .zip(results)
                     {
                         *slot.borrow_mut() = Some(match result {
-                            HostResult::Value { value } => Ok(value.into()),
+                            HostResult::Value { value } => kind.decode(value),
                             HostResult::Error { error } => Err(error),
                         });
                     }
                 }
                 Reply::Values { request, values } => {
-                    for (slot, value) in task
+                    for ((kind, slot), value) in task
                         .waiting
                         .remove(&request)
                         .expect("validated callback")
                         .into_iter()
                         .zip(values)
                     {
-                        *slot.borrow_mut() = Some(Ok(value.into()));
+                        *slot.borrow_mut() = Some(kind.decode(value));
                     }
                 }
                 Reply::Error { request, error } => {
-                    for slot in task.waiting.remove(&request).expect("validated callback") {
+                    for (_, slot) in task.waiting.remove(&request).expect("validated callback") {
                         *slot.borrow_mut() = Some(Err(error.clone()));
                     }
                 }
@@ -549,7 +634,13 @@ impl Runtime {
                     };
                     self.callback = callback;
                     let count = queue.len().min(64);
-                    let (operations, slots): (Vec<_>, Vec<_>) = queue.drain(..count).unzip();
+                    let (operations, slots): (Vec<_>, Vec<_>) = queue
+                        .drain(..count)
+                        .map(|(operation, slot)| {
+                            let kind = operation.fact_kind();
+                            (operation, (kind, slot))
+                        })
+                        .unzip();
                     task.waiting.insert(callback, slots);
                     callbacks.push(HostRequest {
                         request: callback,

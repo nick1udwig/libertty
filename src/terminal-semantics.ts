@@ -1,3 +1,4 @@
+import { terminalABI } from './gespenst-compat.ts';
 import type { CoreRuntime, CoreTerminal } from '@gespenst/core/headless';
 
 export interface ShellSemantics {
@@ -7,10 +8,6 @@ export interface ShellSemantics {
   error?: string;
 }
 type Bindings = CoreRuntime['bindings'];
-interface NativeTerminal {
-  handle: number;
-  host: { bindings: Bindings };
-}
 interface Callbacks {
   semantic: number;
   reset: number;
@@ -104,7 +101,7 @@ export class TerminalSemantics {
   private callbacks: Callbacks;
   constructor(core: CoreTerminal) {
     this.core = core;
-    this.bindings = (core as unknown as NativeTerminal).host.bindings;
+    this.bindings = terminalABI(core).bindings;
     this.callbacks = runtimeCallbacks(this.bindings);
     this.callbacks.terminals.set(core.id, this);
     this.attach();
@@ -125,7 +122,7 @@ export class TerminalSemantics {
   attach() {
     this.clear();
     const { bindings } = this,
-      handle = (this.core as unknown as NativeTerminal).handle;
+      handle = terminalABI(this.core).handle;
     for (const [name, callback] of [
       ['SEMANTIC_PROMPT', this.callbacks.semantic],
       ['RESET', this.callbacks.reset],

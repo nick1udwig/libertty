@@ -129,8 +129,9 @@ pub struct SSHHost {
     history_source: Mutex<String>,
     context: tokio::sync::Mutex<Option<(u64, ShellContext)>>,
     closed: AtomicBool,
+    pub(crate) descriptions: Mutex<crate::ssh_facts::Descriptions>,
     pub(crate) help_cache: tokio::sync::Mutex<crate::help::HelpCache>,
-    pub(crate) syntax_cache: Mutex<std::collections::VecDeque<(String, bool)>>,
+    pub(crate) syntax_cache: Mutex<std::collections::VecDeque<((String, String), bool)>>,
     pub(crate) lifetime: CancellationToken,
 }
 impl std::fmt::Debug for SSHHost {
@@ -453,6 +454,7 @@ impl SSHHost {
             history_source: Mutex::new(String::new()),
             context: tokio::sync::Mutex::new(None),
             closed: AtomicBool::new(false),
+            descriptions: Mutex::new(Default::default()),
             help_cache: tokio::sync::Mutex::new(Default::default()),
             syntax_cache: Mutex::new(Default::default()),
             lifetime: CancellationToken::new(),
@@ -528,12 +530,12 @@ impl SSHHost {
                 .map_err(|e| e.to_string())?;
             let mut stdout = Vec::new();
             let mut stderr = Vec::new();
-            let mut code = 0;
+            let mut code = None;
             while let Some(message) = read.wait().await {
                 match message {
                     ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
                     ChannelMsg::ExtendedData { data, .. } => stderr.extend_from_slice(&data),
-                    ChannelMsg::ExitStatus { exit_status } => code = exit_status,
+                    ChannelMsg::ExitStatus { exit_status } => code = Some(exit_status),
                     ChannelMsg::Failure => return Err("SSH command was refused.".into()),
                     ChannelMsg::Close => break,
                     _ => {}
@@ -545,7 +547,7 @@ impl SSHHost {
             Ok(Output {
                 stdout: String::from_utf8_lossy(&stdout).into_owned(),
                 stderr: String::from_utf8_lossy(&stderr).into_owned(),
-                code,
+                code: code.ok_or("SSH command closed without an exit status.")?,
             })
         })
         .await

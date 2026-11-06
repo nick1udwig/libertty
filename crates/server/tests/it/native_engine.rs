@@ -1452,3 +1452,35 @@ async fn dictated_editor_paths_follow_real_directory_names_and_file_case() {
         .unwrap();
     assert!(result.iter().all(Candidate::is_literal), "{result:?}");
 }
+
+#[tokio::test]
+async fn help_retries_timeout_without_an_executable_or_context_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().to_str().unwrap();
+    executable(
+        &dir.path().join("orchard"),
+        "#!/bin/sh\nif [ ! -e attempted ]; then : > attempted; /bin/sleep 5; fi\nprintf '  --recovered  Available\\n'\n",
+    );
+    let catalog = catalog(cwd, &["orchard"]);
+    let env = BTreeMap::from([("PATH".into(), cwd.into()), ("HOME".into(), cwd.into())]);
+    let help = HelpProvider::new(ProbePool::default());
+    let cancel = CancellationToken::new();
+    assert!(
+        help.read("orchard", &[], &catalog, &env, &cancel)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        help.read("orchard", &[], &catalog, &env, &cancel)
+            .await
+            .unwrap()
+            .flags[0]
+            .name,
+        "--recovered"
+    );
+    assert_eq!(help.help_probes(), 2);
+    help.read("orchard", &[], &catalog, &env, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(help.help_probes(), 2);
+}

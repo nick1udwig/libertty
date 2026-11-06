@@ -1,3 +1,11 @@
+import {
+  endpointTimeouts,
+  type HttpEndpoint,
+  type HttpInput,
+  type HttpOutput,
+  type HttpQuery,
+} from './http-contract.ts';
+import { abortableDelay } from './abortable-delay.ts';
 import { constrainedLink } from './wire.ts';
 
 export interface RequestOptions extends RequestInit {
@@ -6,6 +14,7 @@ export interface RequestOptions extends RequestInit {
   timeout?: number;
 }
 export function requestTimeout(url: URL, data?: unknown): number {
+  const endpoint = url.pathname.slice(url.pathname.lastIndexOf('/api/') + 1) as HttpEndpoint;
   if (
     url.pathname.endsWith('/api/herdr/action') &&
     ['list-worktrees', 'new-worktree', 'open-worktree', 'delete-worktree'].includes(
@@ -13,25 +22,13 @@ export function requestTimeout(url: URL, data?: unknown): number {
     )
   )
     return 135000;
+  if (Object.hasOwn(endpointTimeouts, endpoint)) return endpointTimeouts[endpoint];
   if (/\/api\/(sessions|ssh\/captured|herdr\/connect|herdr\/captured)$/.test(url.pathname))
     return 25000;
   return 12000;
 }
 const attempts = 3,
   retriedStatus = [502, 503, 504];
-function pause(ms: number, signal?: AbortSignal | null) {
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(timer);
-        reject(signal.reason);
-      },
-      { once: true },
-    );
-  });
-}
 /** Changes with a JSON body carry a key, so the backend replays an earlier attempt's reply instead of repeating it. */
 function idempotencyKey(init: RequestInit) {
   const method = (init.method || 'GET').toUpperCase();
@@ -75,7 +72,7 @@ export async function request(url: URL | string, options: RequestOptions = {}): 
         if (!retried || attempt === attempts || (expired && timedOut)) throw error;
         timedOut ||= expired;
       }
-      await pause(500 * 2 ** (attempt - 1), init.signal);
+      await abortableDelay(500 * 2 ** (attempt - 1), init.signal);
     }
   };
   const rejected = currentToken();
@@ -90,9 +87,20 @@ export async function request(url: URL | string, options: RequestOptions = {}): 
   return response;
 }
 export async function responseJSON<T>(response: Response): Promise<T> {
-  const result = await response.json();
+  let result;
+  try {
+    result = await response.json();
+  } catch (cause) {
+    throw Object.assign(
+      new Error(
+        response.ok ? 'Invalid JSON response.' : 'Request failed (' + response.status + ').',
+        { cause },
+      ),
+      { status: response.status },
+    );
+  }
   if (!response.ok)
-    throw Object.assign(new Error(result.error || 'Request failed'), result, {
+    throw Object.assign(new Error(result?.error || 'Request failed'), result, {
       status: response.status,
     });
   return result;
@@ -113,4 +121,20 @@ export async function requestJSON<T>(
       ...(data === undefined ? {} : { body: JSON.stringify(data) }),
     }),
   );
+}
+
+export function requestEndpoint<K extends HttpEndpoint, I extends HttpInput<K>>(
+  base: string | URL,
+  endpoint: K,
+  data: I,
+  options: Omit<RequestOptions, 'method' | 'body'> & { query?: HttpQuery<K> } = {},
+): Promise<HttpOutput<K, I>> {
+  const { query, ...requestOptions } = options;
+  const url = new URL(endpoint, base);
+  for (const [key, value] of Object.entries(query || {}))
+    if (value !== undefined) url.searchParams.set(key, String(value));
+  return requestJSON<HttpOutput<K, I>>(url, data, {
+    ...requestOptions,
+    timeout: options.timeout ?? requestTimeout(url, data),
+  });
 }

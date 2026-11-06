@@ -244,7 +244,7 @@ impl NativeEngine {
         self.sender
             .try_send(Message::Start(Box::new(Job {
                 call,
-                host: host.clone(),
+                host: host.request_scope(),
                 cancel: pending.0.clone(),
                 result,
             })))

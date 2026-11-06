@@ -23,15 +23,9 @@ export interface TerminalTab {
   pluginId: string;
   pluginVersion: string;
   pluginState?: unknown;
+  /** Selected-file permission stays outside plugin-writable state. */
   readPath?: string;
-  readCapture?: string;
-  readExitCode?: number;
-  readHerdrTerminal?: string;
-  herdrCore?: boolean;
   ownsSession?: boolean;
-  herdrSession?: string;
-  herdrSource?: string;
-  directory?: string;
   id: string;
   name: string;
   backendId: string;

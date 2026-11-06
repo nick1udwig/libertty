@@ -1,18 +1,34 @@
 import type { HostProfile, TerminalTab } from './connections.ts';
+import type { PluginConnection } from './plugin-connection.ts';
 
 export const BUILTIN_VERSION = '1';
 export const builtinIds = ['terminal', 'files', 'herdr', 'herdr-core', 'reading'] as const;
 export function isHerdrPlugin(id: string): boolean {
   return id === 'herdr' || id === 'herdr-core';
 }
-/** Whether a tab shows a terminal pane with its shortcut controls. */
-export function showsTerminal(id: string): boolean {
-  return id === 'terminal' || isHerdrPlugin(id);
-}
 export function tabPluginId(tab: TerminalTab): string {
   return tab.pluginId;
 }
+export interface PluginTerminal {
+  readonly frame: HTMLIFrameElement | undefined;
+  readonly frames: Iterable<HTMLIFrameElement>;
+  retain?: boolean;
+}
+export interface PluginNavigation {
+  element: HTMLElement;
+  readonly gesturesBlocked: boolean;
+  setExpanded(expanded: boolean): void;
+  holdSize(): () => void;
+}
+export interface PluginCapabilities {
+  terminal?: boolean;
+  waitForReady?: boolean;
+  attentionLabel?: string;
+}
 export interface PluginView {
+  readonly ready?: boolean;
+  terminal?: PluginTerminal;
+  navigation?: PluginNavigation;
   element: HTMLElement;
   setVisible(visible: boolean): void;
   setHeld?(held: boolean): void;
@@ -21,8 +37,15 @@ export interface PluginView {
   applySettings?(): void;
   copySelection?(): void;
   canEvict?(): boolean;
+  updatePresence?(): void;
+  openTerminal?(id: string): void;
+}
+export interface PluginStateCodec<State = unknown> {
+  ownsSession: boolean;
+  decode(value: unknown, legacy: Readonly<Record<string, unknown>>): State;
 }
 export interface TabPlugin {
+  state?: PluginStateCodec;
   id: string;
   version: string;
   name: string;
@@ -31,20 +54,31 @@ export interface TabPlugin {
   iconHTML?: string;
   panelPrefix: string;
   className?: string;
+  capabilities?: PluginCapabilities;
+  connection?: PluginConnection;
+  resume?(tab: TerminalTab): Promise<void>;
   available(host: HostProfile): boolean;
   connect(host: HostProfile): Promise<void>;
-  mount(tab: TerminalTab): Promise<PluginView>;
+  mount(tab: TerminalTab, signal?: AbortSignal): Promise<PluginView>;
   close(tab: TerminalTab): Promise<boolean>;
 }
 
 /** Versions stay registered so an update never silently replaces an open tab. */
 export class PluginRegistry {
+  private states = new Map<string, PluginStateCodec>();
+  constructor(states: readonly { id: string; version: string; state: PluginStateCodec }[] = []) {
+    for (const entry of states) this.states.set(this.key(entry.id, entry.version), entry.state);
+  }
+  stateFor(id: string, version: string) {
+    return this.states.get(this.key(id, version));
+  }
   private versions = new Map<string, TabPlugin>();
   private current = new Map<string, TabPlugin>();
   private disabled = new Set<string>();
   register(plugin: TabPlugin) {
     const key = this.key(plugin.id, plugin.version);
     if (this.versions.has(key)) throw new Error('This plugin version is already installed.');
+    if (plugin.state) this.states.set(key, plugin.state);
     this.versions.set(key, plugin);
     this.current.set(plugin.id, plugin);
   }

@@ -1,4 +1,5 @@
 //! Validated client messages shared by native terminals and Herdr viewers.
+pub mod http;
 use crate::alternatives::Intent;
 use libertty_engine::utf16_len;
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
@@ -482,6 +483,7 @@ impl ClientMessage {
 }
 
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 #[serde(
     tag = "action",
     rename_all = "kebab-case",
@@ -580,6 +582,25 @@ mod tests {
         ClientMessage::export_all(&config).unwrap();
         crate::herdr::Metadata::export_all(&config).unwrap();
         crate::files::Listing::export_all(&config).unwrap();
+        super::requests::FileAction::export_all(&config).unwrap();
+        super::KeychainAction::export_all(&config).unwrap();
+        super::requests::SshAddress::export_all(&config).unwrap();
+        super::requests::Folder::export_all(&config).unwrap();
+        super::requests::Connect::export_all(&config).unwrap();
+        super::requests::Sessions::export_all(&config).unwrap();
+        super::requests::HerdrConnect::export_all(&config).unwrap();
+        super::requests::HerdrTicket::export_all(&config).unwrap();
+        super::http::Connected::export_all(&config).unwrap();
+        super::http::CreatedSession::export_all(&config).unwrap();
+        super::http::SocketTicket::export_all(&config).unwrap();
+        super::http::Success::export_all(&config).unwrap();
+        super::http::FileText::export_all(&config).unwrap();
+        super::http::HttpError::export_all(&config).unwrap();
+        super::http::ConnectedHerdr::export_all(&config).unwrap();
+        crate::herdr::action::Action::export_all(&config).unwrap();
+        super::http::HerdrCreated::export_all(&config).unwrap();
+        super::http::HerdrWorktrees::export_all(&config).unwrap();
+        super::http::HerdrActionError::export_all(&config).unwrap();
         libertty_engine::types::Catalog::export_all(&config).unwrap();
         let mut files: Vec<_> = std::fs::read_dir(directory.path())
             .unwrap()

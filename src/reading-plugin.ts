@@ -1,3 +1,4 @@
+import { builtinState } from './builtin-state.ts';
 import { request } from './api.ts';
 import { icon } from './icons.ts';
 import type { BackendProfile, TerminalTab } from './connections.ts';
@@ -31,10 +32,11 @@ export function readingPlugin(s: ReadingServices): TabPlugin {
       return mountReading(tab, s);
     },
     async close(tab) {
-      if (tab.readCapture) {
+      const state = builtinState(tab);
+      if (state.readCapture) {
         const backend = s.backend(tab),
           url = readingURL(tab, backend, true);
-        url.searchParams.set('id', tab.readCapture);
+        url.searchParams.set('id', state.readCapture);
         url.searchParams.set('session', tab.session);
         void request(url, {
           method: 'DELETE',
@@ -48,21 +50,23 @@ export function readingPlugin(s: ReadingServices): TabPlugin {
 }
 
 function readingURL(tab: TerminalTab, backend: BackendProfile, capture = false) {
+  const state = builtinState(tab);
   const url = new URL(
-    (tab.readHerdrTerminal ? 'api/herdr/reading/' : 'api/reading/') +
+    (state.readHerdrTerminal ? 'api/herdr/reading/' : 'api/reading/') +
       (capture ? 'capture' : 'file'),
     backend.url,
   );
-  if (tab.readHerdrTerminal) {
-    if (tab.herdrCore) url.searchParams.set('herdrCore', '1');
-    url.searchParams.set('herdrSession', tab.herdrSession || '');
-    if (tab.herdrSource) url.searchParams.set('herdrSource', tab.herdrSource);
+  if (state.readHerdrTerminal) {
+    if (state.herdrCore) url.searchParams.set('herdrCore', '1');
+    url.searchParams.set('herdrSession', state.herdrSession || '');
+    if (state.herdrSource) url.searchParams.set('herdrSource', state.herdrSource);
   }
   return url;
 }
 
 function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
-  const path = tab.readPath;
+  const state = builtinState(tab);
+  const path = state.readPath;
   if (path === undefined) throw new Error('This reading tab has no file or command output.');
   const backend = s.backend(tab),
     controller = new AbortController();
@@ -108,13 +112,13 @@ function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
   display(message(path, 'Opening file…'));
   void (async () => {
     try {
-      const blob = await readFile(path, tab.readCapture);
+      const blob = await readFile(path, state.readCapture);
       if (disposed) return;
-      if (tab.readCapture && !blob.size) {
-        const failed = typeof tab.readExitCode === 'number' && tab.readExitCode !== 0;
+      if (state.readCapture && !blob.size) {
+        const failed = typeof state.readExitCode === 'number' && state.readExitCode !== 0;
         const detail = failed
-          ? `Exited with status ${tab.readExitCode} without writing to standard output. Check the terminal for errors.`
-          : typeof tab.readExitCode === 'number'
+          ? `Exited with status ${state.readExitCode} without writing to standard output. Check the terminal for errors.`
+          : typeof state.readExitCode === 'number'
             ? 'Finished successfully without writing to standard output.'
             : 'No standard output was captured.';
         const hint =
@@ -125,9 +129,9 @@ function mountReading(tab: TerminalTab, s: ReadingServices): PluginView {
       } else
         display(
           readingView(
-            tab.readCapture ? 'Command output' : path,
+            state.readCapture ? 'Command output' : path,
             blob,
-            tab.readCapture
+            state.readCapture
               ? undefined
               : { load: readFile, open: (path) => s.openReading(tab, path) },
           ),

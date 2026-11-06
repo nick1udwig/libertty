@@ -1,7 +1,6 @@
 use crate::types::{DirectoryEntry, DirectoryLookup, FileInfo, Flag, Help, SharedList};
 use futures::future::LocalBoxFuture;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
@@ -51,12 +50,6 @@ pub struct ScopedHost<'a> {
     pub cwd: &'a str,
 }
 impl Host for ScopedHost<'_> {
-    fn request(&self, operation: Value) -> LocalBoxFuture<'_, Result<FactValue, String>> {
-        match serde_json::from_value(operation) {
-            Ok(operation) => self.fact(operation),
-            Err(error) => Box::pin(async move { Err(error.to_string()) }),
-        }
-    }
     fn fact(&self, operation: HostOperation) -> LocalBoxFuture<'_, Result<FactValue, String>> {
         if matches!(operation, HostOperation::Scoped { .. }) {
             return self.inner.fact(operation);
@@ -86,7 +79,7 @@ fn deserialize_timeout<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Res
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum FactValue {
-    Json(Arc<Value>),
+    Version(Arc<str>),
     Lookup(Arc<DirectoryLookup>),
     Entries(SharedList<DirectoryEntry>),
     Stat(Option<FileInfo>),
@@ -95,18 +88,35 @@ pub enum FactValue {
     Help(Arc<Help>),
     Describe(Arc<Option<Vec<Flag>>>),
 }
-impl From<Value> for FactValue {
-    fn from(value: Value) -> Self {
-        Self::Json(Arc::new(value))
+#[derive(Clone, Copy)]
+pub(crate) enum FactKind {
+    Version,
+    Lookup,
+    Entries,
+    Stat,
+    Syntax,
+    Completion,
+    Help,
+    Describe,
+}
+impl HostOperation {
+    pub(crate) fn fact_kind(&self) -> FactKind {
+        match self {
+            Self::Scoped { operation, .. } => operation.fact_kind(),
+            Self::Version { .. } => FactKind::Version,
+            Self::Lookup { .. } => FactKind::Lookup,
+            Self::Entries { .. } => FactKind::Entries,
+            Self::Stat { .. } => FactKind::Stat,
+            Self::Syntax { .. } => FactKind::Syntax,
+            Self::Completion { .. } => FactKind::Completion,
+            Self::Help { .. } => FactKind::Help,
+            Self::Describe { .. } => FactKind::Describe,
+        }
     }
 }
-
 /// Facts are supplied by an adapter; the engine never opens files or executes commands.
 pub trait Host {
-    fn request(&self, operation: Value) -> LocalBoxFuture<'_, Result<FactValue, String>>;
-    fn fact(&self, operation: HostOperation) -> LocalBoxFuture<'_, Result<FactValue, String>> {
-        self.request(serde_json::to_value(operation).expect("host operation"))
-    }
+    fn fact(&self, operation: HostOperation) -> LocalBoxFuture<'_, Result<FactValue, String>>;
     fn now_ms(&self) -> f64;
     fn deadline_ms(&self) -> f64 {
         f64::INFINITY
@@ -122,10 +132,7 @@ pub async fn version(host: &dyn Host, command: &str) -> Result<String, String> {
         })
         .await?
     {
-        FactValue::Json(value) => value
-            .as_str()
-            .map(str::to_owned)
-            .ok_or_else(|| "Invalid schema version.".into()),
+        FactValue::Version(value) => Ok(value.to_string()),
         _ => Err("Invalid schema version.".into()),
     }
 }
@@ -143,9 +150,6 @@ pub async fn stat(
         .await?
     {
         FactValue::Stat(value) => Ok(value),
-        FactValue::Json(value) => {
-            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
-        }
         _ => Err("Invalid host fact type.".into()),
     }
 }
@@ -155,9 +159,6 @@ pub async fn lookup(host: &dyn Host, path: &str) -> Result<DirectoryLookup, Stri
         .await?
     {
         FactValue::Lookup(value) => Ok(value.as_ref().clone()),
-        FactValue::Json(value) => {
-            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
-        }
         _ => Err("Invalid host fact type.".into()),
     }
 }
@@ -174,9 +175,6 @@ pub async fn entries(
         .await?
     {
         FactValue::Entries(value) => Ok(value),
-        FactValue::Json(value) => {
-            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
-        }
         _ => Err("Invalid host fact type.".into()),
     }
 }
@@ -188,9 +186,6 @@ pub async fn syntax(host: &dyn Host, command: &str) -> Result<bool, String> {
         .await?
     {
         FactValue::Syntax(value) => Ok(value),
-        FactValue::Json(value) => {
-            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
-        }
         _ => Err("Invalid host fact type.".into()),
     }
 }
@@ -207,9 +202,6 @@ pub async fn complete(
         .await?
     {
         FactValue::Completion(value) => Ok(value.as_ref().clone()),
-        FactValue::Json(value) => {
-            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
-        }
         _ => Err("Invalid host fact type.".into()),
     }
 }
@@ -222,9 +214,6 @@ pub async fn help(host: &dyn Host, command: &str, route: &[String]) -> Result<He
         .await?
     {
         FactValue::Help(value) => Ok(value.as_ref().clone()),
-        FactValue::Json(value) => {
-            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
-        }
         _ => Err("Invalid host fact type.".into()),
     }
 }
@@ -236,9 +225,6 @@ pub async fn describe(host: &dyn Host, command: &str) -> Result<Option<Vec<Flag>
         .await?
     {
         FactValue::Describe(value) => Ok(value.as_ref().clone()),
-        FactValue::Json(value) => {
-            crate::deserialize(value.as_ref()).map_err(|e| format!("Invalid host fact: {e}"))
-        }
         _ => Err("Invalid host fact type.".into()),
     }
 }

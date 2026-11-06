@@ -1,6 +1,7 @@
+import { terminalMessage, sendToTerminal, type WorkspaceMessage } from './frame-protocol.ts';
 import { terminalRenderers } from './renderer-cache.ts';
 import { node } from './dom.ts';
-import { readingOpen, type ReadingOpen } from './reading-request.ts';
+import type { ReadingOpen } from './reading-request.ts';
 import type { HerdrAgent } from './herdr-protocol.ts';
 import { terminalCanEvict } from './terminal-retention.ts';
 import { frameNotice, type Fail, type NoticeInput, type Notify } from './notice-model.ts';
@@ -84,44 +85,41 @@ export class HerdrFrames {
   /** Handle a message from one of these iframes, ignoring every other window. */
   message(event: MessageEvent) {
     if (event.origin !== location.origin) return;
+    const data = terminalMessage(event.data);
+    if (!data) return;
     const entry = [...this.entries.values()].find(
-      (entry) =>
-        event.source === entry.frame.contentWindow && event.data?.session === entry.session,
+      (entry) => event.source === entry.frame.contentWindow && data.session === entry.session,
     );
     if (!entry) return;
     const active = entry.frame === this.frame;
-    if (event.data.type === 'terminal-loaded') {
+    if (data.type === 'terminal-loaded') {
       entry.loaded = true;
       entry.state = undefined;
       if (active) this.host.state('terminal');
-      entry.frame.contentWindow?.postMessage({ type: 'shortcut-host' }, location.origin);
-      entry.frame.contentWindow?.postMessage(
-        { type: 'herdr-present', presentation: entry.presentation },
-        location.origin,
-      );
+      sendToTerminal(entry.frame.contentWindow, { type: 'shortcut-host' });
+      sendToTerminal(entry.frame.contentWindow, {
+        type: 'herdr-present',
+        presentation: entry.presentation!,
+      });
       if (entry.verified)
-        entry.frame.contentWindow?.postMessage(
-          { type: 'authorize', accessToken: this.host.token() },
-          location.origin,
-        );
-      entry.frame.contentWindow?.postMessage(
-        { type: 'tab-visibility', visible: this.host.visible() && active },
-        location.origin,
-      );
+        sendToTerminal(entry.frame.contentWindow, {
+          type: 'authorize',
+          accessToken: this.host.token(),
+        });
+      sendToTerminal(entry.frame.contentWindow, {
+        type: 'tab-visibility',
+        visible: this.host.visible() && active,
+      });
     }
-    const geometry = event.data.cols + 'x' + event.data.rows;
-    if (
-      event.data.type === 'terminal-sizing' &&
-      active &&
-      event.data.presentation === entry.presentation
-    )
+    const geometry = 'cols' in data ? data.cols + 'x' + data.rows : '';
+    if (data.type === 'terminal-sizing' && active && data.presentation === entry.presentation)
       entry.geometry = geometry;
     if (
-      event.data.type === 'terminal-rendered' &&
+      data.type === 'terminal-rendered' &&
       active &&
       this.host.visible() &&
       !this.host.held() &&
-      event.data.presentation === entry.presentation &&
+      data.presentation === entry.presentation &&
       geometry === entry.geometry
     ) {
       entry.rendered = true;
@@ -137,26 +135,25 @@ export class HerdrFrames {
       this.setLoading(false);
       this.host.painted();
     }
-    if (event.data.type === 'herdr-resize-ready') this.resizing.get(entry.frame)?.();
-    const remote = frameNotice(event.data, entry.frame.contentWindow);
+    if (data.type === 'herdr-resize-ready') this.resizing.get(entry.frame)?.();
+    const remote = frameNotice(data, entry.frame.contentWindow);
     if (remote?.status) {
       entry.state = remote.input;
       if (active) this.host.state('terminal', entry.state);
     } else if (active && remote?.input)
       this.host.notice(remote.input.message, remote.input.kind, remote.input.actions);
-    if (event.data.type === 'reading-open' && readingOpen(event.data))
-      this.host.reading(entry.frame.dataset.terminal!, event.data);
-    if (event.data.type === 'terminal-ended') this.host.ended();
-    if (event.data.type === 'terminal-locked') entry.locked = true;
+    if (data.type === 'reading-open') this.host.reading(entry.frame.dataset.terminal!, data);
+    if (data.type === 'terminal-ended') this.host.ended();
+    if (data.type === 'terminal-locked') entry.locked = true;
     terminalRenderers.trim();
-    if (active && event.data.type === 'terminal-locked')
+    if (active && data.type === 'terminal-locked')
       void this.host
         .authenticate()
         .then(() =>
-          entry.frame.contentWindow?.postMessage(
-            { type: 'authorize', accessToken: this.host.token() },
-            location.origin,
-          ),
+          sendToTerminal(entry.frame.contentWindow, {
+            type: 'authorize',
+            accessToken: this.host.token(),
+          }),
         )
         .catch(this.host.fail);
   }
@@ -179,10 +176,10 @@ export class HerdrFrames {
     this.loadingLabel.textContent =
       'Loading ' + (this.host.agentName(entry.frame.dataset.terminal!) || 'terminal') + '…';
     this.setLoading(true);
-    entry.frame.contentWindow?.postMessage(
-      { type: 'herdr-present', presentation: entry.presentation },
-      location.origin,
-    );
+    sendToTerminal(entry.frame.contentWindow, {
+      type: 'herdr-present',
+      presentation: entry.presentation!,
+    });
   }
   /** Keep a frame for a quick return on phones, keep it visible during a handoff, or remove it. */
   park(frame: HTMLIFrameElement, keepVisible = false) {
@@ -200,7 +197,7 @@ export class HerdrFrames {
     ) {
       frame.className = keepVisible ? 'herdr-terminal-previous' : 'herdr-terminal-cached';
       frame.style.visibility = keepVisible ? '' : 'hidden';
-      frame.contentWindow?.postMessage({ type: 'herdr-park', parked: true }, location.origin);
+      sendToTerminal(frame.contentWindow, { type: 'herdr-park', parked: true });
     } else {
       this.removeFrame(frame);
     }
@@ -216,15 +213,14 @@ export class HerdrFrames {
       const timer = setTimeout(done, 150);
       this.resizing.get(frame)?.();
       this.resizing.set(frame, done);
-      frame.contentWindow?.postMessage({ type: 'herdr-resize-cover' }, location.origin);
+      sendToTerminal(frame.contentWindow, { type: 'herdr-resize-cover' });
     });
   }
-  post(message: object) {
-    this.frame?.contentWindow?.postMessage(message, location.origin);
+  post(message: WorkspaceMessage) {
+    sendToTerminal(this.frame?.contentWindow, message);
   }
-  broadcast(message: object) {
-    for (const entry of this.entries.values())
-      entry.frame.contentWindow?.postMessage(message, location.origin);
+  broadcast(message: WorkspaceMessage) {
+    for (const entry of this.entries.values()) sendToTerminal(entry.frame.contentWindow, message);
   }
   /** Show the selected terminal, reusing its cached frame when its size still fits.
    * Unverified identities only preview retained output; live metadata authorizes the same frame. */
@@ -249,10 +245,10 @@ export class HerdrFrames {
         if (entry.verified) continue;
         entry.verified = true;
         if (entry.loaded)
-          entry.frame.contentWindow?.postMessage(
-            { type: 'authorize', accessToken: this.host.token() },
-            location.origin,
-          );
+          sendToTerminal(entry.frame.contentWindow, {
+            type: 'authorize',
+            accessToken: this.host.token(),
+          });
       }
     if (!selected) {
       if (this.displayed) this.removeFrame(this.displayed);
@@ -299,21 +295,18 @@ export class HerdrFrames {
         void this.host
           .authenticate()
           .then(() =>
-            cached.frame.contentWindow?.postMessage(
-              { type: 'authorize', accessToken: this.host.token() },
-              location.origin,
-            ),
+            sendToTerminal(cached.frame.contentWindow, {
+              type: 'authorize',
+              accessToken: this.host.token(),
+            }),
           )
           .catch(this.host.fail);
       }
-      cached.frame.contentWindow?.postMessage(
-        { type: 'herdr-park', parked: false, preserve },
-        location.origin,
-      );
-      cached.frame.contentWindow?.postMessage(
-        { type: 'tab-visibility', visible: this.host.visible() },
-        location.origin,
-      );
+      sendToTerminal(cached.frame.contentWindow, { type: 'herdr-park', parked: false, preserve });
+      sendToTerminal(cached.frame.contentWindow, {
+        type: 'tab-visibility',
+        visible: this.host.visible(),
+      });
     } else {
       const session = crypto.randomUUID();
       const frame = node('iframe', 'herdr-terminal');

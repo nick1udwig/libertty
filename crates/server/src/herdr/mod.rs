@@ -357,7 +357,7 @@ impl Target {
     pub async fn action<M: TryInto<crate::herdr::action::Action>>(
         &self,
         input: M,
-    ) -> Result<Value, String>
+    ) -> Result<Value, crate::protocol::http::HerdrActionError>
     where
         M::Error: std::fmt::Display,
     {
@@ -368,7 +368,16 @@ impl Target {
         if self.core {
             hc::action(self, input).await
         } else {
-            cli::action(self, input).await
+            let deletion = matches!(input, Action::DeleteWorktree { .. });
+            cli::action(self, input).await.map_err(|error| {
+                // Older Herdr servers expose this capability only in their error text.
+                let code = if deletion && Regex::new(r"--force\b").unwrap().is_match(&error) {
+                    crate::protocol::http::HerdrActionErrorCode::ForceRequired
+                } else {
+                    crate::protocol::http::HerdrActionErrorCode::Failed
+                };
+                crate::protocol::http::HerdrActionError { error, code }
+            })
         }
     }
     pub async fn ensure(&self, cwd: &str) -> Result<(), String> {

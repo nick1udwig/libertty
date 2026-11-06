@@ -4,10 +4,12 @@
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
 The library has no filesystem, subprocess, browser, network or terminal effects.
 `selection.rs` owns final evidence ordering, stable deduplication and original-text presentation, with separate search, validation, compound and display limits.
-`arguments.rs` shares plain argument values, source spans and option bindings across repair, completion and validation.
+`arguments.rs` shares plain argument values and source spans across repair, completion and validation.
+Its argument cursor tracks option value bounds, subcommand scopes, operands and the literal delimiter while each consumer applies its own acceptance rules.
 `command_profiles.rs` defines built-in operand schemas, path repair, wrapper handling and directory changes in one registry.
 Add command aliases or operand policies there so these stages stay consistent.
 Independent option-path repair and argument completion share a host-fact round, as do final syntax checks for compound and wrapped choices.
+The SSH adapter sends up to 32 uncached syntax checks through one channel, preserves scoped directories and result order, and caches only completed syntax results.
 The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.
 Historical TypeScript revisions remain in Git for benchmark comparisons.
 
@@ -23,7 +25,17 @@ Tools can request suggestions through `/api/suggest`.
 `crates/server/src/engine.rs` supplies native host facts and delegates to the library's bounded asynchronous runtime.
 Native suggestions and prewarming use typed calls and results without JSON catalog or candidate conversions.
 The WASM adapter retains the existing JSON protocol.
+The runtime decodes JSON host replies once, using the pending operation type, before it stores them in the request cache.
+Engine host adapters must supply typed facts, including schema versions.
 Native help, script and completion adapters retain probe-pool capacity and cancellation.
+Local and SSH completion probes use the same shell functions as the reusable worker, with explicit entrypoints and per-request subshell isolation.
+Help, syntax and script-description caches reuse pending work and successful results, including valid negatives, but retry failed or abandoned work.
+Cancelling one subscriber does not evict work still used by another subscriber.
+Each repair shares up to 64 SSH directory snapshots by path and entry limit, including pending reads for separate missing-path lookups.
+The final listing check always reads fresh data, and the next repair starts with an empty snapshot cache.
+Each repair also shares SSH executable-version lookups across help routes.
+SSH Python descriptions share pending work and successful results by resolved path and SFTP file metadata, with a limit of 200 entries.
+`probe_policy.rs` shares help-route verification, help arguments, probe environments and Python script selection between local and SSH adapters.
 `src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
 Each prepared choice includes its backend action, so selection keeps its reading or shell meaning if browser preferences change.
 Browser and native reading recognition share contract fixtures, normalize phrases, and prefer the longest matching phrase.

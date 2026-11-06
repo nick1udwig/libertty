@@ -112,3 +112,30 @@ async fn work_abandoned_before_its_first_subscription_never_starts() {
     assert!(!started.load(Ordering::SeqCst));
     assert!(task.aborted());
 }
+
+#[tokio::test]
+async fn shared_task_reuse_distinguishes_failures_from_negative_facts() {
+    let cancel = CancellationToken::new();
+    let negative = SharedTask::new(|_| Box::pin(async { Ok(false) }));
+    assert!(!negative.wait(&cancel).await.unwrap());
+    assert!(negative.reusable());
+    let failed = SharedTask::<bool>::new(|_| Box::pin(async { Err("Probe timed out.".into()) }));
+    assert!(failed.wait(&cancel).await.is_err());
+    assert!(!failed.reusable());
+    assert!(!failed.aborted());
+}
+
+#[tokio::test]
+async fn syntax_retries_a_failed_probe_after_the_directory_becomes_available() {
+    let root = tempfile::tempdir().unwrap();
+    let cwd = root.path().join("later");
+    let cwd = cwd.to_str().unwrap();
+    let syntax = libertty_server::syntax::Syntax::default();
+    let cancel = CancellationToken::new();
+    assert!(syntax.valid("echo ok", cwd, &cancel).await.is_err());
+    std::fs::create_dir(cwd).unwrap();
+    assert!(syntax.valid("echo ok", cwd, &cancel).await.unwrap());
+    assert!(!syntax.valid("if then", cwd, &cancel).await.unwrap());
+    std::fs::remove_dir(cwd).unwrap();
+    assert!(!syntax.valid("if then", cwd, &cancel).await.unwrap());
+}

@@ -1,7 +1,7 @@
 //! A bounded shell structure that preserves opaque expressions instead of evaluating them.
 use crate::utf16_len;
 use crate::{
-    command_policy::{flags_for, option_arity},
+    command_policy::{flags_ref, option_arity},
     command_profiles::{Wrapper, profile},
     types::CommandMetadata,
 };
@@ -223,7 +223,7 @@ pub fn nested_command(input: &str, metadata: &CommandMetadata) -> Option<usize> 
     if !assignment(first) && behavior.is_none() {
         return None;
     }
-    let flags = flags_for(&wrapper, metadata);
+    let flags = flags_ref(&wrapper, metadata, &[]);
     let mut index = if assignment(first) { 0 } else { 1 };
     let mut duration = behavior == Some(Wrapper::Duration);
     while index < spans.len() {
@@ -233,7 +233,7 @@ pub fn nested_command(input: &str, metadata: &CommandMetadata) -> Option<usize> 
             break;
         }
         if word.starts_with('-') {
-            index += if option_arity(word, &flags)? { 2 } else { 1 };
+            index += if option_arity(word, flags)? { 2 } else { 1 };
         } else if (behavior == Some(Wrapper::Assignments) || assignment(first)) && assignment(word)
         {
             index += 1;

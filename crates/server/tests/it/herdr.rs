@@ -13,6 +13,7 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
             .action(&request)
             .await
             .unwrap_err()
+            .error
             .contains("linked worktree")
     );
     fixture.snapshot.lock().unwrap()["workspaces"][0]["worktree"] = json!({"is_linked_worktree":true,"checkout_path":"/worktrees/repo/review","repo_key":"/repo/.git","repo_name":"repo"});
@@ -29,7 +30,7 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
     // Worktrees share their repository's key so the strip can group them under its root.
     assert_eq!(snapshot.spaces[0].repo_key.as_deref(), Some("/repo/.git"));
     assert_eq!(snapshot.spaces[0].repo_name.as_deref(), Some("repo"));
-    assert!(fixture.target.action(&json!({"action":"delete-worktree","workspaceId":"missing","path":"/worktrees/repo/review"})).await.unwrap_err().contains("closed"));
+    assert!(fixture.target.action(&json!({"action":"delete-worktree","workspaceId":"missing","path":"/worktrees/repo/review"})).await.unwrap_err().error.contains("closed"));
     for path in [json!("/other"), json!(null)] {
         assert!(
             fixture
@@ -37,6 +38,7 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
                 .action(&json!({"action":"delete-worktree","workspaceId":"w1","path":path}))
                 .await
                 .unwrap_err()
+                .error
                 .contains("folder changed")
         );
     }
@@ -48,9 +50,16 @@ async fn checkout_deletion_validates_the_confirmed_folder_and_preserves_refusals
             .action(&request)
             .await
             .unwrap_err()
+            .error
             .contains("uncommitted")
     );
     assert_eq!(fixture.target.snapshot().await.unwrap().spaces.len(), 1);
+    *fixture.close_error.lock().unwrap() = "Local changes require --force.".into();
+    let refusal = fixture.target.action(&request).await.unwrap_err();
+    assert!(matches!(
+        refusal.code,
+        libertty_server::protocol::http::HerdrActionErrorCode::ForceRequired
+    ));
     fixture.close_error.lock().unwrap().clear();
     fixture.target.action(&request).await.unwrap();
     assert!(fixture.target.snapshot().await.unwrap().spaces.is_empty());
@@ -76,6 +85,7 @@ async fn forced_checkout_deletion_keeps_scope_guards_and_requires_a_boolean() {
             .action(&request)
             .await
             .unwrap_err()
+            .error
             .contains("linked worktree")
     );
     fixture.snapshot.lock().unwrap()["workspaces"][0]["worktree"] =
@@ -223,6 +233,7 @@ async fn worktrees_and_splits_are_scoped_to_the_held_space() {
             .action(&json!({"action":"list-worktrees","workspaceId":"w1"}))
             .await
             .unwrap_err()
+            .error
             .contains("parent space")
     );
 }
@@ -244,6 +255,7 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
             .action(&json!({"action":"rename","terminalId":"missing","name":"No"}))
             .await
             .unwrap_err()
+            .error
             .contains("ended")
     );
     fixture
@@ -275,6 +287,7 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
             .action(&json!({"action":"rename-space","workspaceId":"missing","name":"No"}))
             .await
             .unwrap_err()
+            .error
             .contains("closed")
     );
     fixture
@@ -292,6 +305,7 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
             .action(&json!({"action":"move-space","workspaceId":"w1","beforeWorkspaceId":"w1"}))
             .await
             .unwrap_err()
+            .error
             .contains("another")
     );
     *fixture.close_error.lock().unwrap() = "Server refused to close pane.".into();
@@ -301,6 +315,7 @@ async fn rpc_actions_preserve_labels_and_reject_stale_or_refused_changes() {
             .action(&json!({"action":"close","terminalId":"term_0"}))
             .await
             .unwrap_err()
+            .error
             .contains("refused")
     );
     assert_eq!(fixture.target.snapshot().await.unwrap().terminals.len(), 1);
@@ -342,7 +357,10 @@ async fn unsupported_split_actions_explain_which_server_needs_updating() {
         )
         .await
         .unwrap_err();
-    assert!(error.contains("Update Herdr on this host"), "{error}");
+    assert!(
+        error.error.contains("Update Herdr on this host"),
+        "{error:?}"
+    );
     assert_eq!(
         fixture
             .actions

@@ -3,17 +3,22 @@ use serde_json::Value;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct Connect {
     pub token: Option<String>,
     pub session: Option<String>,
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub no_session: bool,
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct Sessions {
     pub name: Option<String>,
+    #[cfg_attr(test, ts(type = "unknown", optional))]
     pub ssh: Option<Value>,
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub files: bool,
 }
 #[derive(Clone, Copy, Default, Deserialize, PartialEq)]
@@ -35,8 +40,10 @@ pub struct Capture {
     pub trust: Option<String>,
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct HerdrConnect {
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub core: bool,
     pub source: Option<String>,
     pub session: Option<String>,
@@ -50,8 +57,10 @@ pub struct HerdrReading {
     pub cwd: String,
 }
 #[derive(Default, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct HerdrTicket {
     #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
     pub mobile: bool,
     pub cols: Option<u16>,
     pub rows: Option<u16>,
@@ -71,6 +80,7 @@ pub struct Watch {
     pub tab_id: String,
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 pub struct Folder {
     pub path: String,
     pub name: String,
@@ -91,45 +101,64 @@ pub enum TransferAction {
     Download,
 }
 #[derive(Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(optional_fields))]
 pub struct SshAddress {
     pub host: String,
     pub username: String,
     pub port: Option<f64>,
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum FileActionKind {
-    Read,
-    Write,
-    Rename,
-    Copy,
-    Delete,
-}
-impl FileActionKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Read => "read",
-            Self::Write => "write",
-            Self::Rename => "rename",
-            Self::Copy => "copy",
-            Self::Delete => "delete",
-        }
-    }
-}
-#[derive(Deserialize)]
-pub struct FileAction {
-    pub action: FileActionKind,
-    pub path: Option<String>,
-    pub name: Option<String>,
-    pub text: Option<String>,
-    pub version: Option<String>,
-    pub paths: Option<Vec<String>>,
-    pub destination: Option<String>,
+#[derive(Deserialize, Serialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(tag = "action", rename_all = "lowercase")]
+pub enum FileAction {
+    Read {
+        path: String,
+    },
+    Write {
+        path: String,
+        text: String,
+        version: String,
+    },
+    Rename {
+        path: String,
+        name: String,
+    },
+    Copy {
+        paths: Vec<String>,
+        destination: String,
+    },
+    Delete {
+        paths: Vec<String>,
+    },
 }
 impl TryFrom<&Value> for FileAction {
     type Error = serde_json::Error;
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
         Self::deserialize(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FileAction;
+    use serde_json::json;
+
+    #[test]
+    fn file_actions_require_their_operation_fields() {
+        for input in [
+            json!({"action":"read"}),
+            json!({"action":"write","path":"/file","text":"new"}),
+            json!({"action":"rename","path":"/file"}),
+            json!({"action":"copy","paths":["/file"]}),
+            json!({"action":"delete"}),
+        ] {
+            assert!(FileAction::try_from(&input).is_err(), "{input}");
+        }
+        assert!(FileAction::try_from(&json!({"action":"read","path":"/file"})).is_ok());
+        assert!(
+            FileAction::try_from(&json!({"action":"write","path":"/file","text":"","version":"v"}))
+                .is_ok()
+        );
     }
 }

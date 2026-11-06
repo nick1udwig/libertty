@@ -112,7 +112,7 @@ try {
     assert.match(text, /diff --git/); assert.match(text, /-before\n\+after/);
     assert.equal(await page.locator('.reading-view:not([hidden]) .reading-header').count(), 0);
     const beforeReload = await page.locator('[role=tab]').count();
-    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).readCapture);
+    const capture = await page.evaluate(() => JSON.parse(localStorage.getItem('libertty.tabs')).find(tab => tab.id === JSON.parse(localStorage.getItem('libertty.activeTab'))).pluginState.readCapture);
     assert.match(capture, /^[a-f0-9]{32}$/);
     await page.reload();
     await page.locator('.reading-view:not([hidden]) .reading-text').waitFor();
