@@ -17,6 +17,7 @@ class Element {
 class View {
   button = new Element();
   cancel = new Element();
+  bind() {}
   update() {}
   level() {}
 }
@@ -42,6 +43,7 @@ const context = createContext({
   clearTimeout: id => timers.delete(id),
 });
 const definitions = {
+  './dictation-setup.ts': { DictationSetup: class { available = true; poll() {} } },
   './dictation-delivery.ts': { DictationDelivery },
   './voxtype-audio.ts': audioProfile,
   './dictation-capture.ts': { DictationCapture: Capture },
@@ -68,8 +70,7 @@ const control = new module.namespace.DictationControl({
 });
 control.delivery = new DictationDelivery(message => control.retain(message), { after(delay, callback) { const id = ++nextTimer; timers.set(id, { callback, delay }); return () => timers.delete(id); } });
 control.online = true;
-control.available = true;
-control.poll = async () => {};
+control.setup.available = true;
 await control.start();
 control.event(control.id, 'ready', undefined, { acceptedFrames: 0, finished: false });
 control.finish();

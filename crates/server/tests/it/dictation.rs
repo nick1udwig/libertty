@@ -1,5 +1,6 @@
 use futures::{SinkExt, StreamExt};
 use libertty_server::dictation::{self, Recording};
+use libertty_server::protocol::DictationState;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -219,7 +220,7 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
         env: BTreeMap<String, String>,
         results: Arc<Mutex<Vec<String>>>,
         mode: usize,
-    ) -> (String, Option<String>) {
+    ) -> (DictationState, Option<String>) {
         let (sender, mut receive) = tokio::sync::mpsc::unbounded_channel();
         let recording = Recording::start(
             env,
@@ -228,7 +229,7 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
                 Ok(())
             }),
             Arc::new(move |state, message| {
-                let _ = sender.send((state.to_owned(), message));
+                let _ = sender.send((state, message));
             }),
         );
         loop {
@@ -236,7 +237,7 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
                 .await
                 .unwrap()
                 .unwrap();
-            if state == "ready" {
+            if state == DictationState::Ready {
                 match mode {
                     0 => {
                         recording.audio(frame(0, true, true));
@@ -254,12 +255,15 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
     }
     assert_eq!(
         dictate(env.clone(), results.clone(), 0).await,
-        ("done".into(), None)
+        (DictationState::Done, None)
     );
     assert_eq!(*results.lock().unwrap(), ["hello world"]);
     assert!(received.load(Ordering::SeqCst) > 17 && received.load(Ordering::SeqCst) < 1000);
     *transcript.lock().unwrap() = "\x1b[201~\recho injected".into();
-    assert_eq!(dictate(env.clone(), results.clone(), 0).await.0, "error");
+    assert_eq!(
+        dictate(env.clone(), results.clone(), 0).await.0,
+        DictationState::Error
+    );
     assert!(
         dictate(env.clone(), results.clone(), 1)
             .await
@@ -434,7 +438,7 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
                 })
             }),
             Arc::new(move |state, error| {
-                statuses.send((state.to_owned(), error)).unwrap();
+                statuses.send((state, error)).unwrap();
             }),
             Arc::new(move |checkpoint| {
                 checkpoints.send(checkpoint).unwrap();
@@ -462,7 +466,7 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(status, ("done".into(), None));
+    assert_eq!(status, (DictationState::Done, None));
     assert_eq!(*results.lock().unwrap(), vec!["saved speech"]);
     task.await.unwrap();
 }
@@ -509,7 +513,7 @@ async fn finished_daemon_checkpoints_deliver_cached_final_without_reupload_or_fi
                 Ok(())
             })
         }),
-        Arc::new(|state, message| assert_ne!(state, "error", "{message:?}")),
+        Arc::new(|state, message| assert_ne!(state, DictationState::Error, "{message:?}")),
         Arc::new(move |checkpoint| {
             checkpoints.send(checkpoint).unwrap();
         }),
@@ -572,7 +576,7 @@ async fn accepted_final_audio_can_finish_after_its_finish_control_was_lost() {
                 Ok(())
             })
         }),
-        Arc::new(|state, message| assert_ne!(state, "error", "{message:?}")),
+        Arc::new(|state, message| assert_ne!(state, DictationState::Error, "{message:?}")),
         Arc::new(move |checkpoint| {
             checkpoints.send(checkpoint).unwrap();
         }),

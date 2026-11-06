@@ -7,7 +7,8 @@ import type { ClientMessage, ShellState } from './protocol.ts';
 import { dictationTarget } from './protocol.ts';
 import type { Notify } from './notice-model.ts';
 import './dictation.css';
-import { DictationView } from './dictation-view.ts';
+import { DictationSetup } from './dictation-setup.ts';
+import { DictationView, type DictationPhase } from './dictation-view.ts';
 
 interface Host {
   api<T>(path: string, data?: unknown): Promise<T>;
@@ -23,24 +24,13 @@ interface Host {
 }
 export class DictationControl {
   private view = new DictationView();
-  private button = this.view.button;
-  private cancelButton = this.view.cancel;
-  private dialog = document.createElement('dialog');
-  private available = false;
+  private setup: DictationSetup;
   private online = false;
   private visible = true;
-  private phase: 'idle' | 'starting' | 'recording' | 'finishing' | 'retry' = 'idle';
+  private phase: DictationPhase = 'idle';
   private capture?: DictationCapture;
   private id = '';
   private finishPending = false;
-  private offered = false;
-  private installed?: boolean;
-  private daemonAvailable?: boolean;
-  private unavailableReason?: string;
-  private polling = false;
-  private lastPoll = -Infinity;
-  private pollTimer?: ReturnType<typeof setTimeout>;
-  private installPrompt?: number;
   private delivery = new DictationDelivery((message) => this.retain(message));
   private captureFlushed = false;
   private audio = new DictationAudio();
@@ -48,116 +38,30 @@ export class DictationControl {
   private host: Host;
   constructor(host: Host) {
     this.host = host;
+    this.setup = new DictationSetup(
+      host,
+      () => this.active,
+      () => this.render(),
+    );
     window.addEventListener('pagehide', () => {
       this.cancel();
-      clearTimeout(this.pollTimer);
+      this.setup.pause();
     });
-    this.cancelButton.onclick = () => this.cancel();
-    this.dialog.id = 'dictation-install';
-    this.dialog.innerHTML =
-      '<h2>Dictate with Voxtype Mobile</h2><p data-explanation>Install the daemon on your backend to dictate directly into this terminal.</p><p>Install pastes the command into your session. Review it and press Enter to run it.</p><label class="setting-toggle"><input type="checkbox"><span>Do not show again</span></label><div class="run-row"><button type="button" class="secondary-button" data-later>Not now</button><button type="button" class="run-button" data-install>Install</button></div>';
-    const dismiss = () => {
-      if (this.dialog.querySelector('input')!.checked) this.save('dismissed');
-      this.dialog.close();
-    };
-    this.dialog.querySelector<HTMLButtonElement>('[data-later]')!.onclick = dismiss;
-    this.dialog.addEventListener('cancel', dismiss);
-    this.dialog.querySelector<HTMLButtonElement>('[data-install]')!.onclick = async () => {
-      const button = this.dialog.querySelector<HTMLButtonElement>('[data-install]')!;
-      button.disabled = true;
-      try {
-        this.host.prepare();
-        const state = this.host.state();
-        await this.host.api('/api/dictation/install', {
-          prompt: state.prompt,
-          revision: state.inputRevision,
-        });
-        this.installPrompt = state.prompt;
-        dismiss();
-        this.host.focus();
-        this.host.notice('Install command pasted. Review it, then press Enter to run it.', 'info');
-      } catch (error) {
-        this.host.notice((error as Error).message);
-      } finally {
-        button.disabled = false;
-      }
-    };
-    document.body.append(this.dialog);
-    this.render();
-    let press:
-      | {
-          x: number;
-          y: number;
-          left: number;
-          top: number;
-          at: number;
-          active: boolean;
-          dragged: boolean;
-        }
-      | undefined;
-    this.button.addEventListener('pointerdown', (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      this.button.setPointerCapture(event.pointerId);
-      const bounds = this.button.getBoundingClientRect();
-      press = {
-        x: event.clientX,
-        y: event.clientY,
-        left: bounds.left,
-        top: bounds.top,
-        at: performance.now(),
-        active: this.phase !== 'idle',
-        dragged: false,
-      };
-      if (this.phase === 'idle') void this.start();
-    });
-    this.button.addEventListener('pointermove', (event) => {
-      if (!press) return;
-      const dx = event.clientX - press.x,
-        dy = event.clientY - press.y;
-      if (!press.dragged && Math.hypot(dx, dy) < 8) return;
-      if (!press.dragged && !press.active) this.cancel();
-      press.dragged = true;
-      this.view.position(press.left + dx, press.top + dy);
-    });
-    this.button.addEventListener('pointerup', () => {
-      if (!press) return;
-      if (!press.dragged && (press.active || performance.now() - press.at >= 300)) this.finish();
-      if (press.dragged) this.view.remember();
-      press = undefined;
-    });
-    // Android can cancel the touch when the screen locks. Keep the recording active;
-    // a later tap or the cancel button still lets the user finish or discard it.
-    this.button.addEventListener('pointercancel', () => {
-      if (press?.dragged) this.view.remember();
-      press = undefined;
-    });
-    this.button.addEventListener('click', (event) => {
-      if (event.detail === 0) {
-        if (this.phase === 'idle') void this.start();
-        else this.finish();
-      }
+    this.view.bind({
+      active: () => this.active,
+      start: () => this.start(),
+      finish: () => this.finish(),
+      cancel: () => this.cancel(),
     });
     document.addEventListener('visibilitychange', () => {
-      clearTimeout(this.pollTimer);
-      if (!document.hidden) {
-        void this.poll(!this.available);
-        if (this.phase === 'recording') {
-          this.capture?.checkCapture();
-        }
-      }
+      if (!document.hidden && this.phase === 'recording') this.capture?.checkCapture();
     });
-  }
-  private save(value: string) {
-    try {
-      localStorage.setItem('libertty.voxtype:' + this.host.key, value);
-    } catch {}
+    this.render();
   }
   get active() {
     return this.phase !== 'idle';
   }
   connected(online: boolean) {
-    if (!online) clearTimeout(this.pollTimer);
     const changed = this.online !== online;
     if (!online && this.active && this.delivery.state !== 'retained') {
       const context = this.host.context();
@@ -167,12 +71,9 @@ export class DictationControl {
       if (changed) this.host.notice('Recording is retained while the terminal reconnects.', 'info');
     }
     this.online = online;
-    if (!online) {
-      if (!this.active) this.available = false;
-      this.dialog.close();
-    } else if (this.delivery.state === 'offline' && this.active && this.phase !== 'starting')
+    this.setup.connected(online);
+    if (online && this.delivery.state === 'offline' && this.active && this.phase !== 'starting')
       this.resume();
-    else if (changed) void this.poll(true);
     this.render();
   }
   private resume() {
@@ -230,95 +131,24 @@ export class DictationControl {
     this.render();
   }
   prompt() {
-    const state = this.host.state();
-    const installed =
-      this.installPrompt !== undefined && state.ready && state.prompt !== this.installPrompt;
-    if (installed) this.installPrompt = undefined;
-    if (state.ready) void this.poll(installed);
-    this.offer();
+    this.setup.prompt();
   }
   visibility(visible: boolean) {
     this.visible = visible;
-    if (!visible) {
-      clearTimeout(this.pollTimer);
-      this.cancel();
-      this.dialog.close();
-    } else void this.poll(!this.available);
+    this.setup.visibility(visible);
+    if (!visible) this.cancel();
     this.render();
-  }
-  private async poll(force = false) {
-    if (!this.online || !this.visible || document.hidden || this.polling || this.phase !== 'idle')
-      return;
-    if (!force && Date.now() - this.lastPoll < 60000) return;
-    clearTimeout(this.pollTimer);
-    this.lastPoll = Date.now();
-    this.polling = true;
-    let retry = true;
-    try {
-      const status = await this.host.api<{
-        installed: boolean;
-        available: boolean;
-        reason?: string;
-      }>('/api/dictation');
-      if (!this.online || !this.visible) return;
-      this.installed = status.installed;
-      this.daemonAvailable = status.available;
-      retry = !status.available;
-      this.unavailableReason = status.reason;
-      this.available =
-        status.available &&
-        !!navigator.mediaDevices?.getUserMedia &&
-        typeof AudioWorkletNode !== 'undefined' &&
-        typeof Worker !== 'undefined' &&
-        typeof WebAssembly !== 'undefined';
-      if (status.available) this.dialog.close();
-      this.offer();
-    } catch {
-      this.available = false;
-    } finally {
-      this.polling = false;
-      if (retry && this.online && this.visible && !document.hidden && this.phase === 'idle')
-        this.pollTimer = setTimeout(() => void this.poll(true), 15000);
-      this.render();
-    }
-  }
-  private offer() {
-    // Only an explicit dismissal suppresses setup help.
-    let suppressed = false;
-    try {
-      suppressed = localStorage.getItem('libertty.voxtype:' + this.host.key) === 'dismissed';
-    } catch {}
-    if (
-      this.daemonAvailable !== false ||
-      !this.online ||
-      !this.visible ||
-      document.hidden ||
-      suppressed ||
-      this.offered ||
-      !this.host.state().ready ||
-      document.querySelector('dialog[open]')
-    )
-      return;
-    this.dialog.querySelector('h2')!.textContent = this.installed
-      ? 'Enable Voxtype dictation'
-      : 'Dictate with Voxtype Mobile';
-    this.dialog.querySelector('[data-explanation]')!.textContent = this.installed
-      ? this.unavailableReason ||
-        'Voxtype is installed, but its dictation API is unavailable. It may need an update or restart.'
-      : 'Install the daemon on your backend to dictate directly into this terminal.';
-    this.offered = true;
-    this.dialog.showModal();
   }
   private render() {
     this.view.update(
       this.phase,
-      (this.active || (this.available && this.online)) && this.visible,
+      (this.active || (this.setup.available && this.online)) && this.visible,
       this.capture?.paused || false,
     );
   }
   private async start() {
-    void this.poll(true);
-    if (!this.online || !this.available || !dictationTarget(this.host.state())) {
+    void this.setup.poll(true);
+    if (!this.online || !this.setup.available || !dictationTarget(this.host.state())) {
       this.host.notice('Wait for terminal input before dictating.', 'warning');
       return;
     }
@@ -445,6 +275,6 @@ export class DictationControl {
     this.phase = 'idle';
     this.render();
     this.host.waiting?.(false);
-    if (this.online) void this.poll(!this.available);
+    if (this.online) void this.setup.poll(!this.setup.available);
   }
 }

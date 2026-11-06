@@ -44,3 +44,5 @@ pub mod uploads;
 pub mod vault;
 pub mod viewer_queue;
 pub mod wire;
+
+mod voxtype;
