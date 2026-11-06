@@ -257,7 +257,7 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
         dictate(env.clone(), results.clone(), 0).await,
         (DictationState::Done, None)
     );
-    assert_eq!(*results.lock().unwrap(), ["hello world"]);
+    assert_eq!(*results.lock().unwrap(), ["hello\nworld"]);
     assert!(received.load(Ordering::SeqCst) > 17 && received.load(Ordering::SeqCst) < 1000);
     *transcript.lock().unwrap() = "\x1b[201~\recho injected".into();
     assert_eq!(

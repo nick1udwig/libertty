@@ -265,6 +265,9 @@ pub(crate) fn event(bytes: &[u8]) -> Result<Event, String> {
                 .as_str()
                 .filter(|s| utf16_len(s) <= crate::protocol::MAX_TEXT)
                 .ok_or("Invalid Voxtype result.")?;
+            if !crate::dictation_text::valid(text) {
+                return Err("Voxtype returned terminal control characters.".into());
+            }
             Ok(Event::Final(text.to_owned()))
         }
         Some("error") => Err(if event["code"] == "busy" {

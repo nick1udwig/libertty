@@ -270,7 +270,6 @@ async fn run(
     let mut bytes = 0;
     let mut max_bytes = MAX_OPUS_BYTES;
     let mut max_samples = MAX_AUDIO_SAMPLES;
-    let breaks = regex::Regex::new(r"[\r\n\t]+").unwrap();
     let work = async {
         loop {
             tokio::select! {
@@ -316,10 +315,6 @@ async fn run(
                         }
                         voxtype::Event::Final(text) => {
                             if !finishing { return Err("Invalid Voxtype result.".into()); }
-                            let text = breaks.replace_all(&text, " ").into_owned();
-                            if text.chars().any(|c| c < '\x20' || ('\x7f'..='\u{9f}').contains(&c)) {
-                                return Err("Voxtype returned terminal control characters.".into());
-                            }
                             result(text).await?;
                             if cancel.is_cancelled() { return Ok(false); }
                             return Ok(true);
