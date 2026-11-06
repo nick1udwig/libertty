@@ -1,6 +1,6 @@
 use crate::{
     arguments::{Argument, ArgumentCursor, ParsedCommand},
-    command_policy::{flags_for, option_arity, script_operand},
+    command_policy::{flags_ref, option_arity, script_operand},
     host::Host,
     path_repair::{ExpectedType, PathInput, path_input, resolve_path},
     shell_structure::word_spans,
@@ -31,7 +31,7 @@ pub async fn repair_copy_destination(
         return Ok(None);
     };
     let (words, spans) = (parsed.words, parsed.spans);
-    let flags = flags_for("cp", metadata);
+    let flags = flags_ref("cp", metadata, &[]);
     let mut index = 1;
     let mut options = true;
     let mut operands = Vec::new();
@@ -54,7 +54,7 @@ pub async fn repair_copy_destination(
         {
             return Ok(None);
         }
-        let Some(takes_value) = option_arity(option, &flags) else {
+        let Some(takes_value) = option_arity(option, flags) else {
             return Ok(None);
         };
         index += if takes_value { 2 } else { 1 };
@@ -119,7 +119,7 @@ pub async fn repair_input_file(
     {
         return Ok(None);
     }
-    let flags = flags_for(&command, metadata);
+    let flags = flags_ref(&command, metadata, &[]);
     let mut index = 1;
     while index < spans.len() {
         let option = &expanded[spans[index].clone()];
@@ -130,7 +130,7 @@ pub async fn repair_input_file(
         if !option.starts_with('-') {
             break;
         }
-        let Some(takes) = option_arity(option, &flags) else {
+        let Some(takes) = option_arity(option, flags) else {
             return Ok(None);
         };
         index += if takes { 2 } else { 1 };

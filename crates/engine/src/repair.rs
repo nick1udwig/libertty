@@ -860,7 +860,7 @@ pub(crate) fn repair_candidates(
             if clean.iter().any(|candidate| {
                 let args = tokens(&candidate.command);
                 args.len() == 2
-                    && subcommands_for(&args[0].value, metadata).contains(&args[1].value)
+                    && subcommands_ref(&args[0].value, metadata).contains(&args[1].value)
             }) {
                 let mut result: Vec<_> = clean
                     .into_iter()
@@ -932,9 +932,9 @@ fn repair_normalized(
         .cloned()
         .collect();
     for boundary in compact_boundaries(input, catalog) {
-        let flags = flags_for(&boundary.command, metadata);
+        let flags = flags_ref(&boundary.command, metadata, &[]);
         let mut options = Vec::new();
-        for flag in &flags {
+        for flag in flags {
             if flag.name.trim_start_matches('-').to_lowercase() == boundary.suffix.to_lowercase()
                 && !options.contains(&flag.name)
             {
@@ -943,7 +943,7 @@ fn repair_normalized(
         }
         for suffix in [&boundary.suffix, &boundary.suffix.to_lowercase()] {
             let option = format!("-{suffix}");
-            if option_arity(&option, &flags).is_some() && !options.contains(&option) {
+            if option_arity(&option, flags).is_some() && !options.contains(&option) {
                 options.push(option);
             }
         }

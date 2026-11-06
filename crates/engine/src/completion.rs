@@ -1,7 +1,7 @@
 use crate::test;
 use crate::{
     arguments::{Argument, ArgumentCursor, ParsedCommand},
-    command_policy::{child_scope, flags_for, is_path_position, subcommands_for},
+    command_policy::{child_scope, flags_ref, is_path_position, subcommands_ref},
     host::{self, Host},
     repair::{argument_matches, key, repair_candidates as repair, tokens},
     types::{Candidate, Catalog, CommandMetadata, Flag},
@@ -47,7 +47,7 @@ fn operand_position(args: &[String], metadata: &CommandMetadata) -> bool {
     if ["grep", "rg", "sed", "awk"].contains(&args[0].as_str()) && operands == 0 && !supplied_text {
         return false;
     }
-    cursor.literal || subcommands_for(&cursor.scope, metadata).is_empty()
+    cursor.literal || subcommands_ref(&cursor.scope, metadata).is_empty()
 }
 
 pub async fn complete_arguments(
@@ -112,9 +112,9 @@ pub async fn complete_arguments(
                     scope = child_scope(&scope, arg, metadata).unwrap_or(scope);
                 }
                 let options = if crate::command_policy::script_operand(&args).is_some() {
-                    script_flags.map(<[Flag]>::to_vec).unwrap_or_default()
+                    script_flags.unwrap_or_default()
                 } else {
-                    flags_for(&scope, metadata)
+                    flags_ref(&scope, metadata, &[])
                 };
                 let named_option = options.iter().any(|flag| {
                     !key(&word.value).is_empty() && key(&word.value) == key(&flag.name)

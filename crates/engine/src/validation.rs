@@ -225,7 +225,7 @@ async fn policy_plain(
                 }
             }
             Argument::Operand(index) => {
-                if !cursor.literal && !subcommands_for(&cursor.scope, metadata).is_empty() {
+                if !cursor.literal && !subcommands_ref(&cursor.scope, metadata).is_empty() {
                     return Ok(false);
                 }
                 operands.push(&words[index]);
