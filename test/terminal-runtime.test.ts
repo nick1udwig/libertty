@@ -201,3 +201,17 @@ test('fractional theme channels reach the native terminal rounded', () => {
     terminal.dispose();
   }
 });
+test('theme replacement resets omitted palette, selection and cursor settings', () => {
+  const terminal = runtime.createTerminal({ theme: { foreground: '#123456', red: '#abcdef', cursorAccent: '#ff0000', selectionForeground: '#0000ff', brightWhite: '#222222' } });
+  const theme = { background: '#010203' };
+  const fresh = runtime.createTerminal({ theme });
+  try {
+    terminal.setTheme(theme);
+    assert.deepEqual(terminal.theme, theme);
+    assert.deepEqual(terminal.viewport().colors, fresh.viewport().colors);
+    assert.deepEqual(terminal.getPalette(), fresh.getPalette());
+  } finally {
+    terminal.dispose();
+    fresh.dispose();
+  }
+});

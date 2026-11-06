@@ -251,7 +251,7 @@ export class CoreTerminal extends Events<TerminalEvents> {
     return this.call<import('./terminal-types.ts').RenderColor[]>('palette');
   }
   setTheme(theme: TerminalTheme) {
-    this.theme = Object.freeze({ ...this.theme, ...theme });
+    this.theme = Object.freeze({ ...theme });
     const colors = (this.resolved = resolveTerminalTheme(this.theme));
     this.themeAlpha.clear();
     for (const color of [colors.foreground, colors.background, ...colors.palette])
