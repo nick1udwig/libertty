@@ -22,11 +22,18 @@ interface Host {
   execute(text: string): void;
   dictate?(text: string, applied: boolean, replace: boolean): void;
 }
+interface InputOperation {
+  prompt: number;
+  literal: string;
+  controller: AbortController;
+  applied: boolean;
+  application?: Promise<RepairResult>;
+  queued?: string[];
+}
 export class InlineSuggestions {
   private line = new InputLine();
-  private generation = 0;
   private prompt = -1;
-  private controller?: AbortController;
+  private operation?: InputOperation;
   private literal = '';
   private choices: PreparedChoice[] = [];
   private phrases = [...defaultReadingPhrases];
@@ -43,9 +50,9 @@ export class InlineSuggestions {
   }
   private pendingPresentation?: TerminalPresentation;
   private pendingCursor?: { x: number; row: number };
-  private literalReplacement?: Promise<boolean>;
-  private application?: Promise<RepairResult>;
-  private flushing?: string[];
+  private get flushing() {
+    return this.operation?.queued;
+  }
   private suspendedRevision: number | undefined;
   private retryOnResume = false;
   private open = false;
@@ -142,6 +149,43 @@ export class InlineSuggestions {
       dictate: (text, replacement, applied) => this.nativeDictation(text, replacement, applied),
     });
   }
+  private beginOperation(literal = this.literal, applied = false): InputOperation {
+    this.cancelOperation();
+    const operation = {
+      prompt: this.host.state().prompt,
+      literal,
+      controller: new AbortController(),
+      applied,
+    };
+    this.operation = operation;
+    return operation;
+  }
+  private cancelOperation() {
+    if (this.operation?.queued) this.line.known = false;
+    this.operation?.controller.abort();
+    this.operation = undefined;
+  }
+  private current(operation: InputOperation) {
+    const state = this.host.state();
+    return (
+      this.operation === operation &&
+      !operation.controller.signal.aborted &&
+      state.prompt === operation.prompt &&
+      state.ready &&
+      !state.exited
+    );
+  }
+  private applyLine(operation: InputOperation, text: string) {
+    if (!this.current(operation)) return;
+    const queued = operation.queued?.join('') || '';
+    this.operation = undefined;
+    this.line.reset(text);
+    if (queued) {
+      this.clear();
+      this.line.feed(queued);
+      this.host.raw(queued);
+    }
+  }
   private armInput() {
     this.capture.armInput();
   }
@@ -227,17 +271,17 @@ export class InlineSuggestions {
       return;
     }
     this.clear();
-    const request = this.generation;
-    this.flushing = [];
+    const operation = this.beginOperation();
+    operation.queued = [];
     let line: { text: string; cursor: number } | undefined;
     try {
       line = await this.host.readLine();
     } catch {
       /* Preserve input when the snapshot is unavailable. */
     }
-    const queued = this.flushing?.join('') || '';
-    this.flushing = undefined;
-    if (request !== this.generation || !this.host.state().ready || this.host.state().exited) return;
+    if (!this.current(operation)) return;
+    const queued = operation.queued.join('');
+    this.operation = undefined;
     if (!line) {
       if (!alreadyApplied) this.term.paste(text);
       if (queued) this.host.raw(queued);
@@ -331,9 +375,7 @@ export class InlineSuggestions {
     if (this.suspendedRevision !== undefined) return;
     this.suspendedRevision = this.host.state().inputRevision;
     this.retryOnResume = this.loading;
-    ++this.generation;
-    this.controller?.abort();
-    this.controller = undefined;
+    this.cancelOperation();
     this.phase = this.literal ? 'ready' : 'idle';
     this.render();
   }
@@ -364,26 +406,22 @@ export class InlineSuggestions {
     }
     if (this.loading) {
       const literal = this.literal,
-        pending = this.literalReplacement,
-        application = this.application;
-      this.flushing = [data];
+        previous = this.operation;
       this.clear();
-      const restored = application
-        ? application.catch(() => undefined).then(() => this.host.replace(literal))
-        : pending || this.host.replace(literal);
-      void restored
-        .then((accepted) => {
-          const input = this.flushing?.join('') || '';
-          this.flushing = undefined;
-          if (accepted) {
-            this.line.reset(literal);
-            this.host.raw(input);
-          } else this.disconnect();
-        })
-        .catch(() => {
-          this.flushing = undefined;
-          this.disconnect();
-        });
+      const operation = this.beginOperation(literal);
+      operation.queued = [data];
+      const restore = async () => {
+        if (previous?.application) await previous.application.catch(() => undefined);
+        if (!this.current(operation)) return;
+        const accepted =
+          (previous?.applied && !previous.application) || (await this.host.replace(literal));
+        if (!this.current(operation)) return;
+        if (accepted) this.applyLine(operation, literal);
+        else this.disconnect();
+      };
+      void restore().catch(() => {
+        if (this.current(operation)) this.disconnect();
+      });
       return false;
     }
     if (data === '\r' && this.line.known && this.host.state().ready) {
@@ -414,12 +452,9 @@ export class InlineSuggestions {
     return true;
   }
   private clear(keepPresentation = false) {
-    this.application = undefined;
-    this.literalReplacement = undefined;
     const visible =
       !!this.literal || this.loading || this.transcribing || this.open || !!this.choices.length;
-    ++this.generation;
-    this.controller?.abort();
+    this.cancelOperation();
     this.literal = '';
     this.speech = '';
     this.choices = [];
@@ -440,6 +475,7 @@ export class InlineSuggestions {
       !this.line.known ||
       !this.host.state().ready ||
       this.loading ||
+      this.flushing ||
       this.capture.composing ||
       buffer.type !== 'normal' ||
       this.term.getViewportY() > 0
@@ -477,11 +513,7 @@ export class InlineSuggestions {
       if (!alreadyApplied) this.host.raw(text);
       return;
     }
-    this.controller?.abort();
-    this.controller = new AbortController();
-    this.literalReplacement = alreadyApplied ? Promise.resolve(true) : undefined;
-    const request = ++this.generation,
-      prompt = this.host.state().prompt;
+    const operation = this.beginOperation(this.literal, alreadyApplied);
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true);
     const pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
     this.phase = 'repairing';
@@ -498,28 +530,35 @@ export class InlineSuggestions {
         : reading
           ? { kind: 'reading-file', phrase: reading.phrase, operand: reading.operand }
           : { kind: 'shell' };
-      this.application = this.host.repair(this.literal, intent, this.controller.signal);
-      const result = await this.application;
-      if (
-        request !== this.generation ||
-        prompt !== this.host.state().prompt ||
-        !this.host.state().ready
-      )
-        return;
-      this.application = undefined;
+      operation.application = this.host.repair(
+        operation.literal,
+        intent,
+        operation.controller.signal,
+      );
+      const result = await operation.application;
+      if (!this.current(operation)) return;
       if (!result.accepted) {
         if (result.error) throw new Error(result.error);
         this.disconnect();
         return;
       }
+      this.operation = undefined;
       this.backendResult(result);
     } catch (error: any) {
-      if (request !== this.generation || error.name === 'AbortError') return;
-      if (!(await (this.literalReplacement || this.host.replace(this.literal)))) {
-        if (request === this.generation) this.disconnect();
+      if (!this.current(operation) || error?.name === 'AbortError') return;
+      operation.queued = [];
+      let accepted = operation.applied;
+      try {
+        accepted ||= await this.host.replace(operation.literal);
+      } catch {}
+      if (!this.current(operation)) return;
+      if (!accepted) {
+        this.disconnect();
         return;
       }
-      if (request !== this.generation) return;
+      const queued = operation.queued.length > 0;
+      this.applyLine(operation, operation.literal);
+      if (queued) return;
       this.phase = this.literal ? 'ready' : 'idle';
       this.open = true;
       this.pendingPresentation?.reveal();
@@ -547,16 +586,23 @@ export class InlineSuggestions {
       this.host.execute(text);
       return;
     }
-    const request = ++this.generation;
-    this.controller?.abort();
+    const operation = this.beginOperation();
+    operation.queued = [];
     this.phase = this.literal ? 'ready' : 'idle';
     this.collapse();
-    this.line.reset(text);
-    if ((await this.host.replace(text)) && request === this.generation) {
+    try {
+      const accepted = await this.host.replace(text);
+      if (!this.current(operation)) return;
+      if (!accepted) {
+        this.disconnect();
+        return;
+      }
       this.selected = text;
-      this.line.reset(text);
+      this.applyLine(operation, text);
       this.open = false;
       this.render();
+    } catch {
+      if (this.current(operation)) this.disconnect();
     }
   }
   private openRead(operand: string) {

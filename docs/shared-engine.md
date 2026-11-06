@@ -47,6 +47,8 @@ Actions are constructed with candidates and are independent of their display tex
 The browser selects choices by ID and converts older replies at one compatibility boundary.
 Browser and native reading recognition share contract fixtures, normalize phrases, and prefer the longest matching phrase.
 Cancellation, attachment, prompt and revision guards protect concurrent edits.
+Each browser input operation owns its cancellation, literal text, pending result and queued input.
+Alternate replacement updates the tracked line after acknowledgement, and stale replies cannot restore text or consume another operation's queue.
 `crates/server/src/input_coordinator.rs` shares repair deadlines, cancellation and microphone callbacks across native terminals and Herdr.
 Session replay credit, history snapshots and captured connection requests live in separate state types under the session lock.
 Local and SSH PTYs expose the same process interface and event stream through `local_pty.rs` and `ssh_pty.rs`.
