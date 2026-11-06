@@ -49,6 +49,7 @@ export class TerminalSurface extends Events<SurfaceEvents> {
     text.className = 'terminal-text';
     this.textarea = document.createElement('textarea');
     this.textarea.className = 'terminal-input';
+    this.applyInputFont();
     this.textarea.setAttribute('aria-label', 'Terminal input');
     this.textarea.autocapitalize = 'off';
     this.textarea.autocomplete = 'off';
@@ -150,11 +151,20 @@ export class TerminalSurface extends Events<SurfaceEvents> {
     this.backend.painter.resize(metrics);
     this.schedule();
   }
+  private applyInputFont() {
+    Object.assign(this.textarea.style, {
+      fontFamily: this.font.family,
+      fontSize: `${this.font.sizePx}px`,
+      lineHeight: `${this.font.sizePx * 1.25}px`,
+      fontWeight: '400',
+    });
+  }
   async setFont(font: { sizePx?: number; family?: string }) {
     this.font = {
       sizePx: font.sizePx ?? this.font.sizePx,
       family: font.family ?? this.font.family,
     };
+    this.applyInputFont();
     await document.fonts.load(`${this.font.sizePx}px ${this.font.family}`);
     if (!this.disposed) this.resize(this.geometry.cols, this.geometry.rows);
   }
