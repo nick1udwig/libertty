@@ -1,3 +1,4 @@
+import { repairChoices, type PreparedChoice } from './repair-choices.ts';
 import { SuggestionView } from './suggestion-view.ts';
 import { SuggestionInput } from './suggestion-input.ts';
 import type { Terminal } from './terminal-adapter.ts';
@@ -27,9 +28,7 @@ export class InlineSuggestions {
   private prompt = -1;
   private controller?: AbortController;
   private literal = '';
-  private choices: string[] = [];
-  private actions: NonNullable<RepairResult['actions']> = {};
-  private reading?: string;
+  private choices: PreparedChoice[] = [];
   private phrases = [...defaultReadingPhrases];
   private selected = '';
   private prefix = '';
@@ -69,10 +68,7 @@ export class InlineSuggestions {
         transcribing: this.transcribing,
         open: this.open,
         choices: this.choices,
-        reading: this.reading,
-        phrases: this.phrases,
         selected: this.selected,
-        actions: this.actions,
         pendingPresentation: this.pendingPresentation,
         pendingCursor: this.pendingCursor,
       }),
@@ -294,9 +290,6 @@ export class InlineSuggestions {
     this.literal = this.line.known ? this.line.text : text;
     this.speech = text;
     this.selected = this.literal;
-    const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true),
-      pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
-    this.reading = pipeline?.command || reading?.path;
     this.phase = 'repairing';
     this.open = this.autoOpen;
     this.status.textContent = 'Finding alternatives';
@@ -308,7 +301,10 @@ export class InlineSuggestions {
         if (result.original) this.literal = result.original;
         if (this.line.text !== this.literal) this.line.known = false;
         this.selected = this.literal;
-        this.choices = [];
+        this.choices = repairChoices(
+          { ...result, original: this.literal, candidates: [], choices: [] },
+          this.phrases,
+        );
         this.phase = 'ready';
         this.open = this.autoOpen;
         this.status.textContent = 'Alternatives unavailable. Original text kept.';
@@ -317,16 +313,10 @@ export class InlineSuggestions {
       } else this.clear();
       return;
     }
-    this.actions = result.actions || {};
     this.literal = result.original;
     this.selected = result.selected;
     this.line.reset(result.selected);
-    this.choices = result.candidates
-      .filter((candidate) => !candidate.literal && candidate.command !== this.literal)
-      .map((candidate) => candidate.command);
-    const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true),
-      pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
-    this.reading = pipeline?.command || reading?.path;
+    this.choices = repairChoices(result, this.phrases);
     this.phase = this.literal ? 'ready' : 'idle';
     this.open = this.autoOpen;
     this.status.textContent = 'Alternatives ready';
@@ -433,8 +423,6 @@ export class InlineSuggestions {
     this.literal = '';
     this.speech = '';
     this.choices = [];
-    this.actions = {};
-    this.reading = undefined;
     this.suspendedRevision = undefined;
     this.retryOnResume = false;
     this.phase = this.literal ? 'ready' : 'idle';
@@ -496,7 +484,6 @@ export class InlineSuggestions {
       prompt = this.host.state().prompt;
     const reading = readingRequest(this.literal, this.phrases || defaultReadingPhrases, true);
     const pipeline = readingPipeline(this.literal, this.phrases || defaultReadingPhrases, true);
-    this.reading = pipeline?.command || reading?.path;
     this.phase = 'repairing';
     this.open = this.autoOpen;
     this.choices = [];
@@ -536,28 +523,24 @@ export class InlineSuggestions {
       this.phase = this.literal ? 'ready' : 'idle';
       this.open = true;
       this.pendingPresentation?.reveal();
+      this.choices = repairChoices(
+        { original: this.literal, candidates: [], choices: [] },
+        this.phrases,
+      );
       this.status.textContent = 'Alternatives unavailable. Original text kept.';
       this.render();
     }
   }
-  private async choose(text: string) {
-    const action = this.actions[text];
-    if (action?.kind === 'reading-file') {
+  private async choose(id: string) {
+    const choice = this.choices.find((choice) => choice.id === id);
+    if (!choice) return;
+    const { text, action } = choice;
+    if (action.kind === 'reading-file') {
       this.openRead(action.operand);
       return;
     }
-    if (action?.kind === 'reading-pipeline') {
+    if (action.kind === 'reading-pipeline') {
       this.host.execute(action.command + ' | look at');
-      return;
-    }
-    if (!action && this.reading) {
-      const pipeline = readingPipeline(text, this.phrases, true);
-      if (pipeline) {
-        this.host.execute(pipeline.command + ' | look at');
-        return;
-      }
-      const request = readingRequest(text, this.phrases);
-      if (request) this.openRead(request.operand);
       return;
     }
     if (this.tapToSend) {

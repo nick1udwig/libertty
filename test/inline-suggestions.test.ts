@@ -66,7 +66,7 @@ test('fused repair avoids separate replacements and cancellation waits for its a
   g.inline.host.repair = async () => ({ accepted: true, candidates: [{ command: 'git init', changes: [], score: 100 }], original: 'Get in it.', selected: 'git init', revision: 1, prompt: 1 });
   await g.inline.dictate('Get in it.', false);
   assert.deepEqual(g.replacements, []);
-  assert.deepEqual(g.inline.choices, ['git init']);
+  assert.deepEqual(g.inline.choices.filter((choice: any) => !choice.literal).map((choice: any) => choice.text), ['git init']);
   assert.equal(g.inline.selected, 'git init');
 });
 
@@ -79,8 +79,8 @@ test('reader alternatives from a repair execute only after selection', async () 
   };
   f.inline.host.execute = (text: string) => executed.push(text);
   await f.inline.dictate('look at get diff', false);
-  assert.deepEqual(f.inline.choices, ['look at git diff']);
+  assert.deepEqual(f.inline.choices.filter((choice: any) => !choice.literal).map((choice: any) => choice.text), ['look at git diff']);
   assert.deepEqual(executed, []);
-  await f.inline.choose('look at git diff');
+  await f.inline.choose('choice-0');
   assert.deepEqual(executed, ['look at git diff']);
 });

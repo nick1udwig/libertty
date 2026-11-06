@@ -39,7 +39,9 @@ Each repair also shares SSH executable-version lookups across help routes.
 SSH Python descriptions share pending work and successful results by resolved path and SFTP file metadata, with a limit of 200 entries.
 `probe_policy.rs` shares help-route verification, help arguments, probe environments and Python script selection between local and SSH adapters.
 `src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
-Each prepared choice includes its backend action, so selection keeps its reading or shell meaning if browser preferences change.
+Each prepared choice includes its ID, text and backend action, so selection keeps its reading or shell meaning if browser preferences change.
+Actions are constructed with candidates and are independent of their display text.
+The browser selects choices by ID and converts older replies at one compatibility boundary.
 Browser and native reading recognition share contract fixtures, normalize phrases, and prefer the longest matching phrase.
 Cancellation, attachment, prompt and revision guards protect concurrent edits.
 `crates/server/src/input_coordinator.rs` shares repair deadlines, cancellation and microphone callbacks across native terminals and Herdr.
