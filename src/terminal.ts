@@ -20,7 +20,7 @@ import { applyTheme, terminalThemes, watchSystemTheme } from './theme.ts';
 import { adaptDarkAppColors } from './terminal-colors.ts';
 import { ReconnectingSocket, stalledLabel } from './reconnecting-socket.ts';
 import { HerdrLayout } from './herdr-layout.ts';
-import { herdrURL } from './herdr-protocol.ts';
+import { nativeSession, herdrSessionAdapter } from './terminal-session.ts';
 import { TerminalGestures } from './terminal-gestures.ts';
 import { terminalLinkAt } from './terminal-links.ts';
 import { TerminalFocus } from './terminal-focus.ts';
@@ -75,19 +75,27 @@ let authorized = false,
   directAttempt = false;
 const backgroundGrace = 20000;
 const keepingGeometry = () => !document.hidden || !transport.backgroundExpired;
-function endpoint(name: string) {
-  const url = new URL(name.replace(/^\//, ''), baseURL);
-  if (session !== 'default') url.searchParams.set('session', session);
-  return url;
-}
-function herdrEndpoint(name: string) {
-  const url = herdrURL(name, baseURL, {
-    core: herdrCore,
-    session: params.get('herdrSession'),
-    source: params.get('herdrSource'),
-  });
-  if (herdrTerminal) url.searchParams.set('terminalId', herdrTerminal);
-  return url;
+const native = nativeSession(baseURL, session);
+const sessionAdapter = herdrTerminal
+  ? herdrSessionAdapter(baseURL, herdrTerminal, {
+      core: herdrCore,
+      session: params.get('herdrSession'),
+      source: params.get('herdrSource'),
+    })
+  : native;
+const endpoint = native.endpoint;
+const herdrEndpoint = sessionAdapter.endpoint;
+function sessionInputState() {
+  return {
+    hasState: lifecycle.hasState,
+    ready: herdrReady,
+    layoutPending: herdrLayout.pending,
+    parked: visibility.parked,
+    identity: state.inputContext,
+    stream: replay.stream,
+    after: replay.after,
+    target: replay.target,
+  };
 }
 function notify<K extends keyof TerminalEvents>(
   type: K,
@@ -318,8 +326,9 @@ const fit = new FitAddon();
 term.loadAddon(fit);
 const history = new TerminalHistory(() => send({ type: 'herdr-frame-request' }));
 let deferredScreen: string | undefined;
-const projection =
-  herdrTerminal && !herdrCore ? new TerminalProjection(term, term.ghostty!) : undefined;
+const projection = sessionAdapter.projected
+  ? new TerminalProjection(term, term.ghostty!)
+  : undefined;
 const terminalViewport = $('terminal-viewport');
 const herdrLayout = new HerdrLayout(terminalViewport);
 const echo = new TerminalEcho(term, $('terminal'));
@@ -380,13 +389,7 @@ function inputContext(): InputContext | undefined {
     revision: state.inputRevision,
     target,
   };
-  if (!herdrTerminal) {
-    if (!replay.stream || !lifecycle.hasState) return;
-    return { ...context, stream: replay.stream };
-  }
-  if (!state.inputContext) return;
-  context.identity = state.inputContext;
-  if (target === 'shell') {
+  return sessionAdapter.inputContext(context, sessionInputState(), () => {
     const buffer = term.buffer.active,
       lines: string[] = [];
     for (let row = Math.max(0, buffer.length - 1000); row < buffer.length; row++) {
@@ -396,19 +399,11 @@ function inputContext(): InputContext | undefined {
       else lines.push(text);
     }
     while (lines.at(-1) === '') lines.pop();
-    context.picture = JSON.stringify([lines, buffer.cursorX, buffer.cursorY, term.cols]);
-  }
-  return context;
+    return JSON.stringify([lines, buffer.cursorX, buffer.cursorY, term.cols]);
+  });
 }
 function synchronizeInput() {
-  if (
-    !lifecycle.hasState ||
-    presentation.pending ||
-    queue.length ||
-    (!herdrTerminal && replay.after < (replay.target ?? replay.after)) ||
-    (herdrTerminal &&
-      (!herdrReady || herdrLayout.pending || visibility.parked || state.inputContext === undefined))
-  )
+  if (presentation.pending || queue.length || !sessionAdapter.synchronized(sessionInputState()))
     return;
   if (unsentInput.length) {
     const context = inputContext();
@@ -442,7 +437,7 @@ function revealReplay() {
 }
 const mobileViewport = matchMedia('(pointer: coarse) and (max-width: 1024px)');
 function mobileTerminal() {
-  return !!herdrTerminal && !herdrCore && mobileViewport.matches;
+  return sessionAdapter.mobile(mobileViewport.matches);
 }
 function refreshHerdrFrame() {
   if (herdrReady && transport.socket?.readyState === WebSocket.OPEN && projection?.requestFrame())
@@ -451,7 +446,7 @@ function refreshHerdrFrame() {
 // Resizes and screen updates check the layout often, so it is read again only when settings change.
 let fullWidthLayout = saved<string>('herdrLayout', '') === 'full-width';
 function fullWidth() {
-  return !!herdrTerminal && !herdrCore && !mobileTerminal() && fullWidthLayout;
+  return sessionAdapter.projected && !mobileTerminal() && fullWidthLayout;
 }
 // Keep output outside UI state. Ghostty parses synchronously; its callback is an rAF.
 function drain() {
@@ -555,14 +550,13 @@ function sizeTerminal() {
     // Herdr resolves the selected pane asynchronously after the WS upgrade.
     // Send geometry only after its state acknowledges that the handler is ready.
     if (!herdrTerminal || herdrReady)
-      send({
-        type: 'resize',
-        cols: term.cols,
-        rows: term.rows,
-        ...(herdrTerminal
-          ? { mobile: mobileTerminal() && visibility.visible && keepingGeometry() }
-          : {}),
-      });
+      send(
+        sessionAdapter.resize(
+          term.cols,
+          term.rows,
+          mobileTerminal() && visibility.visible && keepingGeometry(),
+        ),
+      );
     inline.refresh();
     refreshHerdrFrame();
   } catch {
@@ -1017,7 +1011,7 @@ const gestures = new TerminalGestures(term, {
 async function socketURL(signal: AbortSignal) {
   if (lastOutputAt || retained.cachePainted) presentation.wait();
   else presentation.freeze();
-  const socketURL = herdrTerminal ? herdrEndpoint('herdr/ws') : endpoint('ws');
+  const socketURL = sessionAdapter.socketEndpoint();
   replay.opened();
   if (herdrTerminal) {
     sizeTerminal();
