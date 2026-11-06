@@ -17,7 +17,7 @@ use crate::{
     repair::{discovery_target, discovery_targets, repair_candidates as repair, tokens},
     speech::{expand_symbols, symbol_alternatives},
     transfer_command::download_pipeline,
-    types::{Candidate, CandidateSource, Catalog, Change, CommandMetadata, Evidence, Flag},
+    types::{Candidate, Catalog, Change, CommandMetadata, Evidence, Flag},
     validation::{Environment, candidate_valid, simple_words},
 };
 use crate::{regex, test};
@@ -397,13 +397,7 @@ fn suggest_text<'a>(
                             Candidate {
                                 command,
                                 score: prefix.score.min(candidate.score),
-                                evidence: Evidence::new(
-                                    CandidateSource::Compound,
-                                    prefix
-                                        .evidence
-                                        .confidence
-                                        .min(candidate.evidence.confidence),
-                                ),
+                                evidence: prefix.evidence.compound(&candidate.evidence),
                                 changes,
                                 literal: None,
                             },
@@ -525,8 +519,7 @@ fn suggest_unchecked<'a>(
             for mut candidate in group.into_iter().filter(|c| !c.is_literal()) {
                 if index > 0 {
                     candidate.score -= SYMBOL_PENALTY;
-                    candidate.evidence.confidence =
-                        (candidate.evidence.confidence - SYMBOL_PENALTY).max(0.0);
+                    candidate.evidence.penalize(SYMBOL_PENALTY);
                     candidate.changes.insert(0, Change::SymbolAlternative);
                 } else if primary != input {
                     candidate.changes.insert(0, Change::Symbols);

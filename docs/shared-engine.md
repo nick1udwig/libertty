@@ -4,6 +4,8 @@
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
 The library has no filesystem, subprocess, browser, network or terminal effects.
 `selection.rs` owns final evidence ordering, stable deduplication and original-text presentation, with separate search, validation, compound and display limits.
+Compound evidence keeps the lowest confidence, combines unresolved counts and stays unresolved if any part is unresolved.
+The assembled command requires its own validation, while confidence penalties preserve its other evidence.
 `arguments.rs` scans plain argument values and source spans together across repair, completion and validation.
 The scanner uses one whitespace policy and preserves literal backslashes inside double quotes.
 Its argument cursor tracks option value bounds, subcommand scopes, operands and the literal delimiter while each consumer applies its own acceptance rules.
