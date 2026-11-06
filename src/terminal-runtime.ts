@@ -318,7 +318,7 @@ export class CoreTerminal extends Events<TerminalEvents> {
     this.state = this.runtime.transfer(bytes, (p, n) =>
       this.runtime.exports.terminal_restore(this.id, p, n),
     );
-    this.geometry = { ...this.geometry, cols: this.state.cols, rows: this.state.rows };
+    this.geometry = this.call<Geometry>('geometry');
     this.setTheme(this.theme);
     this.emit('reset', undefined);
   }

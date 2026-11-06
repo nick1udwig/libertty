@@ -931,6 +931,18 @@ impl Runtime {
         let t = self.terminals.get_mut(&id).ok_or("Terminal disposed")?;
         match op {
             "state" => t.state(),
+            "geometry" => {
+                let cols: u16 = t.get(g::TerminalData::COLS)?;
+                let rows: u16 = t.get(g::TerminalData::ROWS)?;
+                let width: u32 = t.get(g::TerminalData::WIDTH_PX)?;
+                let height: u32 = t.get(g::TerminalData::HEIGHT_PX)?;
+                Ok(json!({
+                    "cols": cols,
+                    "rows": rows,
+                    "cellWidthPx": (width as f64 / cols as f64).round().max(1.) as u32,
+                    "cellHeightPx": (height as f64 / rows as f64).round().max(1.) as u32,
+                }))
+            }
             "mode" => Ok(json!(t.mode(number(&v, "mode") as u16)?)),
             "rows" => t.rows(
                 number(&v, "start"),

@@ -215,3 +215,23 @@ test('theme replacement resets omitted palette, selection and cursor settings', 
     fresh.dispose();
   }
 });
+test('snapshot restore synchronizes native cell geometry and mouse coordinates', () => {
+  const source = runtime.createTerminal({ cols: 20, rows: 4 });
+  const destination = runtime.createTerminal({ cols: 20, rows: 4 });
+  let output = '';
+  destination.on('input', (event) => { output += decode(event.data); });
+  try {
+    source.resize(20, 4, 13, 29);
+    source.write('retained\x1b[?1000h\x1b[?1006h');
+    destination.resize(20, 4, 9, 17);
+    destination.restore(source.snapshot());
+    assert.deepEqual(destination.geometry, source.geometry);
+    assert.deepEqual(destination.geometry, { cols: 20, rows: 4, cellWidthPx: 13, cellHeightPx: 29 });
+    destination.sendPointer({ action: 'press', button: 'left', x: 39, y: 58 });
+    assert.equal(output, '\x1b[<0;4;3M');
+    assert.equal(destination.readBuffer().rows[0].text, 'retained');
+  } finally {
+    source.dispose();
+    destination.dispose();
+  }
+});
