@@ -188,6 +188,152 @@ async fn repair_listings_share_ssh_reads_but_verify_against_fresh_snapshots() {
     fixture.stop().await;
 }
 
+#[tokio::test]
+async fn ssh_schema_facts_share_work_and_refresh_at_their_own_scope() {
+    use libertty_engine::{
+        host::{FactValue, HostOperation},
+        types::Catalog,
+    };
+    let fixture = Fixture::start().await;
+    let remote = fixture.connect(false).await;
+    let home = fixture.home();
+    let script = format!("{home}/tool.py");
+    tokio::fs::write(
+        &script,
+        "import argparse\np=argparse.ArgumentParser()\np.add_argument('--first')\n",
+    )
+    .await
+    .unwrap();
+    let executable = format!("{home}/orchard");
+    tokio::fs::write(
+        &executable,
+        "#!/bin/sh\nprintf '  --first  First option\\n'\n",
+    )
+    .await
+    .unwrap();
+    tokio::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+        .await
+        .unwrap();
+    let services = HostServices::new();
+    let mut host = NativeHost::new(
+        services.clone(),
+        Catalog {
+            cwd: home.clone(),
+            commands: vec!["orchard".into()].into(),
+            ..Default::default()
+        },
+        std::collections::BTreeMap::from([
+            ("HOME".into(), home.clone()),
+            ("PATH".into(), format!("{home}:/usr/bin:/bin")),
+        ]),
+        libertty_server::help::HelpProvider::new(services.pool.clone()),
+    );
+    host.remote = Some(remote.clone());
+    host.verify_listings();
+    let cancel = CancellationToken::new();
+    let operations = [
+        HostOperation::Describe {
+            command: "python3 tool.py --first a".into(),
+        },
+        HostOperation::Describe {
+            command: "python3 tool.py --first b".into(),
+        },
+    ];
+    let results = host.engine_operations(&operations, &cancel).await;
+    let (FactValue::Describe(first), FactValue::Describe(second)) =
+        (results[0].as_ref().unwrap(), results[1].as_ref().unwrap())
+    else {
+        panic!("Expected descriptions");
+    };
+    assert!(
+        Arc::ptr_eq(first, second),
+        "Concurrent alternatives share one AST probe"
+    );
+    assert!(
+        first
+            .as_ref()
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|flag| flag.name == "--first")
+    );
+    let cached = host
+        .engine_operation(&operations[0], &cancel)
+        .await
+        .unwrap();
+    let FactValue::Describe(cached) = cached else {
+        panic!("Expected description");
+    };
+    assert!(
+        Arc::ptr_eq(first, &cached),
+        "Later requests reuse the successful probe"
+    );
+    tokio::fs::write(
+        &script,
+        "import argparse\np=argparse.ArgumentParser()\np.add_argument('--changed')\n",
+    )
+    .await
+    .unwrap();
+    let changed = host
+        .engine_operation(&operations[0], &cancel)
+        .await
+        .unwrap();
+    let FactValue::Describe(changed) = changed else {
+        panic!("Expected description");
+    };
+    assert!(!Arc::ptr_eq(first, &changed));
+    assert!(
+        changed
+            .as_ref()
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|flag| flag.name == "--changed")
+    );
+    tokio::fs::write(&script, "print('no parser')\n")
+        .await
+        .unwrap();
+    let negative = host.engine_operations(&operations, &cancel).await;
+    let (FactValue::Describe(first), FactValue::Describe(second)) =
+        (negative[0].as_ref().unwrap(), negative[1].as_ref().unwrap())
+    else {
+        panic!("Expected descriptions");
+    };
+    assert!(Arc::ptr_eq(first, second));
+    assert!(first.as_ref().is_none());
+    let version = HostOperation::Version {
+        command: "orchard".into(),
+    };
+    let original =
+        serde_json::to_value(host.engine_operation(&version, &cancel).await.unwrap()).unwrap();
+    tokio::fs::write(
+        &executable,
+        "#!/bin/sh\nprintf '  --changed  Changed option\\n'\n",
+    )
+    .await
+    .unwrap();
+    let help = host.read_help("orchard", &[], true, &cancel).await.unwrap();
+    assert_eq!(
+        help.version.as_deref(),
+        original.as_str(),
+        "Help uses the version already resolved in this repair"
+    );
+    host.verify_listings();
+    let fresh =
+        serde_json::to_value(host.engine_operation(&version, &cancel).await.unwrap()).unwrap();
+    assert_ne!(fresh, original, "The next repair checks current metadata");
+    let cancelled = CancellationToken::new();
+    cancelled.cancel();
+    assert!(
+        host.engine_operation(&operations[0], &cancelled)
+            .await
+            .is_err()
+    );
+    assert!(host.engine_operation(&operations[0], &cancel).await.is_ok());
+    remote.dispose().await;
+    fixture.stop().await;
+}
+
 async fn probe_sshd(socket: tokio::net::TcpSocket, address: SocketAddr) -> std::io::Result<()> {
     // A loopback socket can connect to itself while sshd has not bound its port.
     if socket.local_addr()? == address {

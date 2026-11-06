@@ -21,6 +21,20 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
+pub(crate) type RequestVersions =
+    Arc<std::sync::Mutex<std::collections::BTreeMap<String, SharedTask<String>>>>;
+pub(crate) type Descriptions = std::collections::VecDeque<(
+    String,
+    String,
+    SharedTask<Arc<Option<Vec<libertty_engine::types::Flag>>>>,
+)>;
+#[derive(Clone, Copy)]
+pub(crate) struct FactContext<'a> {
+    pub catalog: &'a Catalog,
+    pub env: &'a Environment,
+    pub versions: Option<&'a RequestVersions>,
+}
+
 struct DirectoryGuard {
     raw: Arc<RawSftpSession>,
     handle: String,
@@ -38,6 +52,59 @@ impl Drop for DirectoryGuard {
 }
 impl SSHHost {
     async fn schema_version(
+        self: &Arc<Self>,
+        command: &str,
+        context: FactContext<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<String, String> {
+        let FactContext {
+            catalog,
+            env,
+            versions,
+        } = context;
+        let Some(versions) = versions else {
+            return self
+                .probe_schema_version(command, catalog, env, cancel)
+                .await;
+        };
+        let key = serde_json::to_string(&(
+            command,
+            &catalog.cwd,
+            env.get("HOME"),
+            env.get("PATH"),
+            catalog.commands.iter().any(|name| name == command),
+            catalog
+                .functions
+                .iter()
+                .flatten()
+                .any(|name| name == command),
+        ))
+        .unwrap();
+        let task = {
+            let mut versions = versions.lock().unwrap();
+            versions.retain(|_, task| task.reusable());
+            if let Some(task) = versions.get(&key) {
+                task.clone()
+            } else {
+                if versions.len() >= 64 {
+                    versions.pop_first();
+                }
+                let host = self.clone();
+                let command = command.to_owned();
+                let catalog = catalog.clone();
+                let env = env.clone();
+                let task = SharedTask::new(move |cancel| {
+                    Box::pin(async move {
+                        tokio::select! { biased; _ = host.lifetime.cancelled() => Err(ABORTED.into()), result = host.probe_schema_version(&command, &catalog, &env, &cancel) => result }
+                    })
+                });
+                versions.insert(key, task.clone());
+                task
+            }
+        };
+        task.wait(cancel).await
+    }
+    async fn probe_schema_version(
         &self,
         command: &str,
         catalog: &Catalog,
@@ -203,10 +270,10 @@ impl SSHHost {
     pub(crate) async fn engine_operation(
         self: &Arc<Self>,
         operation: &HostOperation,
-        catalog: &Catalog,
-        env: &Environment,
+        context: FactContext<'_>,
         cancel: &CancellationToken,
     ) -> Result<FactValue, String> {
+        let FactContext { catalog, env, .. } = context;
         if cancel.is_cancelled() {
             return Err(ABORTED.into());
         }
@@ -215,7 +282,7 @@ impl SSHHost {
                 unreachable!("Scoped operations are handled by NativeHost")
             }
             HostOperation::Version { command } => Ok(FactValue::from(json!(
-                self.schema_version(command, catalog, env, cancel).await?
+                self.schema_version(command, context, cancel).await?
             ))),
             HostOperation::Stat { path, executable } => {
                 Ok(FactValue::Stat(self.stat(path, *executable, cancel).await?))
@@ -275,42 +342,79 @@ impl SSHHost {
                 ))))
             }
             HostOperation::Help { command, route } => Ok(FactValue::Help(Arc::new(
-                self.read_help(command, route, catalog, env, true, cancel)
+                self.read_help(command, route, context, true, cancel)
                     .await?,
             ))),
-            HostOperation::Describe { command } => {
-                let Some(file) = probe_policy::python_script(command, &catalog.cwd) else {
-                    return Ok(FactValue::Describe(Arc::new(None)));
-                };
-                if !bounded(cancel, async {
-                    Ok(self
-                        .files
-                        .metadata(&file)
-                        .await
-                        .is_ok_and(|m| m.file_type().is_file() && m.len() <= 1024 * 1024))
-                })
-                .await?
-                {
-                    return Ok(FactValue::Describe(Arc::new(None)));
-                }
-                let output = self
-                    .exec(
-                        &format!(
-                            "python3 -I -c {} {}",
-                            shell_quote(crate::catalog::AST_SCRIPT),
-                            shell_quote(&file)
-                        ),
-                        cancel,
-                    )
-                    .await?;
-                if output.code != 0 {
-                    return Err("Script description probe failed.".into());
-                }
-                Ok(FactValue::Describe(Arc::new(
-                    serde_json::from_str(&output.stdout).map_err(|error| error.to_string())?,
-                )))
-            }
+            HostOperation::Describe { command } => self
+                .describe(command, &catalog.cwd, cancel)
+                .await
+                .map(FactValue::Describe),
         }
+    }
+    async fn describe(
+        self: &Arc<Self>,
+        command: &str,
+        cwd: &str,
+        cancel: &CancellationToken,
+    ) -> Result<Arc<Option<Vec<libertty_engine::types::Flag>>>, String> {
+        let Some(file) = probe_policy::python_script(command, cwd) else {
+            return Ok(Arc::new(None));
+        };
+        let info = bounded(cancel, async { Ok(self.files.metadata(&file).await.ok()) }).await?;
+        let Some(info) =
+            info.filter(|info| info.file_type().is_file() && info.len() <= 1024 * 1024)
+        else {
+            return Ok(Arc::new(None));
+        };
+        let stamp = format!(
+            "{}:{}:{}",
+            info.mtime.unwrap_or_default(),
+            info.len(),
+            info.permissions.unwrap_or_default()
+        );
+        let task = {
+            let mut cache = self.descriptions.lock().unwrap();
+            if let Some((_, _, task)) = cache
+                .iter()
+                .find(|(old, version, task)| old == &file && version == &stamp && task.reusable())
+            {
+                task.clone()
+            } else {
+                cache.retain(|(old, _, task)| old != &file && task.reusable());
+                if cache.len() >= 200 {
+                    cache.pop_front();
+                }
+                let host = Arc::downgrade(self);
+                let target = file.clone();
+                let task = SharedTask::new(move |cancel| {
+                    Box::pin(async move {
+                        let host = host.upgrade().ok_or("SSH connection closed.")?;
+                        let work = async {
+                            let output = host
+                                .exec(
+                                    &format!(
+                                        "python3 -I -c {} {}",
+                                        shell_quote(crate::catalog::AST_SCRIPT),
+                                        shell_quote(&target)
+                                    ),
+                                    &cancel,
+                                )
+                                .await?;
+                            if output.code != 0 {
+                                return Err("Script description probe failed.".into());
+                            }
+                            serde_json::from_str(&output.stdout)
+                                .map(Arc::new)
+                                .map_err(|error| error.to_string())
+                        };
+                        tokio::select! { biased; _ = host.lifetime.cancelled() => Err(ABORTED.into()), result = work => result }
+                    })
+                });
+                cache.push_back((file, stamp, task.clone()));
+                task
+            }
+        };
+        task.wait(cancel).await
     }
     pub(crate) async fn syntax_many(
         &self,
@@ -365,15 +469,15 @@ impl SSHHost {
         }
         Ok(results)
     }
-    pub async fn read_help(
+    pub(crate) async fn read_help(
         self: &Arc<Self>,
         command: &str,
         route: &[String],
-        catalog: &Catalog,
-        env: &Environment,
+        context: FactContext<'_>,
         verified: bool,
         cancel: &CancellationToken,
     ) -> Result<Help, String> {
+        let catalog = context.catalog;
         if !catalog.commands.iter().any(|c| c == command)
             || !valid_name(command)
             || route.len() > 3
@@ -381,17 +485,22 @@ impl SSHHost {
         {
             return Ok(Help::default());
         }
+        let version = self.schema_version(command, context, cancel).await?;
         if verified {
-            return self.cached_help(command, route, catalog, env, cancel).await;
+            return self
+                .cached_help(command, route, context, &version, cancel)
+                .await;
         }
-        let mut parent = self.cached_help(command, &[], catalog, env, cancel).await?;
+        let mut parent = self
+            .cached_help(command, &[], context, &version, cancel)
+            .await?;
         for i in 0..route.len() {
             let allowed = probe_policy::help_children(command, &route[..i], &parent);
             if !allowed.contains(&route[i]) {
                 return Err("Unverified help route.".into());
             }
             parent = self
-                .cached_help(command, &route[..i + 1], catalog, env, cancel)
+                .cached_help(command, &route[..i + 1], context, &version, cancel)
                 .await?;
         }
         Ok(parent)
@@ -400,10 +509,11 @@ impl SSHHost {
         self: &Arc<Self>,
         command: &str,
         route: &[String],
-        catalog: &Catalog,
-        env: &Environment,
+        context: FactContext<'_>,
+        version: &str,
         cancel: &CancellationToken,
     ) -> Result<Help, String> {
+        let FactContext { catalog, env, .. } = context;
         if catalog
             .functions
             .iter()
@@ -412,7 +522,7 @@ impl SSHHost {
         {
             return Ok(Help::default());
         }
-        let version = self.schema_version(command, catalog, env, cancel).await?;
+
         let key = serde_json::to_string(&(
             command,
             route,
@@ -423,6 +533,7 @@ impl SSHHost {
             &version,
         ))
         .unwrap();
+        let version = version.to_owned();
         let task = self.help_cache.lock().await.get_or_insert_with(&key, || {
             let host = Arc::downgrade(self);
             let command = command.to_owned();

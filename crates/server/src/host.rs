@@ -49,15 +49,18 @@ pub struct NativeHost {
     pub remote: Option<Arc<crate::ssh::SSHHost>>,
     verification: Option<ListingVersions>,
     remote_listings: Option<RequestListings>,
+    remote_versions: Option<crate::ssh_facts::RequestVersions>,
 }
 impl NativeHost {
     pub(crate) fn request_scope(&self) -> Self {
         let mut host = self.clone();
+        host.remote_versions = self.remote.as_ref().map(|_| Default::default());
         host.remote_listings = self.remote.as_ref().map(|_| Default::default());
         host
     }
     pub fn verify_listings(&mut self) {
         self.verification = Some(Default::default());
+        self.remote_versions = self.remote.as_ref().map(|_| Default::default());
         self.remote_listings = self.remote.as_ref().map(|_| Default::default());
     }
     fn remember_listing(
@@ -263,7 +266,7 @@ impl NativeHost {
                 FactValue::Lookup(Arc::new(DirectoryLookup { info, listing }))
             } else {
                 remote
-                    .engine_operation(operation, &self.catalog, &self.environment, cancel)
+                    .engine_operation(operation, self.remote_context(), cancel)
                     .await?
             };
             self.remember_lookup(operation, &result);
@@ -353,6 +356,7 @@ impl NativeHost {
             remote: None,
             verification: None,
             remote_listings: None,
+            remote_versions: None,
         }
     }
     pub async fn fact(
@@ -410,6 +414,13 @@ impl NativeHost {
                 .await
         }
     }
+    fn remote_context(&self) -> crate::ssh_facts::FactContext<'_> {
+        crate::ssh_facts::FactContext {
+            catalog: &self.catalog,
+            env: &self.environment,
+            versions: self.remote_versions.as_ref(),
+        }
+    }
     pub async fn read_help(
         &self,
         command: &str,
@@ -419,14 +430,7 @@ impl NativeHost {
     ) -> Result<libertty_engine::types::Help, String> {
         if let Some(remote) = &self.remote {
             remote
-                .read_help(
-                    command,
-                    route,
-                    &self.catalog,
-                    &self.environment,
-                    verified,
-                    cancel,
-                )
+                .read_help(command, route, self.remote_context(), verified, cancel)
                 .await
         } else if verified {
             self.help
