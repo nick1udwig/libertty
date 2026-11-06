@@ -195,7 +195,7 @@ pub async fn repair_input_file(
 
 /// Resolve a schema-declared path value with the same walker as ordinary operands.
 pub async fn repair_option_paths(
-    input: &str,
+    candidates: &[Candidate],
     catalog: &Catalog,
     home: &str,
     host: &dyn Host,
@@ -204,11 +204,7 @@ pub async fn repair_option_paths(
 ) -> Result<Vec<Candidate>, String> {
     let mut result = Vec::new();
     let deadline = (host.now_ms() + 1500.0).min(host.deadline_ms());
-    for candidate in crate::repair::repair_candidates(input, catalog, script_flags, metadata)
-        .into_iter()
-        .filter(|c| !c.is_literal())
-        .take(4)
-    {
+    for candidate in candidates.iter().filter(|c| !c.is_literal()).take(4) {
         if host.now_ms() >= deadline {
             break;
         }

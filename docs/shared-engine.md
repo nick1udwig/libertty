@@ -10,6 +10,9 @@ Its argument cursor tracks option value bounds, subcommand scopes, operands and 
 File repair, script detection and help discovery use the same cursor.
 `command_profiles.rs` defines built-in operand schemas, path repair, wrapper handling and directory changes in one registry.
 Add command aliases or operand policies there so these stages stay consistent.
+Each repair stage holds one catalog and metadata snapshot for generation, completion and validation.
+Option-path repair reuses candidates generated from that snapshot.
+Completion planning stops at the callback budget or deadline before scanning further operands.
 Independent option-path repair and argument completion share a host-fact round, as do final syntax checks for compound and wrapped choices.
 The SSH adapter sends up to 32 uncached syntax checks through one channel, preserves scoped directories and result order, and caches only completed syntax results.
 The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.

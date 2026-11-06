@@ -70,8 +70,15 @@ pub async fn complete_arguments(
     let requests = std::cell::Cell::new(0usize);
     // Independent contexts share a callback wave; a second pass can use earlier corrections.
     for _ in 0..2 {
+        if requests.get() >= 6 || host.now_ms() >= deadline {
+            break;
+        }
+        let count = (6 - requests.get()).div_ceil(2);
         let mut pending = Vec::new();
-        for index in 1..words.len() {
+        'planning: for index in 1..words.len() {
+            if host.now_ms() >= deadline {
+                break;
+            }
             let word = &words[index];
             if word.quoted || test!(r###"(?i)^-|^(dash|hyphen|hep)$"###, &word.value) {
                 continue;
@@ -92,6 +99,9 @@ pub async fn complete_arguments(
                 .filter(|c| !c.is_literal())
                 .take(2)
             {
+                if host.now_ms() >= deadline {
+                    break 'planning;
+                }
                 let Some(args) = ParsedCommand::parse(&candidate.command)
                     .map(|parsed| {
                         parsed
@@ -144,15 +154,17 @@ pub async fn complete_arguments(
                     && !pending.iter().any(|(old, _, _)| old == &context)
                 {
                     pending.push((context, args, index));
+                    if pending.len() == count {
+                        break 'planning;
+                    }
                 }
             }
         }
         if pending.is_empty() || requests.get() >= 6 || host.now_ms() >= deadline {
             break;
         }
-        let count = (6 - requests.get()).div_ceil(2);
-        let replies = futures::future::join_all(pending.into_iter().take(count).map(
-            |(context, args, index)| {
+        let replies =
+            futures::future::join_all(pending.into_iter().map(|(context, args, index)| {
                 let requests = &requests;
                 let words = &words;
                 async move {
@@ -200,9 +212,8 @@ pub async fn complete_arguments(
                     }
                     (context, values)
                 }
-            },
-        ))
-        .await;
+            }))
+            .await;
         learned.argument_values.as_mut().unwrap().extend(replies);
     }
     Ok(repair(input, catalog, script_flags, &learned)
