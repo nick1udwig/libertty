@@ -62,7 +62,6 @@ export class TerminalSurface extends Events<SurfaceEvents> {
     this.accessibility.className = 'terminal-accessibility';
     this.accessibility.setAttribute('aria-hidden', 'true');
     this.element.append(background, text, this.textarea, this.accessibility);
-    options.container.append(this.element);
     this.layout = { metrics: this.measure() };
     const painter = new TerminalPainter(background, text, this.layout.metrics);
     this.backend = {
@@ -93,6 +92,7 @@ export class TerminalSurface extends Events<SurfaceEvents> {
       this.layout.metrics.cellWidth,
       this.layout.metrics.cellHeight,
     );
+    options.container.append(this.element);
   }
   static async create(options: SurfaceOptions) {
     const runtime = await createCoreRuntime();
