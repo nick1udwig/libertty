@@ -227,6 +227,7 @@ export class TerminalPainter {
           c.fillRect(x, top, width, line);
           if (s.underline === 2) c.fillRect(x, top - line * 2, width, line);
         }
+        c.fillStyle = color;
         if (s.strikethrough) c.fillRect(x, y + h * 0.5, width, Math.max(1, m.devicePixelRatio));
         if (s.overline) c.fillRect(x, y, width, Math.max(1, m.devicePixelRatio));
       }
