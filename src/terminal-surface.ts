@@ -233,6 +233,8 @@ export class TerminalSurface extends Events<SurfaceEvents> {
             code: event.code,
             key: event.key,
             action: 'release',
+            capsLock: event.getModifierState('CapsLock'),
+            numLock: event.getModifierState('NumLock'),
             shift: event.shiftKey,
             ctrl: event.ctrlKey,
             alt: event.altKey,
