@@ -43,6 +43,8 @@ export class TerminalSurface extends Events<SurfaceEvents> {
     this.font = { family: options.fontFamily ?? 'monospace', sizePx: options.fontSizePx ?? 14 };
     this.element = document.createElement('div');
     this.element.className = 'terminal-surface';
+    this.element.setAttribute('role', 'application');
+    this.element.setAttribute('aria-label', 'Terminal');
     const background = document.createElement('canvas'),
       text = document.createElement('canvas');
     background.className = 'terminal-background';
@@ -58,8 +60,7 @@ export class TerminalSurface extends Events<SurfaceEvents> {
     this.textarea.setAttribute('data-gramm', 'false');
     this.accessibility = document.createElement('div');
     this.accessibility.className = 'terminal-accessibility';
-    this.accessibility.setAttribute('role', 'log');
-    this.accessibility.setAttribute('aria-live', 'off');
+    this.accessibility.setAttribute('aria-hidden', 'true');
     this.element.append(background, text, this.textarea, this.accessibility);
     options.container.append(this.element);
     this.layout = { metrics: this.measure() };
