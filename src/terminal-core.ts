@@ -1,3 +1,4 @@
+import { terminalABI } from './gespenst-compat.ts';
 import { TerminalSemantics } from './terminal-semantics.ts';
 import { terminalMemoryUsage } from './terminal-memory.ts';
 import {
@@ -151,10 +152,7 @@ export class GhosttyTerminal {
     return { x: state.cursorX, y: state.cursorY, visible: this.core.isMode(25) };
   }
   getPalette() {
-    const {
-      handle,
-      host: { bindings },
-    } = this.core as unknown as { handle: number; host: { bindings: CoreRuntime['bindings'] } };
+    const { handle, bindings } = terminalABI(this.core);
     const size = bindings.abi.size('GhosttyColorRgb'),
       palette = bindings.alloc(256 * size);
     try {

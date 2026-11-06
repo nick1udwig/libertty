@@ -1,7 +1,13 @@
+import {
+  localBackend,
+  controlLocalRenderer,
+  rendererPixelRatio,
+  terminalHasTransparency,
+  type LocalBackend,
+  type Frame,
+} from './gespenst-compat.ts';
 import { createTerminal, type GespenstTerminal } from '@gespenst/core';
 import type {
-  CoreRuntime,
-  CoreTerminal,
   InputSource,
   RenderColor,
   RenderFrame,
@@ -26,39 +32,7 @@ interface TerminalOptions {
   smoothScrollDuration?: number;
   theme?: ITheme;
 }
-type Frame = RenderFrame | ViewportSnapshot;
 type ColorTransform = (r: number, g: number, b: number) => [number, number, number];
-type ScreenMetrics = {
-  width: number;
-  height: number;
-  cellHeight: number;
-  devicePixelRatio: number;
-};
-/** Version-scoped access to Gespenst 0.2.0's local core and render scheduling. */
-interface LocalBackend {
-  terminal: CoreTerminal;
-  pointer(input: Parameters<GespenstTerminal['sendPointer']>[0]): void;
-  retained: { runtime: CoreRuntime; changed(): void };
-  pipeline: { host: { schedule(callback: () => void): void }; scheduleRender(): Promise<void> };
-  painter: {
-    blinkTimer: ReturnType<typeof setInterval>;
-    focused: boolean;
-    render(frame: Frame): void | Promise<void>;
-    setFocused(focused: boolean): void;
-    paint(frame: ViewportSnapshot, damage: ReadonlySet<number>): void;
-    resize(metrics: ScreenMetrics): void;
-    metrics: ScreenMetrics;
-    background: {
-      resize(width: number, height: number): void;
-      render(
-        frame: ViewportSnapshot,
-        metrics: ScreenMetrics,
-        blinkVisible: boolean,
-        focused: boolean,
-      ): void;
-    };
-  };
-}
 
 /** Libertty's synchronous terminal contract over one Gespenst parser and renderer. */
 export class Terminal {
@@ -116,10 +90,7 @@ export class Terminal {
   readonly renderer = {
     getMetrics: () => {
       const geometry = this.view?.geometry;
-      const layout = (
-        this.view as unknown as { layout?: { metrics: { devicePixelRatio: number } } }
-      )?.layout;
-      const ratio = layout?.metrics.devicePixelRatio ?? 1;
+      const ratio = rendererPixelRatio(this.view);
       return {
         width: (geometry?.cellWidthPx ?? 8) / ratio,
         height: (geometry?.cellHeightPx ?? 16) / ratio,
@@ -163,15 +134,13 @@ export class Terminal {
       defaultCursorBlink: false,
       theme: this.options.theme,
     }));
-    const backend = (this.backend = (view as unknown as { backend: LocalBackend }).backend);
-    if (!backend.terminal || !backend.pipeline?.host || !backend.painter)
-      throw new Error('Unsupported Gespenst local backend');
+    const backend = (this.backend = localBackend(view));
     this.ghostty = new Ghostty(backend.retained.runtime, { theme: this.options.theme });
     this.wasmTerm = new GhosttyTerminal(backend.terminal, () => {
       backend.retained.changed();
       void backend.pipeline.scheduleRender();
     });
-    (view as unknown as { resizeObserver: ResizeObserver }).resizeObserver.disconnect();
+    controlLocalRenderer(view, (callback) => this.scheduleFrame(callback));
     this.textarea = view.element.querySelector('textarea')!;
     this.textarea.addEventListener('beforeinput', (event) => {
       if (event.isComposing) return;
@@ -194,8 +163,6 @@ export class Terminal {
       },
       { capture: true },
     );
-    clearInterval(backend.painter.blinkTimer);
-    backend.pipeline.host.schedule = (callback) => this.scheduleFrame(callback);
     const renderNative = backend.terminal.render.bind(backend.terminal);
     // Viewport-only moves reuse cached history rows instead of decoding every visible row again.
     backend.terminal.render = () => this.movedFrame() ?? this.recordView(renderNative());
@@ -467,9 +434,7 @@ export class Terminal {
       term = this.wasmTerm!,
       top = this.buffer.active.viewportY,
       shift = top - (view?.top ?? top);
-    const translucent = (
-      this.backend!.terminal as unknown as { themeAlpha?: ReadonlyMap<string, number> }
-    ).themeAlpha?.size;
+    const translucent = terminalHasTransparency(this.backend!.terminal);
     if (
       !view ||
       !shift ||
