@@ -24,6 +24,7 @@ const defaults = [
 ];
 export function parseColor(value: string | RenderColor): RenderColor {
   if (typeof value !== 'string') return { ...value };
+  value = value.trim();
   const hex = /^#([a-f\d]{3,4}|[a-f\d]{6}|[a-f\d]{8})$/i.exec(value)?.[1];
   if (hex) {
     const full = hex.length < 5 ? [...hex].map((c) => c + c).join('') : hex;
@@ -34,11 +35,15 @@ export function parseColor(value: string | RenderColor): RenderColor {
       a: full.length === 8 ? parseInt(full.slice(6), 16) / 255 : 1,
     };
   }
-  const rgb = /^rgba?\((.*)\)$/
+  const rgb = /^rgba?\((.*)\)$/i
     .exec(value)?.[1]
     .split(/[,\s/]+/)
     .filter(Boolean)
-    .map(Number);
+    .map((channel, index) => {
+      if (!channel.endsWith('%')) return Number(channel);
+      const fraction = Number(channel.slice(0, -1)) / 100;
+      return index < 3 ? Math.round(fraction * 255) : fraction;
+    });
   if (rgb?.length && rgb.length >= 3 && rgb.every(Number.isFinite))
     return { r: rgb[0], g: rgb[1], b: rgb[2], a: rgb[3] ?? 1 };
   throw new TypeError(`Invalid terminal color: ${value}`);
