@@ -9,6 +9,7 @@ if (process.env.VERIFY_QUICK_DONE !== '1') {
   run('cargo', ['fmt', '--all', '--', '--check']);
   run('npm', ['run', 'check:format']);
 }
+run('node', ['scripts/build-terminal.mjs', '--check']);
 run('cargo', ['clippy', '--workspace', '--all-targets', '--locked', '--', '-D', 'warnings']);
 run('npm', ['run', 'test:rust']);
 run('npm', ['run', 'build:frontend']);

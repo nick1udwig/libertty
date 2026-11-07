@@ -12,10 +12,10 @@ License: GNU Affero General Public License v3.0, as distributed upstream.
 Full license: HERDR-SOUNDS-LICENSE.txt (included alongside this notice).
 These assets retain their upstream license.
 
-Gespenst (@gespenst/core)
+Terminal theme and canvas layout references
 =========================
-Version: 0.2.0
-Files: browser terminal, headless core, ghostty-callbacks.wasm
+Reference: Gespenst 0.2.0
+Files: theme defaults and canvas layout formulas in the owned terminal surface
 Source: https://github.com/tobilg/gespenst
 License: https://github.com/tobilg/gespenst/blob/main/LICENSE
 
@@ -41,12 +41,40 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+libghostty-rs
+=============
+Revision: 4230bfe2e00e081871b45ae14161d77c24304d50
+Source: https://github.com/uzaaft/libghostty-rs
+Files: Rust bindings linked into terminal.wasm
+
+MIT License
+
+Copyright (c) 2026 Uzair Aftab, Leah Amelia Chen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 Ghostty / libghostty
 ===================
-Official ghostty-vt.wasm, distributed unchanged by @gespenst/core.
-Revision: 919dca5c848d43a489a4cb2e1feade016f0fa2db
-Source: https://github.com/ghostty-org/ghostty/tree/919dca5c848d43a489a4cb2e1feade016f0fa2db
-License: https://github.com/ghostty-org/ghostty/blob/919dca5c848d43a489a4cb2e1feade016f0fa2db/LICENSE
+Built from source into terminal.wasm through libghostty-rs.
+Revision: 521cf2c5d30bd48028ca61546c64e7913764073d
+Source: https://github.com/ghostty-org/ghostty/tree/521cf2c5d30bd48028ca61546c64e7913764073d
+License: https://github.com/ghostty-org/ghostty/blob/521cf2c5d30bd48028ca61546c64e7913764073d/LICENSE
 
 MIT License
 

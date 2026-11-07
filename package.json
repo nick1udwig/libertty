@@ -15,9 +15,9 @@
     "test:rust-herdr": "node test/rust-herdr.mjs",
     "postinstall": "node scripts/prepare-dependencies.mjs",
     "dev": "node scripts/dev.mjs",
-    "build:frontend": "tsc --noEmit && vite build",
-    "build:site": "tsc --noEmit && vite build --config site/vite.config.ts",
-    "dev:site": "vite --config site/vite.config.ts",
+    "build:frontend": "npm run build:terminal && tsc --noEmit && vite build",
+    "build:site": "npm run build:terminal && tsc --noEmit && vite build --config site/vite.config.ts",
+    "dev:site": "npm run build:terminal && vite --config site/vite.config.ts",
     "test:site": "npm run build:site && node test/site-browser.mjs",
     "bench:site": "npm run build:site && node test/site-performance.mjs",
     "build": "npm run build:backend && npm run build:frontend",
@@ -55,13 +55,13 @@
     "test:herdr-flash": "node test/herdr-space-flash-native.mjs",
     "test:herdr-loading": "node test/herdr-loading-browser.mjs",
     "build:test-support": "cargo build --locked -p libertty-server --examples",
-    "pretest": "npm run build:test-support",
+    "pretest": "npm run build:terminal && npm run build:test-support",
     "contracts:vocabulary": "node scripts/engine-vocabulary.mjs",
     "format": "prettier --write src",
-    "check:format": "prettier --check src"
+    "check:format": "prettier --check src",
+    "build:terminal": "node scripts/build-terminal.mjs"
   },
   "dependencies": {
-    "@gespenst/core": "0.2.0",
     "libopus-wasm": "0.4.1",
     "markdown-it": "^15.0.2",
     "ws": "8.21.3"

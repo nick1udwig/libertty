@@ -8,8 +8,7 @@ import { createRetainedOutput } from '../src/retained-output.ts';
 
 test('retained output owns replay transitions, cancellation and late cache restoration', async (t) => {
   const ghostty = await Ghostty.load({
-    wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-    callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+    wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
   });
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const term = new Terminal({ cols: 20, rows: 4 });

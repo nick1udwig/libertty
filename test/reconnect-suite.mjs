@@ -347,7 +347,7 @@ try {
     stalled = await stallNext('/ws'); states = await stateCount();
     await online(); await stalled.entered;
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
-    const retainedPixels = await page.locator('#terminal .gespenst__text').evaluate(canvas => {
+    const retainedPixels = await page.locator('#terminal .terminal-text').evaluate(canvas => {
       const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
       let painted = 0;
       for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] > 0) painted++;
@@ -393,7 +393,7 @@ try {
     stalled = await stallNext('/api/herdr/ticket'); states = await stateCount();
     await online(); await stalled.entered;
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
-    assert.ok(await page.locator('#terminal .gespenst__background').evaluate(canvas => canvas.width > 0 && canvas.height > 0), 'Keep the Herdr screen during ticket acquisition');
+    assert.ok(await page.locator('#terminal .terminal-background').evaluate(canvas => canvas.width > 0 && canvas.height > 0), 'Keep the Herdr screen during ticket acquisition');
     await background(); await page.evaluate(() => window.__expireBackground()); await foreground(); await connected(states);
     await page.locator('.terminal-presentation').waitFor({ state: 'hidden' });
     assert.equal(stalled.aborted(), true, 'backgrounding aborts Herdr ticket acquisition'); await stalled.done();

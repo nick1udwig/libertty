@@ -24,7 +24,7 @@ test('history identity separates backends, sessions, sources and recycled panes 
 });
 
 test('optional native snapshots retain text fallback and count binary bytes in the cache budget', async () => {
-  const { GHOSTTY_BUILD } = await import('@gespenst/core/headless');
+  const { GHOSTTY_BUILD } = await import('../src/terminal-runtime.ts');
   const native = { build: GHOSTTY_BUILD.sha256, cols: 80, rows: 24, bytes: new Uint8Array(2 * 1024 * 1024) };
   const valid = cachedTerminal({ ...entry(), native }, now)!;
   assert.equal(valid.native?.bytes.byteLength, native.bytes.byteLength);
