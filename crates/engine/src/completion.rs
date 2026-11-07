@@ -151,20 +151,19 @@ pub async fn complete_arguments(
                     .as_ref()
                     .unwrap()
                     .contains_key(&context)
-                    && !pending.iter().any(|(old, _, _)| old == &context)
+                    && !pending.iter().any(|(old, _, _, _)| old == &context)
                 {
-                    pending.push((context, args, index));
-                    if pending.len() == count {
-                        break 'planning;
-                    }
+                    pending.push((context, args, index, candidate));
                 }
             }
         }
         if pending.is_empty() || requests.get() >= 6 || host.now_ms() >= deadline {
             break;
         }
+        pending.sort_by(|a, b| crate::selection::compare(&a.3, &b.3));
+        pending.truncate(count);
         let replies =
-            futures::future::join_all(pending.into_iter().map(|(context, args, index)| {
+            futures::future::join_all(pending.into_iter().map(|(context, args, index, _)| {
                 let requests = &requests;
                 let words = &words;
                 async move {

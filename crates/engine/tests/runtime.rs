@@ -624,3 +624,68 @@ fn path_candidates_survive_an_independent_lookup_or_stat_failure() {
         }
     }
 }
+
+#[test]
+fn fuzzy_git_push_completes_before_opaque_command_alternatives() {
+    use libertty_engine::host::HostOperation;
+    let mut runtime = Runtime::default();
+    let mut step = runtime.start(1, Request {
+        operation: "completeArguments".into(),
+        args: vec![
+            json!("Get push dash u origin feet/better dash dictation"),
+            json!({"cwd":"/fixture","commands":["gem","git","let","net","set"],"paths":[],"history":[]}),
+            json!({"flags":{"git push":[{"name":"-u","takesValue":false}]}}),
+        ],
+    }, 0.0);
+    let mut requests = 0;
+    for wave in 1..=20 {
+        match step {
+            Step::Complete { value, .. } => {
+                assert!(
+                    value
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|candidate| candidate["command"]
+                            == "git push -u origin feat/better-dictation"),
+                    "{value}"
+                );
+                assert!(requests <= 6, "Completion budget exceeded: {requests}");
+                return;
+            }
+            Step::Pending { callbacks, .. } => {
+                let replies = callbacks
+                    .into_iter()
+                    .map(|callback| Reply::Values {
+                        request: callback.request,
+                        values: callback
+                            .operations
+                            .into_iter()
+                            .map(|operation| {
+                                let HostOperation::Completion { words, .. } = operation else {
+                                    panic!("Unexpected fact: {operation:?}")
+                                };
+                                requests += 1;
+                                match words[..words.len() - 1]
+                                    .iter()
+                                    .map(String::as_str)
+                                    .collect::<Vec<_>>()
+                                    .as_slice()
+                                {
+                                    ["git", "push", "-u"] => json!(["origin"]),
+                                    ["git", "push", "-u", "origin"] => {
+                                        json!(["feat/better-dictation"])
+                                    }
+                                    _ => json!([]),
+                                }
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                step = runtime.resume(1, replies, f64::from(wave));
+            }
+            _ => panic!("Unexpected completion result"),
+        }
+    }
+    panic!("Completion did not finish");
+}
