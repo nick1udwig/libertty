@@ -75,8 +75,9 @@ jobs:
           npm run ci:quick
           cargo fmt --all -- --check
           npm run contracts:vocabulary -- --check
-      - name: Check native lints and tests
+      - name: Check terminal and native lints and tests
         run: |
+          node scripts/build-terminal.mjs --check
           cargo clippy --workspace --all-targets --locked -- -D warnings
           npm run test:rust
       - name: Check JavaScript, saved data and installers

@@ -1,4 +1,4 @@
-import { GHOSTTY_BUILD } from '@gespenst/core/headless';
+import { GHOSTTY_BUILD } from './terminal-runtime.ts';
 import type { Terminal } from './terminal-adapter.ts';
 
 import { nativeTerminalSnapshot, type NativeTerminalSnapshot } from './terminal-cache.ts';

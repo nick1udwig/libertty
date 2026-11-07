@@ -545,10 +545,22 @@ try {
     // Passing through unknown returns term_2 to idle without an unseen completion.
     fixture.update(0, 'blocked'); fixture.update(2, 'unknown'); await until(async () => await tab(2).getAttribute('data-status') === 'unknown', 'unknown status'); fixture.update(2, 'idle');
     await until(async () => JSON.stringify(await lanes()) === JSON.stringify(['blocked:term_0', 'idle:term_1,term_2']), 'restored statuses');
+    const markRead = page.locator('.herdr-agent-strip:visible .herdr-mark-read');
+    assert.equal(await markRead.count(), 0, 'Mark read appears only with unread completions');
+    fixture.update(2, 'working'); await until(async () => await tab(2).getAttribute('data-status') === 'working', 'working before mark read'); fixture.update(2, 'idle');
+    await until(async () => JSON.stringify(await lanes()) === JSON.stringify(['blocked:term_0', 'done:term_2', 'idle:term_1']), 'unread completion lane');
+    assert.equal(await page.locator('.herdr-status-lane[data-lane=done] .herdr-mark-read').count(), 1, 'Mark read sits in the Done lane');
+    await markRead.click();
+    await until(async () => JSON.stringify(await lanes()) === JSON.stringify(['blocked:term_0', 'idle:term_1,term_2']), 'mark all done as read');
+    assert.equal(await markRead.count(), 0); assert.equal(await page.locator('#tabs .herdr-tab .tab-attention').textContent(), '1', 'Only the request still needs attention');
     await showTerminalTabs(page); await page.locator('#terminal-back').click(); await page.locator('#nav-settings').click();
     await page.locator('#herdr-strip-order').selectOption('manual'); await page.locator('#nav-terminals').click();
     await until(async () => await page.locator('.herdr-agent-strip:visible .herdr-status-lane').count() === 0, 'manual strip');
     assert.deepEqual(await page.locator('.herdr-agent-tab').evaluateAll(els => els.map(el => el.dataset.terminal)), ['term_1', 'term_2', 'term_0'], 'Manual order survives lanes');
+    fixture.update(2, 'working'); await until(async () => await tab(2).getAttribute('data-status') === 'working', 'working before manual mark read'); fixture.update(2, 'idle');
+    await until(async () => await tab(2).getAttribute('data-status') === 'done', 'manual unread completion');
+    assert.equal(await page.locator('.herdr-agent-strip:visible .herdr-tabs-toggle + .herdr-mark-read').count(), 1, 'Mark read leads the manual strip');
+    await markRead.click(); await until(async () => await tab(2).getAttribute('data-status') === 'idle' && await markRead.count() === 0, 'manual mark all done as read');
     await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').click();
     await mkdir(root + '.test-artifacts', { recursive: true }); await page.screenshot({ path: root + '.test-artifacts/herdr-mobile.png' });
     await page.setViewportSize({ width: 1280, height: 800 }); await page.screenshot({ path: root + '.test-artifacts/herdr-desktop.png' });
@@ -579,7 +591,7 @@ try {
     });
     assert.match(await preview.getAttribute('src'), /herdrPreview=1/, 'Cached metadata mounts only an unauthorized preview');
     const previewFrame = page.frameLocator('.herdr-screen > iframe.herdr-terminal');
-    assert.ok(await previewFrame.locator('#terminal .gespenst__text').evaluate(canvas => {
+    assert.ok(await previewFrame.locator('#terminal .terminal-text').evaluate(canvas => {
       const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
       let painted = 0;
       for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] > 0) painted++;

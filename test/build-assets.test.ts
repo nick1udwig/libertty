@@ -30,13 +30,13 @@ test('compressed production chunks contain finalized dynamic-import preload code
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test('Gespenst ships Ghostty and callback WASM assets with workspace preloads and offline caching', async () => {
+test('The Rust terminal ships one WASM asset with workspace preloads and offline caching', async () => {
   const directory = await mkdtemp('/tmp/libertty-wasm-bundle-');
   try {
     await writeFile(directory + '/index.html', '<script type="module" src="./main.js"></script>');
     await writeFile(directory + '/main.js', 'document.title = "Workspace";');
     await writeFile(directory + '/terminal.html', '<script type="module" src="./terminal.js"></script>');
-    await writeFile(directory + '/terminal.js', `import { createCoreRuntime } from ${JSON.stringify(fileURLToPath(import.meta.resolve('@gespenst/core/headless')))}; globalThis.createCoreRuntime = createCoreRuntime;`);
+    await writeFile(directory + '/terminal.js', `import { createCoreRuntime } from ${JSON.stringify(fileURLToPath(import.meta.resolve('../src/terminal-runtime.ts')))}; globalThis.createCoreRuntime = createCoreRuntime;`);
     const result = await build({
       ...config, root: directory, publicDir: fileURLToPath(new URL('../public', import.meta.url)), configFile: false, logLevel: 'silent',
       build: { ...config.build, write: false, rolldownOptions: { input: { app: directory + '/index.html', terminal: directory + '/terminal.html' } } },
@@ -46,16 +46,16 @@ test('Gespenst ships Ghostty and callback WASM assets with workspace preloads an
     const html = outputs.find(output => output.fileName === 'index.html');
     const worker = outputs.find(output => output.fileName === 'sw.js');
     assert.ok(html?.type === 'asset' && worker?.type === 'asset');
-    for (const name of ['ghostty-vt', 'ghostty-callbacks']) {
+    for (const name of ['terminal']) {
       const emitted = outputs.filter(output => output.fileName.startsWith(`assets/${name}-`) && output.fileName.endsWith('.wasm'));
       assert.equal(emitted.length, 1, `${name} is emitted once instead of inlined`);
       const wasm = emitted[0];
       assert.ok(wasm.type === 'asset');
-      assert.deepEqual(Buffer.from(wasm.source), await readFile(new URL(`../node_modules/@gespenst/core/dist/${name}.wasm`, import.meta.url)));
+      assert.deepEqual(Buffer.from(wasm.source), await readFile(new URL(`../src/generated/${name}.wasm`, import.meta.url)));
       assert.ok(String(html.source).includes(`href="./${wasm.fileName}"`), `${name} starts loading with the workspace`);
       assert.ok(String(worker.source).includes(JSON.stringify(wasm.fileName)), `${name} is available offline`);
-      if (name === 'ghostty-vt') {
-        assert.deepEqual(WebAssembly.Module.imports(await WebAssembly.compile(Buffer.from(wasm.source))), [], 'The official Ghostty module has no imports');
+      if (name === 'terminal') {
+        assert.deepEqual(WebAssembly.Module.imports(await WebAssembly.compile(Buffer.from(wasm.source))), [{module:'env',name:'crypto_getrandom',kind:'function'}], 'Only secure randomness crosses into the host');
         for (const [suffix, decode] of [['br', brotliDecompressSync], ['gz', gunzipSync]] as const) {
           const compressed: (typeof outputs)[number] | undefined = outputs.find(output => output.fileName === wasm.fileName + '.' + suffix);
           assert.ok(compressed?.type === 'asset');

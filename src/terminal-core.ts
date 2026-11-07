@@ -1,4 +1,3 @@
-import { terminalABI } from './gespenst-compat.ts';
 import { TerminalSemantics } from './terminal-semantics.ts';
 import { terminalMemoryUsage } from './terminal-memory.ts';
 import {
@@ -13,7 +12,7 @@ import {
   type RenderColors,
   type TerminalBufferRow,
   type TerminalTheme,
-} from '@gespenst/core/headless';
+} from './terminal-runtime.ts';
 
 export class Ghostty {
   readonly core: CoreRuntime;
@@ -28,7 +27,7 @@ export class Ghostty {
   createTerminal(
     cols: number,
     rows: number,
-    options: CoreTerminalOptions & { scrollbackLimit?: number } = {},
+    options: CoreTerminalOptions & { scrollbackLimit?: number; collectResponses?: boolean } = {},
   ) {
     return new GhosttyTerminal(
       this.core.createTerminal({
@@ -40,7 +39,7 @@ export class Ghostty {
           options.scrollbackLimit ?? options.scrollbackLines ?? this.defaults.scrollbackLines,
       }),
       undefined,
-      true,
+      options.collectResponses ?? false,
     );
   }
   memoryUsage() {
@@ -152,24 +151,7 @@ export class GhosttyTerminal {
     return { x: state.cursorX, y: state.cursorY, visible: this.core.isMode(25) };
   }
   getPalette() {
-    const { handle, bindings } = terminalABI(this.core);
-    const size = bindings.abi.size('GhosttyColorRgb'),
-      palette = bindings.alloc(256 * size);
-    try {
-      bindings.check(
-        bindings.exports.ghostty_terminal_get(
-          handle,
-          bindings.abi.value('GhosttyTerminalData', 'COLOR_PALETTE'),
-          palette.pointer,
-        ),
-        'read terminal palette',
-      );
-      return Array.from({ length: 256 }, (_, index) =>
-        bindings.readColor(palette.pointer + index * size),
-      );
-    } finally {
-      palette.free();
-    }
+    return this.core.getPalette();
   }
   getColors() {
     if (!this.colors || this.theme !== this.core.theme) {

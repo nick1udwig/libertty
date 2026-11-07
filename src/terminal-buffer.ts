@@ -1,4 +1,4 @@
-import type { RenderCell, TerminalBufferRow } from '@gespenst/core/headless';
+import type { RenderCell, TerminalBufferRow } from './terminal-runtime.ts';
 import type { GhosttyTerminal } from './terminal-core.ts';
 
 const cellWidth = (cell: RenderCell) =>
