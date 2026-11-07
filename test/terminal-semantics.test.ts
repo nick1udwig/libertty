@@ -6,8 +6,7 @@ import { EchoPrediction } from '../src/predicted-echo.ts';
 import type { ShellState } from '../src/protocol.ts';
 
 const ghostty = await Ghostty.load({
-  wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-  callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+  wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
 });
 after(() => ghostty.dispose());
 
@@ -43,9 +42,9 @@ test('native shell callbacks handle split sequences, command metadata, exit stat
   } finally { terminal.free(); }
 });
 
-test('callbacks stay isolated, survive restore and reuse one function-table pair per runtime', () => {
-  const first = ghostty.createTerminal(80, 24), table = ghostty.core.bindings.exports.__indirect_function_table;
-  const count = table.length;
+test('callbacks stay isolated, survive restore and release terminal registrations', () => {
+  const first = ghostty.createTerminal(80, 24);
+  const count = ghostty.core.terminals.size;
   try {
     first.write('\x1b]133;C;cmdline_url=first\x07');
     for (let index = 0; index < 20; index++) {
@@ -54,7 +53,7 @@ test('callbacks stay isolated, survive restore and reuse one function-table pair
       assert.equal(first.semantics.state?.command, 'first');
       second.free();
     }
-    assert.equal(table.length, count);
+    assert.equal(ghostty.core.terminals.size, count);
     first.restore(first.core.snapshot());
     assert.equal((() => first.semantics.state)(), undefined);
     first.core.write('\x1b]133;B\x07');

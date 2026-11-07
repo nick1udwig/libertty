@@ -366,18 +366,21 @@ Each successful connection phase or initial replay message renews the idle deadl
 
 ## Terminal engine
 
-The browser uses `@gespenst/core` 0.2.0 with its unchanged Ghostty WASM and callback bridge.
+The browser links Ghostty through pinned `libghostty-rs` bindings in `crates/terminal-wasm`.
+The Rust bridge owns terminal handles, render state, input encoders, selection gestures, tracked rows, snapshots, and shell callbacks.
 The browser terminal and its headless projection terminals share one WASM runtime per view.
+`terminal-runtime.ts` exposes synchronous terminal operations over the owned Rust exports.
+Rows share style records during transfer, and native snapshots cross the boundary as bytes.
+`terminal-surface.ts` owns browser input and font measurement, while `terminal-painter.ts` draws Canvas 2D frames.
 `terminal-adapter.ts`, `terminal-core.ts`, and `terminal-buffer.ts` preserve the synchronous APIs that Libertty uses.
-The adapter uses Canvas 2D on the main thread because predicted echo, link detection, snapshots, and projection reads need synchronous terminal state.
-Worker and GPU modes are not enabled by this migration.
-The version-scoped adapter accesses Gespenst's local backend to share state, schedule paints, suppress its blink interval, and leave resize ownership with Libertty.
-Review these private integration points when upgrading Gespenst.
+The adapter keeps terminal state and painting on the main thread for predicted echo, links, snapshots, and projection reads.
+`npm run build:terminal` builds the pinned source with checksum-verified Zig 0.17.0 and the Rust WASM target.
+The generated WASM is included by the frontend build, preloaded with the workspace, and cached for offline use.
 Snapshots and projections read native cells without a legacy cell conversion.
 Styled transcripts retain underline variants and colors, overlines, explicit backgrounds, and OSC 8 links.
 Snapshot caches follow the core state revision so writes and cursor changes are visible before the next paint.
 Libertty owns mobile focus, IME input, touch selection, and idle render scheduling.
-Gespenst parses synchronized output (DEC mode 2026) but paints during it, so Libertty's scheduler skips paints while a program's synchronized update is open.
+Libertty's scheduler skips paints while a program's synchronized update (DEC mode 2026) is open.
 An update split across socket messages therefore paints once it closes, and an update that never closes paints after one second.
 Reconnect and resize covers combine the background and text canvases.
 The visible window is one row taller than the grid and holds the line above the viewport in its first row.
@@ -400,13 +403,13 @@ Freeing terminal pages permits reuse but does not shrink WASM linear memory.
 
 The local history cache can store a native screen snapshot of up to 2 MiB beside its styled text.
 A native snapshot is saved only when one transcript record matches the current screen and history.
-Restoration requires the exact WASM checksum and grid size, and corrupt or incompatible snapshots fall back to text.
+Restoration requires the exact terminal source fingerprint and grid size, and corrupt or incompatible snapshots fall back to text.
 Multiple transcript records keep their text presentation so a native screen cannot hide older retained excerpts.
 Native snapshot bytes count toward the existing 8 MiB cache budget.
 
 Native OSC 133 callbacks expose the current shell phase, reported command, and optional exit status through `term.wasmTerm.semantics.state`.
 The last completed command remains available through `semantics.lastCommand` when completion and the next prompt arrive in one output chunk.
-The adapter uses two shared typed WASM callback trampolines per runtime and does not parse the output stream again.
+Rust copies native callback events before returning to JavaScript, so callback dispatch cannot re-enter a borrowed terminal.
 Command output and completion suppress predicted echo until the next prompt or input event.
 These markers only constrain prediction and never authorize input or replace server readiness.
 Terminals without shell markers keep the existing prediction rules.
