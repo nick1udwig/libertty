@@ -158,7 +158,8 @@ try {
     await touch('touchMove', { x, y: edge.y + edge.height - thumb.height / 2 }); await touch('touchEnd');
     assert.equal(await scope.evaluate(() => window.__testTerminal.getViewportY()), 0, 'Touch dragging must return to live output');
     await touch('touchStart', { x, y: edge.y + edge.height / 2 }); await touch('touchEnd');
-    assert.ok(Math.abs(await scope.evaluate(() => window.__testTerminal.getViewportY()) - maximum / 2) < .01, 'Tapping the track must jump to that position');
+    const midpoint = await scope.evaluate(() => window.__testTerminal.getViewportY());
+    assert.ok(Math.abs(midpoint - maximum / 2) < .01, `Tapping the track must jump to that position: ${midpoint} instead of ${maximum / 2}`);
     const middle = await scope.locator('.terminal-scrollbar-thumb').boundingBox();
     await touch('touchStart', { x, y: middle.y + middle.height / 2 }); await touch('touchCancel');
     assert.equal(await track.evaluate(el => el.classList.contains('dragging')), false, 'Cancelled drags must release the scrollbar');
@@ -259,7 +260,7 @@ try {
   await delay(20); await touch('touchMove', { x: start.x, y: start.y + 90 }); await touch('touchEnd');
   // Dispatch a fast swipe in one task so CDP round-trip delays cannot turn it into a hold.
   // A fling coasts past all 180 history rows, so it starts at the bottom and is measured in the page before any coasting frame.
-  const coast = await page.locator('#terminal .gespenst__background').evaluate(async (el, point) => {
+  const coast = await page.locator('#terminal .terminal-background').evaluate(async (el, point) => {
     const term = window.__testTerminal;
     term.scrollToBottom();
     const options = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, pointerId: 98, clientX: point.x, clientY: point.y };
@@ -272,7 +273,7 @@ try {
   }, start);
   assert.ok(coast.coasted > coast.released, 'A swipe should coast after release: ' + JSON.stringify(coast));
   assert.equal(await focused(), false, 'Scrolling must leave the keyboard closed');
-  await page.locator('#terminal .gespenst__background').evaluate(el => {
+  await page.locator('#terminal .terminal-background').evaluate(el => {
     const options = { bubbles: true, cancelable: true, sourceCapabilities: new InputDeviceCapabilities({ firesTouchEvents: true }) };
     for (const type of ['mousedown', 'mouseup', 'click']) el.dispatchEvent(new MouseEvent(type, options));
   });
@@ -301,11 +302,11 @@ try {
   });
   assert.ok(flung > 500, `A fast fling must glide well past the old 220 ms decay distance: ${flung}px`);
   // Some browsers coalesce movement: the release alone must disqualify a tap.
-  await page.locator('#terminal .gespenst__background').evaluate((el, point) => {
+  await page.locator('#terminal .terminal-background').evaluate((el, point) => {
     const options = { bubbles: true, cancelable: true, pointerType: 'touch', isPrimary: true, pointerId: 99, clientX: point.x, clientY: point.y };
     el.dispatchEvent(new PointerEvent('pointerdown', options));
     el.dispatchEvent(new PointerEvent('pointerup', { ...options, clientY: point.y + 20 }));
-    el.closest('.gespenst').querySelector('textarea').focus();
+    el.closest('.terminal-surface').querySelector('textarea').focus();
   }, start);
   assert.equal(await focused(), false, 'A release displaced from the press must never be treated as an input tap');
   // Stop momentum with a new touch, then select text from scrollback.
@@ -331,7 +332,7 @@ try {
   await touch('touchStart', from); await delay(400);
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'before selection', 'Holding must not copy before release');
   assert.equal(await page.locator('#notice-bubble:visible').count(), 0);
-  await page.locator('#terminal .gespenst__background').evaluate((el, point) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: point.x, clientY: point.y })), from);
+  await page.locator('#terminal .terminal-background').evaluate((el, point) => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: point.x, clientY: point.y })), from);
   assert.equal(await focused(), false, 'The native long-press menu must not focus terminal input');
   await touch('touchEnd');
   assert.equal(await focused(), false);

@@ -1,4 +1,4 @@
-import type { CellColor, RenderCell, RenderColor } from '@gespenst/core/headless';
+import type { CellColor, RenderCell, RenderColor } from './terminal-runtime.ts';
 import type { Terminal } from './terminal-adapter.ts';
 
 /** The screen rows of the last content line and the cursor, so a repaint keeps the same layout. */
@@ -118,7 +118,8 @@ export function terminalSnapshot(term: Terminal, limit = 5000) {
     cached.limit === limit &&
     cached.columns === columns &&
     cached.rows === rows &&
-    cached.foreground === foreground
+    cached.foreground === foreground &&
+    cached.theme === terminal.core.theme
   )
     return cached.value;
   const palette = terminal.getPalette();

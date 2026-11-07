@@ -50,7 +50,7 @@ test('a host learns of a reveal only after the held picture is gone', () => {
 });
 
 
-test('reconnect and resize covers copy the visible screen from both Gespenst canvas layers', () => {
+test('reconnect and resize covers copy the visible screen from both the terminal canvas layers', () => {
   const previous = globalThis.document;
   const bounds = { left: 4, top: 10, bottom: 210, width: 300, height: 200 };
   // The canvases hold one extra row and rest a quarter row below a whole-row position.

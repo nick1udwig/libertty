@@ -5,10 +5,9 @@ import { Terminal } from '../src/terminal-adapter.ts';
 import { Ghostty } from '../src/terminal-core.ts';
 import { terminalSnapshot, plainText } from '../src/terminal-snapshot.ts';
 
-test('snapshots follow Gespenst revisions before rendering, including direct core writes and cursor changes', async () => {
+test('snapshots follow the terminal revisions before rendering, including direct core writes and cursor changes', async () => {
   const ghostty = await Ghostty.load({
-    wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-    callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+    wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
   });
   const term = new Terminal({ cols: 20, rows: 4 });
   term.wasmTerm = ghostty.createTerminal(20, 4);
@@ -30,8 +29,7 @@ test('snapshots follow Gespenst revisions before rendering, including direct cor
 
 test('styled snapshots preserve native cell attributes, colors, links and graphemes', async () => {
   const ghostty = await Ghostty.load({
-    wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-    callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+    wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
   });
   const term = new Terminal({ cols: 30, rows: 3 });
   term.wasmTerm = ghostty.createTerminal(30, 3);
@@ -58,8 +56,7 @@ test('styled snapshots preserve native cell attributes, colors, links and graphe
 
 test('text snapshots retain OSC 4 foreground and background colors across grid sizes', async () => {
   const ghostty = await Ghostty.load({
-    wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-    callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+    wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
   });
   const term = new Terminal({ cols: 20, rows: 2 });
   term.wasmTerm = ghostty.createTerminal(20, 2);
@@ -85,8 +82,7 @@ test('text snapshots retain OSC 4 foreground and background colors across grid s
 
 test('snapshot capture reuses stable history and follows pruning, screens and resets', async () => {
   const ghostty = await Ghostty.load({
-    wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-    callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+    wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
   });
   const term = new Terminal({ cols: 20, rows: 4 });
   const core = term.wasmTerm = ghostty.createTerminal(20, 4, { scrollbackLimit: 128 });
@@ -115,4 +111,15 @@ test('snapshot capture reuses stable history and follows pruning, screens and re
     core.resize(15, 6);
     verify();
   } finally { core.free(); ghostty.dispose(); }
+});
+
+test('theme-only palette changes invalidate cached snapshots without a terminal write',async()=>{
+  const ghostty=await Ghostty.load({wasm:await readFile(new URL('../src/generated/terminal.wasm',import.meta.url))});
+  const term=new Terminal({cols:20,rows:2});term.wasmTerm=ghostty.createTerminal(20,2,{theme:{red:'#010203'}});
+  try {
+    term.write('\x1b[31mcolor\x1b[0m');const before=terminalSnapshot(term),revision=term.wasmTerm.getRevision();
+    term.wasmTerm.core.setTheme({red:'#040506'});
+    assert.equal(term.wasmTerm.getRevision(),revision);const after=terminalSnapshot(term);
+    assert.notEqual(after,before);assert.match(after.text,/38;2;4;5;6/);
+  }finally{term.wasmTerm.free();ghostty.dispose();}
 });

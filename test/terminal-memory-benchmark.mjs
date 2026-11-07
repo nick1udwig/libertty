@@ -1,12 +1,11 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { Ghostty } from '../src/terminal-core.ts';
-import { GHOSTTY_BUILD } from '@gespenst/core/headless';
+import { GHOSTTY_BUILD } from '../src/terminal-runtime.ts';
 
-const wasm = await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url));
-const callbacksWasm = await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url));
+const wasm = await readFile(new URL('../src/generated/terminal.wasm', import.meta.url));
 const samples = [];
 for (const count of [1, 5, 20]) {
-  const runtime = await Ghostty.load({ wasm, callbacksWasm });
+  const runtime = await Ghostty.load({ wasm });
   const terminals = Array.from({ length: count }, () => runtime.createTerminal(80, 24, { scrollbackLimit: 5000 }));
   const sample = phase => {
     globalThis.gc?.();

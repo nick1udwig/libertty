@@ -229,7 +229,7 @@ The table shows median Chromium task time with `BENCH_GPU=1` for 120 frames from
 Slow scrolling and scrolling with output stayed within the run-to-run spread, which exceeded 100 ms in both builds.
 Software rendering added about 0.4 ms per frame for the larger text canvas, so compare canvas size changes with `BENCH_GPU=1`.
 The text canvas uses about 5 MB more memory at both measured viewport sizes.
-Fast scrolling still decodes every visible row in Gespenst's render reader after each native viewport move.
+This historical measurement predates the owned Rust terminal and cached viewport moves.
 
 ### History frame comparison, 2026-10-31
 
@@ -262,3 +262,27 @@ Times are task time per frame.
 Slow scrolling stayed within run-to-run spread.
 In an instrumented touch fling with fourfold throttling, frames that crossed a row fell from about 9.5 to 5 ms on average and from about 22 to 9 ms at worst.
 The worst baseline frames decoded a new 64-row page while the glide was slow enough for the eye to follow it.
+
+### Direct libghostty-rs comparison, 2026-11-06
+
+The baseline is the Gespenst frontend at `19f82f6`, served by the same native backend as the replacement.
+The replacement uses pinned Rust bindings, an owned WASM bridge and an owned Canvas 2D surface.
+The table shows median Chromium task time for 120 frames across three runs per viewport and workload, without GPU flags or CPU throttling.
+
+| Viewport | Workload | Gespenst | libghostty-rs |
+| --- | --- | ---: | ---: |
+| Mobile | Slow scroll | 421.65 ms | 318.82 ms |
+| Mobile | Fast scroll | 571.49 ms | 426.89 ms |
+| Mobile | Scroll with output | 435.27 ms | 375.88 ms |
+| Desktop | Slow scroll | 561.99 ms | 325.47 ms |
+| Desktop | Fast scroll | 875.23 ms | 498.08 ms |
+| Desktop | Scroll with output | 557.67 ms | 507.94 ms |
+
+Frame intervals at p95 stayed between 16.7 and 16.8 ms.
+Paint timings varied; desktop output paint p95 rose from 4.7 to 6.2 ms while total task time decreased.
+A separate nine-reload comparison measured median readiness at 130.5 → 115.9 ms, input echo at 30.5 → 30.3 ms and command submission at 30.4 → 29.5 ms.
+The loader retains streaming WASM compilation and falls back to buffer compilation when the server lacks the required MIME type.
+Total JavaScript assets fell from 1,170,151 to 943,914 bytes, and one terminal WASM asset replaces two.
+The 20-terminal shared-runtime memory test retained the same 82,575,360 native bytes in both builds.
+WASM capacity rose from 157,548,544 to 158,793,728 bytes, while process JavaScript heap fell from about 13.5 to 9.7 MB.
+These local measurements include instrumentation and shared-host variation.
