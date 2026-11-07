@@ -112,6 +112,8 @@ export type KeychainAction = { "action": "delete", id: string, }
   | { "action": "backup", name: string, passphrase: string, privateKey?: string, replaceId?: string, }
   | { "action": "export", id: string, passphrase: string, };
 
+export type PreparedChoice = { id: string, text: string, action: RepairIntent, literal: boolean, };
+
 export type ReadingCapture = { id: string, name: string, exitCode: number, };
 
 export type RepairIntent = { "kind": "shell" }
@@ -120,7 +122,7 @@ export type RepairIntent = { "kind": "shell" }
 
 export type RepairRequest = { id: string, text: string, prompt: number, revision: number, intent?: RepairIntent, };
 
-export type RepairResult = { id: string, prompt: number, revision: number, accepted: boolean, error?: string, source?: DictationSource, original: string, selected: string, candidates: Array<Candidate>, actions?: { [key in string]: RepairIntent }, };
+export type RepairResult = { id: string, prompt: number, revision: number, accepted: boolean, error?: string, source?: DictationSource, original: string, selected: string, candidates: Array<Candidate>, choices: Array<PreparedChoice>, actions?: { [key in string]: RepairIntent }, };
 
 export type ServerMessage = { "type": "pong" }
   | { "type": "repair-result" } & RepairResult

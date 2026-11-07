@@ -4,11 +4,20 @@
 Matching, speech normalization, history indexes, directory traversal, validation policy, help-tree discovery and learned metadata have one implementation.
 The library has no filesystem, subprocess, browser, network or terminal effects.
 `selection.rs` owns final evidence ordering, stable deduplication and original-text presentation, with separate search, validation, compound and display limits.
-`arguments.rs` shares plain argument values and source spans across repair, completion and validation.
+Compound evidence keeps the lowest confidence, combines unresolved counts and stays unresolved if any part is unresolved.
+The assembled command requires its own validation, while confidence penalties preserve its other evidence.
+`arguments.rs` scans plain argument values and source spans together across repair, completion and validation.
+The scanner uses one whitespace policy and preserves literal backslashes inside double quotes.
 Its argument cursor tracks option value bounds, subcommand scopes, operands and the literal delimiter while each consumer applies its own acceptance rules.
+File repair, script detection and help discovery use the same cursor.
 `command_profiles.rs` defines built-in operand schemas, path repair, wrapper handling and directory changes in one registry.
 Add command aliases or operand policies there so these stages stay consistent.
+Each repair stage holds one catalog and metadata snapshot for generation, completion and validation.
+Option-path repair reuses candidates generated from that snapshot.
+Completion planning stops at the callback budget or deadline before scanning further operands.
 Independent option-path repair and argument completion share a host-fact round, as do final syntax checks for compound and wrapped choices.
+Failed validation facts remove only their own candidates.
+An unavailable original-text probe or optional enrichment does not discard independently validated alternatives.
 The SSH adapter sends up to 32 uncached syntax checks through one channel, preserves scoped directories and result order, and caches only completed syntax results.
 The frontend consumes its TypeScript types and sends repair transactions over the existing terminal WebSocket.
 Historical TypeScript revisions remain in Git for benchmark comparisons.
@@ -37,9 +46,13 @@ Each repair also shares SSH executable-version lookups across help routes.
 SSH Python descriptions share pending work and successful results by resolved path and SFTP file metadata, with a limit of 200 entries.
 `probe_policy.rs` shares help-route verification, help arguments, probe environments and Python script selection between local and SSH adapters.
 `src/terminal.ts` sends one `repair` message and receives the applied line and alternatives in `repair-result`.
-Each prepared choice includes its backend action, so selection keeps its reading or shell meaning if browser preferences change.
+Each prepared choice includes its ID, text and backend action, so selection keeps its reading or shell meaning if browser preferences change.
+Actions are constructed with candidates and are independent of their display text.
+The browser selects choices by ID and converts older replies at one compatibility boundary.
 Browser and native reading recognition share contract fixtures, normalize phrases, and prefer the longest matching phrase.
 Cancellation, attachment, prompt and revision guards protect concurrent edits.
+Each browser input operation owns its cancellation, literal text, pending result and queued input.
+Alternate replacement updates the tracked line after acknowledgement, and stale replies cannot restore text or consume another operation's queue.
 `crates/server/src/input_coordinator.rs` shares repair deadlines, cancellation and microphone callbacks across native terminals and Herdr.
 Session replay credit, history snapshots and captured connection requests live in separate state types under the session lock.
 Local and SSH PTYs expose the same process interface and event stream through `local_pty.rs` and `ssh_pty.rs`.
