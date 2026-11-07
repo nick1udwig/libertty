@@ -7,8 +7,7 @@ import { TerminalProjection } from '../src/terminal-projection.ts';
 import { mergeHerdrFrames, type HerdrFrameMessage } from '../src/terminal-frame-batch.ts';
 
 const ghostty = await Ghostty.load({
-  wasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-vt.wasm', import.meta.url)),
-  callbacksWasm: await readFile(new URL('../node_modules/@gespenst/core/dist/ghostty-callbacks.wasm', import.meta.url)),
+  wasm: await readFile(new URL('../src/generated/terminal.wasm', import.meta.url)),
 });
 
 test('history taps use native rows and reject older history, stale text and different geometry', () => {

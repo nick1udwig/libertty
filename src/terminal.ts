@@ -7,7 +7,7 @@ import { fileClient, saveDownload } from './file-client.ts';
 import { transferView } from './transfer-view.ts';
 import { imagePicker, uploadImage } from './image-upload.ts';
 import { Terminal, FitAddon } from './terminal-adapter.ts';
-import '@gespenst/core/style.css';
+import './terminal-surface.css';
 import type { ClientMessage, ServerMessage, ShellState, RepairResult } from './protocol.ts';
 import './style.css';
 import { backendAccess, rememberBackendAccess, forgetBackendAccess } from './backend-access.ts';
@@ -306,7 +306,7 @@ try {
 }
 if (!fontSizeInput.checkValidity()) fontSizeInput.value = fontSizeInput.defaultValue;
 const fontFamily = getComputedStyle(document.documentElement).fontFamily;
-// Load the font before Gespenst measures cells.
+// Load the font before the terminal measures cells.
 await document.fonts.load(`14px ${fontFamily}`).catch(() => {});
 const term = new Terminal({
   fontSize: (fontSizeInput.valueAsNumber * 4) / 3,

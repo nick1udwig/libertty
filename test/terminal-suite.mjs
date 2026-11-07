@@ -127,7 +127,7 @@ try {
     await page.clock.runFor(800); await page.evaluate(() => window.__paint = []); await page.clock.runFor(800);
     assert.equal(await page.evaluate(() => window.__paint.length), 0, 'An unfocused stationary prompt stops painting');
     await command(page, "printf 'idle-history-%s\\n' {1..100}");
-    await page.locator('#terminal .gespenst__background').hover(); await page.mouse.wheel(0, -1000);
+    await page.locator('#terminal .terminal-background').hover(); await page.mouse.wheel(0, -1000);
     await page.locator('#terminal textarea').evaluate(el => el.blur());
     await page.clock.runFor(2000); await page.evaluate(() => window.__paint = []); await page.clock.runFor(800);
     assert.equal(await page.evaluate(() => window.__paint.length), 0, 'Stationary scrollback stops painting');
@@ -528,7 +528,7 @@ try {
     assert.equal(await distance(), reading, 'Live output keeps the reading position');
     await track.press('End');
     await context.setOffline(true); await page.reload(); await page.waitForSelector('#terminal');
-    await page.waitForSelector('#terminal .gespenst__background');
+    await page.waitForSelector('#terminal .terminal-background');
     await until(async () => !!await paintedStyles('red-proof'), 'retained output painted by the terminal');
     const cachedRed = await paintedStyles('red-proof'), cachedPlain = await paintedStyles('offline-history-proof');
     assert.equal(new Set(cachedRed).size, 1); assert.notEqual(cachedRed[0], cachedPlain[0], 'Retained output keeps its colors');

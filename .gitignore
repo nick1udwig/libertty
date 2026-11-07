@@ -8,3 +8,4 @@ release/
 *.log
 /target/
 dist-site/
+src/generated/terminal.wasm

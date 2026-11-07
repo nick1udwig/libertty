@@ -1,12 +1,10 @@
 import {
-  localBackend,
-  controlLocalRenderer,
   rendererPixelRatio,
   terminalHasTransparency,
   type LocalBackend,
   type Frame,
-} from './gespenst-compat.ts';
-import { createTerminal, type GespenstTerminal } from '@gespenst/core';
+} from './terminal-surface.ts';
+import { createTerminal, type TerminalSurface } from './terminal-surface.ts';
 import type {
   InputSource,
   RenderColor,
@@ -14,7 +12,7 @@ import type {
   RenderRow,
   TerminalTheme,
   ViewportSnapshot,
-} from '@gespenst/core/headless';
+} from './terminal-runtime.ts';
 import { GhosttyTerminal, Ghostty } from './terminal-core.ts';
 import { createTerminalBuffer } from './terminal-buffer.ts';
 import { terminalLinkAt } from './terminal-links.ts';
@@ -34,7 +32,7 @@ interface TerminalOptions {
 }
 type ColorTransform = (r: number, g: number, b: number) => [number, number, number];
 
-/** Libertty's synchronous terminal contract over one Gespenst parser and renderer. */
+/** Libertty's synchronous terminal contract over the Rust terminal and canvas surface. */
 export class Terminal {
   readonly options: TerminalOptions;
   readonly buffer = createTerminalBuffer(() => this.wasmTerm);
@@ -44,7 +42,7 @@ export class Terminal {
   textarea?: HTMLTextAreaElement;
   wasmTerm?: GhosttyTerminal;
   ghostty?: Ghostty;
-  private view?: GespenstTerminal;
+  private view?: TerminalSurface;
   private fontUpdate?: Promise<unknown>;
   private backend?: LocalBackend;
   private paintFrame?: (frame: Frame) => void | Promise<void>;
@@ -124,8 +122,6 @@ export class Terminal {
     this.element = element;
     const view = (this.view = await createTerminal({
       container: element,
-      worker: false,
-      renderer: 'canvas2d',
       cols: this.options.cols,
       rows: this.options.rows,
       fontFamily: this.options.fontFamily,
@@ -134,13 +130,12 @@ export class Terminal {
       defaultCursorBlink: false,
       theme: this.options.theme,
     }));
-    const backend = (this.backend = localBackend(view));
-    this.ghostty = new Ghostty(backend.retained.runtime, { theme: this.options.theme });
+    const backend = (this.backend = view.backend);
+    this.ghostty = new Ghostty(backend.terminal.runtime, { theme: this.options.theme });
     this.wasmTerm = new GhosttyTerminal(backend.terminal, () => {
-      backend.retained.changed();
       void backend.pipeline.scheduleRender();
     });
-    controlLocalRenderer(view, (callback) => this.scheduleFrame(callback));
+    backend.pipeline.host.schedule = (callback) => this.scheduleFrame(callback);
     this.textarea = view.element.querySelector('textarea')!;
     this.textarea.addEventListener('beforeinput', (event) => {
       if (event.isComposing) return;
@@ -185,7 +180,7 @@ export class Terminal {
     layer.append(...view.element.querySelectorAll('canvas'));
     screen.append(layer);
     view.element.prepend(screen);
-    this.screenText = layer.querySelector<HTMLElement>('.gespenst__text') ?? undefined;
+    this.screenText = layer.querySelector<HTMLElement>('.terminal-text') ?? undefined;
     // The text canvas holds two windows, with each line in the slot at its line number modulo the window height.
     // Any window is therefore contiguous, and crossing rows draws only lines that the slots do not hold.
     const background = backend.painter.background,
@@ -290,6 +285,7 @@ export class Terminal {
       this.selectionActive = !!this.wasmTerm?.core.getSelection();
       this.emit('selection');
     });
+    view.on('copy', (text) => this.copyHandler?.(text));
     view.on('scroll', () => this.notifyScroll());
     view.on('viewportChange', () => {
       const cursor = this.wasmTerm!.getCursor(),
