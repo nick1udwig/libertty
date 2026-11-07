@@ -570,6 +570,9 @@ export class HerdrView {
     const previousRepo = this.repoOf(previousSpace)?.id;
     this.status();
     this.metadata(message.snapshot.terminals, message.snapshot.spaces);
+    this.preferences.separateSpaces = this.preferences.separateSpaces!.filter((id) =>
+      this.spaces.some((space) => space.id === id),
+    );
     const notifications = this.tracker.update(message.snapshot);
     this.acknowledge(this.quietSnapshot ? this.currentNotifications() : notifications);
     if (!this.quietSnapshot) for (const event of notifications) this.host.notification(event);
@@ -634,7 +637,7 @@ export class HerdrView {
   private metadata(terminals: HerdrAgent[], spaces: HerdrSpace[]) {
     this.terminals = terminals;
     this.spaces = spaces;
-    this.repos = spaceRepos(spaces);
+    this.repos = spaceRepos(spaces, this.preferences.separateSpaces);
     this.terminalsById = new Map(terminals.map((terminal) => [terminal.terminalId, terminal]));
     this.reposBySpace = new Map(
       this.repos.flatMap((repo) => repo.spaces.map((space) => [space.id, repo] as const)),
@@ -1193,6 +1196,10 @@ export class HerdrView {
         ...(terminal ? { terminalId: terminal.terminalId } : {}),
       });
       if (this.disposed) return;
+      if (this.host.core && result.workspaceId) {
+        this.preferences.separateSpaces!.push(result.workspaceId);
+        this.save();
+      }
       const snapshot = await this.host.api('api/herdr/snapshot', undefined);
       try {
         localStorage.setItem('libertty.herdrStrip', JSON.stringify('spaces'));

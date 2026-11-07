@@ -25,11 +25,17 @@ export interface SpaceTap {
   terminalId?: string;
 }
 
-/** Worktree checkouts join their repository's root space; Herdr reports a repository only once it has a worktree, so other spaces stand alone. */
-export function spaceRepos(spaces: HerdrSpace[]): SpaceRepo[] {
+/** Worktree checkouts join their repository's root space, while repeated spaces in the same checkout keep separate tabs. */
+export function spaceRepos(spaces: HerdrSpace[], separate: string[] = []): SpaceRepo[] {
   const repos = new Map<string, SpaceRepo>();
   for (const space of spaces) {
-    const id = space.repoKey ? 'repo:' + space.repoKey : 'space:' + space.id;
+    const repository = space.repoKey ? 'repo:' + space.repoKey : undefined;
+    const repeated =
+      space.checkoutPath &&
+      repository &&
+      repos.get(repository)?.spaces.some((member) => member.checkoutPath === space.checkoutPath);
+    const id =
+      repository && !repeated && !separate.includes(space.id) ? repository : 'space:' + space.id;
     const repo = repos.get(id) || {
       id,
       name: (space.repoKey && space.repoName) || space.name,
