@@ -171,6 +171,7 @@ Mobile TUI panes render text and cursors directly from Herdr’s live frames whe
 Shell scrollback and differently sized observers retain the history projection.
 
 Status circles follow Herdr: hollow green means idle, orange means working, red means attention is requested, and blue means completed work you have not viewed here.
+The double-check button in the strip marks all unviewed completed work as read.
 Herdr's original completion and request sounds play while the webapp has focus, including when another top-level tab is selected.
 A browser gesture enables audio playback.
 The Herdr tab badge counts agents needing attention.
