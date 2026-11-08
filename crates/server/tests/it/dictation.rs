@@ -1,5 +1,6 @@
 use futures::{SinkExt, StreamExt};
 use libertty_server::dictation::{self, Recording};
+use libertty_server::protocol::DictationState;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
@@ -18,7 +19,7 @@ use tokio_tungstenite::{
     },
 };
 fn capabilities() -> Value {
-    json!({"type":"capabilities","protocol":2,"dictation":true,"sample_rate":16000,"channels":1,"format":"opus","framing":"sequence_opus_v1","audio_encodings":["opus_v1"],"results":["partial","final"]})
+    json!({"type":"capabilities","protocol":2,"dictation":true,"resume":true,"sample_rate":16000,"channels":1,"format":"opus","framing":"sequence_opus_v1","audio_encodings":["opus_v1"],"results":["partial","final"]})
 }
 fn ready() -> Value {
     json!({"type":"ready","protocol":2,"sample_rate":16000,"channels":1,"format":"opus","audio_encoding":"opus_v1","framing":"sequence_opus_v1","max_seconds":300,"max_encoded_bytes":2097152,"resume":true,"accepted_frames":0,"finished":false})
@@ -39,6 +40,7 @@ fn capability_negotiation_and_binary_opus_validation_reject_older_or_malformed_i
     assert!(dictation::compatible(&capabilities()));
     for patch in [
         json!({"protocol":1}),
+        json!({"resume":false}),
         json!({"sample_rate":48000}),
         json!({"results":["partial"]}),
         json!({"dictation":false}),
@@ -56,7 +58,8 @@ fn capability_negotiation_and_binary_opus_validation_reject_older_or_malformed_i
     let parsed = dictation::parse_opus_frame(&encoded).unwrap();
     assert!(parsed.first && parsed.final_frame);
     assert_eq!(parsed.total_samples, 1600);
-    assert_eq!(parsed.packets, vec![vec![0xf8, 0xff, 0xfe]]);
+    assert_eq!(parsed.packets(), &[&[0xf8, 0xff, 0xfe][..]]);
+    assert_eq!(parsed.packets()[0].as_ptr(), encoded[19..].as_ptr());
     for bytes in [vec![0; 16], vec![0; 6403], vec![0; 3200]] {
         assert!(dictation::parse_opus_frame(&bytes).is_err());
     }
@@ -218,7 +221,7 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
         env: BTreeMap<String, String>,
         results: Arc<Mutex<Vec<String>>>,
         mode: usize,
-    ) -> (String, Option<String>) {
+    ) -> (DictationState, Option<String>) {
         let (sender, mut receive) = tokio::sync::mpsc::unbounded_channel();
         let recording = Recording::start(
             env,
@@ -227,7 +230,7 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
                 Ok(())
             }),
             Arc::new(move |state, message| {
-                let _ = sender.send((state.to_owned(), message));
+                let _ = sender.send((state, message));
             }),
         );
         loop {
@@ -235,7 +238,7 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
                 .await
                 .unwrap()
                 .unwrap();
-            if state == "ready" {
+            if state == DictationState::Ready {
                 match mode {
                     0 => {
                         recording.audio(frame(0, true, true));
@@ -253,12 +256,15 @@ async fn authenticated_daemon_negotiation_inserts_only_final_safe_transcripts_an
     }
     assert_eq!(
         dictate(env.clone(), results.clone(), 0).await,
-        ("done".into(), None)
+        (DictationState::Done, None)
     );
-    assert_eq!(*results.lock().unwrap(), ["hello world"]);
+    assert_eq!(*results.lock().unwrap(), ["hello\nworld"]);
     assert!(received.load(Ordering::SeqCst) > 17 && received.load(Ordering::SeqCst) < 1000);
     *transcript.lock().unwrap() = "\x1b[201~\recho injected".into();
-    assert_eq!(dictate(env.clone(), results.clone(), 0).await.0, "error");
+    assert_eq!(
+        dictate(env.clone(), results.clone(), 0).await.0,
+        DictationState::Error
+    );
     assert!(
         dictate(env.clone(), results.clone(), 1)
             .await
@@ -363,8 +369,11 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
     let task = tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut first = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let mut limits = ready();
+        limits["max_seconds"] = json!(2);
+        limits["max_encoded_bytes"] = json!(4096);
         first
-            .send(Message::Text(ready().to_string().into()))
+            .send(Message::Text(limits.to_string().into()))
             .await
             .unwrap();
         let audio = first.next().await.unwrap().unwrap();
@@ -414,11 +423,13 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
     });
     let results = Arc::new(Mutex::new(Vec::new()));
     let (checkpoints, mut checkpoint_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (progress, mut progress_rx) = tokio::sync::mpsc::unbounded_channel();
     let (statuses, mut status_rx) = tokio::sync::mpsc::unbounded_channel();
     let start = || {
         let results = results.clone();
         let checkpoints = checkpoints.clone();
         let statuses = statuses.clone();
+        let progress = progress.clone();
         Recording::start_resumable(
             env.clone(),
             "a".repeat(32),
@@ -430,22 +441,25 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
                 })
             }),
             Arc::new(move |state, error| {
-                statuses.send((state.to_owned(), error)).unwrap();
+                statuses.send((state, error)).unwrap();
             }),
             Arc::new(move |checkpoint| {
                 checkpoints.send(checkpoint).unwrap();
             }),
+            Arc::new(move |frames| {
+                progress.send(frames).unwrap();
+            }),
         )
     };
     let first = start();
-    assert_eq!(
-        receive_with_timeout(&mut checkpoint_rx)
-            .await
-            .accepted_frames,
-        0
-    );
+    let checkpoint = receive_with_timeout(&mut checkpoint_rx).await;
+    assert_eq!(checkpoint.accepted_frames, 0);
+    assert_eq!(checkpoint.upload_window, 16);
+    assert_eq!(checkpoint.max_samples, 32000);
+    assert_eq!(checkpoint.max_encoded_bytes, 4096);
     first.audio(frame(0, false, true));
     receive_with_timeout(&mut accepted_rx).await;
+    assert_eq!(receive_with_timeout(&mut progress_rx).await, 1);
     first.suspend();
     let resumed = start();
     assert_eq!(
@@ -460,7 +474,7 @@ async fn suspended_recordings_resume_accepted_frames_without_cancelling_the_daem
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(status, ("done".into(), None));
+    assert_eq!(status, (DictationState::Done, None));
     assert_eq!(*results.lock().unwrap(), vec!["saved speech"]);
     task.await.unwrap();
 }
@@ -507,10 +521,11 @@ async fn finished_daemon_checkpoints_deliver_cached_final_without_reupload_or_fi
                 Ok(())
             })
         }),
-        Arc::new(|state, message| assert_ne!(state, "error", "{message:?}")),
+        Arc::new(|state, message| assert_ne!(state, DictationState::Error, "{message:?}")),
         Arc::new(move |checkpoint| {
             checkpoints.send(checkpoint).unwrap();
         }),
+        Arc::new(|_| {}),
     );
     assert!(receive_with_timeout(&mut checkpoint_rx).await.finished);
     assert_eq!(
@@ -570,10 +585,11 @@ async fn accepted_final_audio_can_finish_after_its_finish_control_was_lost() {
                 Ok(())
             })
         }),
-        Arc::new(|state, message| assert_ne!(state, "error", "{message:?}")),
+        Arc::new(|state, message| assert_ne!(state, DictationState::Error, "{message:?}")),
         Arc::new(move |checkpoint| {
             checkpoints.send(checkpoint).unwrap();
         }),
+        Arc::new(|_| {}),
     );
     assert_eq!(
         receive_with_timeout(&mut checkpoint_rx)

@@ -1,3 +1,4 @@
+import { AUDIO_PROFILE, MAX_AUDIO_SAMPLES } from './voxtype-audio.ts';
 import type { Notify } from './notice-model.ts';
 import { DictationWakeLock, dictationWakeEnvironment } from './dictation-wake-lock.ts';
 
@@ -14,6 +15,8 @@ interface CaptureEvents {
 
 export class DictationCapture {
   private phase: 'starting' | 'recording' | 'finishing' | 'idle' = 'starting';
+  private samples = 0;
+  private maxSamples = MAX_AUDIO_SAMPLES;
   private stream?: MediaStream;
   private context?: AudioContext;
   private source?: MediaStreamAudioSourceNode;
@@ -88,12 +91,18 @@ export class DictationCapture {
           this.lastAudio = Date.now();
           this.checkCapture();
           if (generation !== this.generation) return;
-          this.events.level(event.data);
+          const available = Math.max(0, this.maxSamples - this.samples) * 2;
+          const pcm =
+            event.data.byteLength <= available ? event.data : event.data.slice(0, available);
+          if (!pcm.byteLength) return;
+          this.samples += pcm.byteLength / 2;
+          this.events.level(pcm);
           if (++this.encoderPending > 8) {
             this.captureFailed('Audio encoding is too slow. Please try again.');
             return;
           }
-          this.encoder!.postMessage({ type: 'audio', pcm: event.data }, [event.data]);
+          this.encoder!.postMessage({ type: 'audio', pcm }, [pcm]);
+          if (this.samples === this.maxSamples) this.events.finish();
         }
       };
       this.phase = 'recording';
@@ -108,7 +117,10 @@ export class DictationCapture {
       if (generation !== this.generation) return;
 
       clearTimeout(this.audioTimer);
-      this.audioTimer = setTimeout(() => this.events.finish(), 299000);
+      this.audioTimer = setTimeout(
+        () => this.events.finish(),
+        (AUDIO_PROFILE.maxSeconds - 1) * 1000,
+      );
       // Permission prompts or device startup can suspend an already resumed context.
       await context.resume();
       if (generation !== this.generation) return;
@@ -285,6 +297,13 @@ export class DictationCapture {
         'info',
       );
     this.events.changed();
+  }
+  limit(maxSamples: number) {
+    if (!Number.isSafeInteger(maxSamples) || maxSamples < 1 || maxSamples > MAX_AUDIO_SAMPLES)
+      throw new Error('Invalid recording duration limit.');
+    if (this.samples > maxSamples) throw new Error('Recording exceeds the daemon duration limit.');
+    this.maxSamples = maxSamples;
+    if (this.samples === maxSamples) this.events.finish();
   }
   finish() {
     if (this.phase !== 'recording') return;

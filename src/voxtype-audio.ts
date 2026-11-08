@@ -1,7 +1,9 @@
+import { AUDIO_PROFILE } from './generated/dictation-profile.ts';
+export { AUDIO_PROFILE };
 /** Voxtype protocol 2: sequence + raw Opus packets, no file container. */
-export const MAX_OPUS_BYTES = 2 * 1024 * 1024;
-export const MAX_OPUS_FRAMES = 15002;
-export const MAX_AUDIO_SAMPLES = 16000 * 300;
+export const MAX_OPUS_BYTES = AUDIO_PROFILE.maxEncodedBytes;
+export const MAX_OPUS_FRAMES = AUDIO_PROFILE.maxFrames;
+export const MAX_AUDIO_SAMPLES = AUDIO_PROFILE.sampleRate * AUDIO_PROFILE.maxSeconds;
 export function opusFrame(
   sequence: number,
   packets: Uint8Array[],
@@ -24,11 +26,20 @@ export function opusFrame(
     bytes.set(packet, offset + 2);
     offset += 2 + packet.length;
   }
-  parseOpusFrame(bytes);
+  validateOpusFrame(bytes);
   return bytes.buffer;
 }
+export function validateOpusFrame(bytes: Uint8Array) {
+  return inspectOpusFrame(bytes);
+}
 export function parseOpusFrame(bytes: Uint8Array) {
-  if (bytes.length < 17 || bytes.length > 6402) throw new Error('Invalid Opus frame size.');
+  const packets: Uint8Array[] = [];
+  const frame = inspectOpusFrame(bytes, (start, end) => packets.push(bytes.subarray(start, end)));
+  return { ...frame, packets };
+}
+function inspectOpusFrame(bytes: Uint8Array, packet?: (start: number, end: number) => void) {
+  if (bytes.length < 17 || bytes.length > 17 + AUDIO_PROFILE.batchPackets * 1277)
+    throw new Error('Invalid Opus frame size.');
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const sequence = view.getBigUint64(0),
     flags = bytes[9],
@@ -47,11 +58,10 @@ export function parseOpusFrame(bytes: Uint8Array) {
     (!first && preSkip) ||
     (!final && totalSamples) ||
     totalSamples > MAX_AUDIO_SAMPLES ||
-    count > 5 ||
+    count > AUDIO_PROFILE.batchPackets ||
     (!count && !final)
   )
     throw new Error('Invalid Opus frame header.');
-  const packets: Uint8Array[] = [];
   let offset = 17;
   for (let i = 0; i < count; i++) {
     if (offset + 2 > bytes.length) throw new Error('Truncated Opus packet.');
@@ -59,9 +69,9 @@ export function parseOpusFrame(bytes: Uint8Array) {
     offset += 2;
     if (length < 1 || length > 1275 || offset + length > bytes.length)
       throw new Error('Invalid Opus packet size.');
-    packets.push(bytes.subarray(offset, offset + length));
+    packet?.(offset, offset + length);
     offset += length;
   }
   if (offset !== bytes.length) throw new Error('Trailing Opus frame bytes.');
-  return { sequence: Number(sequence), first, final, preSkip, totalSamples, packets };
+  return { sequence: Number(sequence), first, final, preSkip, totalSamples };
 }

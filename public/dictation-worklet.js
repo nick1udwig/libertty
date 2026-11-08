@@ -1,22 +1,27 @@
+// Begin generated dictation profile.
+const AUDIO_PROFILE = {"protocol":2,"sampleRate":16000,"channels":1,"frameSamples":320,"batchPackets":5,"maxSeconds":300,"maxEncodedBytes":2097152,"maxFrames":15002};
+// End generated dictation profile.
 // Streaming mono downsampling, retaining fractional sample coverage across blocks.
 class DictationPCM extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.ratio = sampleRate / 16000;
+    this.ratio = sampleRate / AUDIO_PROFILE.sampleRate;
+    this.chunkSamples = AUDIO_PROFILE.frameSamples * AUDIO_PROFILE.batchPackets;
     this.remaining = this.ratio; this.sum = 0;
-    this.samples = []; this.stopped = false; this.gain = 1; this.power = 0; this.pending = 0;
+    this.pcm = new ArrayBuffer(this.chunkSamples * 2); this.view = new DataView(this.pcm); this.sampleCount = 0;
+    this.stopped = false; this.gain = 1; this.power = 0; this.pending = 0;
     this.port.onmessage = event => {
       if (event?.data?.type === 'consumed') { this.pending = Math.max(0, this.pending - 1); return; }
       this.flush(); this.stopped = true; this.port.postMessage('flushed');
     };
   }
   flush() {
-    if (!this.samples.length || this.stopped) return;
-    if (this.pending >= 8) { this.samples = []; this.stopped = true; this.port.postMessage({ type: 'error', message: 'Audio encoding is too slow. Please try again.' }); return; }
+    if (!this.sampleCount || this.stopped) return;
+    if (this.pending >= 8) { this.sampleCount = 0; this.stopped = true; this.port.postMessage({ type: 'error', message: 'Audio encoding is too slow. Please try again.' }); return; }
     this.pending++;
-    const bytes = new ArrayBuffer(this.samples.length * 2), view = new DataView(bytes);
-    this.samples.forEach((value, index) => view.setInt16(index * 2, value, true));
-    this.samples = []; this.port.postMessage(bytes, [bytes]);
+    const bytes = this.sampleCount === this.chunkSamples ? this.pcm : this.pcm.slice(0, this.sampleCount * 2);
+    this.pcm = new ArrayBuffer(this.chunkSamples * 2); this.view = new DataView(this.pcm); this.sampleCount = 0;
+    this.port.postMessage(bytes, [bytes]);
   }
   process(inputs) {
     if (this.stopped) return false;
@@ -46,9 +51,9 @@ class DictationPCM extends AudioWorkletProcessor {
         this.sum += value * used; this.remaining -= used; weight -= used;
         if (this.remaining < 1e-8) {
           const normalized = Math.max(-1, Math.min(1, this.sum / this.ratio));
-          this.samples.push(Math.round(normalized * (normalized < 0 ? 32768 : 32767)));
+          this.view.setInt16(this.sampleCount++ * 2, Math.round(normalized * (normalized < 0 ? 32768 : 32767)), true);
           this.sum = 0; this.remaining = this.ratio;
-          if (this.samples.length >= 1600) { this.flush(); if (this.stopped) return false; }
+          if (this.sampleCount >= this.chunkSamples) { this.flush(); if (this.stopped) return false; }
         }
       }
     }

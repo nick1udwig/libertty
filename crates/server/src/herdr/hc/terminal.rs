@@ -39,6 +39,7 @@ impl crate::input_coordinator::RecordingTarget for Recording {
         text: String,
         phrases: Value,
     ) -> Result<(), String> {
+        let text = crate::dictation_text::terminal(text);
         if !self.input.lock().unwrap().current(&id, serial) {
             return Err(Self::CHANGED.into());
         }

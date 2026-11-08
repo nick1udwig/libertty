@@ -1,5 +1,7 @@
 import { dictationLayout, dictationLevel } from './dictation-layout.ts';
 
+export type DictationPhase = 'idle' | 'starting' | 'recording' | 'finishing' | 'retry';
+
 export class DictationView {
   button = document.createElement('button');
   cancel = document.createElement('button');
@@ -58,6 +60,63 @@ export class DictationView {
     window.addEventListener('resize', () => this.layout());
     this.layout();
   }
+  bind(actions: { active(): boolean; start(): Promise<void>; finish(): void; cancel(): void }) {
+    this.cancel.onclick = () => actions.cancel();
+    let press:
+      | {
+          x: number;
+          y: number;
+          left: number;
+          top: number;
+          at: number;
+          active: boolean;
+          dragged: boolean;
+        }
+      | undefined;
+    this.button.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      this.button.setPointerCapture(event.pointerId);
+      const bounds = this.button.getBoundingClientRect();
+      press = {
+        x: event.clientX,
+        y: event.clientY,
+        left: bounds.left,
+        top: bounds.top,
+        at: performance.now(),
+        active: actions.active(),
+        dragged: false,
+      };
+      if (!actions.active()) void actions.start();
+    });
+    this.button.addEventListener('pointermove', (event) => {
+      if (!press) return;
+      const dx = event.clientX - press.x,
+        dy = event.clientY - press.y;
+      if (!press.dragged && Math.hypot(dx, dy) < 8) return;
+      if (!press.dragged && !press.active) actions.cancel();
+      press.dragged = true;
+      this.position(press.left + dx, press.top + dy);
+    });
+    this.button.addEventListener('pointerup', () => {
+      if (!press) return;
+      if (!press.dragged && (press.active || performance.now() - press.at >= 300)) actions.finish();
+      if (press.dragged) this.remember();
+      press = undefined;
+    });
+    // Android can cancel the touch when the screen locks. Keep the recording active;
+    // a later tap or the cancel button still lets the user finish or discard it.
+    this.button.addEventListener('pointercancel', () => {
+      if (press?.dragged) this.remember();
+      press = undefined;
+    });
+    this.button.addEventListener('click', (event) => {
+      if (event.detail === 0) {
+        if (!actions.active()) void actions.start();
+        else actions.finish();
+      }
+    });
+  }
   private bounds() {
     // The terminal iframe already excludes the workspace header/system insets.
     const width = window.visualViewport?.width || innerWidth;
@@ -96,7 +155,7 @@ export class DictationView {
       localStorage.setItem('libertty.micPositionFraction', JSON.stringify(this.fraction));
     } catch {}
   }
-  update(phase: string, visible: boolean, paused = false) {
+  update(phase: DictationPhase, visible: boolean, paused = false) {
     const expanded = phase !== 'idle';
     this.waiting = phase === 'finishing' || phase === 'retry';
     this.button.hidden = !visible;

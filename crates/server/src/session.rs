@@ -1560,6 +1560,7 @@ impl crate::input_coordinator::RecordingTarget for Session {
         text: String,
         phrases: Value,
     ) -> Result<(), String> {
+        let text = crate::dictation_text::terminal(text);
         let session = self.clone();
         let LineGuard {
             prompt,

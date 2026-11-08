@@ -94,3 +94,39 @@ test('flushing releases capture resources while encoded audio remains available 
     assert.deepEqual(sent, [encoded]);
   }
 });
+
+test('negotiated sample limits trim the last chunk and finish without exceeding duration', async t => {
+  const env = environment(t);
+  let count = 0, finishes = 0;
+  const capture = new DictationCapture({ ...events(), level: pcm => count += pcm.byteLength / 2, finish: () => finishes++ });
+  t.after(() => capture.dispose());
+  await capture.start();
+  capture.limit(100);
+  env.processor.port.onmessage?.({ data: new ArrayBuffer(3200) });
+  assert.equal(count, 100);
+  assert.equal(finishes, 1);
+  env.processor.port.onmessage?.({ data: new ArrayBuffer(3200) });
+  assert.equal(count, 100);
+  assert.throws(() => capture.limit(99), /duration/);
+});
+
+test('capture transfers an unclipped PCM buffer after reading its level', async t => {
+  const env = environment(t), pcm = new ArrayBuffer(3200);
+  new DataView(pcm).setInt16(0, 1234, true);
+  let levelRead = false;
+  const capture = new DictationCapture({ ...events(), level: value => {
+    assert.equal(value, pcm);
+    assert.equal(new DataView(value).getInt16(0, true), 1234);
+    levelRead = true;
+  } });
+  t.after(() => capture.dispose());
+  await capture.start();
+  env.worker.postMessage = (data: any) => {
+    assert.equal(levelRead, true);
+    assert.equal(data.pcm, pcm);
+    const delivered = structuredClone(data, { transfer: [data.pcm] });
+    assert.equal(new DataView(delivered.pcm).getInt16(0, true), 1234);
+  };
+  env.processor.port.onmessage?.({ data: pcm });
+  assert.equal(pcm.byteLength, 0);
+});

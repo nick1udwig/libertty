@@ -9,6 +9,7 @@ import { quickTests } from './quick-tests.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const start = performance.now();
+execFileSync(process.execPath, ['scripts/dictation-profile.mjs', '--check'], { cwd: root, stdio: 'inherit' });
 const list = args => execFileSync('git', ['ls-files', '-z', ...args], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean);
 const deleted = new Set(list(['--deleted']));
 const files = list(['--cached', '--others', '--exclude-standard']).filter(file => !deleted.has(file));

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createDecoder, getPacketInfo } from 'libopus-wasm';
 import { DictationEncoder } from '../src/dictation-encoder.ts';
-import { MAX_OPUS_BYTES, opusFrame, parseOpusFrame } from '../src/voxtype-audio.ts';
+import { MAX_OPUS_BYTES, opusFrame, parseOpusFrame, validateOpusFrame } from '../src/voxtype-audio.ts';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
 
@@ -56,7 +56,7 @@ test('Opus framing rejects legacy PCM, gaps in headers, truncation and trailing 
   const valid = new Uint8Array(opusFrame(0, [new Uint8Array([1, 2, 3])], 312, 1));
   const malformed: Uint8Array[] = [valid.subarray(0, valid.length - 1), new Uint8Array([...valid, 0])];
   for (const [offset, value] of [[8, 2], [9, 7], [16, 6], [11, 1]]) { const bytes = valid.slice(); bytes[offset] = value; malformed.push(bytes); }
-  for (const bytes of malformed) assert.throws(() => parseOpusFrame(bytes));
+  for (const bytes of malformed) { assert.throws(() => parseOpusFrame(bytes)); assert.throws(() => validateOpusFrame(bytes)); }
   assert.throws(() => opusFrame(1, [], 0));
   assert.ok(MAX_OPUS_BYTES < 16000 * 2 * 300);
 });
@@ -72,4 +72,15 @@ test('capture fails explicitly when its eight-chunk encoder handoff is full', ()
   assert.equal(messages.filter(value => typeof value?.byteLength === 'number').length, 8);
   assert.equal(messages.filter(value => value?.type === 'error').length, 1);
   assert.equal(processor.stopped, true);
+});
+
+test('metadata validation respects byte offsets and packet parsing borrows the original buffer', () => {
+  const encoded = new Uint8Array(opusFrame(0, [new Uint8Array([1, 2]), new Uint8Array([3])], 312, 320));
+  const storage = new Uint8Array(encoded.length + 7); storage.set(encoded, 4);
+  const bytes = storage.subarray(4, 4 + encoded.length);
+  const { packets, ...header } = parseOpusFrame(bytes);
+  assert.deepEqual(validateOpusFrame(bytes), header);
+  assert.deepEqual(packets.map(packet => [...packet]), [[1, 2], [3]]);
+  assert.ok(packets.every(packet => packet.buffer === storage.buffer));
+  assert.equal(packets[0].byteOffset, 23);
 });

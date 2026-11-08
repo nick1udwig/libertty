@@ -31,7 +31,7 @@ export type CreatedSession = { id: string, name: string, state: ShellState, };
 
 export type DictationAction = "start" | "finish" | "cancel";
 
-export type DictationCheckpoint = { acceptedFrames: number, finished: boolean, };
+export type DictationCheckpoint = { acceptedFrames: number, finished: boolean, uploadWindow: number, maxSamples: number, maxEncodedBytes: number, };
 
 export type DictationRequest = { id: string, action: DictationAction, prompt?: number, revision?: number, target?: DictationTarget, readingPhrases?: string[], };
 
@@ -128,6 +128,7 @@ export type ServerMessage = { "type": "pong" }
   | { "type": "transfer", request: TransferRequest, }
   | { "type": "pasted", text: string, replace: boolean, prompt: number, revision: number, source?: DictationSource, repairing?: boolean, }
   | { "type": "dictation", resume?: DictationCheckpoint, id: string, state: DictationState, message?: string, }
+  | { "type": "dictation-progress", id: string, forwardedFrames: number, }
   | { "type": "reading-file", path: string, }
   | { "type": "reading-capture" } & ReadingCapture
   | { "type": "reading-error", message: string, }

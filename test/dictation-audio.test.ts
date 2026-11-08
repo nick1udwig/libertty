@@ -36,3 +36,61 @@ test('retained audio remains bounded to the negotiated two MiB recording limit',
     audio.append(value); bytes += value.byteLength; sequence++;
   }
 });
+
+test('negotiated byte limits reject oversized replay without discarding retained frames', () => {
+  const audio = new DictationAudio(), bytes = frame(0, true);
+  audio.append(bytes);
+  for (const invalid of [0, 16, Infinity, MAX_OPUS_BYTES + 1]) assert.throws(() => audio.limit(invalid), /limit/);
+  assert.throws(() => audio.limit(bytes.byteLength - 1), /limit/);
+  audio.limit(bytes.byteLength);
+  assert.equal(audio.upload(value => { assert.equal(value, bytes); return true; }), true);
+  audio.clear(); audio.append(bytes);
+});
+
+test('a negotiated upload limit leaves complete audio available for a later retry', () => {
+  const audio = new DictationAudio(), first = frame(0), last = frame(1, true);
+  audio.limit(first.byteLength);
+  audio.append(first); audio.append(last);
+  assert.throws(() => audio.upload(() => assert.fail('Oversized recordings must not upload')), /daemon audio limit/);
+  audio.limit(MAX_OPUS_BYTES); audio.resume();
+  const sent: ArrayBuffer[] = [];
+  assert.equal(audio.upload(bytes => { sent.push(bytes); return true; }), true);
+  assert.deepEqual(sent, [first, last]);
+});
+
+test('upload credits bound replay and completion waits for all forwarded frames', () => {
+  const audio = new DictationAudio();
+  for (let i = 0; i < 40; i++) audio.append(frame(i, i === 39));
+  audio.resume(0, false, 3);
+  const sent: number[] = [];
+  const send = (bytes: ArrayBuffer) => { sent.push(parseOpusFrame(new Uint8Array(bytes)).sequence); return true; };
+  assert.equal(audio.upload(send), false);
+  assert.deepEqual(sent, [0, 1, 2]);
+  assert.equal(audio.waitingForCredit, true);
+  assert.equal(audio.upload(send), false);
+  assert.equal(sent.length, 3);
+  for (let forwarded = 1; forwarded <= 40; forwarded++) {
+    audio.acknowledge(forwarded);
+    assert.equal(audio.upload(send), forwarded === 40);
+    assert.ok(sent.length - forwarded <= 3);
+  }
+  assert.equal(sent.length, 40);
+  assert.throws(() => audio.acknowledge(41), /acknowledgement/);
+  audio.resume(7, false, 2);
+  assert.equal(audio.upload(send), false);
+  assert.deepEqual(sent.slice(-2), [7, 8]);
+  assert.throws(() => audio.acknowledge(40), /acknowledgement/);
+});
+
+test('socket backpressure preserves credits and invalid windows cannot start an upload', () => {
+  const audio = new DictationAudio(); audio.append(frame(0, true));
+  for (const value of [0, -1, 0.5, Infinity, 65]) assert.throws(() => audio.resume(0, false, value), /checkpoint/);
+  audio.resume(0, false, 1);
+  assert.equal(audio.upload(() => false), false);
+  assert.equal(audio.waitingForCredit, false);
+  assert.throws(() => audio.acknowledge(1), /acknowledgement/);
+  assert.equal(audio.upload(() => true), false);
+  assert.equal(audio.waitingForCredit, true);
+  audio.acknowledge(1);
+  assert.equal(audio.upload(() => assert.fail('Already forwarded')), true);
+});

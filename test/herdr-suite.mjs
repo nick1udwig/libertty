@@ -25,7 +25,7 @@ await once(daemon, 'listening'); await writeFile(fixture.directory + '/voice-tok
 let voiceBytes = 0, voiceAcks = 0;
 daemon.on('connection', (socket, request) => {
   assert.equal(request.headers.authorization, 'Bearer ' + voiceToken);
-  if (request.url === '/v1/capabilities') { socket.send(JSON.stringify({ type: 'capabilities', protocol: 2, dictation: true, sample_rate: 16000, channels: 1, format: 'opus', framing: 'sequence_opus_v1', audio_encodings: ['opus_v1'], results: ['final'] })); return; }
+  if (request.url === '/v1/capabilities') { socket.send(JSON.stringify({ type: 'capabilities', protocol: 2, dictation: true, resume: true, sample_rate: 16000, channels: 1, format: 'opus', framing: 'sequence_opus_v1', audio_encodings: ['opus_v1'], results: ['final'] })); return; }
   socket.send(JSON.stringify({ type: 'ready', protocol: 2, sample_rate: 16000, channels: 1, format: 'opus', audio_encoding: 'opus_v1', framing: 'sequence_opus_v1', max_seconds: 300, max_encoded_bytes: 2097152, resume: true, accepted_frames: 0, finished: false }));
   socket.on('message', (bytes, binary) => {
     if (binary) voiceBytes += bytes.length;

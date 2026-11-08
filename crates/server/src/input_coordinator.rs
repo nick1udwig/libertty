@@ -2,7 +2,7 @@
 use crate::{
     alternatives::{self, Prepared},
     dictation::Recording,
-    protocol::Repair,
+    protocol::{DictationState, Repair},
 };
 use libertty_engine::types::Candidate;
 use serde_json::Value;
@@ -134,28 +134,50 @@ pub(crate) fn recording<T: RecordingTarget>(
         }) as futures::future::BoxFuture<'static, Result<(), String>>
     });
     let weak = Arc::downgrade(target);
+    let progress_guard = guard.clone();
+    let progress_id = id.clone();
+    let progress = Arc::new(move |forwarded_frames| {
+        if let Some(target) = weak.upgrade() {
+            target.recording_status(
+                &progress_guard,
+                &progress_id,
+                serial,
+                DictationState::Ready,
+                crate::protocol::ServerMessage::DictationProgress {
+                    id: progress_id.clone(),
+                    forwarded_frames,
+                },
+            );
+        }
+    });
+    let weak = Arc::downgrade(target);
     let emit = Arc::new(
-        move |state: &str,
+        move |state: DictationState,
               message: Option<String>,
               resume: Option<crate::dictation::Checkpoint>| {
             if let Some(target) = weak.upgrade() {
-                let Some(status) = crate::protocol::DictationState::from_name(state) else {
-                    return;
-                };
                 let reply = crate::protocol::ServerMessage::Dictation {
                     resume,
                     id: id.clone(),
-                    state: status,
+                    state,
                     message,
                 };
-                target.recording_status(&guard, &id, serial, status, reply);
+                target.recording_status(&guard, &id, serial, state, reply);
             }
         },
     );
     let ready = emit.clone();
-    let status = Arc::new(move |state: &str, message: Option<String>| emit(state, message, None));
-    let ready = Arc::new(move |checkpoint| ready("ready", None, Some(checkpoint)));
-    Recording::start_resumable(std::env::vars().collect(), session, result, status, ready)
+    let status =
+        Arc::new(move |state: DictationState, message: Option<String>| emit(state, message, None));
+    let ready = Arc::new(move |checkpoint| ready(DictationState::Ready, None, Some(checkpoint)));
+    Recording::start_resumable(
+        std::env::vars().collect(),
+        session,
+        result,
+        status,
+        ready,
+        progress,
+    )
 }
 
 #[cfg(test)]

@@ -17,23 +17,13 @@ pub enum EngineMode {
 pub enum DictationSource {
     Dictation,
 }
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum DictationState {
     Ready,
     Done,
     Error,
-}
-impl DictationState {
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "ready" => Some(Self::Ready),
-            "done" => Some(Self::Done),
-            "error" => Some(Self::Error),
-            _ => None,
-        }
-    }
 }
 /// Where dictated text goes: the shell prompt or a running program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +91,10 @@ pub enum ServerMessage {
         state: DictationState,
         #[serde(skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+    },
+    DictationProgress {
+        id: String,
+        forwarded_frames: u64,
     },
     ReadingFile {
         path: String,

@@ -5,6 +5,8 @@ pub mod completion;
 pub mod context;
 mod dev;
 pub mod dictation;
+mod dictation_profile;
+mod dictation_text;
 pub mod directories;
 pub mod engine;
 pub mod facts;
@@ -43,3 +45,5 @@ pub mod uploads;
 pub mod vault;
 pub mod viewer_queue;
 pub mod wire;
+
+mod voxtype;

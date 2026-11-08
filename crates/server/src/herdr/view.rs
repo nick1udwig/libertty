@@ -1290,6 +1290,7 @@ impl crate::input_coordinator::RecordingTarget for View {
         text: String,
         phrases: Value,
     ) -> Result<(), String> {
+        let text = crate::dictation_text::terminal(text);
         let DictationGuard {
             prompt,
             revision,
