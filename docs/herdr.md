@@ -245,6 +245,7 @@ The backend uses `herdr-client-lib` over `hc connect`, including over the existi
 The pinned library source and its licenses are in `vendor/herdr-client-lib`.
 
 Herdr Core reuses the Herdr space strip, agent status, dialogs, notifications, reader, microphone, terminal renderer, and tab lifecycle.
+The strip's **+** creates a separate space tab in the selected pane's current directory, including when that checkout already has an open space.
 It stores shared spaces, tabs, and panes in the `herdr-app` document through version-checked library operations.
 The browser retains its own selected pane and attention state.
 The selected repository chip shows its directory above the current branch or custom space name, including with one open checkout.
