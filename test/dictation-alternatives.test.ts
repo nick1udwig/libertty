@@ -28,10 +28,10 @@ test('backend dictation uses the same top-hit and original/alternate flow withou
   assert.deepEqual(f.replacements, [], 'The backend already applied its top hit');
   assert.deepEqual(f.input, []); assert.deepEqual(f.executed, []);
   assert.equal(f.inline.literal, 'Get in it.'); assert.equal(f.inline.selected, 'git init');
-  assert.deepEqual(f.inline.choices, ['git init']); assert.equal(f.inline.open, true);
-  await f.inline.choose('Get in it.');
+  assert.deepEqual(f.inline.choices.filter((choice: any) => !choice.literal).map((choice: any) => choice.text), ['git init']); assert.equal(f.inline.open, true);
+  await f.inline.choose('original');
   assert.deepEqual(f.replacements, ['Get in it.']);
-  f.inline.tapToSend = true; await f.inline.choose('git init');
+  f.inline.tapToSend = true; await f.inline.choose('choice-0');
   assert.deepEqual(f.executed, ['git init']);
 });
 
@@ -140,7 +140,20 @@ test('backend action metadata remains authoritative after reading preferences ch
   f.inline.backendResult({...repaired('look at readme', 'look at README.md'), actions: {
     'look at README.md': {kind: 'reading-file', phrase: 'look at', operand: 'README.md'},
   }});
-  await f.inline.choose('look at README.md');
+  await f.inline.choose('choice-0');
   assert.deepEqual(f.executed, ['look at README.md']);
   assert.deepEqual(f.replacements, []);
+});
+
+
+test('typed choices keep their action when display text and preferences differ', async () => {
+  const f = fixture();
+  f.inline.phrases = ['inspect'];
+  f.inline.backendResult({...repaired('original', 'label'), choices: [
+    {id: 'read-file', text: 'label', action: {kind: 'reading-file', phrase: 'look at', operand: "'a b'"}, literal: false},
+  ]});
+  await f.inline.choose('missing');
+  assert.deepEqual(f.executed, []);
+  await f.inline.choose('read-file');
+  assert.deepEqual(f.executed, ["look at 'a b'"]);
 });

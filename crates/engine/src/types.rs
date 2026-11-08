@@ -223,6 +223,19 @@ impl Evidence {
             unresolved: 0,
         }
     }
+    pub fn compound(&self, other: &Self) -> Self {
+        Self {
+            source: CandidateSource::Compound,
+            confidence: self.confidence.min(other.confidence),
+            validated: false,
+            resolved: self.resolved && other.resolved,
+            unresolved: self.unresolved.saturating_add(other.unresolved),
+        }
+    }
+
+    pub fn penalize(&mut self, amount: f64) {
+        self.confidence = (self.confidence - amount.max(0.0)).clamp(0.0, 100.0);
+    }
 }
 /// Semantic change kinds serialize to the existing user-facing explanation strings.
 #[derive(Debug, Clone, PartialEq)]
@@ -475,4 +488,95 @@ pub struct DirectoryLookup {
         skip_serializing_if = "Option::is_none"
     )]
     pub listing: Option<DirectorySnapshot>,
+}
+
+#[cfg(test)]
+mod evidence_tests {
+    use super::*;
+
+    #[test]
+    fn compound_evidence_preserves_uncertainty_and_requires_its_own_validation() {
+        let left = Evidence {
+            source: CandidateSource::History,
+            confidence: 90.0,
+            validated: true,
+            resolved: false,
+            unresolved: 2,
+        };
+        let right = Evidence {
+            confidence: 80.0,
+            validated: true,
+            unresolved: 1,
+            ..Evidence::default()
+        };
+        let combined = left.compound(&right);
+        assert_eq!(
+            combined,
+            Evidence {
+                source: CandidateSource::Compound,
+                confidence: 80.0,
+                validated: false,
+                resolved: false,
+                unresolved: 3,
+            }
+        );
+        assert_eq!(combined, right.compound(&left));
+        assert!(
+            !Evidence::new(CandidateSource::Literal, 100.0)
+                .compound(&right)
+                .resolved
+        );
+    }
+
+    #[test]
+    fn compound_grouping_preserves_evidence_and_unresolved_counts_do_not_overflow() {
+        let a = Evidence {
+            confidence: 70.0,
+            unresolved: 1,
+            ..Evidence::default()
+        };
+        let b = Evidence {
+            confidence: 90.0,
+            resolved: false,
+            unresolved: 2,
+            ..Evidence::default()
+        };
+        let c = Evidence {
+            confidence: 80.0,
+            unresolved: usize::MAX,
+            ..Evidence::default()
+        };
+        assert_eq!(a.compound(&b).compound(&c), a.compound(&b.compound(&c)));
+        assert_eq!(a.compound(&c).unresolved, usize::MAX);
+    }
+
+    #[test]
+    fn penalties_reduce_only_confidence_within_its_bounds() {
+        let mut evidence = Evidence {
+            source: CandidateSource::Path,
+            confidence: 80.0,
+            validated: true,
+            resolved: false,
+            unresolved: 2,
+        };
+        let original = evidence.clone();
+        evidence.penalize(12.0);
+        assert_eq!(
+            evidence,
+            Evidence {
+                confidence: 68.0,
+                ..original.clone()
+            }
+        );
+        evidence.penalize(-10.0);
+        assert_eq!(evidence.confidence, 68.0);
+        evidence.penalize(1000.0);
+        assert_eq!(
+            evidence,
+            Evidence {
+                confidence: 0.0,
+                ..original
+            }
+        );
+    }
 }

@@ -108,3 +108,25 @@ fn preparation_uses_the_input_operand_and_returns_executable_action_metadata() {
         json!({"kind":"reading-file","phrase":"look at","operand":"README.md"})
     );
 }
+
+#[test]
+fn prepared_choices_keep_canonical_actions_and_exact_original_text() {
+    let text = "  look at README.md.  ";
+    let result = prepare(
+        text,
+        json!({"kind":"reading-file","phrase":"look at","operand":"ignored"}),
+    );
+    let choices = result["choices"].as_array().unwrap();
+    let original = choices
+        .iter()
+        .find(|choice| choice["id"] == "original")
+        .unwrap();
+    assert_eq!(original["text"], text);
+    assert_eq!(original["action"]["operand"], "README.md");
+    assert_eq!(original["literal"], true);
+    assert!(
+        choices
+            .iter()
+            .all(|choice| choice["action"]["kind"] == "reading-file")
+    );
+}

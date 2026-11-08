@@ -567,6 +567,11 @@ try {
       assert.equal((await readFile(path.join(fixture, '.git', 'HEAD'), 'utf8')).trim(), 'ref: refs/heads/feat/elixir-worker');
       before = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, before);
     }
+    await command(page, 'git branch feat/better-dictation');
+    await dictate(page, 'Get push dash u origin feet slash better dash dictation');
+    await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'git push -u origin feat/better-dictation');
+    assert.ok((await page.locator('.alternative-choice .choice-command').allTextContents()).includes('Get push dash u origin feet slash better dash dictation'));
+    before = await shellPrompt(page); await page.keyboard.press('Control+c'); await ready(page, before);
     await command(page, 'git branch feat/elegance-6; git branch master');
     await dictate(page, 'Git push dash u origin master feet slash elegance dash six');
     await page.waitForFunction(() => document.querySelector('.alternative-choice.selected .choice-command')?.textContent === 'git push -u origin master feat/elegance-6');

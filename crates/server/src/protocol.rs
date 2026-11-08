@@ -209,6 +209,7 @@ impl RepairReply {
                 original: text.clone(),
                 selected: text,
                 candidates: vec![],
+                choices: vec![],
                 actions: None,
             },
             error: None,
