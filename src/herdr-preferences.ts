@@ -4,6 +4,7 @@ export interface Preferences {
   order: string[];
   spaceOrder?: string[];
   spaceGroups?: string[][];
+  separateSpaces?: string[];
   collapsedGroups?: string[];
   collapsedLanes?: HerdrLane[];
   spaceTerminals?: Record<string, string>;
@@ -29,6 +30,7 @@ export function decodePreferences(value: unknown): Preferences {
   return {
     order: strings(input.order),
     spaceOrder: strings(input.spaceOrder),
+    separateSpaces: strings(input.separateSpaces),
     spaceGroups: Array.isArray(input.spaceGroups)
       ? input.spaceGroups.map(strings).filter((group) => group.length)
       : [],

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spaceLayout, dropSpace, spaceTerminal, worktreePath, spaceRepos, repoSpace, repoTap, triageSpace } from '../src/herdr-spaces.ts';
+import { decodePreferences } from '../src/herdr-preferences.ts';
 
 test('worktrees group under their repository root while other spaces stand alone', () => {
   const space = (id: string, extra = {}) => ({ id, name: id, terminalIds: [id + ':pane'], cwd: '', ...extra });
@@ -19,6 +20,32 @@ test('worktrees group under their repository root while other spaces stand alone
   assert.equal(repoTap(repos[0], 'root', 'fix')?.space.id, 'main');
   assert.equal(repoTap(repos[0], 'tree', 'fix'), undefined, 'The tree setting leaves the choice to the tree');
   assert.equal(repoTap(repos[1], 'tree')?.space.id, 'notes', 'A lone space opens directly in every mode');
+});
+
+test('repeated spaces in a checkout keep separate tabs from its root and worktrees', () => {
+  const space = (id: string, checkoutPath: string, linkedWorktree = false) => ({ id, name: id, terminalIds: [id + ':pane'], cwd: checkoutPath + '/nested', repoKey: '/repo', repoName: 'repo', checkoutPath, linkedWorktree });
+  const spaces = [space('main', '/repo'), space('second', '/repo'), space('third', '/repo'), space('review', '/review', true), space('review-copy', '/review', true)];
+  const repos = spaceRepos(spaces);
+  assert.deepEqual(repos.map(repo => [repo.id, repo.spaces.map(space => space.id)]), [
+    ['repo:/repo', ['main', 'review']],
+    ['space:second', ['second']],
+    ['space:third', ['third']],
+    ['space:review-copy', ['review-copy']],
+  ]);
+  assert.ok(repos.every(repo => repo.git && repo.name === 'repo'), 'Separate tabs retain repository actions and labels');
+  assert.equal(repoTap(repos[1], 'tree')?.space.id, 'second', 'A repeated space opens its own pane directly');
+});
+
+test('Core spaces created with plus stay separate as their checkout changes or other spaces close', () => {
+  const space = (id: string, checkoutPath: string) => ({ id, name: id, terminalIds: [id + ':pane'], cwd: checkoutPath, repoKey: '/repo', repoName: 'repo', checkoutPath, linkedWorktree: checkoutPath !== '/repo' });
+  const preferences = decodePreferences(JSON.parse(JSON.stringify({ separateSpaces: ['new', 'new', null] })));
+  assert.deepEqual(preferences.separateSpaces, ['new']);
+  for (const path of ['/repo', '/review']) {
+    const repos = spaceRepos([space('main', '/repo'), space('new', path)], preferences.separateSpaces);
+    assert.deepEqual(repos.map(repo => repo.spaces.map(space => space.id)), [['main'], ['new']]);
+    assert.equal(repos[1].id, 'space:new');
+  }
+  assert.equal(spaceRepos([space('new', '/repo')], preferences.separateSpaces)[0].id, 'space:new');
 });
 
 test('triage opens the checkout that has waited longest in the most urgent state', () => {
