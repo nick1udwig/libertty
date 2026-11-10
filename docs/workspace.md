@@ -4,7 +4,13 @@ The workspace is terminal-first, with saved direct and SSH hosts, backend select
 
 ## Runtime boundaries
 
-`src/main.ts` wires workspace services, backend authentication and startup.
+`ui/app.contract` defines the workspace shell, forms, tabs, menus, host cards, settings and shortcut controls.
+`src/exact.ts` starts the compiled Exact view before `src/main.ts` wires browser services, backend authentication and startup.
+`src/exact-model.ts` sends typed view records through `ui/bridge.js` to Exact resources.
+The browser adapter preserves HTML form submission, validation, labels and the existing theme styles.
+Terminal rendering and plugin surfaces keep their browser integration.
+Exact is pinned by commit in `build/exact.json`, and its compiler output stays under `target/`.
+`npm run build:exact` rebuilds the UI, and the development server rebuilds it after edits in `ui/`.
 `workspace-storage.ts` validates saved profiles and tabs, while the connection, settings, library and navigation modules own their respective UI flows.
 These modules share one live workspace state so replacing saved hosts, backends or tabs is visible to pending actions.
 `terminal-lifecycle.ts` owns connection progress, visibility policy and timers for hidden tabs and parked panes.

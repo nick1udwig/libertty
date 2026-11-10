@@ -1,3 +1,4 @@
+import { renderWorkspaceBackups } from './exact-model.ts';
 import type { WorkspaceServices } from './workspace-storage.ts';
 import { $, input, select, dialog } from './dom.ts';
 import type { BackendProfile, KeyInfo } from './connections.ts';
@@ -125,25 +126,19 @@ export function vaultUI(services: VaultServices) {
       restore:
         'Unlock the backend copy and save it encrypted in this browser. The backend copy will remain as a backup.',
     }[mode];
-    $('backup-devices').replaceChildren();
-    if (mode === 'backup')
-      for (const backend of services.backends()) {
-        const label = document.createElement('label');
-        label.className = 'toggle';
-        const check = document.createElement('input');
-        check.type = 'checkbox';
-        check.value = backend.id;
-        const exists =
-          'backups' in keyDetail.key &&
-          keyDetail.key.backups.some((b) => b.backendURL === backend.url);
-        label.append(
-          check,
-          document.createTextNode(
-            backend.name + ' · ' + backend.url + (exists ? ' (refresh backup)' : ''),
-          ),
-        );
-        $('backup-devices').append(label);
-      }
+    renderWorkspaceBackups(
+      mode !== 'backup'
+        ? []
+        : services.backends().map((backend) => {
+            const exists =
+              'backups' in keyDetail!.key &&
+              keyDetail!.key.backups.some((backup) => backup.backendURL === backend.url);
+            return {
+              id: backend.id,
+              label: backend.name + ' · ' + backend.url + (exists ? ' (refresh backup)' : ''),
+            };
+          }),
+    );
     $('key-transfer-submit').textContent =
       mode === 'backup'
         ? 'Back up selected devices'

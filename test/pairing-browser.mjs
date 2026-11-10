@@ -37,9 +37,10 @@ try {
   await page.waitForFunction(() => document.querySelector('#login-error').textContent.includes('pairing token'));
   await input.fill('dev-test-pairing-token-123456789'); await submit.click();
   await page.locator('#terminal-stack iframe').waitFor();
+  await page.frameLocator('#terminal-stack iframe').locator('#connection-label').waitFor({ state: 'attached' });
   const frame = await (await page.locator('#terminal-stack iframe').elementHandle()).contentFrame();
-  await frame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected');
-  await frame.waitForFunction(() => document.querySelector('#shell-status')?.textContent === 'At prompt');
+  await frame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected', undefined, { polling: 50 });
+  await frame.waitForFunction(() => document.querySelector('#shell-status')?.textContent === 'At prompt', undefined, { polling: 50 });
   await frame.locator('#terminal .terminal-background').click();
   assert.equal(await frame.locator('#terminal textarea').evaluate(el => el === document.activeElement && !el.readOnly), true, 'Clicking the terminal must enable input');
   await page.keyboard.type('printf dev-paired > checked.txt'); await page.keyboard.press('Enter');
@@ -54,8 +55,9 @@ try {
   saved.cookies = [];
   const reopened = await browser.newContext({ storageState: saved }), reopenedPage = await reopened.newPage();
   await reopenedPage.goto(base); await reopenedPage.locator('#terminal-stack iframe').waitFor();
+  await reopenedPage.frameLocator('#terminal-stack iframe').locator('#connection-label').waitFor({ state: 'attached' });
   const reopenedFrame = await (await reopenedPage.locator('#terminal-stack iframe').elementHandle()).contentFrame();
-  await reopenedFrame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected');
+  await reopenedFrame.waitForFunction(() => document.querySelector('#connection-label')?.textContent === 'Connected', undefined, { polling: 50 });
   await reopened.close();
   console.log('PASS ' + ('Rust') + ' development browser: mounted pairing gate, protected development assets, incorrect-token rejection, connected terminal, remembered pairing without cookies, authenticated Vite HMR');
 } finally { await browser?.close(); server.kill('SIGTERM'); await exited; await rm(directory, { recursive: true, force: true }); }

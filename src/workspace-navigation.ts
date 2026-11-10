@@ -1,8 +1,13 @@
+import {
+  renderWorkspaceTabs,
+  clearWorkspaceHostMenu,
+  addWorkspaceHostAction,
+  renderWorkspaceShortcuts as publishShortcuts,
+} from './exact-model.ts';
 import type { MountedTabs } from './mounted-tabs.ts';
 import { builtinState } from './builtin-state.ts';
 import { terminalMessage, sendToTerminal } from './frame-protocol.ts';
 import { terminalRenderers } from './renderer-cache.ts';
-import { closeIcon } from './icons.ts';
 import { type BackendProfile, type HostProfile, type TerminalTab } from './connections.ts';
 import { $, button, input, select } from './dom.ts';
 import { herdrName } from './herdr-protocol.ts';
@@ -185,12 +190,7 @@ export function createWorkspaceNavigation(options: Options) {
     const index = peers.indexOf(tab);
     return index > 0 ? `${tab.name} (${index + 1})` : tab.name;
   }
-  const hostMenu = document.createElement('div');
-  hostMenu.id = 'host-terminal-menu';
-  hostMenu.className = 'host-terminal-menu';
-  hostMenu.role = 'menu';
-  hostMenu.hidden = true;
-  document.body.append(hostMenu);
+  const hostMenu = $<HTMLDivElement>('host-terminal-menu');
   let menuAnchor: HTMLButtonElement | undefined;
   function closeHostMenu(focus = false) {
     hostMenu.hidden = true;
@@ -206,23 +206,21 @@ export function createWorkspaceNavigation(options: Options) {
     closeHostMenu();
     menuAnchor = anchor;
     anchor.setAttribute('aria-expanded', 'true');
-    hostMenu.replaceChildren();
+    clearWorkspaceHostMenu();
     hostMenu.setAttribute('aria-label', host.name + ' terminals');
     const item = (label: string, action: () => void) => {
-      const control = button(label, () => {
+      const control = addWorkspaceHostAction(label);
+      control.onclick = () => {
         closeHostMenu();
         action();
-      });
-      control.role = 'menuitem';
-      control.setAttribute('aria-label', label);
-      hostMenu.append(control);
+      };
       return control;
     };
     for (const plugin of plugins.actions(host))
       item(plugin.connectLabel, () => void plugin.connect(host).catch(fail));
     const open = hostTabs(host);
     if (open.length) {
-      hostMenu.append(document.createElement('hr'));
+      addWorkspaceHostAction('', true);
       for (const tab of open) {
         const control = item(tabLabel(tab), () => activate(tab.id));
         if (tab.id === workspace.active) {
@@ -231,7 +229,7 @@ export function createWorkspaceNavigation(options: Options) {
         }
       }
     }
-    hostMenu.append(document.createElement('hr'));
+    addWorkspaceHostAction('', true);
     item('Edit host', () => editHost(host));
     hostMenu.hidden = false;
     const rect = anchor.getBoundingClientRect(),
@@ -248,11 +246,7 @@ export function createWorkspaceNavigation(options: Options) {
   }
   menuEvents(hostMenu, () => menuAnchor, closeHostMenu);
   $('library-content').addEventListener('scroll', () => closeHostMenu(), { passive: true });
-  const tabMenu = document.createElement('div');
-  tabMenu.className = 'host-terminal-menu';
-  tabMenu.role = 'menu';
-  tabMenu.hidden = true;
-  document.body.append(tabMenu);
+  const tabMenu = $('workspace-tab-menu');
   let tabMenuAnchor: HTMLElement | undefined;
   function closeTabMenu(focus = false) {
     tabMenu.hidden = true;
@@ -261,18 +255,15 @@ export function createWorkspaceNavigation(options: Options) {
   }
   function openTabMenu(tab: TerminalTab, anchor: HTMLElement) {
     tabMenuAnchor = anchor;
-    tabMenu.replaceChildren();
-    const rename = button('Rename', () => {
+    const rename = $('workspace-tab-rename');
+    rename.onclick = () => {
       closeTabMenu();
       renameTab(tab);
-    });
-    rename.role = 'menuitem';
-    const close = button('Close tab', () => {
+    };
+    $('workspace-tab-close').onclick = () => {
       closeTabMenu();
       void closeTab(tab).catch(fail);
-    });
-    close.role = 'menuitem';
-    tabMenu.append(rename, close);
+    };
     tabMenu.hidden = false;
     tabMenu.setAttribute('aria-label', tab.name + ' tab actions');
     const rect = anchor.getBoundingClientRect();
@@ -282,27 +273,12 @@ export function createWorkspaceNavigation(options: Options) {
     rename.focus({ preventScroll: true });
   }
   function renameTab(tab: TerminalTab) {
-    const modal = document.createElement('dialog'),
-      form = document.createElement('form'),
-      title = document.createElement('h2'),
-      field = document.createElement('input'),
-      error = document.createElement('p'),
-      actions = document.createElement('div');
-    title.textContent = 'Rename tab';
+    const modal = $<HTMLDialogElement>('workspace-tab-rename-dialog');
+    const form = $<HTMLFormElement>('workspace-tab-rename-form');
+    const field = input('workspace-tab-name');
+    const error = $('workspace-tab-name-error');
     field.value = tab.name;
-    field.maxLength = 100;
-    field.required = true;
-    field.setAttribute('aria-label', 'Tab name');
-    error.className = 'form-error';
-    actions.className = 'actions';
-    const cancel = button('Cancel', () => modal.close(), 'secondary'),
-      save = button('Save', () => {}, 'primary');
-    save.type = 'submit';
-    actions.append(cancel, save);
-    form.append(title, field, error, actions);
-    modal.append(form);
-    document.body.append(modal);
-    modal.onclose = () => modal.remove();
+    error.textContent = '';
     form.onsubmit = (event) => {
       event.preventDefault();
       try {
@@ -424,42 +400,50 @@ export function createWorkspaceNavigation(options: Options) {
     };
     const buttons = $('workspace-shortcut-buttons'),
       scroll = buttons.scrollLeft;
-    buttons.replaceChildren();
-    shortcuts.forEach((shortcut, index) => {
-      const control = button(
-        shortcut.label,
-        () => {
-          if (!ready || shortcutFrame()?.contentWindow !== source) return;
-          sendToTerminal(source!, {
-            type: 'terminal-shortcut',
-            index,
-            kind: shortcut.kind,
-            value: shortcut.value,
-          });
-        },
-        shortcut.kind === 'command' ? 'command-shortcut' : '',
-      );
-      control.title = shortcut.value;
-      control.disabled = !ready || (shortcut.kind === 'command' && !state?.available);
-      if (shortcut.kind === 'keys' && shortcut.value === 'Ctrl') {
-        control.dataset.modifier = '';
-        control.setAttribute('aria-pressed', String(ready && state?.ctrl));
-      }
-      control.addEventListener('pointerdown', (event) => event.preventDefault());
-      buttons.append(control);
-    });
-    const image = button(
-      'Image',
-      () => {
-        if (!ready || shortcutFrame()?.contentWindow !== source) return;
-        imageTarget = source;
-        images.click();
+    publishShortcuts([
+      ...shortcuts.map((shortcut, index) => ({
+        id: String(index),
+        label: shortcut.label,
+        title: shortcut.value,
+        className: shortcut.kind === 'command' ? 'command-shortcut' : '',
+        disabled: !ready || (shortcut.kind === 'command' && !state?.available),
+        modifier: shortcut.kind === 'keys' && shortcut.value === 'Ctrl',
+        pressed: !!(ready && state?.ctrl),
+      })),
+      {
+        id: 'image',
+        label: 'Image',
+        title: 'Attach images',
+        className: 'image-upload',
+        disabled: !ready || !state?.imageAvailable,
+        modifier: false,
+        pressed: false,
       },
-      'image-upload',
-    );
+    ]);
+    shortcuts.forEach((shortcut, index) => {
+      const control = $('workspace-shortcut-' + index);
+      control.onclick = () => {
+        if (!ready || shortcutFrame()?.contentWindow !== source) return;
+        sendToTerminal(source!, {
+          type: 'terminal-shortcut',
+          index,
+          kind: shortcut.kind,
+          value: shortcut.value,
+        });
+      };
+      control.onpointerdown = (event) => event.preventDefault();
+      if (shortcut.kind !== 'keys' || shortcut.value !== 'Ctrl') {
+        delete control.dataset.modifier;
+        control.removeAttribute('aria-pressed');
+      }
+    });
+    const image = $('workspace-shortcut-image');
     image.setAttribute('aria-label', 'Attach images');
-    image.disabled = !ready || !state?.imageAvailable;
-    buttons.append(image);
+    image.onclick = () => {
+      if (!ready || shortcutFrame()?.contentWindow !== source) return;
+      imageTarget = source;
+      images.click();
+    };
     buttons.scrollLeft = scroll;
   }
   function showTerminalLoading(id: string, waitForPrompt = false) {
@@ -472,50 +456,45 @@ export function createWorkspaceNavigation(options: Options) {
       updateTerminalLoading();
     }
   }
+  const gestureTabs = new WeakSet<HTMLElement>();
   function renderTabs() {
-    $('tabs').replaceChildren();
     const all = workspace.tabs;
+    renderWorkspaceTabs(
+      all.map((tab) => {
+        const plugin = plugins.forTab(tab);
+        return {
+          id: tab.id,
+          name: tabLabel(tab),
+          title: (tab.readPath || tabLabel(tab)) + ' · ' + backendFor(tab.backendId).name,
+          icon: plugin?.iconHTML ?? '',
+          glyph: plugin?.iconHTML ? '' : plugin?.icon || '◇',
+          className: ['tab', plugin?.className].filter(Boolean).join(' '),
+          selected: tab.id === workspace.active,
+          controls:
+            pluginViews.get(tab.id)?.element.id || (plugin?.panelPrefix || 'plugin-') + tab.id,
+          attention: attentionCounts.get(tab.id) || 0,
+          attentionLabel: plugin?.capabilities?.attentionLabel ?? '',
+        };
+      }),
+    );
     for (const tab of all) {
-      const plugin = plugins.forTab(tab);
-      const el = document.createElement('div');
-      el.className = 'tab';
-      if (plugin?.className) el.classList.add(plugin.className);
-      el.role = 'tab';
-      el.tabIndex = tab.id === workspace.active ? 0 : -1;
-      el.setAttribute('aria-selected', String(tab.id === workspace.active));
-      el.setAttribute(
-        'aria-controls',
-        pluginViews.get(tab.id)?.element.id || (plugin?.panelPrefix || 'plugin-') + tab.id,
-      );
-      el.title = (tab.readPath || tabLabel(tab)) + ' · ' + backendFor(tab.backendId).name;
-      const icon = document.createElement('span');
-      icon.className = 'tab-icon';
-      if (plugin?.iconHTML) icon.innerHTML = plugin.iconHTML;
-      else icon.textContent = plugin?.icon || '◇';
-      const name = document.createElement('span');
-      name.className = 'tab-name';
-      name.textContent = tabLabel(tab);
-      const close = button('', () => void closeTab(tab).catch(fail), 'tab-close');
-      close.innerHTML = closeIcon;
-      close.setAttribute('aria-label', 'Close ' + tab.name);
-      close.addEventListener('click', (event) => event.stopPropagation());
-      if (plugin?.capabilities?.attentionLabel) {
-        const badge = document.createElement('span');
-        badge.className = 'tab-attention';
-        badge.dataset.tab = tab.id;
-        badge.textContent = String(attentionCounts.get(tab.id) || 0);
-        badge.hidden = !attentionCounts.get(tab.id);
-        badge.setAttribute(
-          'aria-label',
-          badge.textContent + ' ' + plugin.capabilities.attentionLabel,
-        );
-        el.append(icon, name, badge, close);
-      } else el.append(icon, name, close);
-      tabGestures(el, {
-        select: () => activate(tab.id),
-        hold: () => openTabMenu(tab, el),
-        scroll: $('tabs'),
-      });
+      const el = $('workspace-tab-' + tab.id);
+      const close = el.querySelector<HTMLButtonElement>('.tab-close')!;
+      close.onclick = (event) => {
+        event.stopPropagation();
+        void closeTab(tab).catch(fail);
+      };
+      if (!gestureTabs.has(el)) {
+        gestureTabs.add(el);
+        tabGestures(el, {
+          select: () => activate(tab.id),
+          hold: () => {
+            const current = workspace.tabs.find((entry) => entry.id === tab.id);
+            if (current) openTabMenu(current, el);
+          },
+          scroll: $('tabs'),
+        });
+      }
       el.onkeydown = (event) => {
         if (['Enter', ' '].includes(event.key)) {
           event.preventDefault();
@@ -529,7 +508,6 @@ export function createWorkspaceNavigation(options: Options) {
           ($('tabs').querySelector('[aria-selected=true]') as HTMLElement)?.focus();
         }
       };
-      $('tabs').append(el);
     }
     updateViewVisibility();
     $('empty-terminal').hidden = !!all.length;

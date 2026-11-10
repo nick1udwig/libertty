@@ -37,7 +37,9 @@ Linux x86_64, Linux ARM64 and macOS Apple Silicon are release targets, with auto
 
 Building from source requires **Rust 1.90+**, **Node.js 22.18+**, a native C/C++ build toolchain, **Bash 4.4+**, **Python 3.8+**, and `base64`.
 On macOS, install modern Bash with `brew install bash`.
-The frontend build downloads checksum-verified Zig 0.17.0 and installs the Rust WASM target.
+The workspace UI uses [Exact](https://github.com/expo/exact), with Contract views in `ui/app.contract` and TypeScript browser services.
+Frontend builds also require Bun 1.4.4 and the Rust toolchain pinned in `build/exact.json`.
+The build downloads the pinned Exact source, checksum-verified Zig 0.17.0, and the Rust WASM target.
 Set `ZIG` to use an existing Zig 0.17.0 executable.
 The Rust server uses a native PTY and runs the repair engine beside local or SSH host facts.
 

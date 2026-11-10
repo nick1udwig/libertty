@@ -58,6 +58,11 @@ jobs:
         with:
           path: ~/.npm
           key: npm-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.node }}-${{ hashFiles('package-lock.json') }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - name: Install the Exact compiler toolchain
+        run: rustup toolchain install "$(node -p 'require("./build/exact.json").rust')" --profile minimal
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:

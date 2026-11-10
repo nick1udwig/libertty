@@ -1,0 +1,529 @@
+shape WorkspaceCard
+  id: string
+  name: string
+  detail: string
+  icon: string
+  badge: string
+  editable: bool
+
+shape WorkspaceTab
+  id: string
+  name: string
+  title: string
+  icon: string
+  glyph: string
+  className: string
+  selected: bool
+  controls: string
+  attention: number
+  attentionLabel: string
+
+shape MenuItem
+  id: string
+  label: string
+  separator: bool
+
+shape ShortcutControl
+  id: string
+  label: string
+  title: string
+  className: string
+  disabled: bool
+  modifier: bool
+  pressed: bool
+
+shape PluginSetting
+  id: string
+  name: string
+  version: string
+  enabled: bool
+
+shape BackupDevice
+  id: string
+  label: string
+
+shape ShortcutEditorRow
+  id: string
+  label: string
+  kind: string
+  value: string
+  first: bool
+  last: bool
+
+component Workspace
+  resource cards = workspaceCards() as shape WorkspaceCard[] else empty()
+  resource tabs = workspaceTabs() as shape WorkspaceTab[] else empty()
+  resource hostMenu = workspaceHostMenu() as shape MenuItem[] else empty()
+  resource shortcuts = workspaceShortcuts() as shape ShortcutControl[] else empty()
+  resource pluginSettings = workspacePluginSettings() as shape PluginSetting[] else empty()
+  resource backupDevices = workspaceBackupDevices() as shape BackupDevice[] else empty()
+  resource shortcutEditor = workspaceShortcutEditor() as shape ShortcutEditorRow[] else empty()
+  view
+    view id="workspace-root"
+      view id="workspace-app"
+        main id="terminal-stack"
+          view id="empty-terminal"
+            text "›_" data-html="span" data-css="terminal-glyph" aria-hidden="true"
+            h1 "Your shell, within reach."
+            text "Connecting to your terminal…" data-html="p"
+            button id="empty-open" data-css="primary"
+              text "Open a host"
+          view id="terminal-loading" data-hidden="true" role="status"
+            text "" data-html="span" data-css="terminal-loading-spinner" aria-hidden="true"
+            text "Opening SSH terminal…" data-html="span" id="terminal-loading-label"
+        view id="workspace-navigation"
+          view id="terminal-tabs-drawer"
+            view data-css="terminal-tabs-clip"
+              header id="terminal-header" data-css="terminal-header"
+                button id="terminal-back" data-css="icon" aria-label="Open hosts"
+                  svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                    path d="M19 12H5m7-7-7 7 7 7"
+                view id="tabs" role="tablist" aria-label="Open tabs"
+                  for tab in tabs key=tab.id
+                    view id=`workspace-tab-${tab.id}` data-css=tab.className role="tab" tabindex=(tab.selected ? 0 : -1) aria-selected=tab.selected aria-controls=tab.controls title=tab.title
+                      text tab.glyph data-html="span" data-css="tab-icon" data-icon=tab.icon
+                      text tab.name data-html="span" data-css="tab-name"
+                      if tab.attentionLabel != ""
+                        text tab.attention.toString() data-html="span" data-css="tab-attention" data-tab=tab.id data-hidden=(tab.attention == 0 ? "true" : "false") aria-label=`${tab.attention} ${tab.attentionLabel}`
+                      button data-css="tab-close" aria-label=`Close ${tab.name}`
+                        svg width=18 height=18 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                          path d="m6 6 12 12M18 6 6 18"
+        section id="workspace-shortcuts" data-css="key-controls" aria-label="Shell controls" data-hidden="true"
+          view id="workspace-shortcut-buttons" data-css="key-bar" role="group" aria-label="Shortcuts"
+            for shortcut in shortcuts key=shortcut.id
+              button id=`workspace-shortcut-${shortcut.id}` data-css=shortcut.className title=shortcut.title disabled=shortcut.disabled data-modifier=(shortcut.modifier ? "true" : "false") aria-pressed=shortcut.pressed
+                text shortcut.label
+          button id="workspace-enter" data-css="terminal-enter" data-type="button" title="Send Return without opening the keyboard" disabled=true
+            text "Enter ↵"
+        section id="library" data-hidden="true"
+          header data-css="page-header"
+            button id="page-back" data-css="back"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="M19 12H5m7-7-7 7 7 7"
+              text "Vault" data-html="span"
+            h1 "Hosts" id="page-title"
+            button id="sort-hosts" data-css="icon" aria-label="Sort alphabetically"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="M7 4v16m0 0-3-3m3 3 3-3m4-11h7m-7 6h5m-5 6h3"
+          view id="library-content"
+            view data-html="label" id="search-label" data-css="search"
+              view data-html="span"
+                svg width=18 height=18 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                  circle cx=10.5 cy=10.5 r=6.5
+                  path d="m16 16 5 5"
+              input id="search" placeholder="Search hosts" autocomplete="off" aria-label="Search"
+            view data-html="label" id="backend-filter-label" data-hidden="true"
+              text "Storage"
+              select id="backend-filter"
+            text "Saved hosts" data-html="p" id="list-heading" data-css="section-label"
+            view id="cards"
+              for card in cards key=card.id
+                view id=`workspace-card-${card.id}` data-css="card"
+                  button data-css="card-main"
+                    view data-html="span" data-css="card-icon" data-icon=card.icon aria-hidden="true"
+                    view data-html="span" data-css="card-text"
+                      text card.name data-html="span" data-css="card-name"
+                        if card.badge != ""
+                          text ` ${card.badge}` data-html="span" data-css="badge"
+                      text card.detail data-html="span" data-css="card-detail"
+                  if card.editable
+                    button data-css="card-edit" aria-label=`Edit ${card.name}`
+                      svg width=18 height=18 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                        circle cx=5 cy=12 r=1 fill="currentColor"
+                        circle cx=12 cy=12 r=1 fill="currentColor"
+                        circle cx=19 cy=12 r=1 fill="currentColor"
+            text "" data-html="p" id="list-empty" data-css="empty" data-hidden="true"
+          section id="settings-pane" data-hidden="true" aria-label="Settings"
+            view data-html="label" data-for="theme"
+              text "Theme"
+            select id="theme"
+              option "Forest" value="forest"
+              option "Paper — light, for e-paper and daylight" value="paper"
+              option "Ink — high-contrast black" value="ink"
+              option "1776 — red, white and navy" value="1776"
+              option "Flag — red and blue on white" value="flag"
+              option "Auto — Paper or Ink with the system" value="auto"
+            text "Paper and Ink stay readable on grayscale and amber-lit screens. Open terminals reload to apply a new theme." data-html="p" data-css="hint"
+            view data-html="label" data-for="font-size"
+              text "Terminal font size (pt)"
+            input id="font-size" type="number" min=6 max=24 step=0.5 value="10" data-required=""
+            view data-html="label" data-css="toggle"
+              input id="show-downloads" type="checkbox" checked=true
+              text "Show download progress and completion"
+            view data-html="label" data-css="toggle"
+              input id="auto-alternatives" type="checkbox" checked=true
+              text "Open alternatives after dictation"
+            view data-html="label" data-css="toggle"
+              input id="tap-alternate-send" type="checkbox" checked=true
+              text "Tap alternate to send"
+            view data-html="label" data-for="herdr-strip"
+              text "Herdr strip shows"
+            select id="herdr-strip"
+              option "Spaces" value="spaces"
+              option "Agents" value="agents"
+            text "Swipe sideways to scroll, up to reveal terminal tabs, or down to hide them. Tap the selected space again, or hold any space, to open its tree of worktrees and panes. While a tree is open, tap another space to open its tree instead. Hold, then drag beside a space to reorder, or onto it to stack. + creates a space in the current directory." data-html="p" data-css="hint"
+            view data-html="label" data-for="herdr-space-tap"
+              text "Tapping a repository with worktrees opens"
+            select id="herdr-space-tap"
+              option "Last used worktree" value="recent"
+              option "Most urgent worktree" value="triage"
+              option "Root checkout" value="root"
+              option "Its worktree tree" value="tree"
+            text "Most urgent opens the pane waiting longest for input, then the oldest unseen finish, then the longest working, then the oldest seen finish, and otherwise the last used worktree." data-html="p" data-css="hint"
+            view data-html="label" data-for="herdr-strip-order"
+              text "Herdr strip order"
+            select id="herdr-strip-order"
+              option "Status lanes" value="lanes"
+              option "Manual" value="manual"
+            text "Status lanes group tabs into needs you, done, working and idle. Tap a lane's count to fold or unfold it. Dragging is paused while lanes are on, and your manual order returns when you switch back." data-html="p" data-css="hint"
+            view data-html="label" data-for="herdr-layout"
+              text "Herdr terminal layout"
+            select id="herdr-layout"
+              option "Reflow text" value="reflow"
+              option "Full width — pan sideways" value="full-width"
+            text "On mobile, the app resizes the shared terminal to fit your screen, including the desktop view. Desktop web views can reflow or pan at full width." data-html="p" data-css="hint"
+            view id="herdr-notifications" aria-label="Background notifications"
+            section id="plugin-settings" aria-label="Plugins"
+              h2 "Plugins"
+              text "Terminal, SFTP / Files and Herdr are included. Load a plugin package to add another connection action." data-html="p"
+              view data-html="label"
+                text "Load plugin package"
+                input id="plugin-file" type="file" accept=".json,application/json"
+              text "" data-html="p" id="plugin-install-error" data-css="form-error" role="alert"
+              view id="plugin-list"
+                text "Included: Terminal · SFTP / Files · Herdr · Reading Mode" data-html="p"
+                for plugin in pluginSettings key=plugin.id
+                  view id=`workspace-plugin-${plugin.id}` data-css="plugin-entry"
+                    text `${plugin.name} · ${plugin.version}` data-html="strong"
+                    text `${plugin.id} · Reads the file you select when connecting.` data-html="p"
+                    view data-html="label" data-css="toggle"
+                      input type="checkbox" checked=plugin.enabled aria-label=`Enable ${plugin.name}`
+                      text "Enabled"
+                    button data-css="secondary"
+                      text "Remove plugin"
+            h2 "Reading Mode"
+            text "Open a file in its own tab by entering a phrase followed by a path. Relative paths start from the current terminal directory." data-html="p"
+            view data-html="label" data-for="reading-phrases"
+              text "Reading phrases, one per line"
+            textarea id="reading-phrases" data-rows="3" data-spellcheck="false" placeholder="look at"
+            text "" data-html="p" id="reading-phrases-error" data-css="form-error" role="alert"
+            button id="save-reading-phrases" data-css="secondary settings-button"
+              text "Save reading phrases"
+            button id="customize-shortcuts" data-css="secondary settings-button"
+              text "Customize shortcuts"
+            section id="shortcut-settings" data-hidden="true" aria-label="Shortcuts"
+              h2 "Shortcuts"
+              text "Send keys or run a saved command with one tap." data-html="p" data-css="hint"
+              view data-html="form" id="shortcuts-form"
+                view id="shortcut-editor"
+                  for shortcut in shortcutEditor key=shortcut.id
+                    view id=`workspace-shortcut-row-${shortcut.id}` data-css="shortcut-row"
+                      view data-html="label"
+                        text "Label"
+                        input value=shortcut.label data-css="shortcut-label" maxlength=24 autocomplete="off" data-spellcheck="false"
+                      view data-html="label"
+                        text "Action"
+                        select value=shortcut.kind
+                          option "Keys" value="keys"
+                          option "Command" value="command"
+                      view data-html="label" data-css="binding-label"
+                        text (shortcut.kind == "command" ? "Command to run" : "Keys to send")
+                        input value=shortcut.value data-css="binding" maxlength=4000 autocomplete="off" data-spellcheck="false"
+                      view data-css="shortcut-actions"
+                        button data-css="text-button" disabled=shortcut.first
+                          text "Move up"
+                        button data-css="text-button" disabled=shortcut.last
+                          text "Move down"
+                        button data-css="text-button"
+                          text "Remove"
+                button id="add-shortcut" data-type="button" data-css="secondary"
+                  text "Add shortcut"
+                text "" data-html="p" id="shortcut-error" data-css="form-error" role="alert"
+                view data-css="actions"
+                  button id="reset-shortcuts" data-type="button" data-css="secondary"
+                    text "Restore defaults"
+                  button id="cancel-shortcuts" data-type="button" data-css="secondary"
+                    text "Cancel"
+                  button data-type="submit" data-css="primary"
+                    text "Save shortcuts"
+            section id="settings-terminal"
+              h2 "Current terminal"
+              text "" data-html="p" id="settings-terminal-name"
+              button id="settings-copy" data-css="secondary settings-button"
+                text "Copy terminal selection"
+              button id="settings-restart" data-css="secondary settings-button"
+                text "Start a new shell"
+          button id="library-add" data-css="floating-add" aria-label="Add host"
+            svg width=24 height=24 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+              path d="M12 5v14M5 12h14"
+          nav data-css="bottom-nav" aria-label="Main navigation"
+            button id="nav-vault"
+              view data-html="span"
+                svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                  rect x=3 y=3 width=7 height=7 rx="1.5"
+                  rect x=14 y=3 width=7 height=7 rx="1.5"
+                  rect x=3 y=14 width=7 height=7 rx="1.5"
+                  rect x=14 y=14 width=7 height=7 rx="1.5"
+              text "Vault"
+            button id="nav-terminals"
+              view data-html="span"
+                svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                  path d="m5 7 5 5-5 5m8 0h6"
+              text "Terminals"
+            button id="nav-settings"
+              view data-html="span"
+                svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                  path d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h11m4 0h1"
+                  circle cx=15 cy=6 r=2
+                  circle cx=9 cy=12 r=2
+                  circle cx=17 cy=18 r=2
+              text "Settings"
+      dialog id="host-dialog"
+        view data-html="form" id="host-form"
+          header
+            h2 "New host" id="host-dialog-title"
+            button data-type="button" data-close="host-dialog" data-css="icon" aria-label="Close host editor"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="m6 6 12 12M18 6 6 18"
+          view data-html="label"
+            text "Name"
+            input id="host-name" maxlength=100 data-required="" placeholder="Development server"
+          view data-html="label"
+            text "Connection"
+            select id="host-kind"
+              option "HTTP · direct backend" value="http"
+              option "SSH · through a backend" value="ssh"
+              option "Herdr" value="herdr" data-hidden="true"
+          view data-html="label"
+            text "Backend"
+            select id="host-backend"
+          view id="direct-fields"
+            view data-html="label"
+              text "Backend URL"
+              input id="host-url" type="url" placeholder="https://my-server.tailnet.ts.net/" autocomplete="url"
+            text "The terminal connects directly to this backend." data-html="p" data-css="hint"
+          view id="herdr-fields" data-hidden="true"
+            view data-html="label"
+              text "Herdr session"
+              input id="host-herdr-session" maxlength=64 placeholder="Default session" autocomplete="off"
+            text "Connect to Herdr running on the selected backend. Leave the session empty for its default session." data-html="p" data-css="hint"
+          view id="ssh-fields" data-hidden="true"
+            view data-html="label"
+              text "Hostname or IP"
+              input id="host-address" placeholder="192.168.1.10" autocomplete="off"
+            view data-css="field-pair"
+              view data-html="label"
+                text "Username"
+                input id="host-user" autocomplete="username"
+              view data-html="label"
+                text "Port"
+                input id="host-port" type="number" min=1 max=65535 value="22"
+            view data-html="label"
+              text "Route"
+              select id="host-route"
+                option "Fastest available backend" value="auto"
+                option "Selected backend only" value="fixed"
+            text "Browser keys can use any connected backend. Automatic routing measures the available routes." data-html="p" data-css="hint"
+          text "" data-html="p" data-css="form-error" id="host-error" role="alert"
+          view data-css="actions"
+            button id="delete-host" data-css="danger" data-type="button" data-hidden="true"
+              text "Delete host"
+            button data-css="primary" data-type="submit"
+              text "Save host"
+      dialog id="backend-dialog"
+        view data-html="form" id="backend-form"
+          header
+            h2 "Add backend"
+            button data-type="button" data-close="backend-dialog" data-css="icon" aria-label="Close backend editor"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="m6 6 12 12M18 6 6 18"
+          view data-html="label"
+            text "Name"
+            input id="backend-name" data-required="" maxlength=100
+          view data-html="label"
+            text "URL"
+            input id="backend-url" type="url" data-required="" placeholder="https://server.tailnet.ts.net/"
+          text "Use a reachable libertty backend. Other backends must allow this frontend’s origin." data-html="p" data-css="hint"
+          text "" data-html="p" data-css="form-error" id="backend-error" role="alert"
+          button data-css="primary" data-type="submit"
+            text "Save backend"
+      dialog id="plugin-connect-dialog"
+        view data-html="form" id="plugin-connect-form"
+          header
+            h2 "Connect plugin" id="plugin-connect-title"
+            button data-type="button" data-close="plugin-connect-dialog" data-css="icon" aria-label="Cancel connection"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="m6 6 12 12M18 6 6 18"
+          text "" data-html="p" id="plugin-connect-host"
+          view id="plugin-read-fields"
+            view data-html="label"
+              text "File path"
+              input id="plugin-read-path" maxlength=4096 placeholder="/var/log/app.log" autocomplete="off"
+            text "This plugin can read this file and save its own view preferences. Choose a UTF-8 text file, up to 20 MB." data-html="p" data-css="hint"
+          view id="plugin-herdr-fields" data-hidden="true"
+            view data-html="label"
+              text "Herdr session"
+              input id="plugin-herdr-session" maxlength=64 placeholder="Default session" autocomplete="off"
+            text "Connect to Herdr on this host. An absent server starts automatically. Closing the connection keeps agents running." data-html="p" data-css="hint"
+          text "" data-html="p" id="plugin-connect-error" data-css="form-error" role="alert"
+          button data-css="primary" data-type="submit"
+            text "Connect"
+      dialog id="backend-login"
+        view data-html="form" id="backend-login-form"
+          header
+            h2 "Pair with backend"
+            button data-type="button" data-close="backend-login" data-css="icon" aria-label="Cancel backend login"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="m6 6 12 12M18 6 6 18"
+          text "" data-html="p" id="backend-login-name"
+          text "Enter the pairing token shown in the server’s startup output. Pairing is required even on this machine." data-html="p"
+          view data-html="label"
+            text "Pairing token"
+            input id="backend-token" type="password" autocomplete="current-password" data-required=""
+          text "" data-html="p" id="backend-login-error" data-css="form-error" role="alert"
+          button data-css="primary" data-type="submit"
+            text "Connect"
+      dialog id="ssh-dialog"
+        view data-html="form" id="ssh-form"
+          header
+            h2 "Connect with SSH" id="ssh-title"
+            button data-type="button" data-close="ssh-dialog" data-css="icon" aria-label="Cancel SSH connection"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="m6 6 12 12M18 6 6 18"
+          text "" data-html="p" id="ssh-destination"
+          view data-html="label"
+            text "Authentication"
+            select id="ssh-key"
+          view data-html="label"
+            text "Key passphrase" data-html="span" id="ssh-secret-label"
+            input id="ssh-secret" type="password" autocomplete="off" data-required=""
+          view data-html="label" data-css="toggle"
+            input id="ssh-show-secret" type="checkbox"
+            text "Show passphrase"
+          text "Passphrases and account passwords are not saved. Browser keys are unlocked here and sent to the chosen backend for this connection. They are only stored there if you choose to back them up." data-html="p" data-css="hint"
+          text "" data-html="p" id="ssh-error" data-css="form-error" role="alert"
+          text "" data-html="p" id="ssh-progress" role="status"
+          button id="ssh-connect" data-css="primary" data-type="submit"
+            text "Connect"
+      dialog id="key-dialog"
+        view data-html="form" id="key-form"
+          header
+            h2 "New SSH key"
+            button data-type="button" data-close="key-dialog" data-css="icon" aria-label="Close key editor"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="m6 6 12 12M18 6 6 18"
+          text "Stored encrypted in this browser. You can choose backup devices after saving." data-html="p" data-css="hint"
+          view data-html="label"
+            text "Name"
+            input id="key-name" maxlength=100 data-required="" placeholder="Personal SSH key"
+          view data-html="label"
+            text "Key"
+            select id="key-method"
+              option "Generate ED25519" value="generate"
+              option "Import key or backup" value="import"
+          view id="key-import-label" data-hidden="true"
+            view data-html="label"
+              text "Key file or encrypted backup"
+              input id="key-import-file" type="file"
+            view data-html="label"
+              text "Or paste its contents"
+              textarea id="key-import" data-rows="5" data-spellcheck="false" autocomplete="off"
+            text "Encrypted backups are restored in this browser. SSH private keys are checked by the primary backend without saving them there." data-html="p" data-css="hint"
+          view data-html="label"
+            text "Passphrase"
+            input id="key-passphrase" type="password" autocomplete="new-password" data-required=""
+          view data-html="label"
+            text "Confirm passphrase"
+            input id="key-confirm" type="password" autocomplete="new-password" data-required=""
+          text "For an encrypted import, use its existing passphrase. Export a backup to keep your keys if this browser’s storage is cleared." data-html="p" data-css="hint"
+          text "" data-html="p" id="key-error" data-css="form-error" role="alert"
+          button data-css="primary" data-type="submit"
+            text "Save key"
+      dialog id="key-details"
+        header
+          h2 "SSH key"
+          button data-type="button" data-close="key-details" data-css="icon" aria-label="Close key details"
+            svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+              path d="m6 6 12 12M18 6 6 18"
+        view data-html="label"
+          text "Name"
+          input id="key-rename" maxlength=100
+        text "" data-html="p" id="key-storage" data-css="hint"
+        text "" data-html="p" id="key-fingerprint" data-css="fingerprint"
+        view data-html="label"
+          text "Public key"
+          textarea id="public-key" readonly=true data-rows="5" data-spellcheck="false"
+        text "Add this public key to the target account’s authorized_keys." data-html="p" data-css="hint"
+        view data-css="actions"
+          button id="export-key-backup" data-css="primary"
+            text "Export encrypted backup"
+          button id="backup-key" data-css="secondary"
+            text "Back up to devices"
+          button id="export-private-key" data-css="secondary"
+            text "Export SSH private key"
+          button id="restore-backend-key" data-css="primary" data-hidden="true"
+            text "Restore to this browser"
+        view data-css="actions"
+          button id="delete-key" data-css="danger"
+            text "Delete key"
+          button id="rename-key" data-css="secondary"
+            text "Rename"
+          button id="copy-key" data-css="primary"
+            text "Copy public key"
+      dialog id="key-transfer"
+        view data-html="form" id="key-transfer-form"
+          header
+            h2 "Back up key" id="key-transfer-title"
+            button data-type="button" data-close="key-transfer" data-css="icon" aria-label="Cancel key transfer"
+              svg width=20 height=20 viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=1.8 stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                path d="m6 6 12 12M18 6 6 18"
+          text "" data-html="p" id="key-transfer-hint" data-css="hint"
+          view id="backup-devices"
+            for device in backupDevices key=device.id
+              view data-html="label" data-css="toggle"
+                input type="checkbox" value=device.id
+                text device.label
+          view data-html="label"
+            text "Passphrase"
+            input id="key-transfer-passphrase" type="password" autocomplete="off" data-required=""
+          text "" data-html="p" id="key-transfer-error" data-css="form-error" role="alert"
+          button id="key-transfer-submit" data-type="submit" data-css="primary"
+            text "Continue"
+      dialog id="captured-ssh-dialog"
+        view data-html="form" id="captured-ssh-form"
+          header
+            h2 "Connect with backend SSH key"
+          text "" data-html="p" id="captured-ssh-command"
+          text "" data-html="p" id="captured-ssh-error" data-css="form-error" role="alert"
+          view data-html="label" id="captured-ssh-secret-label"
+            text "Key passphrase"
+            input id="captured-ssh-secret" type="password" autocomplete="off"
+          view data-css="actions"
+            button id="captured-ssh-cancel" data-type="button" data-css="secondary"
+              text "Cancel"
+            button id="captured-ssh-native" data-type="button" data-css="secondary"
+              text "Use native SSH"
+            button id="captured-ssh-connect" data-type="submit" data-css="primary"
+              text "Connect"
+      view id="host-terminal-menu" data-css="host-terminal-menu" role="menu" data-hidden="true"
+        for item in hostMenu key=item.id
+          if item.separator
+            hr
+          else
+            button id=`workspace-host-action-${item.id}` role="menuitem" aria-label=item.label
+              text item.label
+      view id="workspace-tab-menu" data-css="host-terminal-menu" role="menu" data-hidden="true"
+        button id="workspace-tab-rename" role="menuitem"
+          text "Rename"
+        button id="workspace-tab-close" role="menuitem"
+          text "Close tab"
+      dialog id="workspace-tab-rename-dialog"
+        view data-html="form" id="workspace-tab-rename-form"
+          h2 "Rename tab"
+          input id="workspace-tab-name" maxlength=100 data-required="" aria-label="Tab name"
+          text "" data-html="p" id="workspace-tab-name-error" data-css="form-error"
+          view data-css="actions"
+            button data-close="workspace-tab-rename-dialog" data-css="secondary"
+              text "Cancel"
+            button data-type="submit" data-css="primary"
+              text "Save"

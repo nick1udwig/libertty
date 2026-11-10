@@ -1,9 +1,9 @@
+import { addWorkspaceCard, clearWorkspaceCards } from './exact-model.ts';
 import {
   hostIcon,
   keyIcon,
   backendIcon,
   shieldIcon,
-  ellipsisIcon,
   chevronDownIcon,
   chevronIcon,
 } from './icons.ts';
@@ -88,44 +88,23 @@ export function createWorkspaceLibrary(options: Options) {
     edit?: () => void,
     badge?: string,
   ) {
-    const row = document.createElement('div');
-    row.className = 'card';
-    const main = button('', action, 'card-main'),
-      glyph = document.createElement('span');
-    glyph.className = 'card-icon';
-    glyph.innerHTML = iconHTML;
-    glyph.setAttribute('aria-hidden', 'true');
-    const text = document.createElement('span');
-    text.className = 'card-text';
-    const title = document.createElement('span');
-    title.className = 'card-name';
-    title.textContent = name;
-    if (badge) {
-      const tag = document.createElement('span');
-      tag.className = 'badge';
-      tag.textContent = badge;
-      title.append(document.createTextNode(' '), tag);
-    }
-    const subtitle = document.createElement('span');
-    subtitle.className = 'card-detail';
-    subtitle.textContent = detail;
-    text.append(title, subtitle);
-    main.append(glyph, text);
-    row.append(main);
-    if (edit) {
-      const b = button('', edit, 'card-edit');
-      b.innerHTML = ellipsisIcon;
-      b.setAttribute('aria-label', 'Edit ' + name);
-      row.append(b);
-    }
-    $('cards').append(row);
+    const row = addWorkspaceCard({
+      name,
+      detail,
+      icon: iconHTML,
+      badge: badge ?? '',
+      editable: !!edit,
+    });
+    row.querySelector<HTMLButtonElement>('.card-main')!.onclick = action;
+    const editButton = row.querySelector<HTMLButtonElement>('.card-edit');
+    if (editButton && edit) editButton.onclick = edit;
     return row;
   }
   let rendering = 0;
   async function renderCards() {
     closeHostMenu();
     const generation = ++rendering;
-    $('cards').replaceChildren();
+    clearWorkspaceCards();
     $('list-empty').hidden = true;
     const query = input('search').value.trim().toLowerCase();
     const matches = (value: string) => value.toLowerCase().includes(query);

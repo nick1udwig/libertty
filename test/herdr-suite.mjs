@@ -208,7 +208,7 @@ try {
       }
       catch (error) { if (!error.message.includes('not attached')) throw error; return false; }
     }, 'attached tab for long press');
-    const menu = await locator.evaluate(element => element.closest('#tabs') ? 'body > .host-terminal-menu' : '.herdr-tab-menu');
+    const menu = await locator.evaluate(element => element.closest('#tabs') ? '#workspace-tab-menu' : '.herdr-tab-menu');
     await touch('touchStart', rect.x + rect.width / 2, rect.y + rect.height / 2);
     await page.waitForFunction(selector => [...document.querySelectorAll(selector)].some(menu => menu.checkVisibility({ checkVisibilityCSS: true })), menu);
     await touch('touchEnd');
@@ -512,7 +512,7 @@ try {
     await page.evaluate(() => window.__focused = true); await showTerminalTabs(page); await page.locator('#tabs .herdr-tab').click();
     await until(async () => await tab(1).getAttribute('data-status') === 'idle', 'view after muted notification');
     await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab'));
-    await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Rename', exact: true }).click();
+    await page.locator('#workspace-tab-menu:visible').getByRole('menuitem', { name: 'Rename', exact: true }).click();
     await page.getByRole('textbox', { name: 'Tab name', exact: true }).fill('Agent team'); await page.locator('dialog[open]').getByRole('button', { name: 'Save', exact: true }).click();
     await page.reload();
     await until(async () => await tab(1).count() === 1 && await tab(1).getAttribute('data-status') === 'idle', 'restored view and acknowledgements');
@@ -601,14 +601,14 @@ try {
     assert.equal(previewTickets, 0, 'Cached panes do not attach before live identity verification');
     page.off('request', countPreviewTicket);
     await context.setOffline(false); await page.reload(); await tab(0).waitFor();
-    await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
+    await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('#workspace-tab-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
     assert.ok(fixture.actions.some(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control'));
     assert.equal(await page.locator('.herdr-view').count(), 0); assert.equal(fixture.snapshot.agents.length, 3);
     await page.setViewportSize({ width: 390, height: 844 });
   }
   if (scenario === 'transport') {
     await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab'));
-    await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
+    await page.locator('#workspace-tab-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
     // Reopening a dedicated local Herdr transport reuses its tab after the source closes.
     const localHerdr = await page.evaluate(async () => {
       const api = async (name, data) => { const response = await fetch(new URL('api/' + name, document.baseURI), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }); const result = await response.json(); if (!response.ok) throw new Error(result.error); return result; };
@@ -625,7 +625,7 @@ try {
     assert.equal(await page.getByRole('button', { name: 'Reconnect', exact: true }).count(), 0, 'An expired source restores without a manual reconnect');
     // Exercise the opening transition before using touch coordinates for the tab menu.
     const drawerMotion = await page.addStyleTag({ content: '#terminal-tabs-drawer, #terminal-tabs-drawer .terminal-header { transition-duration: 1s !important; }' });
-    await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('body > .host-terminal-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
+    await showTerminalTabs(page); await hold(page.locator('#tabs .herdr-tab')); await page.locator('#workspace-tab-menu:visible').getByRole('menuitem', { name: 'Close tab', exact: true }).click();
     await drawerMotion.evaluate(element => element.remove());
     const controlsBeforeSSH = fixture.actions.filter(a => a.method === 'fixture.terminal.open' && a.params.mode === 'control').length;
     // A real disposable SSH server exercises command capture and Unix socket forwarding.

@@ -90,8 +90,8 @@ for (const mode of ['production', 'development']) {
       if (mode === 'development') {
         const cookie = paired.headers.get('set-cookie')!.split(';')[0];
         const page = await fetch(base + '/', { headers: { Cookie: cookie } });
-        assert.match(await page.text(), /workspace-app/, 'pairing must unlock the development frontend');
-        assert.equal((await fetch(base + '/src/main.ts', { headers: { Cookie: cookie } })).status, 200);
+        assert.match(await page.text(), /id="exact-root"/, 'pairing must unlock the development frontend');
+        assert.equal((await fetch(base + '/src/exact.ts', { headers: { Cookie: cookie } })).status, 200);
       }
     } finally { child.kill('SIGTERM'); await exited; await rm(directory, { recursive: true, force: true }); }
   });

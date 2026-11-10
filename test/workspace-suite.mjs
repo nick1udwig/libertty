@@ -83,12 +83,16 @@ try {
   });
   await page.goto(origin);
   await page.locator('#backend-login').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#workspace-app').evaluate(element => element.$exactTree), true, 'Exact owns the workspace view');
+  assert.equal(await page.locator('#backend-login-form').evaluate(element => element.tagName), 'FORM', 'Pairing keeps native form submission');
+  assert.equal(await page.locator('#backend-token').evaluate(element => element.required), true, 'Pairing keeps native validation');
   const originalTerminal = await page.locator('#terminal-stack iframe').elementHandle();
   const lockedFrame = await originalTerminal.contentFrame();
   await lockedFrame.waitForFunction(() => document.querySelector('#connection-label').textContent === 'Locked');
   await page.getByRole('button', { name: 'Cancel backend login' }).click();
   await page.locator('#terminal-back').click(); await page.locator('#page-back').click();
   await page.getByRole('button', { name: /^Backends/ }).click();
+  assert.equal(await page.locator('#cards .card-main').first().evaluate(element => element.$exactTree), true, 'Exact owns reactive host cards');
   await page.getByRole('button', { name: 'Primary backend HTTP' }).click();
   await page.locator('#backend-token').fill('wrong'); await page.locator('#backend-login-form button[type=submit]').click();
   await page.waitForFunction(() => document.querySelector('#backend-login-error').textContent.includes('pairing token'));

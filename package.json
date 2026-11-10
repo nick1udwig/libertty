@@ -15,7 +15,7 @@
     "test:rust-herdr": "node test/rust-herdr.mjs",
     "postinstall": "node scripts/prepare-dependencies.mjs",
     "dev": "node scripts/dev.mjs",
-    "build:frontend": "npm run build:terminal && tsc --noEmit && vite build",
+    "build:frontend": "npm run build:terminal && npm run build:exact && tsc --noEmit && vite build",
     "build:site": "npm run build:terminal && tsc --noEmit && vite build --config site/vite.config.ts",
     "dev:site": "npm run build:terminal && vite --config site/vite.config.ts",
     "test:site": "npm run build:site && node test/site-browser.mjs",
@@ -59,7 +59,8 @@
     "contracts:vocabulary": "node scripts/engine-vocabulary.mjs",
     "format": "prettier --write src",
     "check:format": "prettier --check src",
-    "build:terminal": "node scripts/build-terminal.mjs"
+    "build:terminal": "node scripts/build-terminal.mjs",
+    "build:exact": "node scripts/build-exact.mjs"
   },
   "dependencies": {
     "libopus-wasm": "0.4.1",

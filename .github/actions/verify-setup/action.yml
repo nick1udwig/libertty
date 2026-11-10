@@ -29,6 +29,12 @@ runs:
     - uses: dtolnay/rust-toolchain@stable
       with:
         components: rustfmt, clippy
+    - uses: oven-sh/setup-bun@v2
+      with:
+        bun-version: '1.4.4'
+    - name: Install the Exact compiler toolchain
+      shell: bash
+      run: rustup toolchain install "$(node -p 'require("./build/exact.json").rust')" --profile minimal
     - uses: Swatinem/rust-cache@v2
       with:
         shared-key: libertty-linux-x64

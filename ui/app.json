@@ -1,0 +1,34 @@
+{
+  "app": {
+    "id": "dev.libertty.app",
+    "name": "libertty"
+  },
+  "host": {
+    "web": {}
+  },
+  "data": [
+    "close",
+    "css",
+    "for",
+    "hidden",
+    "html",
+    "required",
+    "rows",
+    "spellcheck",
+    "type",
+    "icon",
+    "tab",
+    "modifier"
+  ],
+  "name": "libertty",
+  "file_handlers": [
+    {
+      "action": "/",
+      "accept": {
+        "application/json": [
+          ".json"
+        ]
+      }
+    }
+  ]
+}

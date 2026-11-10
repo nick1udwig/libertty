@@ -1,6 +1,7 @@
+import { renderWorkspacePlugins, renderWorkspaceShortcutEditor } from './exact-model.ts';
 import { sendToTerminal } from './frame-protocol.ts';
 import { type TerminalTab } from './connections.ts';
-import { $, button, input, select } from './dom.ts';
+import { $, input, select } from './dom.ts';
 import { HerdrNotifications } from './herdr-notifications.ts';
 import { saved } from './persistence.ts';
 import {
@@ -126,25 +127,18 @@ export function createWorkspaceSettings(options: Options) {
     renderPluginSettings();
   }
   function renderPluginSettings() {
-    const list = $('plugin-list');
-    list.replaceChildren();
-    const defaults = document.createElement('p');
-    defaults.textContent = 'Included: Terminal · SFTP / Files · Herdr · Reading Mode';
-    list.append(defaults);
     const current = new Map(installedPlugins.map((entry) => [entry.package.manifest.id, entry]));
-    for (const [id, entry] of current) {
-      const row = document.createElement('div');
-      row.className = 'plugin-entry';
-      const name = document.createElement('strong');
-      name.textContent = entry.package.manifest.name + ' · ' + entry.package.manifest.version;
-      const detail = document.createElement('p');
-      detail.textContent = id + ' · Reads the file you select when connecting.';
-      const label = document.createElement('label');
-      label.className = 'toggle';
-      const enabled = document.createElement('input');
-      enabled.type = 'checkbox';
-      enabled.checked = entry.enabled;
-      enabled.setAttribute('aria-label', 'Enable ' + entry.package.manifest.name);
+    renderWorkspacePlugins(
+      [...current].map(([id, entry]) => ({
+        id,
+        name: entry.package.manifest.name,
+        version: entry.package.manifest.version,
+        enabled: entry.enabled,
+      })),
+    );
+    for (const id of current.keys()) {
+      const row = $('workspace-plugin-' + id);
+      const enabled = row.querySelector<HTMLInputElement>('input')!;
       enabled.onchange = () => {
         try {
           savePlugins(
@@ -159,22 +153,16 @@ export function createWorkspaceSettings(options: Options) {
           fail(error);
         }
       };
-      label.append(enabled, document.createTextNode('Enabled'));
-      const remove = button(
-        'Remove plugin',
-        () => {
-          try {
-            savePlugins(installedPlugins.filter((item) => item.package.manifest.id !== id));
-            plugins.remove(id);
-            refreshPluginTabs(id);
-          } catch (error: any) {
-            fail(error);
-          }
-        },
-        'secondary',
-      );
-      row.append(name, detail, label, remove);
-      list.append(row);
+      const remove = row.querySelector<HTMLButtonElement>('button')!;
+      remove.onclick = () => {
+        try {
+          savePlugins(installedPlugins.filter((item) => item.package.manifest.id !== id));
+          plugins.remove(id);
+          refreshPluginTabs(id);
+        } catch (error: any) {
+          fail(error);
+        }
+      };
     }
   }
   input('plugin-file').onchange = () => {
@@ -268,6 +256,7 @@ export function createWorkspaceSettings(options: Options) {
     currentShortcuts,
     (value) => preferencesChanged('shortcuts', value),
     () => ($('shortcut-settings').hidden = true),
+    renderWorkspaceShortcutEditor,
   );
   $('customize-shortcuts').onclick = () => {
     prepareEditor();

@@ -5,6 +5,10 @@
 * {
   box-sizing: border-box;
 }
+#exact-root,
+#workspace-root {
+  display: contents;
+}
 body {
   margin: 0;
   overscroll-behavior: none;
