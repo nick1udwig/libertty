@@ -5,6 +5,8 @@ import { shellQuote } from '../../src/shell-words.ts';
 
 export async function exerciseCoreTouch(page, frame, root) {
   const file = root + '/touch-state.json', app = root + '/touch.mjs';
+  const url = 'https://github.com/nick1udwig/libertty/pull/new/fix/hc-ssh-alternates';
+  const prefix = 'remote:      ';
   await writeFile(app, `
     import { writeFileSync } from 'node:fs';
     let pending = '', text = 'alpha beta gamma', cursor = 0, mouse = [], wheels = [], arrows = [], offset = 50, normal = false;
@@ -13,6 +15,9 @@ export async function exerciseCoreTouch(page, frame, root) {
       writeFileSync(${JSON.stringify(file)}, JSON.stringify({ text, cursor, mouse, wheels, arrows, offset, cols, rows, normal }));
       let screen = '\\x1b[2J\\x1b[HCore touch test ' + cols + 'x' + rows + '\\r\\nTap to place the cursor\\r\\n' + text + '\\r\\n';
       for (let row = 3; row < rows - 1; row++) screen += 'ROW-' + (offset + row) + ' alpha beta gamma\\r\\n';
+      const link = ${JSON.stringify(prefix + url)};
+      for (let offset = 0; offset < link.length; offset += cols)
+        screen += '\\x1b[' + (5 + offset / cols) + ';1H\\x1b[2K' + link.slice(offset, offset + cols);
       process.stdout.write(screen + '\\x1b[3;' + (cursor + 1) + 'H');
     };
     const click = (button, column, row, action) => {
@@ -105,6 +110,16 @@ export async function exerciseCoreTouch(page, frame, root) {
   await page.keyboard.type([process.execPath, app].map(shellQuote).join(' '));
   await page.keyboard.press('Enter');
   await ready();
+  await page.context().route('https://github.com/**', route => route.fulfill({ body: '' }));
+  const cols = await frame.evaluate(() => window.__testTerminal.cols);
+  assert.ok(prefix.length < cols && prefix.length + url.length > cols);
+  for (const offset of [prefix.length, prefix.length + url.length - 1]) {
+    const { x, y } = await point(offset % cols, 4 + Math.floor(offset / cols));
+    const [popup] = await Promise.all([page.context().waitForEvent('page'), page.touchscreen.tap(x, y)]);
+    await popup.waitForLoadState();
+    assert.equal(popup.url(), url);
+    await popup.close();
+  }
   await tap();
   await expectClick(2, 6);
   await page.keyboard.type('X');
@@ -180,5 +195,5 @@ export async function exerciseCoreTouch(page, frame, root) {
   assert.equal((await state()).wheels.length, historyWheels, 'Local terminal history consumes its own scrolling');
   await page.keyboard.press('Control+c');
   await waitForShell(frame);
-  console.log('Core touch: native taps, swipes, held selection scrolling, edit ordering, mouse modes, hold-to-copy, reconnect without replay, resize and local history passed.');
+  console.log('Core touch: wrapped links, native taps, swipes, held selection scrolling, edit ordering, mouse modes, hold-to-copy, reconnect without replay, resize and local history passed.');
 }
