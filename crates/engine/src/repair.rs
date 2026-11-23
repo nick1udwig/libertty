@@ -817,6 +817,85 @@ mod spoken_argument_tests {
     }
 }
 
+/// Repairs speech when the foreground SSH client has no separate connection for host facts.
+pub fn repair_without_host(input: &str) -> Vec<Candidate> {
+    static CATALOG: OnceLock<Catalog> = OnceLock::new();
+    let catalog = CATALOG.get_or_init(|| {
+        let vocabulary = crate::command_policy::vocabulary();
+        let commands = vocabulary
+            .common_flags
+            .keys()
+            .chain(vocabulary.subcommands.keys())
+            .filter_map(|scope| scope.split_whitespace().next())
+            .chain(["cd", "pwd", "ls", "echo"])
+            .collect::<BTreeSet<_>>();
+        Catalog {
+            commands: commands
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+                .into(),
+            ..Default::default()
+        }
+    });
+    let mut choices = repair(input, catalog, None, &Default::default());
+    let spoken = command_speech_shared(&tokens(input), &catalog.commands, Some(&catalog.commands))
+        .into_iter()
+        .filter(|matched| matched.score >= 100.0 && directory_command(&matched.value))
+        .max_by_key(|matched| matched.consumed);
+    let canonical = spoken.and_then(|matched| {
+        let spans = crate::shell_structure::word_spans(input)?;
+        let end = spans.get(matched.consumed - 1)?.end;
+        Some(format!("{}{}", matched.value, &input[end..]))
+    });
+    let directory = canonical.as_deref().unwrap_or(input);
+    if (canonical.is_some() || expand_symbols(directory, true) != input)
+        && let Some(path) = crate::path_repair::directory_input(directory)
+    {
+        let name = path.parts.join("/");
+        let name = if path.quoted {
+            name
+        } else {
+            name.replace(" -", "-")
+        };
+        let operand = format!("{}{name}", path.prefix);
+        let operand = if path.quoted {
+            shell_quote_literal(&operand)
+        } else {
+            shell_quote(&operand)
+        };
+        let command = format!("{} {}{operand}", path.command, path.options);
+        if command != input {
+            choices.insert(
+                0,
+                Candidate {
+                    command,
+                    score: 100.0,
+                    changes: vec![Change::Symbols],
+                    literal: None,
+                    evidence: Default::default(),
+                },
+            );
+        }
+    }
+    choices
+}
+
+#[cfg(test)]
+#[test]
+fn ssh_repair_keeps_the_remote_home_operand() {
+    for (spoken, expected) in [
+        (
+            "C D tilde slash hyperware dash homes",
+            "cd ~/hyperware-homes",
+        ),
+        ("C D src slash tests", "cd src/tests"),
+        ("C D slash var slash log", "cd /var/log"),
+    ] {
+        assert_eq!(repair_without_host(spoken)[0].command, expected);
+    }
+}
+
 pub fn repair(
     input: &str,
     catalog: &Catalog,

@@ -423,7 +423,8 @@ try {
     }),
     sshPort = await freePort();
   await writeFile(join(root, 'host'), hostKey.private, { mode: 0o600 });
-  await writeFile(join(root, 'authorized'), identity.public + '\n');
+  const nestedKey = ssh2.utils.generateKeyPairSync('ed25519');
+  await writeFile(join(root, 'authorized'), identity.public + '\n' + nestedKey.public + '\n');
   const config = await sshdConfig(root, sshPort, {
     env: {
       HOME: root,
@@ -436,6 +437,33 @@ try {
   sshd = spawn(sshdPath(), ['-D', '-e', '-f', config], { stdio: ['ignore', 'pipe', 'pipe'] });
   sshd.stderr.on('data', (b) => (logs += b));
   await new Promise((resolve) => setTimeout(resolve, 150));
+  await writeFile(join(root, 'nested-key'), nestedKey.private, { mode: 0o600 });
+  await writeFile(join(root, 'known_hosts'), `[127.0.0.1]:${sshPort} ${hostKey.public}\n`);
+  const nestedHome = join(root, 'nested-home');
+  await mkdir(join(nestedHome, 'hyperware-homes'), { recursive: true });
+  await writeFile(join(root, 'remote.bashrc'), `PS1='remote:\\w# '\nexport HOME='${nestedHome}'\n`);
+  const nested = await connectSocket(created.terminalId);
+  const sendNested = (message) => nested.ws.send(JSON.stringify(message));
+  const latestState = () => nested.messages.filter((message) => message.type === 'state').at(-1)?.state;
+  await until(() => latestState()?.ready, 'local shell before SSH');
+  sendNested({ type: 'input', data: `ssh -F /dev/null -o BatchMode=yes -o UserKnownHostsFile=${root}/known_hosts -i ${root}/nested-key -p ${sshPort} -tt 127.0.0.1 'bash --rcfile ${root}/remote.bashrc -i'\r` });
+  await until(() => {
+    const state = latestState();
+    if (!state?.ready) return false;
+    const [, shellPid, foregroundPid] = JSON.parse(state.inputContext);
+    return shellPid !== foregroundPid;
+  }, 'nested SSH shell prompt');
+  const nestedPrompt = latestState();
+  sendNested({ type: 'dictation-paste', text: 'C D tilde slash hyperware dash homes', applied: false, replace: false, prompt: nestedPrompt.prompt, revision: nestedPrompt.inputRevision });
+  await until(() => nested.messages.some((m) => m.type === 'repair-result'), 'nested SSH repair');
+  const reply = nested.messages.find((m) => m.type === 'repair-result');
+  assert.ok(reply.accepted, JSON.stringify(reply));
+  assert.equal(reply.selected, 'cd ~/hyperware-homes');
+  sendNested({ type: 'command', id: 'nested-cd', command: reply.selected, prompt: nestedPrompt.prompt });
+  await until(() => nested.messages.some((m) => m.type === 'output' && m.data.includes('~/hyperware-homes#')), 'SSH shell changed directory');
+  sendNested({ type: 'input', data: 'exit\r' });
+  await until(() => latestState()?.ready && latestState().inputContext === shellState.inputContext, 'local shell after SSH');
+  nested.ws.close();
   const source = await api('api/sessions', {
     files: true,
     name: 'Core SSH',

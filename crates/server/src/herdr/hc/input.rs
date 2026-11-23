@@ -1,6 +1,32 @@
 use super::*;
 use herdr_client_lib::{client::Stream, protocol::Terminal};
 
+pub(super) fn ssh_line(record: &Terminal, parser: &vt100::Parser) -> bool {
+    let screen = parser.screen();
+    if !screen.bracketed_paste()
+        || screen.alternate_screen()
+        || !record
+            .foreground
+            .as_ref()
+            .is_some_and(|fg| fg.name.rsplit('/').next() == Some("ssh"))
+    {
+        return false;
+    }
+    let (row, col) = screen.cursor_position();
+    let mut start = row;
+    while start > 0 && screen.row_wrapped(start - 1) {
+        start -= 1;
+    }
+    let line = screen.contents_between(start, 0, row, col);
+    ["$ ", "# ", "% ", "❯ ", "➜ "]
+        .iter()
+        .any(|marker| line.contains(marker))
+}
+
+pub(super) fn shell_line(record: &Terminal, parser: &vt100::Parser) -> bool {
+    shell(record).is_some() || ssh_line(record, parser)
+}
+
 pub(super) struct Editable {
     pub text: String,
     context: String,
@@ -47,7 +73,7 @@ impl Editable {
             .terminal_get(&record.address, DEADLINE)
             .await
             .map_err(error)?;
-        if shell(&current).is_none()
+        if !shell_line(&current, parser)
             || context(&current) != self.context
             || self.screen.as_ref() != Some(&Self::picture(parser))
         {
@@ -83,6 +109,7 @@ pub(super) fn prepare(
     terminal: String,
     request: crate::protocol::Repair,
     backend: bool,
+    ssh_line: bool,
     lifetime: &CancellationToken,
     send: tokio::sync::mpsc::Sender<Prepared>,
 ) -> Pending {
@@ -110,7 +137,13 @@ pub(super) fn prepare(
                     services.clone(),
                     lifetime.clone(),
                 );
-                Box::pin(async move { target.suggest(&terminal, &text, services, &cancel).await })
+                Box::pin(async move {
+                    if ssh_line {
+                        Ok(libertty_engine::repair::repair_without_host(&text))
+                    } else {
+                        target.suggest(&terminal, &text, services, &cancel).await
+                    }
+                })
             },
         )
         .await;
@@ -133,6 +166,28 @@ pub(super) fn prepare(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_shell_editing_follows_remote_terminal_modes() {
+        let record = Terminal {
+            foreground: Some(herdr_client_lib::protocol::Foreground {
+                name: "ssh".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut parser = vt100::Parser::default();
+        parser.process(b"Password: ");
+        assert!(!shell_line(&record, &parser));
+        parser.process(b"\r\n\x1b[?2004h>>> ");
+        assert!(!shell_line(&record, &parser));
+        parser.process(b"\r\nroot@abraham:~# ");
+        assert!(shell_line(&record, &parser));
+        parser.process(b"\x1b[?1049h");
+        assert!(!shell_line(&record, &parser));
+        parser.process(b"\x1b[?1049l\x1b[?2004l\r\n");
+        assert!(!shell_line(&record, &parser));
+    }
 
     #[test]
     fn wrapped_dictation_survives_duplicate_resize_but_rejects_edits() {
