@@ -909,7 +909,8 @@ function copyTerminalText(text: string) {
 const gestures = new TerminalGestures(term, {
   focus,
   notice: plainToast,
-  link: (col, row) => terminalLinkAt(term, col, row, projection?.clickable),
+  link: (col, row) =>
+    terminalLinkAt(term, col, row, (!!herdrTerminal && herdrCore) || projection?.clickable),
   pan: {
     enabled: () => fullWidth() && terminalViewport.scrollWidth > terminalViewport.clientWidth,
     move: (pixels) => {
