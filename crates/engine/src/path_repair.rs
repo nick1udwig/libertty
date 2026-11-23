@@ -2,7 +2,7 @@ use crate::{
     command_speech::command_speech,
     host::{self, Host},
     path,
-    repair::{directory_scores, shell_quote, tokens},
+    repair::{directory_scores, shell_quote, shell_quote_literal, tokens},
     types::{
         Candidate, CandidateSource, Catalog, Change, DirectoryEntry, Evidence, FileInfo, SharedList,
     },
@@ -61,11 +61,6 @@ fn make_candidate(request: &PathInput, branch: Branch, expected: ExpectedType) -
         branch.rendered.trim_end_matches('/')
     };
     let rendered = if rendered.is_empty() { "." } else { rendered };
-    let argument = if request.quoted {
-        format!("'{}'", rendered.replace('\'', "'\\''"))
-    } else {
-        shell_quote(rendered)
-    };
     Candidate {
         evidence: Evidence::new(
             CandidateSource::Path,
@@ -75,7 +70,7 @@ fn make_candidate(request: &PathInput, branch: Branch, expected: ExpectedType) -
                 branch.score / request.parts.len() as f64
             },
         ),
-        command: format!("{} {}{}", request.command, request.options, argument),
+        command: request.render_command(rendered),
         score: if expected == ExpectedType::Directory {
             110.0
         } else {
@@ -384,6 +379,16 @@ pub struct PathInput {
     pub prefix: String,
     pub parts: Vec<String>,
 }
+impl PathInput {
+    pub(crate) fn render_command(&self, path: &str) -> String {
+        let operand = if self.quoted {
+            shell_quote_literal(path)
+        } else {
+            shell_quote(path)
+        };
+        format!("{} {}{operand}", self.command, self.options)
+    }
+}
 pub type DirectoryInput = PathInput;
 
 pub fn directory_input(input: &str) -> Option<PathInput> {
@@ -396,13 +401,16 @@ pub fn directory_input(input: &str) -> Option<PathInput> {
         (command.to_lowercase(), target.trim().to_owned())
     } else {
         let commands = crate::command_profiles::directory_commands();
-        let matched = command_speech(&tokens(expanded), &commands)
+        let matched = command_speech(&tokens(input), &commands)
             .into_iter()
             .filter(|matched| matched.score >= 100.0)
             .max_by_key(|matched| matched.consumed)?;
-        let spans = crate::shell_structure::word_spans(expanded)?;
+        let spans = crate::shell_structure::word_spans(input)?;
         let end = spans.get(matched.consumed - 1)?.end;
-        (matched.value, expanded[end..].trim().to_owned())
+        let canonical = format!("{}{}", matched.value, &input[end..]);
+        let expanded = expand_symbols(&canonical, true);
+        let (_, target) = expanded.split_once(crate::util::js_whitespace)?;
+        (matched.value, target.trim().to_owned())
     };
     let mut target = target;
     let mut options = String::new();

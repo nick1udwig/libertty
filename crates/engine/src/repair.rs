@@ -817,6 +817,72 @@ mod spoken_argument_tests {
     }
 }
 
+/// Repairs speech when the foreground SSH client has no separate connection for host facts.
+pub fn repair_without_host(input: &str) -> Vec<Candidate> {
+    static CATALOG: OnceLock<Catalog> = OnceLock::new();
+    let catalog = CATALOG.get_or_init(|| {
+        let vocabulary = crate::command_policy::vocabulary();
+        let commands = vocabulary
+            .common_flags
+            .keys()
+            .chain(vocabulary.subcommands.keys())
+            .filter_map(|scope| scope.split_whitespace().next())
+            .chain(["cd", "pwd", "ls", "echo"])
+            .collect::<BTreeSet<_>>();
+        Catalog {
+            commands: commands
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+                .into(),
+            ..Default::default()
+        }
+    });
+    let mut choices = repair(input, catalog, None, &Default::default());
+    if let Some(path) = crate::path_repair::directory_input(input)
+        && (tokens(input)
+            .first()
+            .is_some_and(|word| word.value != path.command)
+            || expand_symbols(input, true) != input)
+    {
+        let name = path.parts.join("/");
+        let name = if path.quoted {
+            name
+        } else {
+            name.replace(" -", "-")
+        };
+        let command = path.render_command(&format!("{}{name}", path.prefix));
+        if command != input {
+            choices.insert(
+                0,
+                Candidate {
+                    command,
+                    score: 100.0,
+                    changes: vec![Change::Symbols],
+                    literal: None,
+                    evidence: Default::default(),
+                },
+            );
+        }
+    }
+    choices
+}
+
+#[cfg(test)]
+#[test]
+fn ssh_repair_keeps_the_remote_home_operand() {
+    for (spoken, expected) in [
+        (
+            "C D tilde slash hyperware dash homes",
+            "cd ~/hyperware-homes",
+        ),
+        ("C D src slash tests", "cd src/tests"),
+        ("C D slash var slash log", "cd /var/log"),
+    ] {
+        assert_eq!(repair_without_host(spoken)[0].command, expected);
+    }
+}
+
 pub fn repair(
     input: &str,
     catalog: &Catalog,

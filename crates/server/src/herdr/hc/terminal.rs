@@ -228,8 +228,8 @@ fn state(
     record: &herdr_client_lib::protocol::Terminal,
     revision: u64,
     prompt: u64,
+    ready: bool,
 ) -> ServerMessage {
-    let ready = shell(record).is_some();
     ServerMessage::State {
         state: crate::session::ShellState {
             cwd: record.folder().unwrap_or_default().into(),
@@ -291,8 +291,13 @@ impl Pane<'_> {
             .ok_or_else(|| "Browser output queue closed.".into())
     }
     async fn send_state(&mut self) -> Result<(), String> {
-        self.send(state(&self.current, self.revision, self.prompt))
-            .await
+        self.send(state(
+            &self.current,
+            self.revision,
+            self.prompt,
+            super::input::shell_line(&self.current, &self.parser),
+        ))
+        .await
     }
     async fn close(&mut self) {
         self.send.send(Transport::Close(1000, ENDED.into()));
@@ -329,6 +334,7 @@ impl Pane<'_> {
             self.id.into(),
             request,
             backend,
+            super::input::ssh_line(&self.current, &self.parser),
             self.cancel,
             self.prepared.clone(),
         ));
@@ -427,7 +433,7 @@ impl Pane<'_> {
         };
         if result.is_ok() {
             self.revision += 1;
-            let shell = shell(&self.current).is_some();
+            let shell = super::input::shell_line(&self.current, &self.parser);
             if shell {
                 self.dictated_text(text.text.clone(), false);
             }
@@ -454,7 +460,16 @@ impl Pane<'_> {
             self.close().await;
             return Ok(false);
         };
+        let ssh_before = super::input::ssh_line(&self.current, &self.parser);
         self.parser.process(&bytes);
+        if ssh_before != super::input::ssh_line(&self.current, &self.parser) {
+            self.editable = None;
+            self.revision += 1;
+            if !ssh_before {
+                self.prompt += 1;
+            }
+            self.send_state().await?;
+        }
         if let Some(editable) = &mut self.editable {
             editable.observe(&self.parser);
         }
@@ -564,7 +579,7 @@ impl Pane<'_> {
                 self.send_state().await?;
             }
             ClientMessage::Dictation(request) if active => {
-                let target = if shell(&self.current).is_some() {
+                let target = if super::input::shell_line(&self.current, &self.parser) {
                     DictationTarget::Shell
                 } else {
                     DictationTarget::Program
@@ -650,7 +665,7 @@ impl Pane<'_> {
                 let result = if !active
                     || prompt != self.prompt
                     || revision != self.revision
-                    || shell(&self.current).is_none()
+                    || !super::input::shell_line(&self.current, &self.parser)
                 {
                     Err("Terminal input changed.".to_owned())
                 } else if applied {
