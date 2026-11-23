@@ -839,18 +839,11 @@ pub fn repair_without_host(input: &str) -> Vec<Candidate> {
         }
     });
     let mut choices = repair(input, catalog, None, &Default::default());
-    let spoken = command_speech_shared(&tokens(input), &catalog.commands, Some(&catalog.commands))
-        .into_iter()
-        .filter(|matched| matched.score >= 100.0 && directory_command(&matched.value))
-        .max_by_key(|matched| matched.consumed);
-    let canonical = spoken.and_then(|matched| {
-        let spans = crate::shell_structure::word_spans(input)?;
-        let end = spans.get(matched.consumed - 1)?.end;
-        Some(format!("{}{}", matched.value, &input[end..]))
-    });
-    let directory = canonical.as_deref().unwrap_or(input);
-    if (canonical.is_some() || expand_symbols(directory, true) != input)
-        && let Some(path) = crate::path_repair::directory_input(directory)
+    if let Some(path) = crate::path_repair::directory_input(input)
+        && (tokens(input)
+            .first()
+            .is_some_and(|word| word.value != path.command)
+            || expand_symbols(input, true) != input)
     {
         let name = path.parts.join("/");
         let name = if path.quoted {
@@ -858,13 +851,7 @@ pub fn repair_without_host(input: &str) -> Vec<Candidate> {
         } else {
             name.replace(" -", "-")
         };
-        let operand = format!("{}{name}", path.prefix);
-        let operand = if path.quoted {
-            shell_quote_literal(&operand)
-        } else {
-            shell_quote(&operand)
-        };
-        let command = format!("{} {}{operand}", path.command, path.options);
+        let command = path.render_command(&format!("{}{name}", path.prefix));
         if command != input {
             choices.insert(
                 0,
