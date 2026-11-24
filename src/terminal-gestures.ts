@@ -109,9 +109,8 @@ export class TerminalGestures {
           this.lastTouch = performance.now();
           this.extendSelection(host, x, y, index);
         },
-        up: ({ x, y }) => {
+        up: () => {
           if (this.dragHandle !== index) return;
-          this.extendSelection(host, x, y, index);
           this.finishSelectionScroll();
           this.lastTouch = performance.now();
           this.dragHandle = undefined;
@@ -195,7 +194,8 @@ export class TerminalGestures {
           this.press.mode = 'select';
           this.selectWord(this.point(this.press.x, this.press.y));
         }
-        if (x !== this.press.lastX || y !== this.press.lastY) move(x, y, at);
+        if (this.press.mode !== 'select' && (x !== this.press.lastX || y !== this.press.lastY))
+          move(x, y, at);
         const press = this.press;
         this.press = undefined;
         this.finishSelectionScroll();
@@ -494,18 +494,8 @@ export class TerminalGestures {
     this.nextSelectionScroll = this.nextSelectionRead = 0;
   }
   private finishSelectionScroll() {
-    if (this.remoteScroll && this.selectionHistory && this.selectionContact) {
-      const anchor = this.selectionContact.handle ? this.start : this.end;
-      if (
-        anchor &&
-        this.selectionHistory.update(this.remoteScroll.direction, anchor.row) === 'moved'
-      ) {
-        this.remoteScroll = undefined;
-        this.moveSelectionEndpoint();
-      } else
-        this.selectionWarning =
-          'Only confirmed text was copied; start a new selection to extend it.';
-    }
+    if (this.remoteScroll)
+      this.selectionWarning = 'Only confirmed text was copied; start a new selection to extend it.';
     this.stopSelectionScroll();
   }
   private extendSelection(host: Host, x: number, y: number, handle = 1) {

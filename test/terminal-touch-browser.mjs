@@ -155,11 +155,11 @@ try {
     await page.clock.resume();
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha');
     assert.ok(await frame.locator('.terminal-selection span').count(), 'Long press highlights the selected word');
-    await contacts([{ type: 'touchstart', point: word }, { type: 'touchmove', point: { ...word, x: word.x + 9 * word.cell } }, { type: 'touchend', point: { ...word, x: word.x + 9 * word.cell } }]);
+    await contacts([{ type: 'touchstart', point: word }, { type: 'touchmove', point: { ...word, x: word.x + 9 * word.cell } }, { type: 'touchend', point: { x: word.x, y: word.y + 30 } }]);
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta');
     const handle = await frame.locator('.selection-handle').last().evaluate(el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
     const endHandle = '.selection-handle[aria-label="Selection end"]';
-    await contacts([{ type: 'touchstart', point: handle, selector: endHandle }, { type: 'touchmove', point: { ...handle, x: handle.x + 6 * word.cell }, selector: endHandle }, { type: 'touchend', point: { ...handle, x: handle.x + 6 * word.cell }, selector: endHandle }]);
+    await contacts([{ type: 'touchstart', point: handle, selector: endHandle }, { type: 'touchmove', point: { ...handle, x: handle.x + 6 * word.cell }, selector: endHandle }, { type: 'touchend', point: handle, selector: endHandle }]);
     await frame.waitForFunction(() => window.__copies.at(-1) === 'alpha beta gamma');
     const selectionEdge = await frame.evaluate(x => ({ x, y: document.querySelector('#terminal .terminal-screen').getBoundingClientRect().top + 1 }), word.x + 9 * word.cell);
     const beforeEdge = await frame.evaluate(() => window.__testTerminal.getViewportY());
