@@ -1,3 +1,4 @@
+import { bindShortcutHold } from './shortcut-hold.ts';
 import type { MountedTabs } from './mounted-tabs.ts';
 import { builtinState } from './builtin-state.ts';
 import { terminalMessage, sendToTerminal } from './frame-protocol.ts';
@@ -445,7 +446,7 @@ export function createWorkspaceNavigation(options: Options) {
         control.dataset.modifier = '';
         control.setAttribute('aria-pressed', String(ready && state?.ctrl));
       }
-      control.addEventListener('pointerdown', (event) => event.preventDefault());
+      bindShortcutHold(control, shortcut);
       buttons.append(control);
     });
     const image = button(
