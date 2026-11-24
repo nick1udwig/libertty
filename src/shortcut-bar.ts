@@ -1,3 +1,4 @@
+import { bindShortcutHold } from './shortcut-hold.ts';
 import { shortcutEditor } from './shortcut-editor.ts';
 import { defaults, keySequence, validateShortcuts, type Shortcut } from './shortcuts.ts';
 
@@ -92,7 +93,7 @@ export class ShortcutBar {
         button.dataset.modifier = '';
         button.setAttribute('aria-pressed', String(this.ctrl));
       }
-      button.addEventListener('pointerdown', (e) => e.preventDefault());
+      bindShortcutHold(button, shortcut);
       button.onclick = () => {
         if (shortcut.kind === 'command') return this.host.execute(shortcut.value);
         if (shortcut.value === 'Ctrl') this.setCtrl(!this.ctrl);

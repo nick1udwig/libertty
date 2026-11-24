@@ -118,6 +118,31 @@ try {
     await controlModifier.click(); await until(async () => await controlModifier.getAttribute('aria-pressed') === 'true');
     assert.equal(await frame.locator('[data-modifier]').getAttribute('aria-pressed'), 'true', 'Outer modifier state matches active terminal');
     await controlModifier.click(); await until(async () => await controlModifier.getAttribute('aria-pressed') === 'false');
+    await frame.evaluate(() => {
+      window.__leftInputs = 0;
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (raw) {
+        const message = window.__wireSent(raw);
+        if (message.type === 'input' && message.data === '\x1b[D') window.__leftInputs++;
+        return send.call(this, raw);
+      };
+    });
+    const left = page.locator('#workspace-shortcut-buttons [title="Left"]');
+    await left.click();
+    await frame.waitForFunction(() => window.__leftInputs === 1);
+    const box = await left.boundingBox(), cdp = await context.newCDPSession(page);
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
+    await page.clock.runFor(550);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.clock.runFor(500);
+    assert.equal(await frame.evaluate(() => window.__leftInputs), 4, 'A held arrow repeats three times and stops on release');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box.x + box.width / 2, y: box.y + box.height / 2 }] });
+    await page.clock.runFor(100);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await page.clock.runFor(500);
+    assert.equal(await frame.evaluate(() => window.__leftInputs), 4, 'A cancelled press sends no arrow');
+    await page.clock.resume();
     await page.screenshot({ path: '/tmp/libertty-bottom-controls.png' });
     await frame.locator('#copy-selection').evaluate(el => el.click());
     await page.getByText('Select terminal text first.', { exact: true }).waitFor({ state: 'visible' });
