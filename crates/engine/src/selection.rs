@@ -99,4 +99,16 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert!(!result[0].is_literal());
     }
+    #[test]
+    fn unresolved_compounds_do_not_outrank_resolved_choices() {
+        let mut uncertain = candidate("uncertain | command", 200.0, 100.0, 1);
+        uncertain.evidence = candidate("command", 100.0, 100.0, 0)
+            .evidence
+            .compound(&uncertain.evidence);
+        let resolved = candidate("resolved | command", 50.0, 70.0, 0);
+        let mut candidates = vec![uncertain, resolved];
+        sort(&mut candidates);
+        assert_eq!(candidates[0].command, "resolved | command");
+        assert_eq!(candidates[1].evidence.unresolved, 1);
+    }
 }

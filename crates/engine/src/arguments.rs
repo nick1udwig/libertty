@@ -1,9 +1,5 @@
 //! Plain command arguments retain their source spans and share option interpretation.
-use crate::{
-    shell_structure::word_spans,
-    types::{CommandMetadata, Flag, Word},
-    validation::simple_words,
-};
+use crate::types::{CommandMetadata, Flag, Word};
 use std::ops::Range;
 
 pub(crate) struct ParsedCommand {
@@ -12,9 +8,76 @@ pub(crate) struct ParsedCommand {
 }
 impl ParsedCommand {
     pub fn parse(input: &str) -> Option<Self> {
-        let words = simple_words(input)?;
-        let spans = word_spans(input)?;
-        (words.len() == spans.len()).then_some(Self { words, spans })
+        let mut words = Vec::new();
+        let mut spans = Vec::new();
+        let (mut value, mut quote, mut start, mut home) = (String::new(), None, None, false);
+        let mut chars = input.char_indices();
+        while let Some((offset, ch)) = chars.next() {
+            if quote == Some('\'') {
+                if ch == '\'' {
+                    quote = None;
+                } else {
+                    value.push(ch);
+                }
+                continue;
+            }
+            if ch == '\\' {
+                start.get_or_insert(offset);
+                let (_, escaped) = chars.next()?;
+                if quote == Some('"') && !"$`\"\\\n".contains(escaped) {
+                    value.push('\\');
+                }
+                if escaped != '\n' {
+                    value.push(escaped);
+                }
+                continue;
+            }
+            if quote == Some('"') {
+                if ch == '"' {
+                    quote = None;
+                } else if ch == '$' || ch == '`' {
+                    return None;
+                } else {
+                    value.push(ch);
+                }
+                continue;
+            }
+            if ch == '"' || ch == '\'' {
+                start.get_or_insert(offset);
+                quote = Some(ch);
+                continue;
+            }
+            if "|&;<>()`$*?[]{}\n\r".contains(ch) {
+                return None;
+            }
+            if crate::util::js_whitespace(ch) {
+                if let Some(begin) = start.take() {
+                    words.push(Word {
+                        value: std::mem::take(&mut value),
+                        home,
+                    });
+                    spans.push(begin..offset);
+                }
+                home = false;
+                continue;
+            }
+            if start.is_none() {
+                if ch == '#' {
+                    return None;
+                }
+                home = ch == '~';
+                start = Some(offset);
+            }
+            value.push(ch);
+        }
+        if quote.is_some() {
+            return None;
+        }
+        if let Some(begin) = start {
+            words.push(Word { value, home });
+            spans.push(begin..input.len());
+        }
+        Some(Self { words, spans })
     }
 }
 pub(crate) struct OptionBinding<'a> {
@@ -153,6 +216,32 @@ impl<'a> ArgumentCursor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn lexical_values_and_spans_use_the_same_whitespace_and_quote_rules() {
+        for input in [
+            "echo\u{feff}hello",
+            "echo\u{85}hello",
+            r#"echo "a\qb" escaped\ value '' ~/file"#,
+        ] {
+            let parsed = ParsedCommand::parse(input).unwrap();
+            assert_eq!(parsed.words.len(), parsed.spans.len());
+            for (word, span) in parsed.words.iter().zip(&parsed.spans) {
+                let single = ParsedCommand::parse(&input[span.clone()]).unwrap();
+                assert_eq!(single.words.as_slice(), std::slice::from_ref(word));
+            }
+        }
+        let parsed = ParsedCommand::parse("echo\u{feff}hello").unwrap();
+        assert_eq!(parsed.words.len(), 2);
+        assert_eq!(
+            ParsedCommand::parse("echo\u{85}hello").unwrap().words.len(),
+            1
+        );
+        assert_eq!(
+            ParsedCommand::parse(r#"echo "a\qb""#).unwrap().words[1].value,
+            r"a\qb"
+        );
+    }
+
     #[test]
     fn cursor_binds_attached_and_following_values_without_consuming_delimiters() {
         let metadata: CommandMetadata = serde_json::from_value(serde_json::json!({"flags":{"tool":[{"name":"--pair","takesValue":true,"value":{"kind":"text","minimum":2,"maximum":2}}]}})).unwrap();

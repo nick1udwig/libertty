@@ -1,6 +1,6 @@
 use crate::test;
 use crate::{
-    command_policy::{option_arity, script_operand, vocabulary},
+    command_policy::{script_operand, vocabulary},
     host::{self, Host},
     repair::{matches, tokens},
     types::{Catalog, CommandMetadata, Flag, Help, SchemaState, SharedList},
@@ -402,20 +402,16 @@ impl Discovery {
                     .chain(branch.route.iter().map(String::as_str))
                     .collect::<Vec<_>>()
                     .join(" ");
+                let mut cursor = crate::arguments::ArgumentCursor::new(
+                    std::iter::once(scope.as_str())
+                        .chain(words[branch.index..].iter().map(|word| word.value.as_str())),
+                    &metadata,
+                );
                 let mut index = branch.index;
-                while index < words.len() && words[index].value.starts_with('-') {
-                    let takes = option_arity(
-                        &words[index].value,
-                        metadata
-                            .flags
-                            .get(&scope)
-                            .map(Vec::as_slice)
-                            .unwrap_or_default(),
-                    );
-                    if takes.is_none() || words[index].value == "--" {
-                        break;
-                    }
-                    index += if takes == Some(true) { 2 } else { 1 };
+                while let Some(crate::arguments::Argument::Option { complete: true, .. }) =
+                    cursor.next()
+                {
+                    index = branch.index + cursor.index - 1;
                 }
                 let found = matches(
                     &words,

@@ -370,52 +370,83 @@ fn command_profiles_preserve_operand_types_and_script_argument_boundaries() {
 
 #[test]
 fn compound_and_wrapper_syntax_checks_share_one_wave_and_filter_independently() {
-    use libertty_engine::host::HostOperation;
-    for input in ["sudo cat my notes", "cat my notes | cat"] {
-        let mut runtime = Runtime::default();
-        let mut step = runtime.start(1, Request {
+    use libertty_engine::{host::HostOperation, runtime::HostResult};
+    for failure in [
+        "invalid",
+        "unavailable",
+        "original-unavailable",
+        "all-unavailable",
+    ] {
+        for input in ["sudo cat my notes", "cat my notes | cat"] {
+            let mut runtime = Runtime::default();
+            let mut step = runtime.start(1, Request {
             operation: "suggest".into(),
             args: vec![json!(input),
                 json!({"cwd":"/fixture","commands":["sudo","cat"],"paths":["my-notes","my_notes"],"history":[]}),
                 json!({}), json!(false)],
         }, 0.0);
-        let mut syntax_waves: Vec<Vec<String>> = Vec::new();
-        let mut completed = false;
-        for wave in 1..=10 {
-            match step {
-                Step::Complete { value, .. } => {
-                    let commands: Vec<_> = value
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .filter(|candidate| candidate["literal"] != true)
-                        .map(|candidate| candidate["command"].as_str().unwrap())
-                        .collect();
-                    let expected = if input.starts_with("sudo") {
-                        "sudo cat my_notes"
-                    } else {
-                        "cat my_notes | cat"
-                    };
-                    assert!(commands.contains(&expected), "{input}: {commands:?}");
-                    assert!(!commands.iter().any(|command| command.contains("my-notes")));
-                    assert_eq!(syntax_waves.len(), 1, "{input}: {syntax_waves:?}");
-                    assert_eq!(syntax_waves[0].len(), 2, "{input}: {syntax_waves:?}");
-                    completed = true;
-                    break;
-                }
-                Step::Pending { callbacks, .. } => {
-                    let mut syntax_commands = Vec::new();
-                    let replies = callbacks
+            let mut syntax_waves: Vec<Vec<String>> = Vec::new();
+            let mut completed = false;
+            for wave in 1..=10 {
+                match step {
+                    Step::Complete { value, .. } => {
+                        let commands: Vec<_> = value
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter(|candidate| candidate["literal"] != true)
+                            .map(|candidate| candidate["command"].as_str().unwrap())
+                            .collect();
+                        let expected = if input.starts_with("sudo") {
+                            "sudo cat my_notes"
+                        } else {
+                            "cat my_notes | cat"
+                        };
+                        if failure == "all-unavailable" {
+                            assert!(commands.is_empty(), "{input}: {commands:?}");
+                            assert_eq!(value.as_array().unwrap().last().unwrap()["command"], input);
+                        } else {
+                            assert!(
+                                commands.contains(&expected),
+                                "{failure}, {input}: {commands:?}"
+                            );
+                            assert_eq!(
+                                commands.iter().any(|command| command.contains("my-notes")),
+                                failure == "original-unavailable"
+                            );
+                        }
+                        assert_eq!(syntax_waves.len(), 1, "{input}: {syntax_waves:?}");
+                        assert_eq!(syntax_waves[0].len(), 2, "{input}: {syntax_waves:?}");
+                        completed = true;
+                        break;
+                    }
+                    Step::Pending { callbacks, .. } => {
+                        let mut syntax_commands = Vec::new();
+                        let replies = callbacks
                         .into_iter()
-                        .map(|callback| Reply::Values {
+                        .map(|callback| Reply::Results {
                             request: callback.request,
-                            values: callback
+                            results: callback
                                 .operations
                                 .into_iter()
-                                .map(|operation| match operation {
+                                .map(|operation| {
+                                    if let HostOperation::Syntax { command } = &operation {
+                                        let compound = command.starts_with("sudo ") || command.contains(" | ");
+                                        let unavailable = match failure {
+                                            "all-unavailable" => compound,
+                                            "unavailable" => compound && command.contains("my-notes"),
+                                            "original-unavailable" => command == "cat my notes",
+                                            _ => false,
+                                        };
+                                        if unavailable {
+                                            if compound { syntax_commands.push(command.clone()); }
+                                            return HostResult::Error { error: "Probe unavailable".into() };
+                                        }
+                                    }
+                                    HostResult::Value { value: match operation {
                                     HostOperation::Syntax { command } => {
                                         if command.starts_with("sudo ") || command.contains(" | ") {
-                                            let valid = !command.contains("my-notes");
+                                            let valid = failure != "invalid" || !command.contains("my-notes");
                                             syntax_commands.push(command);
                                             json!(valid)
                                         } else {
@@ -428,19 +459,21 @@ fn compound_and_wrapper_syntax_checks_share_one_wave_and_filter_independently() 
                                         } else { Value::Null }
                                     }
                                     _ => panic!("Unexpected fact: {operation:?}"),
+                                } }
                                 })
                                 .collect(),
                         })
                         .collect();
-                    if !syntax_commands.is_empty() {
-                        syntax_waves.push(syntax_commands);
+                        if !syntax_commands.is_empty() {
+                            syntax_waves.push(syntax_commands);
+                        }
+                        step = runtime.resume(1, replies, f64::from(wave * 150));
                     }
-                    step = runtime.resume(1, replies, f64::from(wave * 150));
+                    _ => panic!("Unexpected syntax validation result"),
                 }
-                _ => panic!("Unexpected syntax validation result"),
             }
+            assert!(completed, "Suggestion did not finish: {input}");
         }
-        assert!(completed, "Suggestion did not finish: {input}");
     }
 }
 
@@ -521,4 +554,138 @@ fn option_path_repair_and_argument_completion_share_a_callback_wave() {
         }
     }
     panic!("Suggestion did not finish");
+}
+
+#[test]
+fn path_candidates_survive_an_independent_lookup_or_stat_failure() {
+    use libertty_engine::{host::HostOperation, runtime::HostResult};
+    for failed in ["lookup", "stat"] {
+        let mut runtime = Runtime::default();
+        let mut step = runtime.start(
+            1,
+            Request {
+                operation: "suggest".into(),
+                args: vec![
+                    json!("cat doc slash my notes"),
+                    json!({"cwd":"/fixture","commands":["cat"],"paths":[],"history":[]}),
+                    json!({}),
+                    json!(false),
+                ],
+            },
+            0.0,
+        );
+        let mut failures = 0;
+        for wave in 1..=20 {
+            match step {
+                Step::Complete { value, .. } => {
+                    assert!(failures > 0, "The {failed} failure was not exercised");
+                    assert!(
+                        value
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|candidate| candidate["command"] == "cat docs/my_notes"
+                                && candidate["literal"] != true),
+                        "{failed}: {value}"
+                    );
+                    break;
+                }
+                Step::Pending { callbacks, .. } => {
+                    let replies = callbacks.into_iter().map(|callback| Reply::Results {
+                        request: callback.request,
+                        results: callback.operations.into_iter().map(|operation| {
+                            let unavailable = match &operation {
+                                HostOperation::Lookup { path } if failed == "lookup" => path == "/fixture/docx/my notes",
+                                HostOperation::Stat { path, .. } if failed == "stat" => path == "/fixture/docs/my-notes",
+                                _ => false,
+                            };
+                            if unavailable {
+                                failures += 1;
+                                return HostResult::Error { error: "Probe unavailable".into() };
+                            }
+                            HostResult::Value { value: match operation {
+                                HostOperation::Syntax { .. } => json!(true),
+                                HostOperation::Version { .. } => json!("v1"),
+                                HostOperation::Lookup { path } if path == "/fixture/doc" => json!({"listing":{"version":"v1","complete":true,"entries":[{"name":"docx","directory":true,"symlink":false},{"name":"docs","directory":true,"symlink":false}]}}),
+                                HostOperation::Lookup { path } if path == "/fixture/docs" => json!({"info":{"directory":true,"file":false,"executable":false}}),
+                                HostOperation::Lookup { path } if path == "/fixture/docs/my notes" => json!({"listing":{"version":"v1","complete":true,"entries":[{"name":"my-notes","directory":false,"symlink":false},{"name":"my_notes","directory":false,"symlink":false}]}}),
+                                HostOperation::Lookup { .. } => json!({}),
+                                HostOperation::Stat { path, .. } if path.ends_with("my_notes") || path.ends_with("my-notes") => json!({"file":true,"directory":false,"executable":false}),
+                                HostOperation::Stat { .. } => Value::Null,
+                                _ => panic!("Unexpected fact: {operation:?}"),
+                            } }
+                        }).collect(),
+                    }).collect();
+                    step = runtime.resume(1, replies, f64::from(wave * 10));
+                }
+                _ => panic!("Unexpected repair result"),
+            }
+            assert!(wave < 20, "Repair did not finish");
+        }
+    }
+}
+
+#[test]
+fn fuzzy_git_push_completes_before_opaque_command_alternatives() {
+    use libertty_engine::host::HostOperation;
+    let mut runtime = Runtime::default();
+    let mut step = runtime.start(1, Request {
+        operation: "completeArguments".into(),
+        args: vec![
+            json!("Get push dash u origin feet/better dash dictation"),
+            json!({"cwd":"/fixture","commands":["gem","git","let","net","set"],"paths":[],"history":[]}),
+            json!({"flags":{"git push":[{"name":"-u","takesValue":false}]}}),
+        ],
+    }, 0.0);
+    let mut requests = 0;
+    for wave in 1..=20 {
+        match step {
+            Step::Complete { value, .. } => {
+                assert!(
+                    value
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|candidate| candidate["command"]
+                            == "git push -u origin feat/better-dictation"),
+                    "{value}"
+                );
+                assert!(requests <= 6, "Completion budget exceeded: {requests}");
+                return;
+            }
+            Step::Pending { callbacks, .. } => {
+                let replies = callbacks
+                    .into_iter()
+                    .map(|callback| Reply::Values {
+                        request: callback.request,
+                        values: callback
+                            .operations
+                            .into_iter()
+                            .map(|operation| {
+                                let HostOperation::Completion { words, .. } = operation else {
+                                    panic!("Unexpected fact: {operation:?}")
+                                };
+                                requests += 1;
+                                match words[..words.len() - 1]
+                                    .iter()
+                                    .map(String::as_str)
+                                    .collect::<Vec<_>>()
+                                    .as_slice()
+                                {
+                                    ["git", "push", "-u"] => json!(["origin"]),
+                                    ["git", "push", "-u", "origin"] => {
+                                        json!(["feat/better-dictation"])
+                                    }
+                                    _ => json!([]),
+                                }
+                            })
+                            .collect(),
+                    })
+                    .collect();
+                step = runtime.resume(1, replies, f64::from(wave));
+            }
+            _ => panic!("Unexpected completion result"),
+        }
+    }
+    panic!("Completion did not finish");
 }

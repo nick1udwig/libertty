@@ -17,12 +17,28 @@ use crate::{
     repair::{discovery_target, discovery_targets, repair_candidates as repair, tokens},
     speech::{expand_symbols, symbol_alternatives},
     transfer_command::download_pipeline,
-    types::{Candidate, CandidateSource, Catalog, Change, CommandMetadata, Evidence, Flag},
+    types::{Candidate, Catalog, Change, CommandMetadata, Evidence, Flag},
     validation::{Environment, candidate_valid, simple_words},
 };
 use crate::{regex, test};
 use futures::future::{LocalBoxFuture, join_all};
 use std::{cell::RefCell, sync::Arc};
+
+fn validated_candidates(
+    candidates: Vec<Candidate>,
+    results: Vec<Result<bool, String>>,
+) -> impl Iterator<Item = Candidate> {
+    candidates
+        .into_iter()
+        .zip(results)
+        .filter_map(|(mut candidate, result)| {
+            if !matches!(result, Ok(true)) {
+                return None;
+            }
+            candidate.evidence.validated = true;
+            Some(candidate)
+        })
+}
 
 async fn check_syntax(
     candidates: Vec<Candidate>,
@@ -34,13 +50,7 @@ async fn check_syntax(
             .map(|candidate| host::syntax(host, &candidate.command)),
     )
     .await;
-    let mut valid = Vec::new();
-    for (candidate, result) in candidates.into_iter().zip(results) {
-        if result? {
-            valid.push(candidate);
-        }
-    }
-    Ok(valid)
+    Ok(validated_candidates(candidates, results).collect())
 }
 
 fn covered(candidate: &Candidate, metadata: &CommandMetadata) -> bool {
@@ -96,29 +106,22 @@ async fn check(
             .iter()
             .map(|c| candidate_valid(input, c, catalog, env, metadata, host, script_flags)),
     )
-    .await
-    .into_iter()
-    .map(|result| result.unwrap_or(false))
-    .collect::<Vec<_>>();
-    let mut valid: Vec<_> = ranked
-        .into_iter()
-        .zip(valid)
-        .filter_map(|(mut c, valid)| {
-            c.evidence.validated = valid;
-            if valid
-                && simple_words(&c.command)
-                    .and_then(|words| {
-                        words.first().map(|word| {
-                            crate::command_policy::input_file_command(&word.value)
-                                || crate::command_policy::directory_command(&word.value)
-                        })
+    .await;
+    let mut valid: Vec<_> = validated_candidates(ranked, valid)
+        .map(|mut c| {
+            if simple_words(&c.command)
+                .and_then(|words| {
+                    words.first().map(|word| {
+                        crate::command_policy::input_file_command(&word.value)
+                            || crate::command_policy::directory_command(&word.value)
                     })
-                    .unwrap_or(false)
+                })
+                .unwrap_or(false)
             {
                 c.evidence.resolved = true;
                 c.evidence.unresolved = 0;
             }
-            valid.then_some(c)
+            c
         })
         .collect();
     sort(&mut valid);
@@ -246,7 +249,7 @@ fn part_choices<'a>(
             .filter(|c| !c.is_literal())
             .collect();
         if !candidates.iter().any(|c| c.command == input) {
-            let literal = Candidate {
+            let mut literal = Candidate {
                 command: input.into(),
                 score: 110.0,
                 changes: vec![],
@@ -254,7 +257,11 @@ fn part_choices<'a>(
                 evidence: Evidence::default(),
             };
             let metadata = discovery.cached(catalog, env, host.now_ms());
-            if candidate_valid(input, &literal, catalog, env, &metadata, host, None).await? {
+            if candidate_valid(input, &literal, catalog, env, &metadata, host, None)
+                .await
+                .unwrap_or(false)
+            {
+                literal.evidence.validated = true;
                 candidates.insert(0, literal);
             }
         }
@@ -390,13 +397,7 @@ fn suggest_text<'a>(
                             Candidate {
                                 command,
                                 score: prefix.score.min(candidate.score),
-                                evidence: Evidence::new(
-                                    CandidateSource::Compound,
-                                    prefix
-                                        .evidence
-                                        .confidence
-                                        .min(candidate.evidence.confidence),
-                                ),
+                                evidence: prefix.evidence.compound(&candidate.evidence),
                                 changes,
                                 literal: None,
                             },
@@ -518,8 +519,7 @@ fn suggest_unchecked<'a>(
             for mut candidate in group.into_iter().filter(|c| !c.is_literal()) {
                 if index > 0 {
                     candidate.score -= SYMBOL_PENALTY;
-                    candidate.evidence.confidence =
-                        (candidate.evidence.confidence - SYMBOL_PENALTY).max(0.0);
+                    candidate.evidence.penalize(SYMBOL_PENALTY);
                     candidate.changes.insert(0, Change::SymbolAlternative);
                 } else if primary != input {
                     candidate.changes.insert(0, Change::Symbols);
@@ -530,6 +530,99 @@ fn suggest_unchecked<'a>(
         sort(&mut candidates);
         Ok(selection::present(input, candidates, Original::Separate))
     })
+}
+
+struct RepairStage<'a> {
+    input: &'a str,
+    catalog: &'a Catalog,
+    env: &'a Environment,
+    metadata: &'a CommandMetadata,
+    host: &'a dyn Host,
+    script_flags: Option<&'a [Flag]>,
+}
+
+impl RepairStage<'_> {
+    fn candidates(&self) -> Vec<Candidate> {
+        repair(self.input, self.catalog, self.script_flags, self.metadata)
+            .into_iter()
+            .filter(|candidate| !candidate.is_literal())
+            .collect()
+    }
+
+    async fn validate(&self, candidates: Vec<Candidate>) -> Result<Vec<Candidate>, String> {
+        check(
+            self.input,
+            candidates,
+            self.catalog,
+            self.env,
+            self.metadata,
+            self.host,
+            self.script_flags,
+        )
+        .await
+    }
+
+    async fn complete(&self) -> Result<Vec<Candidate>, String> {
+        complete_arguments(
+            self.input,
+            self.catalog,
+            self.metadata,
+            self.host,
+            self.script_flags,
+        )
+        .await
+    }
+
+    async fn enrich(&self, repairs: Vec<Candidate>) -> Vec<Candidate> {
+        let home = self.env.get("HOME").map(String::as_str).unwrap_or_default();
+        let (paths, completed) = futures::join!(
+            repair_option_paths(
+                &repairs,
+                self.catalog,
+                home,
+                self.host,
+                self.metadata,
+                self.script_flags
+            ),
+            self.complete(),
+        );
+        completed
+            .unwrap_or_default()
+            .into_iter()
+            .chain(paths.unwrap_or_default())
+            .chain(repairs)
+            .collect()
+    }
+}
+
+fn metadata_targets(input: &str, catalog: &Catalog, preliminary: &[Candidate]) -> Vec<String> {
+    let roots = discovery_targets(&expand_symbols(input, true), catalog);
+    let mut targets: Vec<_> = Vec::new();
+    let script_targets = preliminary
+        .iter()
+        .filter(|candidate| {
+            let words = tokens(&candidate.command);
+            script_operand(&words.iter().map(|word| &word.value).collect::<Vec<_>>())
+                .is_some_and(|index| words[index].value.ends_with(".py"))
+        })
+        .take(DISCOVERY_TARGET_LIMIT)
+        .map(|candidate| candidate.command.clone());
+    for target in script_targets.chain(
+        preliminary
+            .first()
+            .map(|c| c.command.clone())
+            .into_iter()
+            .chain(roots),
+    ) {
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+    targets.truncate(DISCOVERY_TARGET_LIMIT);
+    if targets.is_empty() {
+        targets.push(discovery_target(input, catalog));
+    }
+    targets
 }
 
 async fn suggest_one(
@@ -566,53 +659,48 @@ async fn suggest_one(
         return Ok(valid);
     }
     let catalog = nearby_file_paths(input, catalog, host, &metadata).await;
-    let cheap: Vec<_> = repair(input, &catalog, None, &metadata)
-        .into_iter()
-        .filter(|c| !c.is_literal())
-        .collect();
+    let known = RepairStage {
+        input,
+        catalog: &catalog,
+        env,
+        metadata: &metadata,
+        host,
+        script_flags: None,
+    };
+    let cheap = known.candidates();
     if historic.iter().any(|c| c.score >= 102.0) {
-        let mut from_history = check(
-            input,
-            historic
-                .iter()
-                .filter(|c| c.score >= 102.0)
-                .cloned()
-                .chain(cheap.iter().cloned())
-                .collect(),
-            &catalog,
-            env,
-            &metadata,
-            host,
-            None,
-        )
-        .await?;
+        let mut from_history = known
+            .validate(
+                historic
+                    .iter()
+                    .filter(|c| c.score >= 102.0)
+                    .cloned()
+                    .chain(cheap.iter().cloned())
+                    .collect(),
+            )
+            .await?;
         if !from_history.is_empty() {
             *stage.borrow_mut() = Some("history".into());
             from_history.push(literal);
             return Ok(from_history);
         }
     }
-    let fast = check(
-        input,
-        cheap
-            .iter()
-            .filter(|c| c.score >= 100.0 && covered(c, &metadata))
-            .cloned()
-            .collect(),
-        &catalog,
-        env,
-        &metadata,
-        host,
-        None,
-    )
-    .await?;
+    let fast = known
+        .validate(
+            cheap
+                .iter()
+                .filter(|c| c.score >= 100.0 && covered(c, &metadata))
+                .cloned()
+                .collect(),
+        )
+        .await?;
     let unresolved_dash = fast.iter().any(|c| {
         tokens(&c.command)
             .iter()
             .any(|w| !w.quoted && test!(r###"(?i)^(dash|hyphen|hep)$"###, &w.value))
     });
     if !fast.is_empty() && !unresolved_dash {
-        let completed = complete_arguments(input, &catalog, &metadata, host, None).await?;
+        let completed = known.complete().await?;
         *stage.borrow_mut() = Some(
             if metadata.flags.is_empty() {
                 "schema"
@@ -624,16 +712,9 @@ async fn suggest_one(
         let mut candidates = if completed.is_empty() {
             fast
         } else {
-            check(
-                input,
-                completed.into_iter().chain(fast).collect(),
-                &catalog,
-                env,
-                &metadata,
-                host,
-                None,
-            )
-            .await?
+            known
+                .validate(completed.into_iter().chain(fast).collect())
+                .await?
         };
         candidates.push(literal);
         return Ok(candidates);
@@ -654,32 +735,7 @@ async fn suggest_one(
         .chain(historic.iter().cloned())
         .collect();
     sort(&mut preliminary);
-    let roots = discovery_targets(&expand_symbols(input, true), &catalog);
-    let mut targets: Vec<_> = Vec::new();
-    let script_targets = preliminary
-        .iter()
-        .filter(|candidate| {
-            let words = tokens(&candidate.command);
-            script_operand(&words.iter().map(|word| &word.value).collect::<Vec<_>>())
-                .is_some_and(|index| words[index].value.ends_with(".py"))
-        })
-        .take(DISCOVERY_TARGET_LIMIT)
-        .map(|candidate| candidate.command.clone());
-    for target in script_targets.chain(
-        preliminary
-            .first()
-            .map(|c| c.command.clone())
-            .into_iter()
-            .chain(roots),
-    ) {
-        if !targets.contains(&target) {
-            targets.push(target);
-        }
-    }
-    targets.truncate(DISCOVERY_TARGET_LIMIT);
-    if targets.is_empty() {
-        targets.push(discovery_target(input, &catalog));
-    }
+    let targets = metadata_targets(input, &catalog, &preliminary);
     let discoveries = join_all(
         targets
             .iter()
@@ -721,34 +777,18 @@ async fn suggest_one(
     }
     let catalog = nearby_file_paths(input, &catalog, host, &metadata).await;
     let catalog = referenced_paths(input, &catalog, env, host).await?;
-    let repairs = repair(input, &catalog, script_flags.as_deref(), &metadata);
-    let (path_values, completed) = futures::join!(
-        repair_option_paths(
-            input,
-            &catalog,
-            home,
-            host,
-            &metadata,
-            script_flags.as_deref()
-        ),
-        complete_arguments(input, &catalog, &metadata, host, script_flags.as_deref())
-    );
-    let (path_values, completed) = (path_values?, completed?);
-    let mut candidates = check(
+    let discovered = RepairStage {
         input,
-        completed
-            .into_iter()
-            .chain(path_values)
-            .chain(repairs)
-            .chain(historic)
-            .collect(),
-        &catalog,
+        catalog: &catalog,
         env,
-        &metadata,
+        metadata: &metadata,
         host,
-        script_flags.as_deref(),
-    )
-    .await?;
+        script_flags: script_flags.as_deref(),
+    };
+    let repairs = discovered.enrich(discovered.candidates()).await;
+    let mut candidates = discovered
+        .validate(repairs.into_iter().chain(historic).collect())
+        .await?;
     candidates.push(literal);
     Ok(candidates)
 }

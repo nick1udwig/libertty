@@ -222,7 +222,7 @@ mod tests {
         .value();
         assert_eq!(
             reply,
-            json!({"type":"repair-result","id":"one","prompt":3,"revision":4,"accepted":false,"original":"echo words","selected":"echo words","candidates":[]})
+            json!({"type":"repair-result","id":"one","prompt":3,"revision":4,"accepted":false,"original":"echo words","selected":"echo words","candidates":[],"choices":[]})
         );
         let mut reply = RepairReply::new("two".into(), "echo words".into(), 3, 4, true);
         reply.error = Some("Repair timed out.".into());

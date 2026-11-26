@@ -101,11 +101,20 @@ impl Intent {
     }
 }
 #[derive(Clone, Serialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "PreparedChoice"))]
+pub struct Choice {
+    pub id: String,
+    pub text: String,
+    pub action: Intent,
+    pub literal: bool,
+}
+#[derive(Clone, Serialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields))]
 pub struct Prepared {
     pub original: String,
     pub selected: String,
     pub candidates: Vec<Candidate>,
+    pub choices: Vec<Choice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub actions: Option<std::collections::BTreeMap<String, Intent>>,
 }
@@ -148,19 +157,32 @@ pub async fn prepare<F: Future<Output = Result<Vec<Candidate>, String>>>(
             fallback = true;
         }
     }
+    let mut actions = std::collections::BTreeMap::new();
     for candidate in &mut candidates {
-        candidate.command = match intent {
-            Intent::Shell => candidate.command.clone(),
-            Intent::ReadingPipeline { phrase, .. } => format!("{} | {phrase}", candidate.command),
-            Intent::ReadingFile { phrase, .. } if fallback => {
-                format!("{phrase} {}", candidate.command)
-            }
-            Intent::ReadingFile { phrase, .. } => {
-                let words = simple_words(&candidate.command).unwrap();
-                format!("{phrase} {}", crate::repair::shell_quote(&words[1].value))
-            }
+        let action = match intent {
+            Intent::Shell => Intent::Shell,
+            Intent::ReadingPipeline { phrase, .. } => Intent::ReadingPipeline {
+                phrase: phrase.clone(),
+                command: candidate.command.clone(),
+            },
+            Intent::ReadingFile { phrase, .. } => Intent::ReadingFile {
+                phrase: phrase.clone(),
+                operand: if fallback {
+                    candidate.command.clone()
+                } else {
+                    let words = simple_words(&candidate.command).unwrap();
+                    crate::repair::shell_quote(&words[1].value)
+                },
+            },
         };
+        candidate.command = match &action {
+            Intent::Shell => candidate.command.clone(),
+            Intent::ReadingPipeline { phrase, command } => format!("{command} | {phrase}"),
+            Intent::ReadingFile { phrase, operand } => format!("{phrase} {operand}"),
+        };
+        actions.insert(candidate.command.clone(), action);
     }
+    actions.insert(text.into(), intent.clone());
     let candidates =
         crate::selection::present(text, candidates, crate::selection::Original::IfMissing);
     let selected = candidates
@@ -168,42 +190,28 @@ pub async fn prepare<F: Future<Output = Result<Vec<Candidate>, String>>>(
         .filter(|candidate| !candidate.is_literal())
         .map(|candidate| candidate.command.clone())
         .unwrap_or_else(|| text.into());
-    let mut actions = std::collections::BTreeMap::new();
-    for command in candidates
+    let mut choices: Vec<_> = candidates
         .iter()
-        .map(|candidate| candidate.command.as_str())
-        .chain(std::iter::once(text))
-    {
-        let action = match intent {
-            Intent::Shell => Intent::Shell,
-            Intent::ReadingFile { phrase, .. } => Intent::ReadingFile {
-                phrase: phrase.clone(),
-                operand: command
-                    .strip_prefix(phrase)
-                    .unwrap_or(command)
-                    .trim()
-                    .into(),
-            },
-            Intent::ReadingPipeline { phrase, .. } => {
-                if command == text {
-                    intent.clone()
-                } else {
-                    Intent::ReadingPipeline {
-                        phrase: phrase.clone(),
-                        command: command
-                            .strip_suffix(&format!(" | {phrase}"))
-                            .unwrap_or(command)
-                            .into(),
-                    }
-                }
-            }
-        };
-        actions.insert(command.into(), action);
-    }
+        .filter(|candidate| !candidate.is_literal() && candidate.command != text)
+        .enumerate()
+        .map(|(index, candidate)| Choice {
+            id: format!("choice-{index}"),
+            text: candidate.command.clone(),
+            action: actions[&candidate.command].clone(),
+            literal: false,
+        })
+        .collect();
+    choices.push(Choice {
+        id: "original".into(),
+        text: text.into(),
+        action: intent.clone(),
+        literal: true,
+    });
     Ok(Prepared {
         original: text.into(),
         selected,
         candidates,
+        choices,
         actions: Some(actions),
     })
 }

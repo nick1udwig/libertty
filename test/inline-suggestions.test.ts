@@ -66,7 +66,7 @@ test('fused repair avoids separate replacements and cancellation waits for its a
   g.inline.host.repair = async () => ({ accepted: true, candidates: [{ command: 'git init', changes: [], score: 100 }], original: 'Get in it.', selected: 'git init', revision: 1, prompt: 1 });
   await g.inline.dictate('Get in it.', false);
   assert.deepEqual(g.replacements, []);
-  assert.deepEqual(g.inline.choices, ['git init']);
+  assert.deepEqual(g.inline.choices.filter((choice: any) => !choice.literal).map((choice: any) => choice.text), ['git init']);
   assert.equal(g.inline.selected, 'git init');
 });
 
@@ -79,8 +79,111 @@ test('reader alternatives from a repair execute only after selection', async () 
   };
   f.inline.host.execute = (text: string) => executed.push(text);
   await f.inline.dictate('look at get diff', false);
-  assert.deepEqual(f.inline.choices, ['look at git diff']);
+  assert.deepEqual(f.inline.choices.filter((choice: any) => !choice.literal).map((choice: any) => choice.text), ['look at git diff']);
   assert.deepEqual(executed, []);
-  await f.inline.choose('look at git diff');
+  await f.inline.choose('choice-0');
   assert.deepEqual(executed, ['look at git diff']);
+});
+
+function choiceFixture() {
+  const f = fixture();
+  f.inline.tapToSend = false;
+  f.inline.literal = 'original';
+  f.inline.selected = 'original';
+  f.inline.line.reset('original');
+  f.inline.choices = [{ id: 'alternate', text: 'replacement', action: { kind: 'shell' }, literal: false }];
+  return f;
+}
+
+test('alternate replacement commits the tracked line only after acknowledgement', async () => {
+  for (const accepted of [true, false]) {
+    const f = choiceFixture();
+    const pending = f.inline.choose('alternate');
+    assert.equal(f.inline.line.text, 'original');
+    assert.equal(f.inline.selected, 'original');
+    assert.equal(f.inline.predictionReady, false);
+    f.acknowledge(accepted);
+    await pending;
+    assert.equal(f.inline.line.known, accepted);
+    assert.equal(f.inline.line.text, accepted ? 'replacement' : 'original');
+    assert.equal(f.inline.predictionReady, accepted);
+  }
+});
+
+test('typing during alternate replacement follows the acknowledged line', async () => {
+  const f = choiceFixture(), sent: string[] = [];
+  f.inline.host.raw = (text: string) => sent.push(text);
+  const pending = f.inline.choose('alternate');
+  assert.equal(f.inline.raw('x'), false);
+  assert.equal(f.inline.raw('y'), false);
+  assert.deepEqual(sent, []);
+  f.acknowledge(true);
+  await pending;
+  assert.deepEqual(sent, ['xy']);
+  assert.equal(f.inline.line.text, 'replacementxy');
+  assert.equal(f.inline.predictionReady, true);
+});
+
+test('a failed replacement invalidates prediction without an unhandled rejection', async () => {
+  const f = choiceFixture();
+  f.inline.host.replace = async () => { throw new Error('Disconnected'); };
+  await f.inline.choose('alternate');
+  assert.equal(f.inline.line.text, 'original');
+  assert.equal(f.inline.predictionReady, false);
+});
+
+test('a late replacement cannot consume a newer operation or its queued input', async () => {
+  const f = choiceFixture(), sent: string[] = [], replies: ((accepted: boolean) => void)[] = [];
+  let prompt = 1;
+  f.inline.host.state = () => ({ prompt, ready: true, exited: false, inputRevision: prompt, promptRevision: prompt });
+  f.inline.host.raw = (text: string) => sent.push(text);
+  f.inline.host.replace = () => new Promise(resolve => replies.push(resolve));
+  const old = f.inline.choose('alternate');
+  f.inline.raw('old');
+  prompt = 2;
+  f.inline.onState(f.inline.host.state());
+  f.inline.choices = [{ id: 'new', text: 'new', action: { kind: 'shell' }, literal: false }];
+  const current = f.inline.choose('new');
+  f.inline.raw(' input');
+  replies[0](true);
+  await old;
+  assert.deepEqual(sent, []);
+  assert.equal(f.inline.line.text, '');
+  replies[1](true);
+  await current;
+  assert.deepEqual(sent, [' input']);
+  assert.equal(f.inline.line.text, 'new input');
+});
+
+test('cancelled repair does not restore its literal into a later prompt', async () => {
+  const f = fixture();
+  let prompt = 1, finish!: (result: any) => void;
+  f.inline.host.state = () => ({ prompt, ready: true, exited: false, inputRevision: prompt, promptRevision: prompt });
+  f.inline.host.repair = () => new Promise(resolve => finish = resolve);
+  const pending = f.inline.dictate('old literal', false);
+  f.inline.raw('old input');
+  prompt = 2;
+  f.inline.onState(f.inline.host.state());
+  finish({ accepted: false });
+  await pending;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.replacements, []);
+  assert.equal(f.inline.line.text, '');
+  assert.equal(f.inline.predictionReady, true);
+});
+
+test('typing during failed-repair restoration shares the pending replacement', async () => {
+  const f = fixture(), sent: string[] = [];
+  f.inline.host.repair = async () => { throw new Error('Unavailable'); };
+  f.inline.host.raw = (text: string) => sent.push(text);
+  const pending = f.inline.dictate('original', false);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.replacements, ['original']);
+  assert.equal(f.inline.raw(' input'), false);
+  f.acknowledge(true);
+  await pending;
+  assert.deepEqual(f.replacements, ['original']);
+  assert.deepEqual(sent, [' input']);
+  assert.equal(f.inline.line.text, 'original input');
+  assert.equal(f.inline.open, false);
 });

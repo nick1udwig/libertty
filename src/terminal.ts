@@ -682,6 +682,7 @@ const inline = new InlineSuggestions(term, {
         id,
         accepted: false,
         candidates: [],
+        choices: [],
         original: text,
         selected: text,
         prompt,

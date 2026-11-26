@@ -1,18 +1,16 @@
 import { icon as svgIcon, uploadIcon, downloadIcon } from './icons.ts';
 import { transferAction, downloadPipeline } from './transfer-command.ts';
-import { readingPipeline, readingPath } from './reading-request.ts';
+import { simpleWords } from './shell-words.ts';
+import type { PreparedChoice } from './repair-choices.ts';
 import type { Terminal } from './terminal-adapter.ts';
-import type { ShellState, RepairResult } from './protocol.ts';
+import type { ShellState } from './protocol.ts';
 interface Model {
   literal: string;
   loading: boolean;
   transcribing: boolean;
   open: boolean;
-  choices: string[];
-  reading?: string;
-  phrases: string[];
+  choices: PreparedChoice[];
   selected: string;
-  actions: NonNullable<RepairResult['actions']>;
   pendingPresentation?: { pending: boolean };
   pendingCursor?: { x: number; row: number };
 }
@@ -54,36 +52,28 @@ export class SuggestionView {
     this.menu.setAttribute('aria-busy', String(busy));
     this.items.replaceChildren();
     if (!busy) {
-      model.choices.forEach((text, index) => this.addChoice(text, index, false));
+      model.choices.forEach((choice, index) => this.addChoice(choice, index));
     }
-    if (model.literal && !busy) this.addChoice(model.literal, model.choices.length, true);
     this.callbacks.refresh();
   }
-  private addChoice(text: string, index: number, literal: boolean) {
+  private addChoice(choice: PreparedChoice, index: number) {
+    const { text, action, literal } = choice;
     const model = this.model();
     const button = document.createElement('button');
     button.className = 'alternative-choice';
     button.type = 'button';
-    const pipeline = model.reading ? readingPipeline(text, model.phrases, true) : undefined;
-    const action = model.actions[text];
+    const words = action.kind === 'reading-file' ? simpleWords(action.operand) : undefined;
     const reading =
-      action?.kind === 'reading-file'
-        ? readingPath(text, [action.phrase]) || action.operand
-        : action?.kind === 'reading-pipeline'
+      action.kind === 'reading-file'
+        ? words?.length === 1
+          ? words[0].value
+          : action.operand
+        : action.kind === 'reading-pipeline'
           ? action.command + ' output'
-          : action
-            ? undefined
-            : pipeline
-              ? pipeline.command + ' output'
-              : model.reading
-                ? readingPath(text, model.phrases)
-                : undefined;
+          : undefined;
     button.classList.toggle('reading-choice', !!reading);
     button.classList.toggle('literal-choice', literal);
-    button.classList.toggle(
-      'selected',
-      text === model.selected && (!literal || !model.choices.includes(text)),
-    );
+    button.classList.toggle('selected', text === model.selected);
     button.setAttribute('aria-pressed', String(button.classList.contains('selected')));
     button.title = text;
     const icon = document.createElement('span');
@@ -109,7 +99,7 @@ export class SuggestionView {
     number.setAttribute('aria-hidden', 'true');
     button.append(icon, label, number);
     button.addEventListener('pointerdown', (e) => e.preventDefault());
-    button.onclick = () => void this.callbacks.choose(text);
+    button.onclick = () => void this.callbacks.choose(choice.id);
     this.items.append(button);
   }
   position() {
